@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "DriverZone Driver",
+    "slug": "driverzone-driver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": { "package": "in.driverzone.driver" },
+    "ios": { "bundleIdentifier": "in.driverzone.driver" }
+  }
+}

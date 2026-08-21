@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Packages permitted to run install scripts. pnpm blocks them by default — a postinstall
+# script is arbitrary code from a transitive dependency — so each entry is an explicit
+# decision. These four need to compile or download a native binary to function at all.
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
+  sharp: true
+  unrs-resolver: true

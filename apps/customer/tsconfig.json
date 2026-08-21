@@ -1,0 +1,6 @@
+{
+  "extends": "@driverzone/config/tsconfig.react.json",
+  "compilerOptions": { "jsx": "react-native", "types": ["react-native"] },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}

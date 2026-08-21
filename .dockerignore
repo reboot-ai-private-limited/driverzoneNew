@@ -1,0 +1,51 @@
+# Everything here is either reinstalled/rebuilt inside the image or must never reach it.
+# Without this file the build context is the whole workspace including node_modules, and it is
+# uploaded to the daemon on EVERY build — on a small deploy VM that is a minutes-long stall
+# before the first RUN even starts.
+
+# Dependencies — reinstalled from the lockfile in the `deps` stage.
+node_modules
+**/node_modules
+.pnpm-store
+
+# Build output — rebuilt in the image. A stale host `.next` copied in would be picked up by
+# `next build` as an incremental cache from a DIFFERENT environment.
+dist
+**/dist
+.next
+**/.next
+build
+out
+.turbo
+**/.turbo
+**/*.tsbuildinfo
+
+# Secrets. Env reaches containers through compose `env_file` at RUN time, never through an
+# image layer — a baked-in .env leaks to anyone who can pull the image.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# The mobile apps never reach a server IMAGE — but their package.json files must stay in the
+# build CONTEXT, because `pnpm install --frozen-lockfile` validates the entire workspace and
+# fails if a package named in the lockfile is missing. Their source is a few KB and is never
+# copied into any image; only node_modules and build output are excluded, above.
+.expo
+**/.expo
+**/android
+**/ios
+
+# Not needed to build or run.
+.git
+.gitignore
+.github
+coverage
+**/test
+**/*.test.ts
+**/*.test.tsx
+
+# Documentation.
+docs
+*.md
+!apps/*/README.md

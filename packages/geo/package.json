@@ -1,0 +1,33 @@
+{
+  "name": "@driverzone/geo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@turf/area": "^7.1.0",
+    "@turf/boolean-overlap": "^7.1.0",
+    "@turf/boolean-point-in-polygon": "^7.1.0",
+    "@turf/boolean-within": "^7.1.0",
+    "@turf/difference": "^7.1.0",
+    "@turf/helpers": "^7.1.0",
+    "@turf/intersect": "^7.1.0",
+    "@turf/kinks": "^7.1.0",
+    "@turf/length": "^7.1.0",
+    "@turf/line-split": "^7.1.0",
+    "@turf/polygon-to-line": "^7.1.0"
+  },
+  "devDependencies": {
+    "@driverzone/config": "workspace:*",
+    "@types/geojson": "^7946.0.15",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

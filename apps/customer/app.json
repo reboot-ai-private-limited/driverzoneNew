@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "DriverZone",
+    "slug": "driverzone-customer",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": { "package": "in.driverzone.customer" },
+    "ios": { "bundleIdentifier": "in.driverzone.customer" }
+  }
+}

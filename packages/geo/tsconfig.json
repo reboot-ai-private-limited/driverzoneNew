@@ -1,0 +1,5 @@
+{
+  "extends": "@driverzone/config/tsconfig.base.json",
+  "compilerOptions": { "moduleResolution": "Bundler", "module": "ESNext" },
+  "include": ["src"]
+}

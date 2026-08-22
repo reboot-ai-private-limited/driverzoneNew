@@ -204,7 +204,14 @@ Run from the repo root — turbo fans out across all packages:
 
 | Command | Does |
 |---|---|
-| `pnpm dev` | Every app in watch mode |
+| `pnpm dev:api` | API only, watch mode |
+| `pnpm dev:worker` | The BullMQ worker only |
+| `pnpm dev:backend` | API + worker |
+| `pnpm dev:web` | API + admin panel — the usual one |
+| `pnpm dev:full` | API + worker + admin panel |
+| `pnpm dev:customer` | The customer app. **Own terminal** — see below |
+| `pnpm dev:driver` | The driver app. **Own terminal** |
+| `pnpm dev` | Every app at once. Rarely what you want — it starts both Expo servers through turbo, which eats their QR codes |
 | `pnpm typecheck` | `tsc --noEmit` everywhere |
 | `pnpm lint` | ESLint + dependency-cruiser |
 | `pnpm test` | All test suites |
@@ -213,6 +220,12 @@ Run from the repo root — turbo fans out across all packages:
 | `pnpm ci` | The above, filtered to what changed since `origin/main` |
 | `pnpm format` | Prettier, write |
 | `pnpm format:check` | Prettier, verify only |
+
+The `dev:*` scripts are thin wrappers over turbo filters; any combination they miss is one
+command away. **Mobile apps are the exception** — `expo start` needs a real terminal, and
+turbo's output multiplexer is not one, so running them through it loses the QR code and every
+keyboard shortcut. `dev:customer` and `dev:driver` bypass turbo for that reason. Details and
+the phone-cannot-reach-localhost problem: [`docs/setup-development.md`](docs/setup-development.md).
 
 Target one package with `--filter`:
 

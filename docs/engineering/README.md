@@ -36,7 +36,7 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 
 docker compose -f docker-compose.dev.yml up -d  # Mongo needs the replica-set init to accept writes
-pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web    # :4000 and :3000
+pnpm dev:web                                   # api :4000 + admin panel :3000
 
 curl localhost:4000/api/health
 ```

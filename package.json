@@ -8,6 +8,15 @@
   "packageManager": "pnpm@11.18.0",
   "scripts": {
     "dev": "turbo run dev",
+
+    "dev:api": "turbo run dev --filter=@driverzone/api",
+    "dev:worker": "turbo run dev:worker --filter=@driverzone/api",
+    "dev:backend": "turbo run dev dev:worker --filter=@driverzone/api",
+    "dev:web": "turbo run dev --filter=@driverzone/api --filter=@driverzone/web",
+    "dev:full": "turbo run dev dev:worker --filter=@driverzone/api --filter=@driverzone/web",
+    "dev:customer": "pnpm --filter @driverzone/customer dev",
+    "dev:driver": "pnpm --filter @driverzone/driver dev",
+
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",

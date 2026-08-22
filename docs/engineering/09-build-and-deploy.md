@@ -146,7 +146,7 @@ docker run --rm -e MONGO_URI=… -e REDIS_URL=… driverzone-api
 ```bash
 cp apps/api/.env.example apps/api/.env
 docker compose -f docker-compose.dev.yml up -d    # infrastructure only
-pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web
+pnpm dev:web                                      # api + admin panel
 ```
 
 `docker-compose.dev.yml` runs Mongo, Redis and OSRM and nothing else — the apps run on the

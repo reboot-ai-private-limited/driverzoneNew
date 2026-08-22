@@ -49,8 +49,13 @@ cp apps/api/.env.example apps/api/.env
 docker compose -f docker-compose.dev.yml up -d
 
 # The API and the admin panel, both in watch mode.
-pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web
+pnpm dev:web
 ```
+
+Working on something else? [Pick your combination](#running-the-combination-you-need) —
+`dev:api`, `dev:backend`, `dev:customer`, `dev:driver`. Note that `pnpm dev` with no suffix is
+**not** the one you want; the mobile apps need their own terminal, and the section below
+explains why.
 
 If Docker reports a port already in use, you have a Mongo or Redis on the host already — see
 [the troubleshooting entry](#troubleshooting) for the one-variable fix.
@@ -99,34 +104,94 @@ that runs `rs.initiate()` and exits — you will see it as `Exited (0)` in `dock
 which is correct, not a crash. Skip it and Mongo starts fine and refuses every write with
 `MongoServerError: not primary`.
 
-### Filters, and why the bare command is wrong
+### Running the combination you need
 
-`pnpm turbo run dev` with no filter also starts the two **Expo dev servers** for
-`apps/customer` and `apps/driver`. They are interactive terminal UIs, they fight over stdin
-with the other tasks, and you almost certainly do not want them while working on the backend.
-Name what you need:
+There are four things you can run, and you rarely want all of them. Pick by what you are
+working on:
+
+| Working on | Command | Runs |
+|---|---|---|
+| API endpoints, domain logic | `pnpm dev:api` | api |
+| Dispatch, notifications, anything queued | `pnpm dev:backend` | api + worker |
+| The admin panel | `pnpm dev:web` | api + web |
+| Admin panel with queue side effects | `pnpm dev:full` | api + worker + web |
+| The customer app | `pnpm dev:customer` **in its own terminal** | customer |
+| The driver app | `pnpm dev:driver` **in its own terminal** | driver |
+
+`dev:web` starts the API too, because the panel is unusable without it — every screen it has
+calls `/api`. If you genuinely want Next alone, `pnpm turbo run dev --filter=@driverzone/web`.
+
+These are thin wrappers over turbo filters (see `package.json`), so any combination the table
+does not cover is one command away:
 
 ```bash
-pnpm turbo run dev --filter=@driverzone/api                    # API only
 pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web
-pnpm turbo run dev --filter=@driverzone/customer               # the customer app
+pnpm turbo run dev dev:worker --filter=@driverzone/api      # server and worker together
+pnpm turbo run dev --filter='...@driverzone/geo'            # everything depending on geo
 ```
 
-### The worker
+Multiple `--filter` flags union. `dev` and `dev:worker` are separate turbo tasks, so naming
+both runs both.
+
+### The mobile apps go in their own terminal
+
+**Do not run `apps/customer` or `apps/driver` through turbo.** They start `expo start`, which
+needs a real terminal, and turbo's output multiplexer is not one. What you lose:
+
+- the **QR code** — the only convenient way to open the app on a physical device
+- the **keyboard shortcuts** (`a` Android, `i` iOS, `r` reload, `j` debugger)
+- the `exp://…` URL Expo prints for manual entry
+
+You get a Metro bundler with no way to reach it. This is why `pnpm dev:customer` calls
+`pnpm --filter … dev` directly instead of going through turbo, and why `pnpm dev` — bare, no
+filter — is the wrong command: it starts both Expo servers this way, plus two more tasks
+competing for the same terminal.
+
+So a customer-app session is two terminals:
+
+```bash
+# terminal 1
+pnpm dev:backend        # or dev:api, if nothing you touch is queued
+
+# terminal 2
+pnpm dev:customer       # QR code, shortcuts, all of it
+```
+
+Both mobile apps at once is three terminals. The second one finds Metro's default port taken
+and asks:
+
+```
+? Use port 8082 instead? › (Y/n)
+```
+
+Answer `Y` and they coexist fine. That prompt is also the clearest demonstration of why these
+cannot run under turbo: there it appears with no terminal able to answer it, and the task hangs
+forever.
+
+### A phone cannot reach `localhost`
+
+Once the apps start calling the API (phase 7, [`11-roadmap.md`](11-roadmap.md)), this bites
+immediately: `localhost` on a physical device means *the device*, not your machine. Expo
+already prints the address it expects you to use —
+
+```
+› Metro waiting on exp://192.168.1.16:8081
+```
+
+— and the API needs the same treatment: `http://192.168.1.16:4000/api`, your LAN address from
+`hostname -I` or `ipconfig`. The API server binds all interfaces already, so nothing needs
+changing on that side; the phone and the laptop just have to be on the same network.
+
+An emulator is the exception. The Android emulator reaches the host at `10.0.2.2`, and the iOS
+simulator shares the host's network stack, so `localhost` works there.
+
+### The worker is not a second app
 
 `apps/api` ships **two composition roots over the same code**: `server.ts` serves HTTP,
-`worker.ts` hands the same modules to BullMQ queue consumers. `turbo run dev` starts only the
-server. Start the worker when you are touching dispatch or notifications:
-
-```bash
-pnpm turbo run dev:worker --filter=@driverzone/api    # or: pnpm --filter @driverzone/api dev:worker
-```
-
-Both at once, in one terminal:
-
-```bash
-pnpm turbo run dev dev:worker --filter=@driverzone/api --filter=@driverzone/web
-```
+`worker.ts` hands the same modules to BullMQ queue consumers. That is why `dev:backend` runs
+two turbo tasks against one package rather than two packages, and why production runs one image
+with two commands ([`engineering/09`](engineering/09-build-and-deploy.md)). A worker running
+different code from the API is a class of bug that cannot happen here.
 
 ### Verify the whole workspace
 

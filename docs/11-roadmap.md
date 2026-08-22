@@ -7,13 +7,17 @@ before any polish.
 ## Phase 0 — Foundations (~1 week)
 
 - Monorepo scaffold (pnpm + Turborepo, four apps, five packages) — **done**
-- Docker Compose (Mongo replica set, Redis, OSRM on an India extract)
-- Migration tooling, seed fixtures
+- Docker Compose (Mongo replica set, Redis, OSRM on an India extract) — **done**, split
+  into dev (infrastructure) and prod (full stack); see
+  [`setup-development.md`](setup-development.md)
+- Migration tooling, seed fixtures — the seed script is specced in
+  [`setup-development.md`](setup-development.md#seed-data--planned-not-yet-implemented):
+  a dev admin, drivers, customers, zones and packages created in one idempotent command
 - Auth: phone+OTP for customer/driver, email+TOTP for admin
 - CI: lint, typecheck, migrations, tests
 
-**Done when:** `docker compose up` gives a working stack with seeded Siliguri zones, and
-CI is green.
+**Done when:** `docker compose -f docker-compose.dev.yml up -d` plus `pnpm turbo run dev`
+gives a working stack with seeded Siliguri zones, and CI is green.
 
 ## Phase 1 — Zones & the resolution engine (~2 weeks)
 

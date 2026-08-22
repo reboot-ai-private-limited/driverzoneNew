@@ -19,7 +19,8 @@ driverzone/
 │   ├── 01-12*.md               product & architecture
 │   └── engineering/            this handbook
 ├── deploy/nginx/
-├── docker-compose.yml
+├── docker-compose.dev.yml      infrastructure only — apps run on the host
+├── docker-compose.prod.yml     full stack in Docker
 ├── turbo.json                  task orchestration + caching
 ├── pnpm-workspace.yaml         which directories are packages
 └── .npmrc                      node-linker=hoisted  ← required by React Native

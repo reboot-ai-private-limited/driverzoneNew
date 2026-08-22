@@ -6,6 +6,13 @@ customer app + driver app).
 > Status: **draft / pre-implementation**. Nothing here is built yet.
 > Decisions marked 🔴 in `12-open-questions.md` block implementation.
 
+## Setting up
+
+New here? [`setup-development.md`](setup-development.md) takes a fresh clone to a running
+stack, and explains the two Docker Compose workflows: `docker-compose.dev.yml` for
+infrastructure while the apps run on your machine with hot reload, and
+`docker-compose.prod.yml` for the whole stack in built images.
+
 ## Read in this order
 
 | # | Doc | What it answers |

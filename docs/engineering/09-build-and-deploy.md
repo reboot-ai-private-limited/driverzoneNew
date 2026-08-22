@@ -50,6 +50,7 @@ failed to compute cache key: "/packages/mobile-ui/package.json": not found
 ([03](03-module-anatomy.md)). They ship in one image:
 
 ```yaml
+# docker-compose.prod.yml
 api:
   build: { context: ., dockerfile: apps/api/Dockerfile }
 worker:
@@ -143,11 +144,15 @@ docker run --rm -e MONGO_URI=… -e REDIS_URL=… driverzone-api
 ## Local development
 
 ```bash
-docker compose up -d mongo mongo-init redis
 cp apps/api/.env.example apps/api/.env
-pnpm --filter @driverzone/api dev      # :4000
-pnpm --filter @driverzone/web dev      # :3000
+docker compose -f docker-compose.dev.yml up -d    # infrastructure only
+pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web
 ```
+
+`docker-compose.dev.yml` runs Mongo, Redis and OSRM and nothing else — the apps run on the
+host so a save reloads instead of rebuilding an image. `docker-compose.prod.yml` runs the
+stack below in full, from these images. Both are covered in
+[`../setup-development.md`](../setup-development.md).
 
 `mongo-init` promotes the single node to a replica set and exits. Without it Mongo starts but
 refuses every write with `not primary` — multi-document transactions require a replica set, and

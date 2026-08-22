@@ -25,6 +25,9 @@ the zone model, pricing, dispatch. This directory is about the *code*.
 
 ## Day one
 
+The short version is below; [`../setup-development.md`](../setup-development.md) is the full
+guide, including the production stack and troubleshooting.
+
 ```bash
 git clone <repo> && cd driverzone
 corepack enable && corepack prepare pnpm@11.18.0 --activate
@@ -32,9 +35,8 @@ pnpm install
 
 cp apps/api/.env.example apps/api/.env
 
-docker compose up -d mongo mongo-init redis    # Mongo needs the replica-set init to accept writes
-pnpm --filter @driverzone/api dev               # :4000
-pnpm --filter @driverzone/web dev               # :3000
+docker compose -f docker-compose.dev.yml up -d  # Mongo needs the replica-set init to accept writes
+pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web    # :4000 and :3000
 
 curl localhost:4000/api/health
 ```

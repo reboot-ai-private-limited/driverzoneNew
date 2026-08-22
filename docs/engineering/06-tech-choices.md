@@ -119,7 +119,7 @@ Format for each entry:
   job. It also cost the ability to compute intersection areas and route lengths in the query —
   hence Turf.
 - **Requires:** a replica set, even single-node. Multi-document transactions need one, and the
-  booking→ledger write does. `docker-compose.yml` handles the init.
+  booking→ledger write does. Both compose files handle the init.
 - **Revisit when:** zone or route geometry becomes a query-time bottleneck, or the ledger's
   consistency requirements outgrow what Mongo transactions comfortably give.
 

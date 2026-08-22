@@ -30,6 +30,9 @@ different one resolves the lockfile differently.
 
 ## First-time setup
 
+The condensed version is below. [`docs/setup-development.md`](docs/setup-development.md) is
+the full guide — both compose workflows, what each service is for, and troubleshooting.
+
 ```bash
 git clone git@github.com:reboot-ai-private-limited/driverzoneNew.git driverzone
 cd driverzone
@@ -41,7 +44,7 @@ cp apps/api/.env.example apps/api/.env
 
 # Mongo + Redis. mongo-init promotes Mongo to a replica set and exits — without it
 # every write fails with "not primary".
-docker compose up -d mongo mongo-init redis
+docker compose -f docker-compose.dev.yml up -d
 
 pnpm turbo run typecheck lint test      # 18 tasks, all should pass
 ```
@@ -121,7 +124,7 @@ build, and under MongoDB that rule is protecting data integrity, not tidiness**.
 ### API — `apps/api`
 
 ```bash
-docker compose up -d mongo mongo-init redis     # dependencies must be up first
+docker compose -f docker-compose.dev.yml up -d   # dependencies must be up first
 
 pnpm --filter @driverzone/api dev                # :4000, watch mode
 pnpm --filter @driverzone/api dev:worker         # the BullMQ worker, separate terminal
@@ -226,11 +229,23 @@ That last one is the useful one: after changing `packages/geo`, it tests every c
 ## Docker
 
 ```bash
-docker compose up -d mongo mongo-init redis    # dependencies only — the usual case
-docker compose up -d                            # full stack, builds api + web images
-docker compose logs -f api
-docker compose down                             # keeps volumes
-docker compose down -v                          # wipes the database
+docker compose -f docker-compose.dev.yml up -d          # Mongo + Redis — the usual case
+docker compose -f docker-compose.dev.yml logs -f mongo
+docker compose -f docker-compose.dev.yml down          # keeps volumes
+docker compose -f docker-compose.dev.yml down -v       # wipes the database
+```
+
+The full stack in Docker — API, worker and admin panel as built images, the way a deployed
+host runs them:
+
+```bash
+cp apps/api/.env.prod.example apps/api/.env.prod        # once
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+There is no bare `docker-compose.yml`. Every command names its file, so the two stacks can
+never be mixed by accident — they use separate volumes and the production one publishes no
+database ports. See [`docs/setup-development.md`](docs/setup-development.md).
 ```
 
 Building the images by hand — note the context is the **repo root**, not the app directory:
@@ -267,7 +282,7 @@ remove `node-linker=hoisted` from `.npmrc` — Metro cannot walk pnpm's default 
 **`MongoServerError: not primary`**
 The replica-set init didn't run:
 ```bash
-docker compose up -d mongo-init
+docker compose -f docker-compose.dev.yml up -d mongo-init
 ```
 
 **`ESLint couldn't find the config "@driverzone/config/eslint.base.cjs"`**

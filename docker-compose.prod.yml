@@ -1,0 +1,142 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PRODUCTION — the full stack in Docker.
+#
+# Builds and runs every server-side artifact the way a deployed host does: the API image, the
+# same image again as the worker, and the Next.js admin panel. Use it to verify a release, to
+# reproduce a bug that only appears in a built image, or as the basis of an actual deploy.
+#
+#   cp apps/api/.env.prod.example apps/api/.env.prod   # then edit it
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# It is NOT the file to develop against — the apps are baked into images, so every change is a
+# rebuild. Use docker-compose.dev.yml for that; see docs/setup-development.md.
+#
+# Note what is NOT here: apps/customer and apps/driver. Mobile apps do not deploy to a server;
+# they build to store binaries via EAS. That is the whole answer to "do I need to ship the
+# mobile code to the API server" — no, and there is nowhere for it to go.
+#
+# On a real host, nginx terminates TLS in front of web:3000 and api:4000 — see
+# docs/engineering/09-build-and-deploy.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  mongo:
+    image: mongo:7
+    # A replica set, even with one node. Multi-document transactions require one, and the
+    # booking→ledger write in docs/05 needs a transaction to stay consistent.
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    # No `ports:` — deliberately. The database is reachable only on the compose network, by
+    # api and worker. Publishing 27017 on a production host exposes an unauthenticated Mongo
+    # to anything that can route to it. To inspect it, exec in:
+    #   docker compose -f docker-compose.prod.yml exec mongo mongosh driverzone
+    volumes: ['mongo-data:/data/db']
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Runs once to promote the single node to a replica set, then exits. Without it mongo starts
+  # but refuses every write with "not primary".
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo: { condition: service_healthy }
+    restart: 'no'
+    entrypoint:
+      - bash
+      - -c
+      - mongosh --host mongo --quiet --eval 'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}) }'
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    # Not published, for the same reason as mongo.
+    volumes: ['redis-data:/data']
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Road distance for outstation band matching (docs/04). Commented out because it needs a
+  # prepared OSM extract (docs/engineering/09-build-and-deploy.md) — but unlike in the dev
+  # file, a real deployment SHOULD enable this. Without it every quote falls back to a paid
+  # API or a mock, and OSRM_BASE_URL below points at nothing.
+  # osrm:
+  #   image: ghcr.io/project-osrm/osrm-backend:latest
+  #   command: ['osrm-routed', '--algorithm', 'mld', '/data/india-latest.osrm']
+  #   restart: unless-stopped
+  #   volumes: ['./deploy/osrm:/data']
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    # A separate file from apps/api/.env, which holds the localhost URIs the host-run dev API
+    # uses. Loading that one here would set NODE_ENV=development inside a production image and
+    # point CORS at localhost.
+    env_file: [apps/api/.env.prod]
+    # Set after env_file, so these win: inside the network the hosts are service names, and no
+    # .env.prod should be able to misdirect them.
+    environment:
+      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      REDIS_URL: redis://redis:6379
+      OSRM_BASE_URL: http://osrm:5000
+    ports: ['4000:4000']
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:4000/api/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Same image as `api`, different command. One build, two processes — see apps/api/Dockerfile.
+  # A worker running different code from the API is a whole category of bug that cannot occur
+  # while this stays a command override rather than a second build.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    env_file: [apps/api/.env.prod]
+    environment:
+      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      REDIS_URL: redis://redis:6379
+      OSRM_BASE_URL: http://osrm:5000
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Inlined into the client bundle at BUILD time, which makes this image
+        # environment-specific: pointing it at a different API is a rebuild, not a restart.
+        # Override for a real deploy:
+        #   NEXT_PUBLIC_API_BASE_URL=https://api.example.com/api \
+        #     docker compose -f docker-compose.prod.yml build web
+        # It is the browser that calls this URL, so it must be reachable from the browser —
+        # `http://api:4000` would resolve inside the network and nowhere else.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api}
+    depends_on:
+      api: { condition: service_healthy }
+    ports: ['3000:3000']
+    restart: unless-stopped
+
+# Named explicitly, and distinctly from the dev file's volumes. Compose's default name is
+# derived from the directory, which both files share — so without these a prod-stack run and a
+# dev-stack run would read and write the same database.
+volumes:
+  mongo-data:
+    name: driverzone-mongo-data-prod
+  redis-data:
+    name: driverzone-redis-data-prod

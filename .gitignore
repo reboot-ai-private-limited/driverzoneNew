@@ -12,6 +12,10 @@ out/
 .env.*
 !.env.example
 !**/.env.example
+# Per-environment templates, e.g. .env.prod.example. The two rules above un-ignore only the
+# exact name `.env.example`, so `.env.*` would otherwise swallow every other template.
+!.env.*.example
+!**/.env.*.example
 
 coverage/
 .expo/

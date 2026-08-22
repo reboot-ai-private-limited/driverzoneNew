@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVELOPMENT — infrastructure only.
+#
+# This file starts the things you cannot run with `pnpm`: Mongo, Redis, and (once prepared)
+# OSRM. The applications are NOT here on purpose. You run those on your own machine with
+#
+#   pnpm turbo run dev --filter=@driverzone/api --filter=@driverzone/web
+#
+# so a saved file reloads in under a second instead of rebuilding an image. Full guide:
+# docs/setup-development.md
+#
+# For the everything-in-Docker stack, see docker-compose.prod.yml.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  mongo:
+    image: mongo:7
+    # A replica set, even with one node. Multi-document transactions require one, and the
+    # booking→ledger write in docs/05 needs a transaction to stay consistent. Adding it later
+    # means re-seeding every environment.
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    # Published to the host because the API runs on the host in this workflow — it connects to
+    # localhost:27017, not to a compose service name. This is the main difference from the
+    # production file, where nothing but the app containers may reach the database.
+    #
+    # Bound to 127.0.0.1, not 0.0.0.0: an unauthenticated Mongo should not be reachable from
+    # the coffee-shop wifi. The port is overridable for the common case of a Mongo already
+    # installed on the host — set MONGO_PORT in a root .env and match it in apps/api/.env.
+    ports: ['127.0.0.1:${MONGO_PORT:-27017}:27017']
+    volumes: ['mongo-data:/data/db']
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Runs once to promote the single node to a replica set, then exits. Without it mongo starts
+  # but refuses every write with "not primary".
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo: { condition: service_healthy }
+    restart: 'no'
+    entrypoint:
+      - bash
+      - -c
+      - mongosh --host mongo --quiet --eval 'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}) }'
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    # Same reasoning as mongo above; REDIS_PORT overrides it.
+    ports: ['127.0.0.1:${REDIS_PORT:-6379}:6379']
+    volumes: ['redis-data:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Road distance for outstation band matching (docs/04). Self-hosted because every quote hits
+  # it and quote volume runs ~3x booking volume — per-call pricing adds up fast.
+  #
+  # Needs a prepared OSM extract before first run; the commands are in
+  # docs/engineering/09-build-and-deploy.md. Commented out until then so this file comes up on
+  # a fresh clone. Without it, quotes either hit a paid API or get mocked — and mocked
+  # distances hide exactly the band-boundary bugs that matter.
+  # osrm:
+  #   image: ghcr.io/project-osrm/osrm-backend:latest
+  #   command: ['osrm-routed', '--algorithm', 'mld', '/data/india-latest.osrm']
+  #   ports: ['127.0.0.1:${OSRM_PORT:-5000}:5000']
+  #   volumes: ['./deploy/osrm:/data']
+
+# Named explicitly rather than left to compose's <project>_<volume> default. The default is
+# derived from the directory name, which both this file and docker-compose.prod.yml share —
+# so without these names a prod-stack run would write into the database you develop against.
+volumes:
+  mongo-data:
+    name: driverzone-mongo-data-dev
+  redis-data:
+    name: driverzone-redis-data-dev

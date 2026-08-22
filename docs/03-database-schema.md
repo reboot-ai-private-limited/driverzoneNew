@@ -1,7 +1,7 @@
 # 03 — Database Schema (MongoDB 7 + Mongoose 8)
 
 > **Requires a replica set**, even single-node. Multi-document transactions need one, and the
-> booking→ledger write uses one. `docker-compose.yml` handles the init; without it Mongo starts
+> booking→ledger write uses one. Both compose files handle the init; without it Mongo starts
 > and refuses every write with `not primary`.
 
 ## Conventions

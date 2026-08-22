@@ -9,9 +9,9 @@ before any polish.
 - Monorepo scaffold (pnpm + Turborepo, four apps, five packages) — **done**
 - Docker Compose (Mongo replica set, Redis, OSRM on an India extract) — **done**, split
   into dev (infrastructure) and prod (full stack); see
-  [`setup-development.md`](setup-development.md)
+  [`setup-development.md`](../setup-development.md)
 - Migration tooling, seed fixtures — the seed script is specced in
-  [`setup-development.md`](setup-development.md#seed-data--planned-not-yet-implemented):
+  [`setup-development.md`](../setup-development.md#seed-data--planned-not-yet-implemented):
   a dev admin, drivers, customers, zones and packages created in one idempotent command
 - Auth: phone+OTP for customer/driver, email+TOTP for admin
 - CI: lint, typecheck, migrations, tests

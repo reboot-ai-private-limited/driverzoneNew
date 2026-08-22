@@ -100,7 +100,7 @@ dispatch: escalate to the next wave when no candidates are in radius
 An empty wave-1 radius previously burned the full 45s TTL before widening,
 adding a minute to time-to-assignment for outlying pickups.
 
-Refs: docs/06-dispatch-and-assignment.md §Waves
+Refs: docs/LLD/06-dispatch-and-assignment.md §Waves
 ```
 
 Not `fix stuff`. Full convention in
@@ -343,8 +343,13 @@ at runtime — the contract file is types only and leaves no trace in the shippe
 
 | | |
 |---|---|
-| [`docs/`](docs/README.md) | **The product** — zones, pricing, dispatch, booking lifecycle, API contracts |
+| [`docs/`](docs/README.md) | Index — start here |
+| [`docs/01-prd.md`](docs/01-prd.md) | **The product** — what we're building, for whom, what's out of scope |
+| [`docs/LLD/`](docs/README.md#read-in-this-order) | **The design** — zones, pricing, dispatch, booking lifecycle, API contracts |
 | [`docs/engineering/`](docs/engineering/README.md) | **The code** — layout, architecture, boundaries, tech choices, deploy |
+| [`docs/setup-development.md`](docs/setup-development.md) | Clone to running stack |
+| [`docs/decision-log.md`](docs/decision-log.md) | Decisions already made, dated, with what they replaced |
+| [`CHANGELOG.md`](CHANGELOG.md) | What moved, newest first |
 
 New to the project? Read `docs/engineering/README.md`, then `01` through `04`. About an hour,
 and it covers every decision you need to make sense of the rest.

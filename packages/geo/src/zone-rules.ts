@@ -8,7 +8,7 @@ import { kinks } from '@turf/kinks';
 import type { Feature, Polygon } from 'geojson';
 
 /**
- * The zone invariants from docs/02-domain-model.md, as pure functions.
+ * The zone invariants from docs/LLD/02-domain-model.md, as pure functions.
  *
  * Under PostGIS these were database triggers, so an invalid polygon was impossible to save.
  * MongoDB cannot express a cross-document geometric constraint, so the checks moved here —
@@ -21,7 +21,7 @@ import type { Feature, Polygon } from 'geojson';
  * docs/engineering/04-boundaries-and-enforcement.md.
  *
  * These run unchanged in the browser, so the admin map editor validates live as the polygon
- * is drawn rather than on submit (docs/10-admin-panel.md §Live validation).
+ * is drawn rather than on submit (docs/LLD/10-admin-panel.md §Live validation).
  */
 
 export type ZoneRule = 'Z-1' | 'Z-2' | 'Z-3' | 'Z-MIN-AREA' | 'Z-COMPLEXITY';

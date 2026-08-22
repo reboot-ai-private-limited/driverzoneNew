@@ -15,7 +15,7 @@
  * mattering. ESLint is the echo; this file is the authority.
  *
  * Under MongoDB this file also carries DATA INTEGRITY, not just tidiness. The zone invariants
- * in docs/02-domain-model.md were PostGIS triggers — a bad polygon could not be saved. Mongo
+ * in docs/LLD/02-domain-model.md were PostGIS triggers — a bad polygon could not be saved. Mongo
  * cannot express a cross-document geometric constraint, so those checks live in
  * @driverzone/geo and run in the zones module's write path. That is only a real guarantee
  * while `module-internals-are-private` holds: it is what stops another module reaching

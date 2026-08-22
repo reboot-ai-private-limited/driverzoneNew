@@ -117,7 +117,7 @@ distance — return **HTTP 200** with `available: false`:
 
 These are the system working correctly. Returning 4xx buries genuine faults under expected
 traffic and makes the error rate meaningless. See
-[`../04-zone-resolution.md`](../04-zone-resolution.md).
+[`../04-zone-resolution.md`](../LLD/04-zone-resolution.md).
 
 Clients render `message` verbatim and never build copy from `reason` — that way a reason added
 server-side displays correctly on app versions that predate it, which matters when the old

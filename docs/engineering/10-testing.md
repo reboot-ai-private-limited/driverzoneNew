@@ -38,7 +38,7 @@ where it should take a port.
 
 **`packages/geo`** — 31 tests. These carry the zone invariants that used to be database
 triggers, so a bug here is a bad polygon in production. Every case from
-[`../04-zone-resolution.md`](../04-zone-resolution.md) is covered, including the awkward ones:
+[`../04-zone-resolution.md`](../LLD/04-zone-resolution.md) is covered, including the awkward ones:
 
 ```ts
 it('rejects a swapped coordinate rather than resolving it to the wrong place', …);
@@ -83,7 +83,7 @@ Keep integration tests in `test/integration/` behind a separate script so `pnpm 
 ### The one integration test to write first
 
 The **atomic dispatch claim**. Everything else in
-[`../06-dispatch-and-assignment.md`](../06-dispatch-and-assignment.md) is recoverable; a
+[`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) is recoverable; a
 double-assignment means two drivers at one pickup and a customer paying twice.
 
 ```ts

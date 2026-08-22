@@ -71,7 +71,7 @@ holes at once, whichever way the import is spelled.
 
 **Under MongoDB this rule carries data integrity, not just tidiness.**
 
-The zone invariants in [`../02-domain-model.md`](../02-domain-model.md) — pickup zones inside
+The zone invariants in [`../02-domain-model.md`](../LLD/02-domain-model.md) — pickup zones inside
 their city, no same-type overlap, no self-intersection — were PostGIS triggers. A bad polygon
 was *impossible to save*, from any code path, forever.
 

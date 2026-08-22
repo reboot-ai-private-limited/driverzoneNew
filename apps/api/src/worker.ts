@@ -13,7 +13,7 @@ import { buildContainers } from './routes.js';
  * one image (different CMD) is what keeps them from drifting — see apps/api/Dockerfile.
  *
  * This is where dispatch waves, scheduled dispatch and the sweeper will run
- * (docs/06-dispatch-and-assignment.md).
+ * (docs/LLD/06-dispatch-and-assignment.md).
  */
 async function main(): Promise<void> {
   await connectMongo();

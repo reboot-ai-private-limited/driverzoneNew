@@ -106,7 +106,7 @@ Format for each entry:
 - **Why this one:** team fluency, and its geospatial support covers the two operations on the
   hot path — `$geoIntersects` with a `2dsphere` index for zone resolution, `$geoNear` for
   finding drivers. Single-document atomicity makes the dispatch claim in
-  [`../06-dispatch-and-assignment.md`](../06-dispatch-and-assignment.md) clean:
+  [`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) clean:
   `findOneAndUpdate({ _id, driverId: null })` either wins or returns nothing.
 - **Rejected:** PostgreSQL + PostGIS — genuinely the stronger fit for this product, and the
   original design. It loses on team familiarity, and that matters more than it looks: the
@@ -135,7 +135,7 @@ Format for each entry:
   easy, polygon boolean operations are emphatically not).
 - **Status:** a first-class dependency, not a utility. It carries invariants that used to be
   database triggers, so it lives in `packages/geo` with its own test suite — 31 tests covering
-  every case in [`../04-zone-resolution.md`](../04-zone-resolution.md).
+  every case in [`../04-zone-resolution.md`](../LLD/04-zone-resolution.md).
 - **Note:** import the individual `@turf/*` packages, never the `@turf/turf` meta-package —
   the latter is ~500KB and the admin bundle ships to browsers.
 
@@ -146,7 +146,7 @@ Format for each entry:
 - **Why this one:** BullMQ requires it, and the same instance solves the location write-volume
   problem. 2,000 on-duty drivers pinging every 10s is ~200 writes/s; sent to Mongo that bloats
   collections and starves booking queries. Redis absorbs it and Mongo gets a batched flush every
-  30s. See [`../09-architecture.md`](../09-architecture.md).
+  30s. See [`../09-architecture.md`](../LLD/09-architecture.md).
 - **Config note:** `maxRetriesPerRequest: null` is required by BullMQ, not a tuning choice — its
   blocking commands are long-lived and ioredis's default retry cap kills them mid-wait. Without
   it, dispatch workers die quietly seconds after starting.
@@ -271,4 +271,4 @@ nginx. See [09](09-build-and-deploy.md).
 | A DI container (tsyringe, InversifyJS) | `<module>.container.ts` is ~30 lines of explicit wiring per module, greppable and debuggable. A decorator-driven container trades that for magic and a metadata dependency. |
 | GraphQL | Four known clients and a fixed set of screens. REST with typed contracts is less machinery for the same result. |
 | A state-management library (web) | Server state via fetch + cache. Add TanStack Query when the admin panel actually needs it, not before. |
-| Sentry / APM | Should be added before the pilot. Not scaffolded yet — tracked in [`../11-roadmap.md`](../11-roadmap.md). |
+| Sentry / APM | Should be added before the pilot. Not scaffolded yet — tracked in [`../11-roadmap.md`](../LLD/11-roadmap.md). |

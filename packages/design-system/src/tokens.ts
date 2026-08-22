@@ -14,7 +14,7 @@ export const colors = {
   success: '#1a7f37',
   warning: '#9a6700',
   danger: '#cf222e',
-  /** Zone-editor fills, matching docs/10-admin-panel.md. */
+  /** Zone-editor fills, matching docs/LLD/10-admin-panel.md. */
   zoneCity: '#0b6bcb',
   zonePickupFree: '#1a7f37',
   zonePickupPaid: '#9a6700',

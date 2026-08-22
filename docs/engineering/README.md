@@ -3,6 +3,9 @@
 How this codebase is built and why. If you are new here, read `01` through `04` in order —
 that is roughly an hour and covers every decision you need to make sense of the rest.
 
+Decisions already made are logged in [`../decision-log.md`](../decision-log.md); what moved
+recently is in [`../../CHANGELOG.md`](../../CHANGELOG.md).
+
 The product documentation lives one level up in [`../`](../README.md): what DriverZone does,
 the zone model, pricing, dispatch. This directory is about the *code*.
 
@@ -55,7 +58,7 @@ imports `bookings.public.js`. This is machine-enforced — see `04`. It costs no
 runtime: the contract file is types only and leaves no trace in the shipped bundle.
 
 **2. `pnpm lint:deps` protects data integrity, not just tidiness.**
-The zone invariants in [`../02-domain-model.md`](../02-domain-model.md) were originally
+The zone invariants in [`../02-domain-model.md`](../LLD/02-domain-model.md) were originally
 PostGIS triggers, so a bad polygon was impossible to save. MongoDB cannot express a
 cross-document geometric constraint, so those checks moved into `@driverzone/geo` and run in
 the `zones` module's write path. That is a real guarantee only while nothing else can reach

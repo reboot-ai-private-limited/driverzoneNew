@@ -106,7 +106,7 @@ not a rewrite.
 
 ## The driver app's real risk: the foreground service
 
-[`../06-dispatch-and-assignment.md`](../06-dispatch-and-assignment.md) requires the driver app
+[`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) requires the driver app
 to hold a **persistent socket** while on duty, because FCM alone will not reliably deliver a
 45-second ringing trip offer.
 

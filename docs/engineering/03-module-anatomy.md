@@ -176,7 +176,7 @@ that nobody skips it.
 
 **`dispatch` near the top, alone.** It is the only module permitted to write
 `bookings.driverId`. One module owning the assignment race is what keeps the atomic claim in
-[`../06-dispatch-and-assignment.md`](../06-dispatch-and-assignment.md) correct — two writers
+[`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) correct — two writers
 would reintroduce double-assignment no matter how careful each one was.
 
 ## How a request flows

@@ -10,7 +10,7 @@ import { redisConnection } from './redis.js';
  * because nothing failed. A customer watches a spinner while the system believes it is working.
  *
  * BullMQ persists to Redis, survives restarts, retries, and is inspectable when something goes
- * wrong. See docs/06-dispatch-and-assignment.md §Non-negotiable.
+ * wrong. See docs/LLD/06-dispatch-and-assignment.md §Non-negotiable.
  */
 export const QUEUE_NAMES = {
   dispatch: 'dispatch',

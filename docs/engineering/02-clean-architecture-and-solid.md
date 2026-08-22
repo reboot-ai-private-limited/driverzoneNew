@@ -223,7 +223,7 @@ a single greppable answer.
 The strongest argument for this structure is not theoretical — it is this project's own
 history.
 
-The original design ([`../03-database-schema.md`](../03-database-schema.md)) was PostgreSQL +
+The original design ([`../03-database-schema.md`](../LLD/03-database-schema.md)) was PostgreSQL +
 PostGIS: `ST_Contains` for zone resolution, database triggers for the invariants. That was
 changed to MongoDB before a line of feature code was written.
 
@@ -237,7 +237,7 @@ What that change touches, under this architecture:
 | `infrastructure/` | **all of it** — `ST_Contains` → `$geoIntersects`, DDL → Mongoose schemas |
 | `@driverzone/geo` | **added** — the invariants Postgres enforced with triggers |
 
-The algorithm in [`../04-zone-resolution.md`](../04-zone-resolution.md) — resolve the point,
+The algorithm in [`../04-zone-resolution.md`](../LLD/04-zone-resolution.md) — resolve the point,
 find the pickup zone, check the drop, match packages, return variants — did not change by a
 single step. Only the sentence "how do I ask the database which polygons contain this point"
 changed, and that sentence lives in one file per module.

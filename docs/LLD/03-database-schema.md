@@ -10,7 +10,7 @@
 - **Percentages** are basis points: `2500` = 25%.
 - **Geometry** is GeoJSON, so coordinates are `[lng, lat]` — the reverse of how humans write
   them. Conversion happens only in `@driverzone/geo`; see
-  [`engineering/05`](engineering/05-coding-standards.md#coordinates).
+  [`engineering/05`](../engineering/05-coding-standards.md#coordinates).
 - **Enums** are string unions validated by Zod at the boundary and constrained by `enum:` in the
   schema.
 - Every collection carries `createdAt`/`updatedAt` via `{ timestamps: true }`.
@@ -34,7 +34,7 @@ This is a **weaker guarantee** than a trigger, and it is held up by two things:
 
 1. The `zones` module is the only code that can write a zone, enforced by
    `module-internals-are-private` in `.dependency-cruiser.cjs`. See
-   [`engineering/04`](engineering/04-boundaries-and-enforcement.md).
+   [`engineering/04`](../engineering/04-boundaries-and-enforcement.md).
 2. A **nightly integrity job** re-checks every zone and alerts on drift.
 
 Do not add a second write path to `zones`. That is the whole guarantee.

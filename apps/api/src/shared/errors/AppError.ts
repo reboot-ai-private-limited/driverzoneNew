@@ -55,7 +55,7 @@ export class AppError extends Error {
    *
    * `isExpected: false` is what routes it to an alert. The customer-facing message is
    * deliberately generic: a configuration fault is never the customer's problem to understand
-   * (docs/04-zone-resolution.md §Error codes).
+   * (docs/LLD/04-zone-resolution.md §Error codes).
    */
   static internal(code: FaultCode, details?: unknown): AppError {
     return new AppError({

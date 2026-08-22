@@ -96,7 +96,7 @@ tends to surface much later than the setup that caused it.
 
 The `mongo` service starts as a **replica set** (`--replSet rs0`) even though it is a single
 node, because multi-document transactions require one and the booking→ledger write in
-[`05-pricing-and-commission.md`](05-pricing-and-commission.md) needs a transaction to stay
+[`05-pricing-and-commission.md`](LLD/05-pricing-and-commission.md) needs a transaction to stay
 consistent. Adding the replica set later means re-seeding every environment.
 
 But a replica set is not usable until it is initiated. `mongo-init` is a one-shot container
@@ -170,7 +170,7 @@ forever.
 
 ### A phone cannot reach `localhost`
 
-Once the apps start calling the API (phase 7, [`11-roadmap.md`](11-roadmap.md)), this bites
+Once the apps start calling the API (phase 7, [`11-roadmap.md`](LLD/11-roadmap.md)), this bites
 immediately: `localhost` on a physical device means *the device*, not your machine. Expo
 already prints the address it expects you to use —
 
@@ -305,9 +305,9 @@ What it should create:
 | 1 admin | fixed credentials, printed on completion | log into the panel without a signup flow |
 | ~3 drivers | varied: online/offline, different vehicle classes, one suspended | dispatch waves need more than one candidate to be worth testing |
 | ~3 customers | one with saved addresses, one brand new | the empty-state and populated cases both matter |
-| 2–3 zones | one city, one pickup-coverage area, one hill region | zone resolution is the core algorithm ([`04`](04-zone-resolution.md)) — with no polygons nothing prices |
+| 2–3 zones | one city, one pickup-coverage area, one hill region | zone resolution is the core algorithm ([`04`](LLD/04-zone-resolution.md)) — with no polygons nothing prices |
 | packages on those zones | one incity hourly, one outstation band | a zone with no packages still returns no quote |
-| a few bookings | one per interesting lifecycle state ([`07`](07-booking-lifecycle.md)) | admin list/detail screens are unreviewable against an empty table |
+| a few bookings | one per interesting lifecycle state ([`07`](LLD/07-booking-lifecycle.md)) | admin list/detail screens are unreviewable against an empty table |
 
 Properties it needs to have, in rough priority order:
 
@@ -392,7 +392,7 @@ docker compose -f docker-compose.dev.yml up -d
 
 ## OSRM
 
-Road distance for outstation band matching ([`04`](04-zone-resolution.md)). It is commented out
+Road distance for outstation band matching ([`04`](LLD/04-zone-resolution.md)). It is commented out
 in both compose files because it needs a prepared OSM extract before it will start — the
 `osrm-extract` / `osrm-partition` / `osrm-customize` commands are in
 [`engineering/09`](engineering/09-build-and-deploy.md#local-development). Budget about an hour

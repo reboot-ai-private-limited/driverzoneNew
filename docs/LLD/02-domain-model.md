@@ -75,7 +75,7 @@ violation should be impossible to create, not merely detected later.
 >
 > That is a weaker guarantee, held up by two things: the `zones` module is the *only* code that
 > can write a zone — enforced by `module-internals-are-private` in `.dependency-cruiser.cjs`,
-> see [`engineering/04`](engineering/04-boundaries-and-enforcement.md) — and a nightly integrity
+> see [`engineering/04`](../engineering/04-boundaries-and-enforcement.md) — and a nightly integrity
 > job re-checks every zone and alerts on drift.
 >
 > The upside is that the same code runs in the browser, so the admin map editor validates live

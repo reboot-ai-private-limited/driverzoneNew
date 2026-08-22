@@ -5,9 +5,9 @@
 | Layer | Choice | Why this one |
 |-------|--------|--------------|
 | Database | **MongoDB 7 + Mongoose 8** | Team fluency, and `2dsphere` covers the two hot-path operations: `$geoIntersects` for zone resolution, `$geoNear` for driver search. Requires a replica set — transactions need one. |
-| Backend | **Express 4 (TypeScript)** | A deliberately thin edge. The architecture lives in the modules and containers, not the framework — see [`engineering/02`](engineering/02-clean-architecture-and-solid.md). |
+| Backend | **Express 4 (TypeScript)** | A deliberately thin edge. The architecture lives in the modules and containers, not the framework — see [`engineering/02`](../engineering/02-clean-architecture-and-solid.md). |
 | Geometry | **Turf.js** | Carries the zone invariants MongoDB cannot express as constraints, and runs in the browser so the admin editor validates live. |
-| Monorepo | **pnpm + Turborepo** | Four apps, five shared packages. See [`engineering/01`](engineering/01-monorepo-layout.md). |
+| Monorepo | **pnpm + Turborepo** | Four apps, five shared packages. See [`engineering/01`](../engineering/01-monorepo-layout.md). |
 | Cache / queue | **Redis 7** | Driver locations (GEO), settings cache, BullMQ job store. |
 | Jobs | **BullMQ** | Durable delayed jobs — the dispatch timers depend on this. |
 | Routing | **OSRM**, self-hosted | Road distance on every quote; per-call pricing gets expensive fast. |
@@ -22,7 +22,7 @@
 ## Repository layout
 
 One monorepo, four apps, five shared packages. Full detail in
-[`engineering/01`](engineering/01-monorepo-layout.md).
+[`engineering/01`](../engineering/01-monorepo-layout.md).
 
 ```
 driverzone/
@@ -44,7 +44,7 @@ lives there — but copies only its own output into a clean final stage:
 
 Two server artifacts, two store binaries. The API image contains no admin-panel code and no
 mobile code; the mobile apps never reach a server at all. See
-[`engineering/09`](engineering/09-build-and-deploy.md).
+[`engineering/09`](../engineering/09-build-and-deploy.md).
 
 ## Services
 
@@ -75,7 +75,7 @@ api/
 ```
 
 Three rules that keep the boundaries real, all machine-enforced by
-`.dependency-cruiser.cjs` ([`engineering/04`](engineering/04-boundaries-and-enforcement.md)):
+`.dependency-cruiser.cjs` ([`engineering/04`](../engineering/04-boundaries-and-enforcement.md)):
 
 1. **`pricing` is pure.** No I/O. Inputs in, `FareBreakdown` out. This makes the most
    dispute-prone logic in the system exhaustively testable without a database.
@@ -85,7 +85,7 @@ Three rules that keep the boundaries real, all machine-enforced by
    rather than database triggers, so this rule is what keeps them a real guarantee.
 
 Modules communicate only through `<name>.public.ts` contracts — types only, erased at compile
-time, zero runtime cost. See [`engineering/03`](engineering/03-module-anatomy.md).
+time, zero runtime cost. See [`engineering/03`](../engineering/03-module-anatomy.md).
 
 ## Driver location — the write-volume problem
 

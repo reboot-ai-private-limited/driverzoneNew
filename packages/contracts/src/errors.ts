@@ -1,7 +1,7 @@
 /**
  * Error and unavailability codes.
  *
- * Two categories, and the split matters operationally (docs/04-zone-resolution.md §Error codes):
+ * Two categories, and the split matters operationally (docs/LLD/04-zone-resolution.md §Error codes):
  *
  *   UNAVAILABLE — an expected answer. "We don't serve your pickup point yet" is the system
  *   working correctly. These return HTTP 200 with `available: false`, so they stay out of

@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { redisConnection } from './redis.js';
+import { getRedis } from './redis.js';
 
 /**
  * Durable job queues.
@@ -11,15 +11,31 @@ import { redisConnection } from './redis.js';
  *
  * BullMQ persists to Redis, survives restarts, retries, and is inspectable when something goes
  * wrong. See docs/LLD/06-dispatch-and-assignment.md §Non-negotiable.
+ *
+ * Constructed on first use rather than at import, for the same reason as the Redis connection
+ * itself — a `new Queue(...)` at module scope connects, so importing anything downstream of
+ * this file would require a live Redis.
  */
 export const QUEUE_NAMES = {
   dispatch: 'dispatch',
   notifications: 'notifications',
 } as const;
 
-export const dispatchQueue = new Queue(QUEUE_NAMES.dispatch, { connection: redisConnection });
-export const notificationsQueue = new Queue(QUEUE_NAMES.notifications, {
-  connection: redisConnection,
-});
+export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
 
-export const allQueues = [dispatchQueue, notificationsQueue];
+const queues = new Map<QueueName, Queue>();
+
+export function getQueue(name: QueueName): Queue {
+  let queue = queues.get(name);
+  if (queue === undefined) {
+    queue = new Queue(name, { connection: getRedis() });
+    queues.set(name, queue);
+  }
+  return queue;
+}
+
+/** Closes every queue that was actually opened. Part of graceful shutdown. */
+export async function closeQueues(): Promise<void> {
+  await Promise.all([...queues.values()].map((q) => q.close()));
+  queues.clear();
+}

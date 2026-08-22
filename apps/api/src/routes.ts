@@ -1,30 +1,14 @@
 import { Router } from 'express';
-import { buildHealthContainer } from '@/modules/health/health.container.js';
+import type { AppContainers } from './container.js';
 
 /**
- * THE APPLICATION COMPOSITION ROOT.
+ * The HTTP half of composition: which module answers on which path.
  *
- * Every module container is built here, in dependency order, and the contracts they expose are
- * threaded into the modules that need them. As modules land this file grows into the readable
- * summary of the whole dependency graph — the tier list in `.dependency-cruiser.cjs` is the
- * machine-checked version of what this file does by hand.
- *
- * Build order must respect those tiers. A module cannot receive a contract that has not been
- * constructed yet, so if the wiring below ever needs to run backwards, the tiers are wrong.
+ * Takes containers already built by `container.ts` rather than building them, so this file has
+ * one job and the worker can construct the same modules without importing it.
  */
-export interface AppContainers {
-  health: ReturnType<typeof buildHealthContainer>;
-}
-
-export function buildContainers(): AppContainers {
-  // tier 0 — depends on no other module
-  const health = buildHealthContainer();
-
-  return { health };
-}
-
 export function buildApiRouter(c: AppContainers): Router {
   const router = Router();
-  router.use('/health', c.health.router);
+  router.use('/health', c.health.buildRouter());
   return router;
 }

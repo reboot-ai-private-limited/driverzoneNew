@@ -4,7 +4,9 @@ import type { Express } from 'express';
 import helmet from 'helmet';
 import { env } from '@/config/env.js';
 import { errorHandler, notFoundHandler } from '@/shared/http/error-handler.js';
-import { buildApiRouter, buildContainers } from './routes.js';
+import { requestIdMiddleware } from '@/shared/http/request-id.middleware.js';
+import { buildContainers } from './container.js';
+import { buildApiRouter } from './routes.js';
 
 /**
  * Builds the Express app without starting a listener, so tests can drive it through supertest
@@ -16,6 +18,10 @@ export function createApp(): Express {
   app.disable('x-powered-by');
   // Behind nginx: without this, req.ip is the proxy and every rate limit shares one bucket.
   app.set('trust proxy', 1);
+
+  // FIRST, ahead of helmet and cors: a request rejected by either still gets an ID, and a
+  // rejection you cannot correlate with a log line is the one you most need to.
+  app.use(requestIdMiddleware());
 
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGINS, credentials: true }));

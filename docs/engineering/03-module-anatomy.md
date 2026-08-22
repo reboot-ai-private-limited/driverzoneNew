@@ -101,8 +101,8 @@ where ports meet adapters.
 
 ```ts
 export interface HealthContainer {
-  router: Router;
   contract: HealthPublicContract;
+  buildRouter: () => Router;
 }
 
 export function buildHealthContainer(): HealthContainer {
@@ -110,11 +110,17 @@ export function buildHealthContainer(): HealthContainer {
   const getHealth = new GetHealthUseCase(probes);
 
   return {
-    router: buildHealthRouter(makeGetHealthController(getHealth)),
     contract: { report: () => getHealth.execute() },
+    buildRouter: () => buildHealthRouter(makeGetHealthController(getHealth)),
   };
 }
 ```
+
+**`buildRouter` is a function, not a `router` property.** Both entrypoints build every
+container — the worker needs the same contracts the HTTP server does — but only one of them
+serves HTTP. As a property, every module would allocate a router, its middleware and its
+validation schemas inside a process with no listener. As a function, `buildApiRouter` calls it
+and the worker never does.
 
 A container that needs another module's contract takes it as an argument:
 

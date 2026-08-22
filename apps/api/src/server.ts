@@ -1,7 +1,8 @@
 import { createApp } from './app.js';
-import { env } from '@/config/env.js';
+import { env, loadEnv } from '@/config/env.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
-import { redisConnection } from '@/shared/queue/redis.js';
+import { disconnectRedis } from '@/shared/queue/redis.js';
+import { closeQueues } from '@/shared/queue/queues.js';
 import { logger } from '@/shared/logging/logger.js';
 
 /**
@@ -12,6 +13,10 @@ import { logger } from '@/shared/logging/logger.js';
  * reason that has nothing to do with the request.
  */
 async function main(): Promise<void> {
+  // Before anything connects: a missing variable should fail here, named, not inside a
+  // connection string ten seconds later.
+  loadEnv();
+
   await connectMongo();
 
   const server = createApp().listen(env.PORT, () => {
@@ -37,8 +42,9 @@ async function main(): Promise<void> {
 
     server.close(() => {
       void (async () => {
+        await closeQueues();
         await disconnectMongo();
-        redisConnection.disconnect();
+        disconnectRedis();
         logger.info('shutdown complete');
         process.exit(0);
       })();

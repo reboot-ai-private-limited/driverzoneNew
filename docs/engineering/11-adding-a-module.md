@@ -14,7 +14,7 @@ small enough to read in five minutes.
 [ ] 6. Write infrastructure/ — the adapters
 [ ] 7. Write interface/ — controller, routes, validation
 [ ] 8. Write <module>.container.ts — the wiring
-[ ] 9. Register it in src/routes.ts
+[ ] 9. Build it in src/container.ts, mount it in src/routes.ts
 [ ] 10. Unit-test the domain and use cases with fakes
 [ ] 11. pnpm --filter @driverzone/api lint:deps
 ```
@@ -120,7 +120,7 @@ with no persistence has no repository. Do not create empty directories to match 
 ## Wiring it up
 
 ```ts
-// src/routes.ts
+// src/container.ts — module wiring, imported by BOTH entrypoints
 export function buildContainers(): AppContainers {
   const health   = buildHealthContainer();                       // tier 0
   const identity = buildIdentityContainer();                     // tier 1
@@ -129,10 +129,11 @@ export function buildContainers(): AppContainers {
   return { health, identity, zones };
 }
 
+// src/routes.ts — the HTTP half, imported by the server only
 export function buildApiRouter(c: AppContainers): Router {
   const router = Router();
-  router.use('/health', c.health.router);
-  router.use('/zones',  c.zones.router);
+  router.use('/health', c.health.buildRouter());
+  router.use('/zones',  c.zones.buildRouter());
   return router;
 }
 ```

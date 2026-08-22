@@ -36,9 +36,14 @@ module.exports = {
   overrides: [
     {
       /*
-       * `src/routes.ts` is the APPLICATION composition root — the one file whose job is to
+       * `src/container.ts` is the APPLICATION composition root — the one file whose job is to
        * build every module container and wire the contracts between them. Reaching for a
        * container is the point of it, not a violation.
+       *
+       * `src/routes.ts` is deliberately NOT in this list. It receives containers already built
+       * and only mounts their routers, so it needs no module internals — and leaving it
+       * unexempted means the boundary rule keeps watching the file most likely to grow a
+       * shortcut.
        *
        * dependency-cruiser needs no equivalent exemption: its rule is scoped to
        * `from: ^src/modules/`, so a file outside a module was never in scope. ESLint's
@@ -46,7 +51,7 @@ module.exports = {
        * which is precisely the limitation documented at the top of
        * `.dependency-cruiser.cjs` — the two tools are not redundant.
        */
-      files: ['src/routes.ts', 'src/app.ts', 'src/server.ts', 'src/worker.ts'],
+      files: ['src/container.ts', 'src/app.ts', 'src/server.ts', 'src/worker.ts'],
       rules: { 'no-restricted-imports': 'off' },
     },
   ],

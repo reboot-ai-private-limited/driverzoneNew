@@ -13,7 +13,8 @@
     "lint": "eslint src --ext .ts && pnpm lint:deps",
     "lint:deps": "depcruise src --config .dependency-cruiser.cjs --output-type err-long",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@driverzone/contracts": "workspace:*",

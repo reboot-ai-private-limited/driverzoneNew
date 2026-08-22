@@ -35,7 +35,43 @@ const CONNECTION_STATES: Record<number, string> = {
   99: 'uninitialized',
 };
 
-export function mongoHealth(): { ok: boolean; state: string } {
+/**
+ * Must answer well inside the orchestrator's health interval (15 s in docker-compose.prod.yml).
+ * A health check that can hang for longer than the thing polling it is worse than none: the
+ * poll times out, the container is marked unhealthy, and the cause is the check itself.
+ */
+const PING_TIMEOUT_MS = 2_000;
+
+/**
+ * Whether Mongo can actually serve a command right now.
+ *
+ * `readyState` is checked first because it is free and a definitive negative — but it is only a
+ * client-side socket flag, and on its own it LIES in the failure that matters most here: a
+ * replica set that has lost its primary keeps `readyState === 1` while refusing every write
+ * with "not primary". Reporting that as healthy keeps a dead instance in the load balancer.
+ *
+ * So the state check is a fast path, and the answer comes from a real round trip.
+ */
+export async function mongoHealth(): Promise<{ ok: boolean; state: string }> {
   const readyState = mongoose.connection.readyState;
-  return { ok: readyState === 1, state: CONNECTION_STATES[readyState] ?? 'unknown' };
+  const state = CONNECTION_STATES[readyState] ?? 'unknown';
+
+  if (readyState !== 1) return { ok: false, state };
+
+  const db = mongoose.connection.db;
+  if (db === undefined) return { ok: false, state: 'no database handle' };
+
+  try {
+    // Races the ping rather than relying on the driver's own timeouts, which are tuned for
+    // application queries and are longer than a health check can afford to wait.
+    await Promise.race([
+      db.admin().ping(),
+      new Promise((_resolve, reject) =>
+        setTimeout(() => reject(new Error('ping timed out')), PING_TIMEOUT_MS).unref(),
+      ),
+    ]);
+    return { ok: true, state };
+  } catch (err) {
+    return { ok: false, state: err instanceof Error ? err.message : state };
+  }
 }

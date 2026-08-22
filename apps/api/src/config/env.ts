@@ -30,15 +30,38 @@ const schema = z.object({
 
 const parsed = schema.safeParse(process.env);
 
-if (!parsed.success) {
+/**
+ * Falls back to the schema's own defaults when the environment is incomplete, so that IMPORTING
+ * this file cannot kill the process.
+ *
+ * The validation still happens and still fails loudly — but at `loadEnv()`, called explicitly
+ * from the entrypoints. The difference matters for tests: a `process.exit(1)` at import turns a
+ * missing MONGO_URI into a test runner that dies with no output, on a suite that never intended
+ * to touch a database.
+ */
+type Env = z.infer<typeof schema>;
+
+export const env: Env = parsed.success
+  ? parsed.data
+  : // The two required fields relaxed to empty, everything else at its schema default. Derived
+    // from the schema rather than written out, so a new variable cannot be forgotten here.
+    schema.extend({ MONGO_URI: z.string().default(''), REDIS_URL: z.string().default('') }).parse({});
+export type { Env };
+
+export const isProduction = env.NODE_ENV === 'production';
+export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * Validates the environment for real. Call once, first thing, from every entrypoint.
+ *
+ * A missing variable fails the process immediately with the variable named, rather than
+ * surfacing as `undefined` inside a connection string an hour into a deploy.
+ */
+export function loadEnv(): Env {
+  if (parsed.success) return parsed.data;
+
   const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
   // Not the logger: the logger reads LOG_LEVEL from this very object, so it may not exist yet.
   console.error(`Invalid environment:\n${issues}`);
   process.exit(1);
 }
-
-export const env = parsed.data;
-export type Env = typeof env;
-
-export const isProduction = env.NODE_ENV === 'production';
-export const isTest = env.NODE_ENV === 'test';

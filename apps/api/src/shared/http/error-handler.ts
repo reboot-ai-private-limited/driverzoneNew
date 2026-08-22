@@ -5,6 +5,15 @@ import { AppError } from '@/shared/errors/AppError.js';
 import { logger } from '@/shared/logging/logger.js';
 import { buildErrorBody } from './response.util.js';
 
+/** Unwraps an `Error.cause` chain into something a log line can carry. */
+function causeChain(err: unknown, depth = 0): string | undefined {
+  if (!(err instanceof Error) || err.cause === undefined || depth > 4) return undefined;
+  const cause = err.cause;
+  const head = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+  const rest = causeChain(cause, depth + 1);
+  return rest === undefined ? head : `${head} <- ${rest}`;
+}
+
 /**
  * The single place an error becomes a response.
  *
@@ -26,7 +35,7 @@ export function errorHandler(
       status: err.statusCode,
       url: req.originalUrl,
       details: err.details,
-      ...(err.isExpected ? {} : { stack: err.stack }),
+      ...(err.isExpected ? {} : { stack: err.stack, cause: causeChain(err) }),
     });
 
     res.status(err.statusCode).json(
@@ -34,6 +43,7 @@ export function errorHandler(
         statusCode: err.statusCode,
         code: err.code,
         message: err.message,
+        publicDetails: err.publicDetails,
         details: err.details,
         stack: err.stack,
       }),
@@ -42,12 +52,14 @@ export function errorHandler(
   }
 
   if (err instanceof ZodError) {
+    // `publicDetails`, not `details`: a client cannot highlight the offending field without
+    // being told which one it is, and Zod's issues name nothing but the caller's own payload.
     res.status(400).json(
       buildErrorBody(req, {
         statusCode: 400,
         code: 'VALIDATION_FAILED',
         message: 'Some of the details provided are not valid.',
-        details: err.issues,
+        publicDetails: err.issues,
       }),
     );
     return;
@@ -67,7 +79,12 @@ export function errorHandler(
   }
 
   const stack = err instanceof Error ? err.stack : undefined;
-  logger.error('unhandled error', { url: req.originalUrl, err: String(err), stack });
+  logger.error('unhandled error', {
+    url: req.originalUrl,
+    err: String(err),
+    stack,
+    cause: causeChain(err),
+  });
 
   res.status(500).json(
     buildErrorBody(req, {

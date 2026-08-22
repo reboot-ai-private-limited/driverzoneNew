@@ -18,8 +18,17 @@ import type { HealthPublicContract } from './health.public.js';
  * to the implementation. You can always jump here.
  */
 export interface HealthContainer {
-  router: Router;
   contract: HealthPublicContract;
+  /**
+   * Builds the HTTP surface — a FUNCTION, not a property, so constructing the module does not
+   * construct its routes.
+   *
+   * The worker builds every container (it needs the same contracts the HTTP server does) and
+   * serves nothing. With an eager `router` property it would allocate an Express router, its
+   * middleware and its validation schemas for all thirteen modules, in a process with no
+   * listener. Called only from `buildApiRouter`.
+   */
+  buildRouter: () => Router;
 }
 
 export function buildHealthContainer(): HealthContainer {
@@ -28,9 +37,9 @@ export function buildHealthContainer(): HealthContainer {
   const getHealth = new GetHealthUseCase(probes);
 
   return {
-    router: buildHealthRouter(makeGetHealthController(getHealth)),
     contract: {
       report: () => getHealth.execute(),
     },
+    buildRouter: () => buildHealthRouter(makeGetHealthController(getHealth)),
   };
 }

@@ -10,6 +10,12 @@
 export interface RequestMeta {
   method: string;
   url: string;
+  /**
+   * Correlates this response with the server logs that produced it, and is also returned in the
+   * `x-request-id` header. Safe to show in a UI — "quote this ID to support" is the whole point,
+   * and it carries no information about anything but the request itself.
+   */
+  requestId: string;
   /** Omitted in production. */
   ip?: string;
 }
@@ -28,6 +34,14 @@ export interface HttpErrorBody {
   code: string;
   request: RequestMeta;
   message: string;
+  /**
+   * Detail the CALLER needs in order to act — field-level validation errors, most often.
+   * Returned in every environment, so a client can highlight the offending input.
+   *
+   * This is deliberately not the same channel as the server's own diagnostics. Anything that
+   * would leak a query, a connection string or an internal identifier belongs in the log, and
+   * `AppError` keeps the two apart: `publicDetails` lands here, `details` does not.
+   */
   data?: unknown;
   /** Stack trace — omitted in production. */
   trace?: string;

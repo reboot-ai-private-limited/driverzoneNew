@@ -4,13 +4,27 @@ import type { FaultCode } from '@driverzone/contracts';
  * An error with an HTTP status and a customer-safe message.
  *
  * `message` is displayed to whoever made the request, so it must never carry a cause, a query,
- * or an internal identifier. Diagnostics go in `details`, which the error handler logs and
- * strips from production responses.
+ * or an internal identifier.
+ *
+ * There are TWO detail channels and the distinction is the point:
+ *
+ *   `publicDetails` — what the CALLER needs in order to act. Field-level validation errors,
+ *   almost always. Returned in every environment, because a 400 that does not say which field
+ *   was wrong forces the client to guess.
+ *
+ *   `details` — diagnostics for US. Logged always, stripped from production responses, because
+ *   returning them hands internals to whoever can trigger the error.
+ *
+ * Putting validation errors in `details` looks safe and quietly breaks every client in
+ * production, which is exactly what happened before this split existed.
  */
 export class AppError extends Error {
   readonly statusCode: number;
   readonly code: FaultCode;
+  /** Diagnostic. Logged, and stripped from production responses. */
   readonly details?: unknown;
+  /** Caller-facing. Returned in every environment. */
+  readonly publicDetails?: unknown;
   /** False for genuine faults — used to decide what pages someone. */
   readonly isExpected: boolean;
 
@@ -19,19 +33,28 @@ export class AppError extends Error {
     code: FaultCode;
     message: string;
     details?: unknown;
+    publicDetails?: unknown;
     isExpected?: boolean;
+    /**
+     * The error this one wraps. Without it the stack starts at the rethrow rather than at the
+     * Mongo timeout that caused it, and the only line that could have explained the failure is
+     * the one that was discarded.
+     */
+    cause?: unknown;
   }) {
-    super(opts.message);
+    super(opts.message, opts.cause === undefined ? undefined : { cause: opts.cause });
     this.name = 'AppError';
     this.statusCode = opts.statusCode;
     this.code = opts.code;
     this.details = opts.details;
+    this.publicDetails = opts.publicDetails;
     this.isExpected = opts.isExpected ?? true;
     Error.captureStackTrace?.(this, AppError);
   }
 
-  static badRequest(message: string, details?: unknown): AppError {
-    return new AppError({ statusCode: 400, code: 'VALIDATION_FAILED', message, details });
+  /** `publicDetails` because the caller has to know which field to fix. */
+  static badRequest(message: string, publicDetails?: unknown): AppError {
+    return new AppError({ statusCode: 400, code: 'VALIDATION_FAILED', message, publicDetails });
   }
 
   static unauthenticated(message = 'Please sign in to continue.'): AppError {
@@ -46,8 +69,8 @@ export class AppError extends Error {
     return new AppError({ statusCode: 404, code: 'NOT_FOUND', message });
   }
 
-  static conflict(message: string, details?: unknown): AppError {
-    return new AppError({ statusCode: 409, code: 'CONFLICT', message, details });
+  static conflict(message: string, publicDetails?: unknown): AppError {
+    return new AppError({ statusCode: 409, code: 'CONFLICT', message, publicDetails });
   }
 
   /**
@@ -55,15 +78,17 @@ export class AppError extends Error {
    *
    * `isExpected: false` is what routes it to an alert. The customer-facing message is
    * deliberately generic: a configuration fault is never the customer's problem to understand
-   * (docs/LLD/04-zone-resolution.md §Error codes).
+   * (docs/LLD/04-zone-resolution.md §Error codes). Everything explanatory goes to `details` and
+   * `cause`, which are logged and never returned in production.
    */
-  static internal(code: FaultCode, details?: unknown): AppError {
+  static internal(code: FaultCode, details?: unknown, cause?: unknown): AppError {
     return new AppError({
       statusCode: 500,
       code,
       message: 'Something went wrong. Please try again shortly.',
       details,
       isExpected: false,
+      cause,
     });
   }
 }

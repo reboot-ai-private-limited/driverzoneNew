@@ -20,6 +20,47 @@ entry links to it.
 
 ---
 
+## 2026-08-22 — Module containers expose `buildRouter()`, not a `router`
+
+**Decision:** A module container returns `{ contract, buildRouter: () => Router }`.
+`buildContainers()` moved out of `routes.ts` into `src/container.ts`, which both entrypoints
+import; `routes.ts` now only mounts what it is handed.
+
+**Why:** Both the HTTP server and the worker need every module's contract, but only one serves
+HTTP. With an eager `router` property the worker allocated an Express router, its middleware and
+its validation schemas for every module, in a process with no listener. One wasted router today
+and thirteen once the modules land — and the shape is copied thirteen times, so it is cheap now
+and tedious later.
+
+**Consequences:** `docs/engineering/11-adding-a-module.md` step 9 is now "build it in
+`container.ts`, mount it in `routes.ts`". The ESLint boundary exemption moved from `routes.ts`
+to `container.ts`; `routes.ts` is deliberately left unexempted, so the rule keeps watching the
+file most likely to grow a shortcut.
+
+**Refs:** [`engineering/03-module-anatomy.md`](engineering/03-module-anatomy.md)
+
+---
+
+## 2026-08-22 — The health probe issues a real command
+
+**Decision:** `mongoHealth()` pings the server (`admin().ping()`, 2 s timeout) instead of
+reading `mongoose.connection.readyState`.
+
+**Why:** `readyState` is a client-side socket flag. It stays `1` when the server is wedged or
+the replica set has lost its primary — the "not primary" failure this project already documents
+— so `/api/health` reported `healthy` while every write failed. That endpoint gates the
+container healthcheck and the load balancer's rotation, so the false positive keeps a dead
+instance in service. Confirmed by pausing the Mongo container: previously `healthy`, now `503`
+with `detail: "ping timed out"`.
+
+**Consequences:** `readyState` is kept as a fast negative — free, and definitive when it says
+no. The 2 s timeout is deliberately tighter than the orchestrator's 15 s interval; a check that
+can outlast its poller is worse than none.
+
+**Refs:** `apps/api/src/shared/db/mongo.ts`
+
+---
+
 ## 2026-08-22 — LLD docs moved to `docs/LLD/`
 
 **Decision:** The eleven low-level design docs (`02`–`12`) moved into `docs/LLD/`. The PRD,

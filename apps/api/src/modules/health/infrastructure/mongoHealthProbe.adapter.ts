@@ -13,7 +13,9 @@ export class MongoHealthProbe implements HealthProbePort {
 
   async check(): Promise<DependencyHealth> {
     const started = Date.now();
-    const { ok, state } = mongoHealth();
+    // Awaited: `mongoHealth` issues a real command. It used to be synchronous, which made the
+    // timing either side of it measure nothing and report a flat 0 ms forever.
+    const { ok, state } = await mongoHealth();
     return {
       name: this.name,
       status: ok ? 'up' : 'down',

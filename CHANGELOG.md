@@ -15,6 +15,16 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- Request correlation. Every response carries an `x-request-id` header and a `requestId` in its
+  envelope; every log line written during that request is stamped with it, via
+  `AsyncLocalStorage` rather than a threaded parameter. An inbound header is reused, so a trace
+  started at nginx stays one trace. Worker jobs inherit the ID from their payload.
+- `AppError` now carries `cause`, and separates `publicDetails` (returned always) from
+  `details` (logged, stripped in production).
+- `apps/api/test/app.test.ts` — the HTTP layer under supertest: envelope, 404, error
+  translation, the 503-when-degraded rule, request-id propagation. 10 tests.
+- `apps/api/vitest.integration.config.ts` and the `test:integration` script that
+  `docs/engineering/10-testing.md` had documented for a while without it existing.
 - `docker-compose.dev.yml` — infrastructure only (Mongo, Redis, OSRM commented out). Ports bind
   loopback and are overridable via `MONGO_PORT` / `REDIS_PORT` / `OSRM_PORT`.
 - `docker-compose.prod.yml` — the full stack from built images, with the databases unpublished
@@ -36,9 +46,25 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   `setup-development.md` stay at `docs/` root.
 - `apps/api/.env.example`: `MONGO_URI` now carries `?replicaSet=rs0&directConnection=true`.
   Without it the first multi-document transaction fails, far from the setup that caused it.
+- Module containers expose `buildRouter()` instead of a `router` property, and
+  `buildContainers()` moved from `routes.ts` to a new `src/container.ts`. The worker builds
+  modules without constructing an HTTP surface it has no listener for.
+- Redis connections and BullMQ queues are created on first use rather than at import, and
+  `config/env.ts` no longer calls `process.exit(1)` at import — validation moved to an explicit
+  `loadEnv()` in each entrypoint. Importing a use case no longer opens a socket or can kill a
+  test runner.
 
 ### Fixed
 
+- **`/api/health` reported `healthy` while Mongo was unable to serve.** The probe read
+  `mongoose.connection.readyState`, a client-side socket flag, and issued no command — so a
+  replica set that had lost its primary, or a wedged server, looked fine to the load balancer
+  and to the container healthcheck. It now issues a real `admin().ping()` under a 2s timeout.
+  Confirmed by pausing the Mongo container: previously `healthy`, now `503` with
+  `detail: "ping timed out"`.
+- Validation errors returned no field information in production. `error-handler` put Zod issues
+  in the diagnostic channel, which `buildErrorBody` strips when `NODE_ENV=production`, so
+  clients received a 400 with nothing to highlight.
 - 44 markdown links and 8 prose references in code, broken by the `docs/LLD/` move.
 
 ### Removed

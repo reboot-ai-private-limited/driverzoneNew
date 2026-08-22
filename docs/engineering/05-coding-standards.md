@@ -123,6 +123,72 @@ Clients render `message` verbatim and never build copy from `reason` — that wa
 server-side displays correctly on app versions that predate it, which matters when the old
 version is a store binary you cannot recall.
 
+## Logging
+
+pino, JSON to stdout in production, pretty in development. Nothing writes log files — the
+container runtime owns collection.
+
+### Argument order
+
+```ts
+logger.info({ bookingId, driverId }, 'driver assigned');   // data first, message second
+```
+
+The reverse of winston's. Getting it backwards does not throw: pino logs the object as the
+message and drops every field.
+
+### Levels
+
+| Level | Means | Example |
+|---|---|---|
+| `fatal` | the process is going down | invalid env, cannot reach Mongo at boot |
+| `error` | a fault; someone should look | unhandled throw, `AppError` with `isExpected: false` |
+| `warn` | degraded but handled | Redis reconnecting, health probe timed out, 4xx response |
+| `info` | a state change worth reconstructing later | booking created, driver assigned, wave escalated |
+| `debug` | developer detail, off in production | container wiring, cache hit/miss |
+| `trace` | per-iteration noise, never on in production | — |
+
+Production runs at `info`. The rule above still governs: expected errors log at `info`, not
+`error`.
+
+### Messages are static; data goes in the object
+
+```ts
+logger.info(`otp ${otp} sent to ${phone}`);        // ✗ lint error
+logger.info({ requestedBy }, 'otp sent');          // ✓
+```
+
+**This is a redaction rule, not a style rule.** `redact` matches object paths and cannot see
+inside a string, so an interpolated message bypasses every entry in the list — the example above
+writes a live trip-start code to stdout. `no-restricted-syntax` in `apps/api/.eslintrc.cjs`
+enforces it. It also makes logs aggregatable: a static message groups, an interpolated one is
+unique per request.
+
+### What is never logged
+
+Configured in `shared/logging/logger.ts`, derived from the payloads in
+[`../LLD/08-api-contracts.md`](../LLD/08-api-contracts.md): OTPs (`otp`, `start_otp`), phone
+numbers (`phone`, `masked_phone`), credentials (`token`, `password`, `refresh_token`,
+`authorization`), `idempotency-key`, and `address` / `customer_car_plate`.
+
+**Coordinates are deliberately not redacted.** A lat/lng is what you debug dispatch with, and
+one point in one line is a different exposure from a stored trace. The rule that protects
+location instead: never log a route or a trace whole — log the zone ID it resolved to.
+
+### What is never logged *at all*
+
+Two paths are excluded from the access log, and both would otherwise drown everything else:
+
+- `/api/health` — polled every 15 s by the container healthcheck, ~5,700 lines a day carrying
+  no information. Excluded only while it succeeds.
+- The driver location ping — 200 writes/s sustained
+  ([`../LLD/09-architecture.md`](../LLD/09-architecture.md)). That is a metric, not a log; at
+  one line each it is ~17M lines a day.
+
+The access log records the route **pattern** (`/api/bookings/:id`), never the raw URL. Raw paths
+carry identifiers, which makes "how often does this endpoint 500" unanswerable and puts IDs in a
+retained, indexed field.
+
 ## Async
 
 Every async Express handler goes through `asyncHandler`:

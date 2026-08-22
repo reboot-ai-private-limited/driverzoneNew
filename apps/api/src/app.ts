@@ -4,6 +4,7 @@ import type { Express } from 'express';
 import helmet from 'helmet';
 import { env } from '@/config/env.js';
 import { errorHandler, notFoundHandler } from '@/shared/http/error-handler.js';
+import { accessLogMiddleware } from '@/shared/http/access-log.middleware.js';
 import { requestIdMiddleware } from '@/shared/http/request-id.middleware.js';
 import { buildContainers } from './container.js';
 import { buildApiRouter } from './routes.js';
@@ -22,6 +23,8 @@ export function createApp(): Express {
   // FIRST, ahead of helmet and cors: a request rejected by either still gets an ID, and a
   // rejection you cannot correlate with a log line is the one you most need to.
   app.use(requestIdMiddleware());
+  // After the ID, so the access line and every application line from this request share it.
+  app.use(accessLogMiddleware());
 
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGINS, credentials: true }));

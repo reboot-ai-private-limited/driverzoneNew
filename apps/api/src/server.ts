@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   await connectMongo();
 
   const server = createApp().listen(env.PORT, () => {
-    logger.info(`api listening on :${env.PORT}`, { env: env.NODE_ENV });
+    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'api listening');
   });
 
   /**
@@ -33,9 +33,9 @@ async function main(): Promise<void> {
    * draining was pointless.
    */
   const shutdown = (signal: string) => {
-    logger.info(`${signal} received, draining`);
+    logger.info({ signal }, 'signal received, draining');
     const force = setTimeout(() => {
-      logger.error('drain timed out, forcing exit');
+      logger.fatal('drain timed out, forcing exit');
       process.exit(1);
     }, 15_000);
     force.unref();
@@ -56,6 +56,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  logger.error('failed to start', { err: String(err) });
+  logger.fatal({ err: String(err) }, 'failed to start');
   process.exit(1);
 });

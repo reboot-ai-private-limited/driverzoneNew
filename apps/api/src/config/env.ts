@@ -22,7 +22,8 @@ const schema = z.object({
     .default('http://localhost:3000')
     .transform((s) => s.split(',').map((o) => o.trim()).filter(Boolean)),
 
-  LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
+  /** pino's six, ordered by severity. See docs/engineering/05-coding-standards.md §Logging. */
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   /** Self-hosted OSRM. Road distance is required to match outstation bands (docs/04). */
   OSRM_BASE_URL: z.string().url().default('http://localhost:5000'),

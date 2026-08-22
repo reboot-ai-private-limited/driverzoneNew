@@ -15,6 +15,14 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- HTTP access logging (`pino-http`): one line per request with method, route pattern, status,
+  duration and `requestId`. `/api/health` and the driver location ping are excluded — see
+  `docs/decision-log.md` for why.
+- Log redaction. OTPs, phone numbers, bearer tokens, idempotency keys and addresses never reach
+  stdout, enforced by config and proved by `apps/api/test/logging.test.ts`.
+- An ESLint rule requiring static log messages, because path-based redaction cannot see inside
+  an interpolated string.
+- A documented level policy in `docs/engineering/05-coding-standards.md`.
 - Request correlation. Every response carries an `x-request-id` header and a `requestId` in its
   envelope; every log line written during that request is stamped with it, via
   `AsyncLocalStorage` rather than a threaded parameter. An inbound header is reused, so a trace
@@ -46,6 +54,11 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   `setup-development.md` stay at `docs/` root.
 - `apps/api/.env.example`: `MONGO_URI` now carries `?replicaSet=rs0&directConnection=true`.
   Without it the first multi-document transaction fails, far from the setup that caused it.
+- **winston replaced with pino.** Chosen for built-in redaction rather than speed; reverses the
+  choice recorded in `06-tech-choices.md`. Note the reversed argument order —
+  `logger.info({ data }, 'message')`.
+- Request IDs are now `req_` + UUID v7 (`req_01J…`), matching
+  `docs/LLD/08-api-contracts.md` and sorting in creation order. Previously a bare UUID v4.
 - Module containers expose `buildRouter()` instead of a `router` property, and
   `buildContainers()` moved from `routes.ts` to a new `src/container.ts`. The worker builds
   modules without constructing an HTTP surface it has no listener for.

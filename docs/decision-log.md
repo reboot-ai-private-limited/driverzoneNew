@@ -20,6 +20,55 @@ entry links to it.
 
 ---
 
+## 2026-08-22 — winston replaced with pino
+
+**Decision:** pino for application logging, reversing the winston choice in
+[`engineering/06-tech-choices.md`](engineering/06-tech-choices.md).
+
+**Why:** redaction, not speed. This system logs around trip-start OTPs, phone numbers and
+bearer tokens — an OTP in a log is a driver starting a trip they never arrived for. pino has
+`redact` built in; winston has nothing, so every rule would have been a format we wrote and
+maintained. The original rejection ("faster, and the speed is irrelevant at our volume") was
+also measured against the wrong number: [`LLD/09-architecture.md`](LLD/09-architecture.md)
+specifies 200 location writes/s sustained.
+
+Done now because 15 call sites is a morning and the thirteen modules ahead would make it a
+week — the same reasoning as the container-shape change above.
+
+**Consequences:** the argument order is reversed (`logger.info({ data }, 'msg')`), and getting
+it wrong is silent — pino logs the object as the message and drops the fields. All 15 sites
+migrated. `LOG_LEVEL` gains `fatal` and `trace`.
+
+**Known limit, accepted:** path-based redaction cannot see PII interpolated into a message
+string. Closed with an ESLint rule enforcing static messages rather than left to discipline.
+
+**Refs:** `apps/api/src/shared/logging/logger.ts`,
+[`engineering/05-coding-standards.md`](engineering/05-coding-standards.md#logging)
+
+---
+
+## 2026-08-22 — Two paths are excluded from the access log
+
+**Decision:** `/api/health` (while succeeding) and the driver location ping are never
+access-logged.
+
+**Why:** the reasoning behind *not* logging something is the kind that gets lost and then
+"fixed" by someone adding it back. Health is polled every 15 s by the container healthcheck —
+~5,700 lines a day carrying no information. The location ping runs at 200 writes/s sustained,
+which is ~17M lines a day and would be the single largest item on any log bill, while telling
+you nothing a metric would not tell you better.
+
+**Consequences:** a failing health check still logs, because that is the case you need. If
+location pings ever need investigating, the answer is a counter, not a log line.
+
+**Also decided here:** the access log records the route *pattern* (`/api/bookings/:id`), never
+the raw URL — raw paths carry identifiers, blow up cardinality, and put IDs into a retained,
+indexed field.
+
+**Refs:** `apps/api/src/shared/http/access-log.middleware.ts`
+
+---
+
 ## 2026-08-22 — Module containers expose `buildRouter()`, not a `router`
 
 **Decision:** A module container returns `{ contract, buildRouter: () => Router }`.

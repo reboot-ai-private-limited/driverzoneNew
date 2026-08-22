@@ -57,7 +57,9 @@ describe('request id', () => {
     const res = await request(createApp()).get('/api/health');
 
     const header = res.headers['x-request-id'];
-    expect(header).toMatch(/^[0-9a-f-]{36}$/);
+    // req_ + UUID v7, per docs/LLD/08-api-contracts.md. The `7` in the third group is the
+    // version nibble — asserting it is what distinguishes a sortable ID from a random one.
+    expect(header).toMatch(/^req_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/);
     expect(res.body.request.requestId).toBe(header);
   });
 

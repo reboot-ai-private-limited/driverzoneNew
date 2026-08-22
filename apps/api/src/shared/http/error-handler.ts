@@ -30,13 +30,16 @@ export function errorHandler(
   if (err instanceof AppError) {
     // Expected errors are traffic, not incidents. Logging them at `error` trains everyone to
     // ignore the error log, which is how a real fault goes unnoticed.
-    logger[err.isExpected ? 'info' : 'error']('request failed', {
-      code: err.code,
-      status: err.statusCode,
-      url: req.originalUrl,
-      details: err.details,
-      ...(err.isExpected ? {} : { stack: err.stack, cause: causeChain(err) }),
-    });
+    logger[err.isExpected ? 'info' : 'error'](
+      {
+        code: err.code,
+        status: err.statusCode,
+        url: req.originalUrl,
+        details: err.details,
+        ...(err.isExpected ? {} : { stack: err.stack, cause: causeChain(err) }),
+      },
+      'request failed',
+    );
 
     res.status(err.statusCode).json(
       buildErrorBody(req, {
@@ -79,12 +82,10 @@ export function errorHandler(
   }
 
   const stack = err instanceof Error ? err.stack : undefined;
-  logger.error('unhandled error', {
-    url: req.originalUrl,
-    err: String(err),
-    stack,
-    cause: causeChain(err),
-  });
+  logger.error(
+    { url: req.originalUrl, err: String(err), stack, cause: causeChain(err) },
+    'unhandled error',
+  );
 
   res.status(500).json(
     buildErrorBody(req, {

@@ -13,6 +13,37 @@ module.exports = {
   root: true,
   rules: {
     ...base.rules,
+    /**
+     * Log messages must be static strings; data goes in the object argument.
+     *
+     * This is a REDACTION rule, not a style rule. pino's `redact` matches object paths — it
+     * cannot see inside a string, so `logger.info(`otp ${otp} sent`)` defeats every path in the
+     * list and writes a trip-start code to stdout. Enforcing static messages closes the one
+     * hole path-based redaction cannot.
+     *
+     * It also makes logs aggregatable: a static message is a groupable key, an interpolated one
+     * is a unique value per request.
+     *
+     *   bad:   logger.info(`${signal} received`)
+     *   good:  logger.info({ signal }, 'signal received')
+     */
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector:
+          "CallExpression[callee.object.name='logger'][arguments.0.type='TemplateLiteral'][arguments.0.expressions.length>0]",
+        message:
+          'Log messages must be static — pino redaction cannot see inside a string. ' +
+          "Put the value in the object argument: logger.info({ signal }, 'signal received').",
+      },
+      {
+        selector:
+          "CallExpression[callee.object.name='logger'][arguments.0.type='BinaryExpression'][arguments.0.operator='+']",
+        message:
+          'Log messages must be static — pino redaction cannot see inside a string. ' +
+          'Put the value in the object argument.',
+      },
+    ],
     'no-restricted-imports': [
       'error',
       {

@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const containers = buildContainers();
   // Referenced so the wiring is real rather than decorative — the queue consumers below will
   // call into these contracts as the dispatch and notification modules land.
-  logger.debug('containers built', { modules: Object.keys(containers) });
+  logger.debug({ modules: Object.keys(containers) }, 'containers built');
 
   const dispatchWorker = new Worker(
     QUEUE_NAMES.dispatch,
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
       const requestId = typeof inherited === 'string' && inherited !== '' ? inherited : randomUUID();
 
       await runWithContext({ requestId }, async () => {
-        logger.info('dispatch job', { name: job.name, id: job.id });
+        logger.info({ name: job.name, id: job.id }, 'dispatch job');
         // Wave timeouts and scheduled dispatch land here in phase 5.
       });
     },
@@ -60,14 +60,14 @@ async function main(): Promise<void> {
   );
 
   dispatchWorker.on('failed', (job, err) => {
-    logger.error('dispatch job failed', { id: job?.id, name: job?.name, err: err.message });
+    logger.error({ id: job?.id, name: job?.name, err: err.message }, 'dispatch job failed');
   });
 
-  logger.info('worker started', { queues: Object.values(QUEUE_NAMES) });
+  logger.info({ queues: Object.values(QUEUE_NAMES) }, 'worker started');
 
   const shutdown = (signal: string) => {
     void (async () => {
-      logger.info(`${signal} received, closing workers`);
+      logger.info({ signal }, 'signal received, closing workers');
       // Waits for the active job to finish. Killing mid-job leaves a booking half-dispatched.
       await dispatchWorker.close();
       await closeQueues();
@@ -82,6 +82,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  logger.error('worker failed to start', { err: String(err) });
+  logger.fatal({ err: String(err) }, 'worker failed to start');
   process.exit(1);
 });

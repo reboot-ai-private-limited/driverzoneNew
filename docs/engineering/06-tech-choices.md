@@ -174,14 +174,23 @@ Format for each entry:
 - **Rejected:** Joi (no type inference); class-validator (needs decorators and
   `reflect-metadata`); hand-written guards (drift).
 
-### Winston
+### pino
 
-- **Chosen for:** structured logging to stdout.
-- **Why this one:** JSON in production, human-readable in development, from one config.
-- **Rejected:** pino (faster, and the speed is irrelevant at our volume); `console.log` (no
+- **Chosen for:** structured logging to stdout, and redaction.
+- **Why this one:** `redact` is built in. This system logs around trip-start OTPs, phone
+  numbers and bearer tokens, and a redaction list that is configuration rather than a format we
+  wrote is the difference between a rule and a maintenance burden. JSON in production,
+  human-readable via `pino-pretty` in development, from one config.
+- **Rejected:** winston (**previously chosen** — no redaction of any kind, so every rule would
+  have been custom code; see [`../decision-log.md`](../decision-log.md)); `console.log` (no
   levels, no structure).
+- **Known limit:** path-based redaction cannot see PII interpolated into a message string. An
+  ESLint rule enforces static messages to close it — see
+  [`05-coding-standards.md`](05-coding-standards.md#messages-are-static-data-goes-in-the-object).
 - **Note:** nothing writes log files. The container runtime owns collection; a process writing
   its own logs is a disk-full outage waiting for a busy day.
+- **Revisit when:** OpenTelemetry lands. `@opentelemetry/instrumentation-pino` injects
+  `trace_id`/`span_id` into these same lines with no change to call sites.
 
 ### Helmet, CORS
 

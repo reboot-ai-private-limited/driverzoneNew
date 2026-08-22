@@ -33,7 +33,7 @@ export function getRedis(): Redis {
    * reports the state and the load balancer decides.
    */
   connection.on('error', (err: Error) => {
-    logger.warn('redis connection error', { message: err.message });
+    logger.warn({ message: err.message }, 'redis connection error');
   });
 
   return connection;

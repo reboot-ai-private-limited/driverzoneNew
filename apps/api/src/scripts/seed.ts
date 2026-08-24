@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { isProduction, loadEnv } from '@/config/env.js';
 import {
+  DEV_ACCOUNTS,
   DEV_ADMIN,
   DEV_CUSTOMER,
   DEV_CUSTOMER_EMPTY,
@@ -12,6 +13,8 @@ import { AdminUserModel } from '@/modules/identity/infrastructure/adminUser.mode
 import { CustomerModel } from '@/modules/identity/infrastructure/customer.model.js';
 import { DriverModel } from '@/modules/identity/infrastructure/driver.model.js';
 import { DriverDocumentModel } from '@/modules/identity/infrastructure/driverDocument.model.js';
+import { SessionModel } from '@/modules/identity/infrastructure/session.model.js';
+import { AuditLogModel } from '@/modules/identity/infrastructure/auditLog.model.js';
 
 /**
  * Creates the known development accounts: an admin, an approved driver, and two customers.
@@ -44,6 +47,69 @@ const SEVOKE_ROAD = { lat: 26.7271, lng: 88.3953 };
 const MATIGARA = { lat: 26.71, lng: 88.43 };
 
 const oid = (id: string): mongoose.Types.ObjectId => new mongoose.Types.ObjectId(id);
+
+/**
+ * Just the capability `--reset` needs.
+ *
+ * A union of differently-typed `Model<T>`s has overloaded call signatures TypeScript cannot
+ * reconcile, so calling `.deleteMany` across the list is an error even though every member accepts
+ * the identical argument (the same limitation worked around in `account.repository.impl.ts`).
+ * Naming the one method keeps the models themselves referenced, so deleting a model is still a
+ * compile error here rather than a collection quietly surviving the reset.
+ */
+interface ClearableModel {
+  deleteMany(filter: Record<string, never>): { exec(): Promise<{ deletedCount: number }> };
+}
+
+/** Every Mongoose model the `identity` module owns, in the order `--reset` clears them. */
+const IDENTITY_MODELS: { name: string; model: ClearableModel }[] = [
+  { name: 'sessions', model: SessionModel },
+  { name: 'auditlogs', model: AuditLogModel },
+  { name: 'driverdocuments', model: DriverDocumentModel },
+  { name: 'drivers', model: DriverModel },
+  { name: 'customers', model: CustomerModel },
+  { name: 'adminusers', model: AdminUserModel },
+];
+
+/** The four documents this script owns. Anything else in these collections came from elsewhere. */
+const SEEDED_IDS = DEV_ACCOUNTS.map((a) => oid(a.id));
+
+/**
+ * `--reset`: clear what `identity` owns, then reseed.
+ *
+ * Collection-by-collection rather than `dropDatabase()`, deliberately. When `zones`, `catalog`
+ * and `bookings` land they will own collections this script knows nothing about, and a blanket
+ * drop would destroy them silently. Each module's seed should extend `IDENTITY_MODELS` with its
+ * own — a list that has to be maintained is the point, not an oversight.
+ *
+ * Sessions and audit rows go first: they reference accounts, so clearing them in this order never
+ * leaves a row pointing at something that no longer exists, even if the script dies midway.
+ */
+async function resetIdentityCollections(): Promise<void> {
+  console.log('\n  Clearing identity collections (--reset)\n');
+
+  for (const { name, model } of IDENTITY_MODELS) {
+    const { deletedCount } = await model.deleteMany({}).exec();
+    console.log(`  ${name.padEnd(16)} ${deletedCount} removed`);
+  }
+}
+
+/**
+ * Counts identity records this script did not create.
+ *
+ * Exists because their absence from the summary was confusing: a run reports "4 accounts" while
+ * the database holds eight, and nothing explains the gap. Left alone rather than removed — an
+ * additive seed must not delete an account somebody is mid-way through testing with.
+ */
+async function countForeignAccounts(): Promise<{ customers: number; drivers: number; admins: number }> {
+  const notSeeded = { _id: { $nin: SEEDED_IDS } };
+  const [customers, drivers, admins] = await Promise.all([
+    CustomerModel.countDocuments(notSeeded).exec(),
+    DriverModel.countDocuments(notSeeded).exec(),
+    AdminUserModel.countDocuments(notSeeded).exec(),
+  ]);
+  return { customers, drivers, admins };
+}
 
 async function seedAdmin(): Promise<void> {
   await AdminUserModel.findOneAndUpdate(
@@ -190,7 +256,10 @@ async function seedCustomers(): Promise<void> {
  * `console.log`, not the logger: this is a human reading a terminal, and a JSON line per row
  * would be worse than useless. Nobody should have to read this script to find out how to log in.
  */
-function printSummary(fixedOtp: string | undefined): void {
+function printSummary(
+  fixedOtp: string | undefined,
+  foreign: { customers: number; drivers: number; admins: number },
+): void {
   const rows = [
     ['ADMIN', DEV_ADMIN.phone, '/admin/auth', 'active'],
     ['DRIVER', DEV_DRIVER.phone, '/driver/auth', 'APPROVED, verified, off duty'],
@@ -202,6 +271,26 @@ function printSummary(fixedOtp: string | undefined): void {
   console.log('  ROLE      PHONE           AUTH PATH        STATE');
   for (const [role, phone, path, state] of rows) {
     console.log(`  ${role?.padEnd(9)} ${phone?.padEnd(15)} ${path?.padEnd(16)} ${state}`);
+  }
+
+  /**
+   * Accounts this run did not create.
+   *
+   * Reported because their absence from the table above is genuinely confusing — the summary says
+   * four while the database holds more, and nothing explains why. Almost always leftovers from
+   * manual testing, which is exactly what `--reset` is for.
+   */
+  const otherTotal = foreign.customers + foreign.drivers + foreign.admins;
+  if (otherTotal > 0) {
+    const parts = [
+      foreign.customers > 0 ? `${foreign.customers} customer${foreign.customers > 1 ? 's' : ''}` : '',
+      foreign.drivers > 0 ? `${foreign.drivers} driver${foreign.drivers > 1 ? 's' : ''}` : '',
+      foreign.admins > 0 ? `${foreign.admins} admin${foreign.admins > 1 ? 's' : ''}` : '',
+    ].filter(Boolean);
+
+    console.log('');
+    console.log(`  Note: ${otherTotal} other account(s) this seed did not create (${parts.join(', ')}).`);
+    console.log('        Left untouched. `pnpm seed --reset` clears them and reseeds.');
   }
 
   console.log('');
@@ -230,14 +319,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  /**
+   * `--reset` is destructive, so it sits BEHIND the production guard above rather than beside it.
+   * The dangerous path must not be the one with the shorter route past the check.
+   */
+  const reset = process.argv.includes('--reset');
+
   await connectMongo();
+
+  if (reset) await resetIdentityCollections();
 
   await seedAdmin();
   await seedDriver();
   await seedCustomers();
 
-  logger.info({ accounts: 4 }, 'seed complete');
-  printSummary(env.DEV_FIXED_OTP);
+  const foreign = await countForeignAccounts();
+
+  logger.info({ accounts: 4, reset }, 'seed complete');
+  printSummary(env.DEV_FIXED_OTP, foreign);
 
   await disconnectMongo();
 }

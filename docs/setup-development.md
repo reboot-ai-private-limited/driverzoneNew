@@ -309,6 +309,33 @@ than producing a second set of accounts, and it leaves any other data in the dat
 one exception is deliberate: the empty customer's profile fields are only written on insert, so
 filling that account in while testing survives the next seed run.
 
+Because it is additive, accounts you created by hand — signing up through the API, testing a flow —
+stay where they are. The seed says so rather than leaving you to wonder why the database holds more
+than the four it reports:
+
+```
+  Note: 4 other account(s) this seed did not create (2 customers, 1 driver, 1 admin).
+        Left untouched. `pnpm seed --reset` clears them and reseeds.
+```
+
+### Starting clean
+
+```bash
+pnpm seed --reset
+```
+
+Deletes every collection `identity` owns — `sessions`, `auditlogs`, `driverdocuments`, `drivers`,
+`customers`, `adminusers` — reports what it removed, then reseeds. Use it when accumulated test
+data is getting in the way, rather than `docker compose down -v`, which also throws away the
+replica-set setup and costs a minute to rebuild.
+
+It is **not** a `dropDatabase()`. The collection list is explicit so that when `zones`, `catalog`
+and `bookings` land, a reset cannot silently destroy data this script knows nothing about — each
+module's seed extends the list. Having to maintain that list is the point.
+
+`--reset` sits behind the same production refusal as the plain form: the destructive path must not
+be the one with the shorter route past the guard.
+
 ### Logging in without reading the logs
 
 By default a login means calling `otp/send` and reading the code off the API log line. To skip

@@ -282,53 +282,92 @@ alias dzprod='docker compose -f docker-compose.prod.yml'
 
 ---
 
-## Seed data — planned, not yet implemented
+## Seed data
 
-> **Status: not built.** Documented here so the shape is agreed before someone writes it.
-> Until it lands, create test accounts by hand or through the admin panel.
-
-Right now a fresh `down -v` leaves you with an empty database: no admin to log into the panel
-with, no drivers to dispatch to, no zones, and therefore no packages — which means no quote can
-be produced at all. Every developer recreates that by hand, differently, and bugs that depend
-on the shape of the data become impossible to reproduce across machines.
-
-The fix is a seed script, run once after the stack is up:
+A fresh `docker compose down -v` leaves an empty database: no admin to log into the panel with,
+no drivers to dispatch to. Every developer used to recreate that by hand, differently, which made
+bugs that depend on the shape of the data impossible to reproduce across machines.
 
 ```bash
-pnpm --filter @driverzone/api seed        # planned
+pnpm seed        # or: pnpm --filter @driverzone/api seed
 ```
 
-What it should create:
+Creates four accounts, and prints them when it finishes:
 
-| | | Why |
+| Role | Phone | State |
 |---|---|---|
-| 1 admin | fixed credentials, printed on completion | log into the panel without a signup flow |
-| ~3 drivers | varied: online/offline, different vehicle classes, one suspended | dispatch waves need more than one candidate to be worth testing |
-| ~3 customers | one with saved addresses, one brand new | the empty-state and populated cases both matter |
-| 2–3 zones | one city, one pickup-coverage area, one hill region | zone resolution is the core algorithm ([`04`](LLD/zone-resolution.md)) — with no polygons nothing prices |
-| packages on those zones | one incity hourly, one outstation band | a zone with no packages still returns no quote |
-| a few bookings | one per interesting lifecycle state ([`07`](LLD/booking-lifecycle.md)) | admin list/detail screens are unreviewable against an empty table |
+| Admin | `+919000000001` | active — the only way into the admin panel |
+| Driver | `+919000000002` | `APPROVED`, verified, off duty; licence and Aadhaar both `VERIFIED` |
+| Customer | `+919000000003` | full profile, two saved addresses, one vehicle |
+| Customer | `+919000000004` | phone only — the brand-new, empty-profile case |
 
-Properties it needs to have, in rough priority order:
+The two customers exist because the empty state is where progressive-profile bugs live: every
+screen has to render an account with no name, no addresses and no vehicles.
 
-1. **Refuse to run against production.** Hard-fail on `NODE_ENV=production` before touching
-   anything. A seed script is a data-destroying script wearing a friendly name.
-2. **Idempotent.** Fixed IDs (UUID v7 where ordering matters, per the repo convention) and
-   upserts, so running it twice does not produce six drivers. `--reset` can be a separate,
-   explicit flag.
-3. **Deterministic.** Same IDs, phone numbers and polygons on every machine, so "driver
-   `…0003` never gets the offer" means the same thing in your terminal as in mine. No faker
-   with a random seed.
-4. **Written against the module public APIs**, not raw Mongoose. Seeding through
-   `zones.public.ts` means the geometry invariants in `@driverzone/geo` run — a seed that
-   writes invalid polygons straight to the collection creates state the app can never produce
-   and everyone then debugs.
-5. **Prints what it made.** A table of logins and IDs at the end; nobody should have to read
-   the script to find the admin password.
+**Idempotent.** It is keyed on fixed IDs, so running it twice restores the intended state rather
+than producing a second set of accounts, and it leaves any other data in the database alone. The
+one exception is deliberate: the empty customer's profile fields are only written on insert, so
+filling that account in while testing survives the next seed run.
 
-Likely shape: `apps/api/src/scripts/seed.ts`, run with `tsx`, composing the same container the
-server does. Worth folding into the setup steps above once it exists, and worth a
-`docker compose -f docker-compose.dev.yml up -d && pnpm seed` one-liner.
+Because it is additive, accounts you created by hand — signing up through the API, testing a flow —
+stay where they are. The seed says so rather than leaving you to wonder why the database holds more
+than the four it reports:
+
+```
+  Note: 4 other account(s) this seed did not create (2 customers, 1 driver, 1 admin).
+        Left untouched. `pnpm seed --reset` clears them and reseeds.
+```
+
+### Starting clean
+
+```bash
+pnpm seed --reset
+```
+
+Deletes every collection `identity` owns — `sessions`, `auditlogs`, `driverdocuments`, `drivers`,
+`customers`, `adminusers` — reports what it removed, then reseeds. Use it when accumulated test
+data is getting in the way, rather than `docker compose down -v`, which also throws away the
+replica-set setup and costs a minute to rebuild.
+
+It is **not** a `dropDatabase()`. The collection list is explicit so that when `zones`, `catalog`
+and `bookings` land, a reset cannot silently destroy data this script knows nothing about — each
+module's seed extends the list. Having to maintain that list is the point.
+
+`--reset` sits behind the same production refusal as the plain form: the destructive path must not
+be the one with the shorter route past the guard.
+
+### Logging in without reading the logs
+
+By default a login means calling `otp/send` and reading the code off the API log line. To skip
+that, set a fixed code in `apps/api/.env`:
+
+```ini
+DEV_FIXED_OTP=000000
+```
+
+`POST /{role}/auth/otp/verify` then accepts that code directly — no `otp/send` first. It is
+scoped to the four seeded numbers above; any other number still gets a real random code, so the
+generation, hashing and attempt-burning paths stay exercised locally.
+
+Four independent things have to hold for it to do anything: the variable set, `NODE_ENV` not
+production, the number on the seed list, and the code matching. The process additionally
+**refuses to start** if the variable is set with `NODE_ENV=production`. See the decision log,
+2026-08-24.
+
+### Still to build
+
+The seed covers identity only. `zones`, `catalog`, `quotes` and `bookings` do not exist yet, so
+there are still no polygons, no packages and therefore no quotes — a fresh database cannot
+produce a fare. When those modules land the seed should grow to cover them, and two properties
+matter more there than they do here:
+
+- **Seed zones through `zones.public.ts`, not Mongoose.** That runs the `@driverzone/geo`
+  invariants, so the seed cannot create geometry the app itself could never produce. Identity
+  needs no equivalent — its rules are single-document and the schema enforces them on any write,
+  which is why `seed.ts` uses the models directly and says so in its header.
+- **More than one driver.** Dispatch waves need several candidates with different duty states and
+  vehicle classes to be worth testing; one approved driver is enough only while there is no
+  dispatch module.
 
 ---
 

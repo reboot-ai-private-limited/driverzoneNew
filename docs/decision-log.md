@@ -6,17 +6,58 @@ Three files cover decisions and they do not overlap:
 
 | File | Answers |
 |---|---|
-| [`LLD/12-open-questions.md`](LLD/12-open-questions.md) | What is **not yet decided** — assumptions A1–A12 and the open items that block build |
-| [`engineering/06-tech-choices.md`](engineering/06-tech-choices.md) | **Current state**: what we use and why, written in the present tense |
+| [`LLD/open-questions.md`](LLD/open-questions.md) | What is **not yet decided** — assumptions A1–A12 and the open items that block build |
+| [`engineering/tech-choices.md`](engineering/tech-choices.md) | **Current state**: what we use and why, written in the present tense |
 | this file | **History**: when it changed, what it replaced, what was rejected |
 
-When an open question closes: add an entry here, rewrite `06-tech-choices.md` (or the relevant
-LLD doc) to describe the new present, and strike the item from `12-open-questions.md`. This log
+When an open question closes: add an entry here, rewrite `tech-choices.md` (or the relevant
+LLD doc) to describe the new present, and strike the item from `open-questions.md`. This log
 is append-only — entries are never edited to match a later reversal. A reversal is a new entry
 that references the old one.
 
 Keep entries short. If the reasoning needs more than a paragraph it belongs in a doc, and the
 entry links to it.
+
+---
+
+## 2026-08-24 — Numeric prefixes dropped from every doc; `check-doc-links.sh` now checks prose
+
+**Decision:** Every file in `docs/`, `docs/LLD/` and `docs/engineering/` loses its `NN-` prefix.
+The old `13-auth-and-user` doc is additionally split into [`LLD/auth.md`](LLD/auth.md) and
+[`LLD/user.md`](LLD/user.md). This reverses the "numbers were **not** rebased" decision of
+2026-08-22 below.
+
+**Why:** `LLD/` ran `02`–`13` with no `01`, an artefact of the flat layout it was moved out of.
+The sequence conveyed nothing and every new module widened the gap. The original rationale —
+that keeping numbers preserved "see docs/04" references in code — held only while nobody minded
+the numbering; there were 12 such references and naming the doc is clearer than citing an
+ordinal anyway. Doing all three directories at once, rather than `LLD/` alone, avoids a state
+where a bare `04-*.md` mention is ambiguous between two directories.
+
+The `auth`/`user` split is separate: that doc had grown to ~500 lines covering two subjects —
+getting a token, and everything you do once you have one.
+
+**Consequences:** 219 references rewritten across ~80 files, plus 24 `git mv`s and 23 H1
+headings. Both README index tables lose their `#` column; row order already carried the reading
+order. Four references that were **already broken** before this change (`docs/roadmap` in the
+three app entry points, and `docs/dispatch-and-assignment` in the coding-standards doc — both
+missing the `LLD/` segment) are repaired,
+along with ten stale link labels whose visible text disagreed with their target.
+
+**Also decided here:** `scripts/check-doc-links.sh` gains a second pass over **prose**, not just
+markdown links. Of the 207 references this rename touched, only 52 were links — the checker was
+blind to 75% of them, which is exactly how 8 references broke silently during the previous move
+while this script was already running in `pnpm check`. The new pass reads every `*.md` mention in
+`.md`/`.ts`/`.tsx`/`.cjs`/`.mjs`/`.yml` and fails on any that names a file which does not exist.
+Verified by deliberately breaking a reference inside a `.ts` comment and confirming a non-zero
+exit.
+
+**Known limit, accepted:** the prose pass matches on basename, so it catches renames and typos
+but not a reference pointing at a real doc that says something else. It also warns rather than
+fails on duplicate basenames across directories — that ambiguity is what this rename removed,
+and it should stay visible if it returns.
+
+**Refs:** `scripts/check-doc-links.sh`, [`README.md`](README.md)
 
 ---
 
@@ -26,7 +67,7 @@ entry links to it.
 per-document review — writes an `auditLog` row. `auditLog.action` gains `APPROVE` and `REJECT`
 alongside the existing `CREATE`/`UPDATE`/`DELETE`/`ACTIVATE`.
 
-**Why:** `LLD/09-architecture.md` requires every admin action to be audited, and these are the
+**Why:** `LLD/architecture.md` requires every admin action to be audited, and these are the
 first admin endpoints that mutate anything — retrofitting an audit trail onto actions already
 shipped is how gaps get missed. The new verbs exist because none of the original four describe
 approving a person: folding an approval into `UPDATE` makes "who approved this driver, and
@@ -44,7 +85,7 @@ role; it should be when that role is next revised — an audit log the applicati
 answers no question worth asking.
 
 **Refs:** `apps/api/src/modules/identity/infrastructure/audit.mongo.ts`,
-[`LLD/03-database-schema.md`](LLD/03-database-schema.md)
+[`LLD/database-schema.md`](LLD/database-schema.md)
 
 ---
 
@@ -54,7 +95,7 @@ answers no question worth asking.
 implements it for development — minting a plausible storage key and a URL that accepts nothing.
 No object storage is wired up.
 
-**Why:** `LLD/09-architecture.md` specifies an S3-compatible private bucket with 5-minute
+**Why:** `LLD/architecture.md` specifies an S3-compatible private bucket with 5-minute
 presigned URLs, and nothing in the repo or either compose file provides one. The alternative was
 dropping the document requirement from `POST /driver/onboarding/submit`, which would have
 shipped a verification gate weaker than the one specified and left no code path to strengthen
@@ -65,7 +106,7 @@ review — is exercisable today and the real adapter is one line in `identity.co
 `LoggingOtpSender`. A deploy that silently accepted document uploads into nowhere would look
 like it worked and surface weeks later as an admin opening a licence and finding nothing. The
 port stays inside the module for now; it moves to `shared/storage/` when `bookings` needs
-receipt URLs, which `09-architecture.md` already anticipates.
+receipt URLs, which `architecture.md` already anticipates.
 
 **Also decided here:** the document row is written *before* the file is uploaded, holding the
 key the client is about to `PUT` to. A failed upload then leaves a `PENDING` document the driver
@@ -73,7 +114,7 @@ can retry rather than no record at all. The cost — a row referencing an object
 arrived — resolves itself: an admin reviewing an empty document rejects it.
 
 **Refs:** `apps/api/src/modules/identity/infrastructure/documentStorage.stub.ts`,
-[`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md)
+[`LLD/auth.md`](LLD/auth.md), [`LLD/user.md`](LLD/user.md)
 
 ---
 
@@ -99,16 +140,16 @@ admin action sets both together rather than two independently-driftable flags. `
 gains a write-side contract, `CustomerBookingProfileContract`, for `bookings` (tier 6) to call
 into `identity` (tier 1) — tier-legal with no dependency-cruiser exception needed.
 
-**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#driver),
-[`LLD/03-database-schema.md`](LLD/03-database-schema.md#drivers),
-[`LLD/08-api-contracts.md`](LLD/08-api-contracts.md)
+**Refs:** [`LLD/user.md`](LLD/user.md#driver),
+[`LLD/database-schema.md`](LLD/database-schema.md#drivers),
+[`LLD/api-contracts.md`](LLD/api-contracts.md)
 
 ---
 
 ## 2026-08-24 — Admin auth unified to phone + OTP, reversing email+password+TOTP
 
 **Decision:** All three roles — customer, driver, admin — authenticate with phone + OTP.
-`09-architecture.md`'s "email + password + TOTP for admins" is reversed; nothing in the system
+`architecture.md`'s "email + password + TOTP for admins" is reversed; nothing in the system
 stores a password.
 
 **Why:** Admin was originally password+TOTP because it's the highest-privilege role and SMS OTP
@@ -125,14 +166,14 @@ parameterized by role.
 
 **Known limit, accepted:** losing TOTP means losing the one factor immune to SIM-swap/SS7
 interception, on the role with the largest blast radius if compromised — zone geometry, pricing,
-booking reassignment, full PII access (`09-architecture.md` §Security). Mitigated by two cheap
+booking reassignment, full PII access (`architecture.md` §Security). Mitigated by two cheap
 knobs, not a second factor: (1) `otp/verify` never auto-provisions an admin account — the number
 must already exist in `admins`, inserted out-of-band by another admin; (2) admin's refresh token
 TTL is 12h vs. 30d for customer/driver, shrinking how long a stolen session stays valid. If
 admin-account compromise becomes a real incident, this is the first reversal to reconsider.
 
-**Refs:** [`LLD/09-architecture.md`](LLD/09-architecture.md#security),
-[`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md)
+**Refs:** [`LLD/architecture.md`](LLD/architecture.md#security),
+[`LLD/auth.md`](LLD/auth.md), [`LLD/user.md`](LLD/user.md)
 
 ---
 
@@ -145,7 +186,7 @@ admin-account compromise becomes a real incident, this is the first reversal to 
 **Why:** `jose` is ESM-native — this repo is `"type": "module"` throughout — and its verify API
 takes an explicit algorithm allowlist rather than trusting the token's own `alg` header, which is
 what closes algorithm-confusion attacks outright rather than by convention. HS256 over RS256
-because this is a modular monolith (`LLD/12-open-questions.md` A11): one process signs, the same
+because this is a modular monolith (`LLD/open-questions.md` A11): one process signs, the same
 process verifies, so there is no second service that needs to verify without holding the signing
 secret. Two secrets, not one, so a leaked access-token secret cannot forge a refresh token and
 vice versa — the two have very different blast radii, 15 minutes against up to 30 days.
@@ -155,7 +196,7 @@ DB round-trip — the standard trade-off for a short TTL: a revoked user stays v
 already-issued access tokens for up to 15 minutes, accepted rather than solved with a
 per-request revocation check.
 
-**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#token-lifecycle)
+**Refs:** [`LLD/auth.md`](LLD/auth.md#token-lifecycle)
 
 ---
 
@@ -177,7 +218,7 @@ genuine double-submit from a flaky mobile network without false-flagging it as t
 security property a stateless design cannot provide. A reuse event logs at `error` with
 `isExpected: false`, which per `shared/http/error-handler.ts` is what pages someone.
 
-**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#token-lifecycle)
+**Refs:** [`LLD/auth.md`](LLD/auth.md#token-lifecycle)
 
 ---
 
@@ -198,7 +239,7 @@ EncryptedSharedPreferences) — an app-side concern, not an API one. If a web-ba
 driver product ever ships, this decision needs revisiting; it is not designed to generalize past
 the current three clients.
 
-**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#token-lifecycle)
+**Refs:** [`LLD/auth.md`](LLD/auth.md#token-lifecycle)
 
 ---
 
@@ -210,7 +251,7 @@ bcrypt/Argon2 hash.
 **Why:** A 6-digit code carries roughly 20 bits of entropy and a 5-minute TTL — a slow,
 memory-hard hash defends against offline brute-force of a secret that is already
 effectively unbrute-forceable within its lifetime by the attempt limit and cooldown alone (see
-`LLD/13-auth-and-user.md`). What a memory-hard hash *would* cost here is verify-time latency
+`LLD/auth.md`). What a memory-hard hash *would* cost here is verify-time latency
 under legitimate retry, for no matching security gain. A keyed HMAC is fast, non-invertible
 without the server-held pepper, and is the right tool for a short-lived, low-entropy,
 rate-limited secret — distinct from the admin-auth-unification entry above, which removes the
@@ -220,20 +261,20 @@ need for any password hash at all.
 leaked pepper only devalues in-flight OTP challenges (5-minute blast radius), not a long-lived
 credential.
 
-**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#otp)
+**Refs:** [`LLD/auth.md`](LLD/auth.md#otp)
 
 ---
 
 ## 2026-08-22 — winston replaced with pino
 
 **Decision:** pino for application logging, reversing the winston choice in
-[`engineering/06-tech-choices.md`](engineering/06-tech-choices.md).
+[`engineering/tech-choices.md`](engineering/tech-choices.md).
 
 **Why:** redaction, not speed. This system logs around trip-start OTPs, phone numbers and
 bearer tokens — an OTP in a log is a driver starting a trip they never arrived for. pino has
 `redact` built in; winston has nothing, so every rule would have been a format we wrote and
 maintained. The original rejection ("faster, and the speed is irrelevant at our volume") was
-also measured against the wrong number: [`LLD/09-architecture.md`](LLD/09-architecture.md)
+also measured against the wrong number: [`LLD/architecture.md`](LLD/architecture.md)
 specifies 200 location writes/s sustained.
 
 Done now because 15 call sites is a morning and the thirteen modules ahead would make it a
@@ -247,7 +288,7 @@ migrated. `LOG_LEVEL` gains `fatal` and `trace`.
 string. Closed with an ESLint rule enforcing static messages rather than left to discipline.
 
 **Refs:** `apps/api/src/shared/logging/logger.ts`,
-[`engineering/05-coding-standards.md`](engineering/05-coding-standards.md#logging)
+[`engineering/coding-standards.md`](engineering/coding-standards.md#logging)
 
 ---
 
@@ -285,12 +326,12 @@ its validation schemas for every module, in a process with no listener. One wast
 and thirteen once the modules land — and the shape is copied thirteen times, so it is cheap now
 and tedious later.
 
-**Consequences:** `docs/engineering/11-adding-a-module.md` step 9 is now "build it in
+**Consequences:** `docs/engineering/adding-a-module.md` step 9 is now "build it in
 `container.ts`, mount it in `routes.ts`". The ESLint boundary exemption moved from `routes.ts`
 to `container.ts`; `routes.ts` is deliberately left unexempted, so the rule keeps watching the
 file most likely to grow a shortcut.
 
-**Refs:** [`engineering/03-module-anatomy.md`](engineering/03-module-anatomy.md)
+**Refs:** [`engineering/module-anatomy.md`](engineering/module-anatomy.md)
 
 ---
 
@@ -416,7 +457,7 @@ the host side only. A root `.env` makes it stick without retyping.
 
 **Why:** Without them the driver connects in single-node topology. Ordinary reads and writes
 work fine, so nothing looks wrong — and then the first multi-document transaction, the
-booking→ledger write in [`LLD/05-pricing-and-commission.md`](LLD/05-pricing-and-commission.md),
+booking→ledger write in [`LLD/pricing-and-commission.md`](LLD/pricing-and-commission.md),
 fails with `Transaction numbers are only allowed on a replica set member or mongos`, months
 away from the setup that caused it.
 

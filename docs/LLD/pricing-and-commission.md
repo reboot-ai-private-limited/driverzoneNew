@@ -1,4 +1,4 @@
-# 05 — Pricing & Commission
+# Pricing & Commission
 
 ## Rules
 
@@ -84,7 +84,7 @@ computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt
 
 🔴 **Open question:** does the band price cover the whole band flat (70–100 km all cost
 the same) or does it cover `min_km` with per-km on top? The formula above assumes the
-latter. See `12-open-questions.md` Q3.
+latter. See `open-questions.md` Q3.
 
 For `ROUND_TRIP`, the price row is separate rather than a computed 2× — round trips are
 usually less than double one-way (the driver is returning anyway) and you want that
@@ -258,7 +258,7 @@ raise it for drivers with history.
 
 ## Things not in v1 but designed around
 
-- **Surge** — deliberately excluded (`01-prd.md` §6). If it ever arrives it becomes a
+- **Surge** — deliberately excluded (`prd.md` §6). If it ever arrives it becomes a
   multiplier line in `lines[]`, which the snapshot shape already accommodates.
 - **Coupons** — another negative line item; needs `applied_promotions` on the quote.
 - **Tolls / parking** — reimbursables the driver adds mid-trip with a photo. Add as

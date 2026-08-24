@@ -4,7 +4,7 @@ Notable changes to this repository. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 There are no releases yet — the first shippable milestone is the phase 9 pilot in
-[`docs/LLD/11-roadmap.md`](docs/LLD/11-roadmap.md). Everything lands under `Unreleased` until
+[`docs/LLD/roadmap.md`](docs/LLD/roadmap.md). Everything lands under `Unreleased` until
 then.
 
 This is not the commit log. Commits are written for someone bisecting a regression; this is for
@@ -22,7 +22,7 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   stdout, enforced by config and proved by `apps/api/test/logging.test.ts`.
 - An ESLint rule requiring static log messages, because path-based redaction cannot see inside
   an interpolated string.
-- A documented level policy in `docs/engineering/05-coding-standards.md`.
+- A documented level policy in `docs/engineering/coding-standards.md`.
 - Request correlation. Every response carries an `x-request-id` header and a `requestId` in its
   envelope; every log line written during that request is stamped with it, via
   `AsyncLocalStorage` rather than a threaded parameter. An inbound header is reused, so a trace
@@ -32,7 +32,7 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 - `apps/api/test/app.test.ts` — the HTTP layer under supertest: envelope, 404, error
   translation, the 503-when-degraded rule, request-id propagation. 10 tests.
 - `apps/api/vitest.integration.config.ts` and the `test:integration` script that
-  `docs/engineering/10-testing.md` had documented for a while without it existing.
+  `docs/engineering/testing.md` had documented for a while without it existing.
 - `docker-compose.dev.yml` — infrastructure only (Mongo, Redis, OSRM commented out). Ports bind
   loopback and are overridable via `MONGO_PORT` / `REDIS_PORT` / `OSRM_PORT`.
 - `docker-compose.prod.yml` — the full stack from built images, with the databases unpublished
@@ -55,10 +55,10 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 - `apps/api/.env.example`: `MONGO_URI` now carries `?replicaSet=rs0&directConnection=true`.
   Without it the first multi-document transaction fails, far from the setup that caused it.
 - **winston replaced with pino.** Chosen for built-in redaction rather than speed; reverses the
-  choice recorded in `06-tech-choices.md`. Note the reversed argument order —
+  choice recorded in `tech-choices.md`. Note the reversed argument order —
   `logger.info({ data }, 'message')`.
 - Request IDs are now `req_` + UUID v7 (`req_01J…`), matching
-  `docs/LLD/08-api-contracts.md` and sorting in creation order. Previously a bare UUID v4.
+  `docs/LLD/api-contracts.md` and sorting in creation order. Previously a bare UUID v4.
 - Module containers expose `buildRouter()` instead of a `router` property, and
   `buildContainers()` moved from `routes.ts` to a new `src/container.ts`. The worker builds
   modules without constructing an HTTP surface it has no listener for.

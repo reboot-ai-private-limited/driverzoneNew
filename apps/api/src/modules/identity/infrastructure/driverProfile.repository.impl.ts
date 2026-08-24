@@ -117,7 +117,7 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
    *
    * `isVerified` is what dispatch and `POST /driver/duty` read; `onboardingStatus` is what the
    * driver's app renders. Splitting these across two calls is exactly how a driver ends up
-   * showing "approved" while dispatch still refuses them (docs/LLD/03-database-schema.md).
+   * showing "approved" while dispatch still refuses them (docs/LLD/database-schema.md).
    */
   async approve(driverId: string, adminId: string, at: Date): Promise<DriverProfile | undefined> {
     if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;

@@ -69,7 +69,7 @@ export class SendOtpUseCase {
     }
 
     /**
-     * Admin accounts are never created by the auth flow (docs/LLD/13-auth-and-user.md §Admin),
+     * Admin accounts are never created by the auth flow (docs/LLD/auth.md §Admin provisioning),
      * so there is nothing to send to if the number is not already provisioned.
      *
      * Note what does NOT happen: no early return, no distinct error. The cooldown and counters

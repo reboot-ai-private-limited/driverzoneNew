@@ -1,4 +1,4 @@
-# 01 — Monorepo Layout
+# Monorepo Layout
 
 ## The tree
 
@@ -81,7 +81,7 @@ those symlinks — so `@driverzone/contracts` resolves to nothing and the app fa
 
 The cost is losing pnpm's protection against **phantom dependencies** (importing a package you
 did not declare). We accept it because dependency-cruiser's `not-to-unresolvable` rule catches
-the same class of mistake at a different point. See [08](08-mobile-in-monorepo.md).
+the same class of mistake at a different point. See [08](mobile-in-monorepo.md).
 
 ## Where does my code go?
 

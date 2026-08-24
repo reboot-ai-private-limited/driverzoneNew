@@ -10,7 +10,7 @@ import type { HealthReport } from './domain/health.entity.js';
  *
  * Split by consumer (Interface Segregation). Today there is one consumer, so there is one
  * interface; when a second appears wanting something different, it gets its own rather than
- * widening this one. See docs/engineering/02-clean-architecture-and-solid.md.
+ * widening this one. See docs/engineering/clean-architecture-and-solid.md.
  */
 export interface HealthReportContract {
   /** The current report. Used by the admin dashboard's status tile. */

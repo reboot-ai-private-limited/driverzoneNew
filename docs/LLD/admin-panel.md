@@ -1,4 +1,4 @@
-# 10 — Admin Panel
+# Admin Panel
 
 The admin panel is not a CRUD afterthought — it is where every price and every service
 boundary in the product is defined. A mistake here takes a city offline.
@@ -39,7 +39,7 @@ Audit Log          every admin action, filterable
 ## The zone editor
 
 This is the most important screen in the panel. Get it right and the whole class of
-configuration faults in `04-zone-resolution.md` disappears.
+configuration faults in `zone-resolution.md` disappears.
 
 ### Layout
 

@@ -4,14 +4,14 @@ Design docs for DriverZone: a zone-based driver-booking platform (admin web pane
 customer app + driver app).
 
 > Status: **draft / pre-implementation**. Nothing here is built yet.
-> Decisions marked 🔴 in [`LLD/12-open-questions.md`](LLD/12-open-questions.md) block
+> Decisions marked 🔴 in [`LLD/open-questions.md`](LLD/open-questions.md) block
 > implementation.
 
 ## What lives where
 
 | | |
 |---|---|
-| [`01-prd.md`](01-prd.md) | What we're building and for whom. Start here. |
+| [`prd.md`](prd.md) | What we're building and for whom. Start here. |
 | [`setup-development.md`](setup-development.md) | Clone to running stack. |
 | [`decision-log.md`](decision-log.md) | Decisions already made, dated, with what they replaced. |
 | [`LLD/`](#read-in-this-order) | Low-level design: the domain, the algorithms, the schemas. |
@@ -26,22 +26,24 @@ infrastructure while the apps run on your machine with hot reload, and
 
 ## Read in this order
 
-[`01-prd.md`](01-prd.md) first — what we're building, for whom, and what's out of scope. Then
+[`prd.md`](prd.md) first — what we're building, for whom, and what's out of scope. Then
 the low-level design in [`LLD/`](LLD/):
 
-| # | Doc | What it answers |
-|---|-----|-----------------|
-| 02 | [Domain Model](LLD/02-domain-model.md) | Glossary, entities, and the invariants that must never break |
-| 03 | [Database Schema](LLD/03-database-schema.md) | Mongoose schemas, indexes, where the invariants live |
-| 04 | [Zone Resolution](LLD/04-zone-resolution.md) | The core algorithm: point → zones → packages |
-| 05 | [Pricing & Commission](LLD/05-pricing-and-commission.md) | Fare computation, snapshots, the earnings ledger |
-| 06 | [Dispatch & Assignment](LLD/06-dispatch-and-assignment.md) | Driver offer waves, accept races, reassignment |
-| 07 | [Booking Lifecycle](LLD/07-booking-lifecycle.md) | State machine and the event log |
-| 08 | [API Contracts](LLD/08-api-contracts.md) | Endpoints, payloads, error codes |
-| 09 | [Architecture](LLD/09-architecture.md) | Stack, services, realtime, deployment |
-| 10 | [Admin Panel](LLD/10-admin-panel.md) | Screens, the polygon editor, validation rules |
-| 11 | [Roadmap](LLD/11-roadmap.md) | Build phases |
-| 12 | [Open Questions](LLD/12-open-questions.md) | Decisions needed before/during build |
+| Doc | What it answers |
+|-----|-----------------|
+| [Domain Model](LLD/domain-model.md) | Glossary, entities, and the invariants that must never break |
+| [Database Schema](LLD/database-schema.md) | Mongoose schemas, indexes, where the invariants live |
+| [Zone Resolution](LLD/zone-resolution.md) | The core algorithm: point → zones → packages |
+| [Pricing & Commission](LLD/pricing-and-commission.md) | Fare computation, snapshots, the earnings ledger |
+| [Dispatch & Assignment](LLD/dispatch-and-assignment.md) | Driver offer waves, accept races, reassignment |
+| [Booking Lifecycle](LLD/booking-lifecycle.md) | State machine and the event log |
+| [API Contracts](LLD/api-contracts.md) | Endpoints, payloads, error codes |
+| [Auth](LLD/auth.md) | Phone + OTP, tokens, rotation and reuse detection |
+| [User](LLD/user.md) | Profiles, addresses, vehicles, driver onboarding, admin verification |
+| [Architecture](LLD/architecture.md) | Stack, services, realtime, deployment |
+| [Admin Panel](LLD/admin-panel.md) | Screens, the polygon editor, validation rules |
+| [Roadmap](LLD/roadmap.md) | Build phases |
+| [Open Questions](LLD/open-questions.md) | Decisions needed before/during build |
 
 ## Engineering handbook
 

@@ -1,4 +1,4 @@
-# 03 — Database Schema (MongoDB 7 + Mongoose 8)
+# Database Schema (MongoDB 7 + Mongoose 8)
 
 > **Requires a replica set**, even single-node. Multi-document transactions need one, and the
 > booking→ledger write uses one. Both compose files handle the init; without it Mongo starts
@@ -10,7 +10,7 @@
 - **Percentages** are basis points: `2500` = 25%.
 - **Geometry** is GeoJSON, so coordinates are `[lng, lat]` — the reverse of how humans write
   them. Conversion happens only in `@driverzone/geo`; see
-  [`engineering/05`](../engineering/05-coding-standards.md#coordinates).
+  [`engineering/05`](../engineering/coding-standards.md#coordinates).
 - **Enums** are string unions validated by Zod at the boundary and constrained by `enum:` in the
   schema.
 - Every collection carries `createdAt`/`updatedAt` via `{ timestamps: true }`.
@@ -34,7 +34,7 @@ This is a **weaker guarantee** than a trigger, and it is held up by two things:
 
 1. The `zones` module is the only code that can write a zone, enforced by
    `module-internals-are-private` in `.dependency-cruiser.cjs`. See
-   [`engineering/04`](../engineering/04-boundaries-and-enforcement.md).
+   [`engineering/04`](../engineering/boundaries-and-enforcement.md).
 2. A **nightly integrity job** re-checks every zone and alerts on drift.
 
 Do not add a second write path to `zones`. That is the whole guarantee.
@@ -146,7 +146,7 @@ const incityVariantSchema = new Schema({
   includedMinutes: { type: Number, required: true, min: 1 },
   includedKm:      { type: Number, required: true, min: 0 },
 
-  // See docs/12-open-questions.md Q1. Defaults from duration: a 10-hour rental's destination is
+  // See open-questions.md Q1. Defaults from duration: a 10-hour rental's destination is
   // advisory, a 3-hour one's is not.
   enforceDropInCity: { type: Boolean, default: true },
 
@@ -164,7 +164,7 @@ const incityPackageSchema = new Schema({
   isActive:      { type: Boolean, default: true },
 }, { timestamps: true });
 
-// The package-matching query in docs/04.
+// The package-matching query in docs/LLD/zone-resolution.md.
 incityPackageSchema.index({ cityZoneId: 1, pickupZoneIds: 1, isActive: 1 });
 ```
 
@@ -232,7 +232,7 @@ const customerSchema = new Schema({
   phone: { type: String, required: true, unique: true },   // primary identity, the OTP target
 
   // Set to null by otp/verify on a first-ever login; filled in by the client's onboarding
-  // screens afterward. There is no separate registration endpoint — see 13-auth-and-user.md.
+  // screens afterward. There is no separate registration endpoint — see user.md.
   fullName: String,
   dob:      Date,
   gender:   { type: String, enum: ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] },
@@ -249,7 +249,7 @@ const customerSchema = new Schema({
     isPreferredPickup: { type: Boolean, default: false },   // prefills the quote flow's pickup
   }],
 
-  // The CUSTOMER's own car — the driver drives it, they don't supply one (12-open-questions.md
+  // The CUSTOMER's own car — the driver drives it, they don't supply one (open-questions.md
   // Q5). `category` is a free string, not a CarCategory ref: a customer describes their car
   // before any admin has to agree it matches one, and pricing keys off the booking's own
   // carCategoryId, never off this field.
@@ -284,7 +284,7 @@ No password, no TOTP secret — admin authenticates with phone + OTP like every 
 (decision log, 2026-08-24). **Deliberately no self-service creation path.** A document here is
 inserted by direct ops action, outside the HTTP surface; `otp/send`/`otp/verify` for an
 unprovisioned number fail the same way an invalid code would, rather than creating one — see
-`13-auth-and-user.md` §Admin.
+`auth.md` §Admin provisioning.
 
 ---
 
@@ -322,7 +322,7 @@ token racing the legitimate client — and revokes every row in that `familyId`,
 being replayed (decision log, 2026-08-24).
 
 OTP challenges are **not** in this collection, or in Mongo at all — they're ephemeral, Redis
-TTL-native, and never need a rotation history. See `13-auth-and-user.md` §OTP.
+TTL-native, and never need a rotation history. See `auth.md` §OTP.
 
 ---
 
@@ -541,10 +541,10 @@ const driverSchema = new Schema({
   walletBalancePaise: { type: Number, default: 0 },   // negative = owes the company
   canDriveHill:   { type: Boolean, default: false },
   // Self-declared at onboarding. Gates nothing on its own — hill driving is a safety matter,
-  // so actual hill dispatch checks this, not canDriveHill (12-open-questions.md Q6).
+  // so actual hill dispatch checks this, not canDriveHill (open-questions.md Q6).
   canDriveHillVerified: { type: Boolean, default: false },
 
-  // Identity/profile fields, added alongside the auth module (13-auth-and-user.md).
+  // Identity/profile fields, added alongside the auth module (user.md).
   dob:    Date,
   gender: { type: String, enum: ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] },
   experienceYears: Number,
@@ -553,12 +553,12 @@ const driverSchema = new Schema({
   address:          String,
 
   // What this driver is COMPETENT to drive, not what they own — the driver drives the
-  // customer's car, never their own (12-open-questions.md Q5). Matched against
+  // customer's car, never their own (open-questions.md Q5). Matched against
   // customers.vehicles[].category at dispatch time, not enforced here.
   vehicleTypePreference:     { type: String, enum: ['AUTO', 'MANUAL', 'EV'] },
   vehicleCategoryPreference: [String],   // CarCategory.code[]
 
-  // Onboarding state machine — see 13-auth-and-user.md §Driver. `isVerified` above stays the
+  // Onboarding state machine — see user.md §Driver. `isVerified` above stays the
   // ONE field dispatch/duty actually gate on (it's already in the index below); this is the
   // richer status the app shows and the admin approve/reject action drives. One action
   // (approve) sets both isVerified and onboardingStatus together, so they never drift apart —

@@ -12,7 +12,7 @@ import { getRedis } from '@/shared/queue/redis.js';
  * quietly scales with your replica count is worse than no limit, because it reads as one.
  *
  * Generic on purpose. `POST /quotes` at 30/min/user is already specified
- * (docs/LLD/09-architecture.md) and will use this rather than growing its own.
+ * (docs/LLD/architecture.md) and will use this rather than growing its own.
  *
  * NOTE: identity's OTP send/verify limits are NOT built on this. Those need to survive a
  * successful response, expose `retry_after_seconds`, and burn attempts atomically against the

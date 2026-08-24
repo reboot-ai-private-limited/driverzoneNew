@@ -1,4 +1,4 @@
-# 10 — Testing
+# Testing
 
 ## What to test where
 
@@ -30,7 +30,7 @@ A three-line object literal substitutes for `MongoHealthProbe` because both sati
 `HealthProbePort`. Nothing is mocked, no module registry is patched, the whole file runs in 10ms.
 
 That is only possible because `GetHealthUseCase` is typed against the port
-([02](02-clean-architecture-and-solid.md#l--liskov-substitution)). **If a unit test needs
+([02](clean-architecture-and-solid.md#l--liskov-substitution)). **If a unit test needs
 `vi.mock`, treat it as a design smell first** — usually the code is importing a concrete class
 where it should take a port.
 
@@ -38,7 +38,7 @@ where it should take a port.
 
 **`packages/geo`** — 31 tests. These carry the zone invariants that used to be database
 triggers, so a bug here is a bad polygon in production. Every case from
-[`../04-zone-resolution.md`](../LLD/04-zone-resolution.md) is covered, including the awkward ones:
+[`../LLD/zone-resolution.md`](../LLD/zone-resolution.md) is covered, including the awkward ones:
 
 ```ts
 it('rejects a swapped coordinate rather than resolving it to the wrong place', …);
@@ -83,7 +83,7 @@ Keep integration tests in `test/integration/` behind a separate script so `pnpm 
 ### The one integration test to write first
 
 The **atomic dispatch claim**. Everything else in
-[`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) is recoverable; a
+[`../LLD/dispatch-and-assignment.md`](../LLD/dispatch-and-assignment.md) is recoverable; a
 double-assignment means two drivers at one pickup and a customer paying twice.
 
 ```ts
@@ -110,7 +110,7 @@ expect(res.body.success).toBe(true);
 
 Worth covering: the error envelope shape, validation rejections, auth on protected routes, and
 that an `available: false` result returns **200** rather than 4xx
-([05](05-coding-standards.md#unavailable-is-not-an-error)).
+([05](coding-standards.md#unavailable-is-not-an-error)).
 
 ## What not to test
 
@@ -163,4 +163,4 @@ pnpm check    # typecheck + lint + test, 18 tasks
 
 `lint` includes `lint:deps`. A boundary violation fails the build, and under MongoDB that rule
 is protecting data integrity rather than tidiness — see
-[04](04-boundaries-and-enforcement.md#module-internals-are-private).
+[04](boundaries-and-enforcement.md#module-internals-are-private).

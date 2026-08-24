@@ -8,7 +8,7 @@ import { logger } from '@/shared/logging/logger.js';
  * Created on first use, not at import. A module-scope `new Redis(...)` opens a socket the
  * moment anything in the import graph reaches this file — which means a unit test that imports
  * a use case, for reasons entirely unrelated to Redis, needs a running Redis. The testing
- * story in docs/engineering/10-testing.md ("no database, no Redis, no Express") only survives
+ * story in docs/engineering/testing.md ("no database, no Redis, no Express") only survives
  * if importing code stays free of side effects.
  */
 let connection: Redis | undefined;

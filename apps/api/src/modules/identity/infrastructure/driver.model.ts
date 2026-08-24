@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 
 /**
- * INFRASTRUCTURE — the `drivers` collection (docs/LLD/03-database-schema.md).
+ * INFRASTRUCTURE — the `drivers` collection (docs/LLD/database-schema.md).
  *
  * Phase 1 only needs `phone` and `fullName` for the auth flow, but the whole schema is declared
  * now rather than grown field-by-field: `mongo.ts` sets `strictQuery: true`, so any field not
@@ -64,7 +64,7 @@ const driverSchema = new Schema<DriverDoc>(
 
     // THE gate. Dispatch and `POST /driver/duty` read this one boolean; `onboardingStatus` below
     // carries the richer story the driver app renders. One admin action sets both together, so
-    // they cannot drift (docs/LLD/03-database-schema.md).
+    // they cannot drift (docs/LLD/database-schema.md).
     isVerified: { type: Boolean, default: false },
     isOnDuty: { type: Boolean, default: false },
     isBlocked: { type: Boolean, default: false },
@@ -89,12 +89,12 @@ const driverSchema = new Schema<DriverDoc>(
     },
     address: { type: String, default: null },
 
-    // What this driver is COMPETENT to drive, not what they own (docs/LLD/12-open-questions.md Q5).
+    // What this driver is COMPETENT to drive, not what they own (docs/LLD/open-questions.md Q5).
     vehicleTypePreference: { type: String, enum: ['AUTO', 'MANUAL', 'EV', null], default: null },
     vehicleCategoryPreference: { type: [String], default: [] },
 
     // Self-declared; gates nothing on its own. Hill dispatch checks the *Verified* flag, which
-    // only an admin sets — hill driving is a safety matter (docs/LLD/12-open-questions.md Q6).
+    // only an admin sets — hill driving is a safety matter (docs/LLD/open-questions.md Q6).
     canDriveHill: { type: Boolean, default: false },
     canDriveHillVerified: { type: Boolean, default: false },
 
@@ -103,7 +103,7 @@ const driverSchema = new Schema<DriverDoc>(
     walletBalancePaise: { type: Number, default: 0 },
 
     // A CACHE flushed from Redis, never written by the high-frequency ping path
-    // (docs/LLD/09-architecture.md).
+    // (docs/LLD/architecture.md).
     lastLocation: {
       type: new Schema(
         { type: { type: String, enum: ['Point'] }, coordinates: [Number] },

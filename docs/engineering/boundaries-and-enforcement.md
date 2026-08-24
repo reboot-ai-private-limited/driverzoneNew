@@ -1,7 +1,7 @@
-# 04 — Boundaries & Enforcement
+# Boundaries & Enforcement
 
 Architecture that is only written down decays. Everything in
-[02](02-clean-architecture-and-solid.md) and [03](03-module-anatomy.md) is machine-checked, and
+[02](clean-architecture-and-solid.md) and [03](module-anatomy.md) is machine-checked, and
 this doc explains each rule and what breaks without it.
 
 ```bash
@@ -71,7 +71,7 @@ holes at once, whichever way the import is spelled.
 
 **Under MongoDB this rule carries data integrity, not just tidiness.**
 
-The zone invariants in [`../02-domain-model.md`](../LLD/02-domain-model.md) — pickup zones inside
+The zone invariants in [`../LLD/domain-model.md`](../LLD/domain-model.md) — pickup zones inside
 their city, no same-type overlap, no self-intersection — were PostGIS triggers. A bad polygon
 was *impossible to save*, from any code path, forever.
 
@@ -131,7 +131,7 @@ modules on one tier importing each other is the mutual coupling this exists to p
 genuine dependency between them means one belongs on a higher tier.
 
 **Adding a module means adding it here**, and that is deliberate — see
-[11](11-adding-a-module.md#choosing-a-tier).
+[11](adding-a-module.md#choosing-a-tier).
 
 ## Verify the rules actually work
 

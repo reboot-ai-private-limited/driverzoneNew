@@ -1,4 +1,4 @@
-# 01 — Product Requirements
+# Product Requirements
 
 ## 1. Problem
 

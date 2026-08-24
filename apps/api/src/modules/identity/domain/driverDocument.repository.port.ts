@@ -33,7 +33,7 @@ export interface DriverDocumentRepositoryPort {
   /**
    * One document per type per driver — an upsert, not an insert.
    *
-   * Matches the unique `(driverId, docType)` index in docs/LLD/03-database-schema.md. Re-uploading
+   * Matches the unique `(driverId, docType)` index in docs/LLD/database-schema.md. Re-uploading
    * a licence replaces the old row rather than accumulating a pile an admin has to sift through
    * to find the current one. It also resets status to `PENDING`: a replaced file has not been
    * verified, and inheriting the old `VERIFIED` would let a driver swap an approved document for

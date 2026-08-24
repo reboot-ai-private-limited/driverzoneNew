@@ -4,7 +4,7 @@ import type { Role } from '@driverzone/contracts';
  * PUBLIC CONTRACT — the only surface other modules may import from `identity`.
  *
  * Types only, so this file compiles to no JavaScript at all. See
- * docs/engineering/03-module-anatomy.md for why that costs nothing at runtime.
+ * docs/engineering/module-anatomy.md for why that costs nothing at runtime.
  *
  * Note what is deliberately **not** here: anything for verifying a bearer token. That lives in
  * `shared/security/jwt.ts` and `shared/http/auth.middleware.ts`, because every module eventually
@@ -25,7 +25,7 @@ export interface IdentityAccount {
  *
  * Batched on purpose. A per-id method called inside a `.map()` is one query per row, and the
  * admin panel's booking list renders a customer name on every line — see the "batch, don't
- * invite N+1" rule in docs/engineering/03-module-anatomy.md.
+ * invite N+1" rule in docs/engineering/module-anatomy.md.
  *
  * NOT IMPLEMENTED YET — phase 2. Declared now because the shape is a design decision and
  * `bookings` will be built against it.
@@ -41,7 +41,7 @@ export interface AccountDirectoryContract {
  * name must not be handed methods that mutate a customer's saved addresses.
  *
  * Called when `POST /bookings` carries `save_pickup_address` or `save_vehicle` — the mechanism
- * behind customer progressive profile completion (docs/LLD/13-auth-and-user.md §Module contract).
+ * behind customer progressive profile completion (docs/LLD/user.md §Module contract).
  *
  * **Both are upserts keyed on the real-world identity of the thing** — coordinates for an
  * address, number plate for a vehicle — and both return the id of the existing entry when one

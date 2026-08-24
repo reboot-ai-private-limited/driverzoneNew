@@ -1,4 +1,4 @@
-# 07 — Booking Lifecycle
+# Booking Lifecycle
 
 ## State machine
 
@@ -183,7 +183,7 @@ Cancellation charges go to a separate `cancellation_charges` table. They never m
 ## The event log is the product's memory
 
 `booking_events` is append-only and the app role has `UPDATE`/`DELETE` revoked
-(`03-database-schema.md`). Every dispute, every "the driver never came", every "I was
+(`database-schema.md`). Every dispute, every "the driver never came", every "I was
 charged for time I didn't use" is answered from this table.
 
 Reconstruct any booking's full history:

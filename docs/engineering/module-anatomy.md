@@ -1,4 +1,4 @@
-# 03 — Module Anatomy
+# Module Anatomy
 
 Every API module has the same shape. `apps/api/src/modules/health/` is the reference
 implementation — small enough to read in five minutes, complete enough to copy.
@@ -27,7 +27,7 @@ implementation — small enough to read in five minutes, complete enough to copy
 ## `<module>.public.ts` — the contract
 
 The single surface other modules may import. Everything else in the directory is private, and
-that is enforced, not requested ([04](04-boundaries-and-enforcement.md)).
+that is enforced, not requested ([04](boundaries-and-enforcement.md)).
 
 ```ts
 import type { HealthReport } from './domain/health.entity.js';
@@ -69,7 +69,7 @@ directly. There is no proxy, no serialisation, no dispatch table.
 ### Designing a good contract
 
 **Split by consumer, not by entity.** Two consumers wanting different things get two
-interfaces. See Interface Segregation in [02](02-clean-architecture-and-solid.md).
+interfaces. See Interface Segregation in [02](clean-architecture-and-solid.md).
 
 **Make it answer-shaped, not data-shaped.** Compare:
 
@@ -182,7 +182,7 @@ that nobody skips it.
 
 **`dispatch` near the top, alone.** It is the only module permitted to write
 `bookings.driverId`. One module owning the assignment race is what keeps the atomic claim in
-[`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) correct — two writers
+[`../LLD/dispatch-and-assignment.md`](../LLD/dispatch-and-assignment.md) correct — two writers
 would reintroduce double-assignment no matter how careful each one was.
 
 ## How a request flows
@@ -219,4 +219,4 @@ from the same code and differ only in what they do with them: the server hands t
 the worker hands them to queue consumers.
 
 They ship in **one Docker image** with different `CMD`s, which is what stops them drifting.
-See [09](09-build-and-deploy.md).
+See [09](build-and-deploy.md).

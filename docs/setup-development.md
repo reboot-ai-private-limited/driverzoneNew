@@ -96,7 +96,7 @@ tends to surface much later than the setup that caused it.
 
 The `mongo` service starts as a **replica set** (`--replSet rs0`) even though it is a single
 node, because multi-document transactions require one and the booking→ledger write in
-[`05-pricing-and-commission.md`](LLD/05-pricing-and-commission.md) needs a transaction to stay
+[`pricing-and-commission.md`](LLD/pricing-and-commission.md) needs a transaction to stay
 consistent. Adding the replica set later means re-seeding every environment.
 
 But a replica set is not usable until it is initiated. `mongo-init` is a one-shot container
@@ -170,7 +170,7 @@ forever.
 
 ### A phone cannot reach `localhost`
 
-Once the apps start calling the API (phase 7, [`11-roadmap.md`](LLD/11-roadmap.md)), this bites
+Once the apps start calling the API (phase 7, [`roadmap.md`](LLD/roadmap.md)), this bites
 immediately: `localhost` on a physical device means *the device*, not your machine. Expo
 already prints the address it expects you to use —
 
@@ -190,7 +190,7 @@ simulator shares the host's network stack, so `localhost` works there.
 `apps/api` ships **two composition roots over the same code**: `server.ts` serves HTTP,
 `worker.ts` hands the same modules to BullMQ queue consumers. That is why `dev:backend` runs
 two turbo tasks against one package rather than two packages, and why production runs one image
-with two commands ([`engineering/09`](engineering/09-build-and-deploy.md)). A worker running
+with two commands ([`engineering/09`](engineering/build-and-deploy.md)). A worker running
 different code from the API is a class of bug that cannot happen here.
 
 ### Verify the whole workspace
@@ -201,7 +201,7 @@ pnpm turbo run typecheck lint test
 
 `lint` includes `dependency-cruiser`, which enforces the module boundaries. Under MongoDB
 those boundaries protect data integrity rather than tidiness — see
-[`engineering/04`](engineering/04-boundaries-and-enforcement.md).
+[`engineering/04`](engineering/boundaries-and-enforcement.md).
 
 ---
 
@@ -305,9 +305,9 @@ What it should create:
 | 1 admin | fixed credentials, printed on completion | log into the panel without a signup flow |
 | ~3 drivers | varied: online/offline, different vehicle classes, one suspended | dispatch waves need more than one candidate to be worth testing |
 | ~3 customers | one with saved addresses, one brand new | the empty-state and populated cases both matter |
-| 2–3 zones | one city, one pickup-coverage area, one hill region | zone resolution is the core algorithm ([`04`](LLD/04-zone-resolution.md)) — with no polygons nothing prices |
+| 2–3 zones | one city, one pickup-coverage area, one hill region | zone resolution is the core algorithm ([`04`](LLD/zone-resolution.md)) — with no polygons nothing prices |
 | packages on those zones | one incity hourly, one outstation band | a zone with no packages still returns no quote |
-| a few bookings | one per interesting lifecycle state ([`07`](LLD/07-booking-lifecycle.md)) | admin list/detail screens are unreviewable against an empty table |
+| a few bookings | one per interesting lifecycle state ([`07`](LLD/booking-lifecycle.md)) | admin list/detail screens are unreviewable against an empty table |
 
 Properties it needs to have, in rough priority order:
 
@@ -378,7 +378,7 @@ Metro cache, nine times out of ten:
 ```bash
 pnpm --filter @driverzone/customer exec expo start --clear
 ```
-If it persists see [`engineering/08`](engineering/08-mobile-in-monorepo.md). Do not remove
+If it persists see [`engineering/08`](engineering/mobile-in-monorepo.md). Do not remove
 `node-linker=hoisted` from `.npmrc` — Metro cannot walk pnpm's default symlink layout.
 
 **Stale or broken database state**
@@ -392,10 +392,10 @@ docker compose -f docker-compose.dev.yml up -d
 
 ## OSRM
 
-Road distance for outstation band matching ([`04`](LLD/04-zone-resolution.md)). It is commented out
+Road distance for outstation band matching ([`04`](LLD/zone-resolution.md)). It is commented out
 in both compose files because it needs a prepared OSM extract before it will start — the
 `osrm-extract` / `osrm-partition` / `osrm-customize` commands are in
-[`engineering/09`](engineering/09-build-and-deploy.md#local-development). Budget about an hour
+[`engineering/09`](engineering/build-and-deploy.md#local-development). Budget about an hour
 and ~8GB of RAM, once.
 
 You can build most features without it. You cannot trust an outstation quote without it:
@@ -406,5 +406,5 @@ mocked distances hide exactly the band-boundary bugs that matter.
 ## Where to go next
 
 - [`engineering/README.md`](engineering/README.md) — the handbook. Read `01`–`04` in order.
-- [`engineering/09`](engineering/09-build-and-deploy.md) — what gets built, what deploys where.
+- [`engineering/09`](engineering/build-and-deploy.md) — what gets built, what deploys where.
 - [`../README.md`](../README.md) — daily workflow and the full command reference.

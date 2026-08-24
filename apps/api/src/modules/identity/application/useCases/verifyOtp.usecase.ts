@@ -69,7 +69,7 @@ export class VerifyOtpUseCase {
     const existing = await this.accounts.findByPhone(role, phone);
 
     /**
-     * Admin accounts are never created here (docs/LLD/13-auth-and-user.md §Admin) — an admin
+     * Admin accounts are never created here (docs/LLD/auth.md §Admin provisioning) — an admin
      * number that reached a correct code without an existing record should be impossible, since
      * `sendOtp` stores no challenge for one. Treated as the generic failure regardless: if the
      * impossible happens, the safe outcome is "no", not "create an administrator".

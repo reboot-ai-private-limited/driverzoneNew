@@ -34,7 +34,7 @@ export interface DriverProfilePatch {
   /**
    * Self-declaration only. A driver may set this; it gates nothing until an admin sets
    * `canDriveHillVerified`, which is not reachable through this patch at all — hill driving in
-   * the Darjeeling region is a safety matter (docs/LLD/12-open-questions.md Q6).
+   * the Darjeeling region is a safety matter (docs/LLD/open-questions.md Q6).
    */
   canDriveHill?: boolean;
 }
@@ -55,7 +55,7 @@ export interface DriverProfileRepositoryPort {
    *
    * `isVerified` is what dispatch and `POST /driver/duty` gate on; `onboardingStatus` is what
    * the driver's app renders. Two separate methods would let a caller set one without the
-   * other, which is exactly the drift `docs/LLD/03-database-schema.md` warns about — a driver
+   * other, which is exactly the drift `docs/LLD/database-schema.md` warns about — a driver
    * showing "approved" who cannot go on duty, or worse, the reverse.
    */
   approve(driverId: string, adminId: string, at: Date): Promise<DriverProfile | undefined>;

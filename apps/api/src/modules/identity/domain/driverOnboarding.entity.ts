@@ -19,7 +19,7 @@ import type { DocumentType, OnboardingStatus } from '@driverzone/contracts';
  * PRESENCE, not verification: an admin verifies content at the next step, and a driver cannot
  * be asked to wait for approval before being allowed to ask for it. The other document types
  * (`VEHICLE_RC`, `INSURANCE`, `POLICE_VERIFICATION`) are optional here because the driver does
- * not supply the vehicle — the customer does (docs/LLD/12-open-questions.md Q5).
+ * not supply the vehicle — the customer does (docs/LLD/open-questions.md Q5).
  */
 export const REQUIRED_DOCUMENT_TYPES: DocumentType[] = ['LICENCE', 'AADHAAR'];
 
@@ -64,7 +64,7 @@ export function missingForSubmission(
  * Which statuses a driver may submit from.
  *
  * `REJECTED` is included on purpose — rejection is not terminal. A driver fixes what the
- * rejection reason named and resubmits (docs/LLD/13-auth-and-user.md §Driver verification).
+ * rejection reason named and resubmits (docs/LLD/user.md §Driver verification).
  * `SUBMITTED` is excluded: resubmitting while already in the queue is a no-op that would reset
  * the driver's place in it.
  */

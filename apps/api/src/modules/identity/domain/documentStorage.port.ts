@@ -3,7 +3,7 @@ import type { DocumentType } from '@driverzone/contracts';
 /**
  * PORT — somewhere to put a file, without naming the provider.
  *
- * `09-architecture.md` specifies an S3-compatible private bucket with 5-minute presigned URLs.
+ * `architecture.md` specifies an S3-compatible private bucket with 5-minute presigned URLs.
  * None exists yet, so `documentStorage.stub.ts` stands in for local development; the real
  * adapter is a one-line change in `identity.container.ts`.
  *
@@ -13,7 +13,7 @@ import type { DocumentType } from '@driverzone/contracts';
  *
  * This lives in the module's `domain/` rather than `shared/` for now, following the repo's
  * ports-live-in-domain rule. It moves to `shared/storage/` when `bookings` needs receipt URLs —
- * `09-architecture.md` names both as consumers.
+ * `architecture.md` names both as consumers.
  */
 export interface PresignedUpload {
   /** Where the client `PUT`s the file. Short-lived. Never stored. */

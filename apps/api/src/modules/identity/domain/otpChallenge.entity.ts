@@ -21,7 +21,7 @@ export const OTP_MAX_ATTEMPTS = 5;
 /** Seconds between sends to one number. Long enough to blunt SMS-pumping, short enough to resend. */
 export const OTP_RESEND_COOLDOWN_SECONDS = 60;
 
-/** Per-phone hourly cap — the figure fixed in docs/LLD/09-architecture.md. */
+/** Per-phone hourly cap — the figure fixed in docs/LLD/architecture.md. */
 export const OTP_MAX_SENDS_PER_PHONE_PER_HOUR = 5;
 
 /**

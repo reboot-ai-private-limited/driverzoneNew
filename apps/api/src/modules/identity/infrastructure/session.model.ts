@@ -2,7 +2,7 @@ import mongoose, { Schema } from 'mongoose';
 import type { Role } from '@driverzone/contracts';
 
 /**
- * INFRASTRUCTURE — the `sessions` collection (docs/LLD/03-database-schema.md).
+ * INFRASTRUCTURE — the `sessions` collection (docs/LLD/database-schema.md).
  *
  * One document per refresh token ever issued, including the spent ones. Spent rows are what
  * makes reuse detectable at all — delete a session on rotation and a replayed token becomes

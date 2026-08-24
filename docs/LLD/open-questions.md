@@ -1,4 +1,4 @@
-# 12 — Open Questions
+# Open Questions
 
 🔴 blocks implementation · 🟡 needed before pilot · 🟢 can be decided later
 
@@ -42,7 +42,7 @@ customer gets a "confirm trip ended" push whose timestamp wins if it comes first
 Does a 70–100 km package charge the same for 72 km and 98 km, or does the price cover
 70 km with a per-km rate on top?
 
-`05-pricing-and-commission.md` assumes **base + per-km beyond `min_km`**. If you intend a
+`pricing-and-commission.md` assumes **base + per-km beyond `min_km`**. If you intend a
 flat band price, `extra_km_rate_paise` is simply 0 and the formula still holds — but say
 so now, because it determines how narrow your bands need to be. Flat pricing needs many
 narrow bands; base+per-km works with a few wide ones.
@@ -91,7 +91,7 @@ driver on a mountain road at night.
 Prepaid at booking, or cash at completion?
 
 - **Cash** matches market expectation but creates the wallet-debt problem
-  (`05-pricing-and-commission.md`), needs collections, and means no-shows cost you nothing
+  (`pricing-and-commission.md`), needs collections, and means no-shows cost you nothing
   to the customer.
 - **Prepaid** removes debt entirely but adds refunds and reduces conversion.
 
@@ -153,7 +153,7 @@ Add explicit multi-stop once you see how customers actually use the 10-hour pack
 
 ### 🟢 Q13 — Tax
 
-`05-pricing-and-commission.md` uses a flat `TAX_BPS`. Actual GST treatment for a
+`pricing-and-commission.md` uses a flat `TAX_BPS`. Actual GST treatment for a
 driver-supply service — rate, whether the driver's share is separately taxable, reverse
 charge — is a question for an accountant, not an engineer.
 

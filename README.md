@@ -13,7 +13,7 @@ One repo, four apps:
 | `apps/driver` | Expo React Native | Play Store |
 
 Plus five shared packages in `packages/`. See
-[`docs/engineering/01`](docs/engineering/01-monorepo-layout.md).
+[`docs/engineering/01`](docs/engineering/monorepo-layout.md).
 
 ---
 
@@ -100,11 +100,11 @@ dispatch: escalate to the next wave when no candidates are in radius
 An empty wave-1 radius previously burned the full 45s TTL before widening,
 adding a minute to time-to-assignment for outlying pickups.
 
-Refs: docs/LLD/06-dispatch-and-assignment.md §Waves
+Refs: docs/LLD/dispatch-and-assignment.md §Waves
 ```
 
 Not `fix stuff`. Full convention in
-[`docs/engineering/05`](docs/engineering/05-coding-standards.md#commits).
+[`docs/engineering/05`](docs/engineering/coding-standards.md#commits).
 
 ### Before you push
 
@@ -115,7 +115,7 @@ pnpm check
 This runs `typecheck`, `lint` and `test` across all nine packages. `lint` includes
 `dependency-cruiser`, which enforces the module boundaries — **a boundary violation fails the
 build, and under MongoDB that rule is protecting data integrity, not tidiness**. See
-[`docs/engineering/04`](docs/engineering/04-boundaries-and-enforcement.md).
+[`docs/engineering/04`](docs/engineering/boundaries-and-enforcement.md).
 
 ---
 
@@ -143,7 +143,7 @@ pnpm --filter @driverzone/api build              # tsc --noEmit && esbuild → d
 ```
 
 **Adding a module?** Follow
-[`docs/engineering/11`](docs/engineering/11-adding-a-module.md) and copy
+[`docs/engineering/11`](docs/engineering/adding-a-module.md) and copy
 `src/modules/health/` — it's the reference implementation, nine files, five minutes to read.
 
 ### Admin panel — `apps/web`
@@ -181,7 +181,7 @@ pnpm --filter @driverzone/driver lint
 pnpm --filter @driverzone/driver exec eas build --profile preview --platform android
 ```
 
-See [`docs/engineering/08`](docs/engineering/08-mobile-in-monorepo.md), especially the Metro
+See [`docs/engineering/08`](docs/engineering/mobile-in-monorepo.md), especially the Metro
 resolution section — that's where the one real monorepo trap lives.
 
 ### Shared packages — `packages/*`
@@ -289,7 +289,7 @@ Metro cache, nine times out of ten:
 ```bash
 pnpm --filter @driverzone/customer exec expo start --clear
 ```
-If it persists, see [`docs/engineering/08`](docs/engineering/08-mobile-in-monorepo.md). Do not
+If it persists, see [`docs/engineering/08`](docs/engineering/mobile-in-monorepo.md). Do not
 remove `node-linker=hoisted` from `.npmrc` — Metro cannot walk pnpm's default symlink layout.
 
 **`MongoServerError: not primary`**
@@ -308,7 +308,7 @@ module.exports = { root: true, extends: [require.resolve('@driverzone/config/esl
 **`error module-internals-are-private`**
 You imported another module's internals. Import its `<name>.public.js` contract instead; if what
 you need isn't on it, add it — that's the design working.
-[`docs/engineering/04`](docs/engineering/04-boundaries-and-enforcement.md#when-a-rule-blocks-you)
+[`docs/engineering/04`](docs/engineering/boundaries-and-enforcement.md#when-a-rule-blocks-you)
 lists the options in order.
 
 **A test suite shows as failed but passes on its own**
@@ -321,7 +321,7 @@ pnpm --filter @driverzone/geo test
 **`tsc` complains about `string | undefined` on something obviously fine**
 `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess` are on deliberately, and they find
 real bugs — four during scaffolding alone. Fix the code rather than loosening the config;
-[`docs/engineering/05`](docs/engineering/05-coding-standards.md#typescript) explains why.
+[`docs/engineering/05`](docs/engineering/coding-standards.md#typescript) explains why.
 
 ---
 
@@ -344,7 +344,7 @@ at runtime — the contract file is types only and leaves no trace in the shippe
 | | |
 |---|---|
 | [`docs/`](docs/README.md) | Index — start here |
-| [`docs/01-prd.md`](docs/01-prd.md) | **The product** — what we're building, for whom, what's out of scope |
+| [`docs/prd.md`](docs/prd.md) | **The product** — what we're building, for whom, what's out of scope |
 | [`docs/LLD/`](docs/README.md#read-in-this-order) | **The design** — zones, pricing, dispatch, booking lifecycle, API contracts |
 | [`docs/engineering/`](docs/engineering/README.md) | **The code** — layout, architecture, boundaries, tech choices, deploy |
 | [`docs/setup-development.md`](docs/setup-development.md) | Clone to running stack |

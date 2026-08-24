@@ -1,4 +1,4 @@
-# 07 — Shared Packages
+# Shared Packages
 
 Five packages in `packages/`. Each has a narrow job and a clear rule about what must never go
 in it.
@@ -86,13 +86,13 @@ in the browser, so this is possible; making it a package is what makes it happen
 
 ### Why it is load-bearing
 
-The invariants in [`../02-domain-model.md`](../LLD/02-domain-model.md) were PostGIS triggers. Under
+The invariants in [`../LLD/domain-model.md`](../LLD/domain-model.md) were PostGIS triggers. Under
 MongoDB they live here.
 
 That means a bug in `zone-rules.ts` is not a UI defect — it is a bad polygon in production, a
 customer being told a city you serve is unserved, and a `ZONE_CONFIG_FAULT` alert at an
 inconvenient hour. It has 31 tests covering every case in
-[`../04-zone-resolution.md`](../LLD/04-zone-resolution.md), including the awkward ones: a point
+[`../LLD/zone-resolution.md`](../LLD/zone-resolution.md), including the awkward ones: a point
 exactly on a shared border, neighbours whose hand-drawn edges nearly coincide, a route grazing a
 hill zone for 800m.
 

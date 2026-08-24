@@ -1,4 +1,4 @@
-# 04 — Zone Resolution
+# Zone Resolution
 
 This is the core algorithm. Everything the customer sees flows from it.
 

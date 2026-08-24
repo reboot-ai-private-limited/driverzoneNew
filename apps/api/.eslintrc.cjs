@@ -58,7 +58,7 @@ module.exports = {
             ],
             message:
               "A module's internals are private. Import its '<name>.public.js' contract instead — " +
-              'see docs/engineering/04-boundaries-and-enforcement.md.',
+              'see docs/engineering/boundaries-and-enforcement.md.',
           },
         ],
       },

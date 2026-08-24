@@ -1,4 +1,4 @@
-# 11 — Adding a Module
+# Adding a Module
 
 Copy `apps/api/src/modules/health/`. It is the reference implementation and it is deliberately
 small enough to read in five minutes.
@@ -57,7 +57,7 @@ one of you is on the wrong tier. Decide which before editing the list.
 8 can be consumed by almost nothing. Push work downward where you can.
 
 If you find yourself wanting to move an existing module up, stop — that usually means a
-dependency is backwards. See [04](04-boundaries-and-enforcement.md#when-a-rule-blocks-you).
+dependency is backwards. See [04](boundaries-and-enforcement.md#when-a-rule-blocks-you).
 
 ## Designing the contract
 
@@ -204,7 +204,7 @@ Two things about this module specifically:
 `@driverzone/geo` and refuses to save on any ERROR violation. Under PostGIS this was a database
 trigger; under MongoDB this use case *is* the guarantee. It is only a real guarantee because
 `module-internals-are-private` stops anything else reaching `zones/infrastructure/` — which is
-why [04](04-boundaries-and-enforcement.md) calls `lint:deps` load-bearing.
+why [04](boundaries-and-enforcement.md) calls `lint:deps` load-bearing.
 
 **The read/write contract split is not cosmetic.** `dispatch` gets
 `ZoneResolutionContract` and therefore *cannot* call `updateGeometry` — the method is not on the

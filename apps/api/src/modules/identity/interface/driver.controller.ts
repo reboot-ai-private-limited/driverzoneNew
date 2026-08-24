@@ -60,7 +60,7 @@ function profileToDto(p: DriverProfile): DriverProfileDto {
  * `fileUrl` is deliberately absent from the DTO.
  *
  * It holds an object storage KEY, which is an internal detail; a download link is minted on
- * demand and expires in minutes (docs/LLD/09-architecture.md). Returning the key would leak the
+ * demand and expires in minutes (docs/LLD/architecture.md). Returning the key would leak the
  * bucket layout and tempt a client to construct URLs itself.
  */
 function documentToDto(d: DriverDocument): DriverDocumentDto {

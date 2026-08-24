@@ -1,9 +1,9 @@
 /**
  * PORT — the record of what an admin did.
  *
- * `09-architecture.md` requires every admin action to be audited, and this module's admin
+ * `architecture.md` requires every admin action to be audited, and this module's admin
  * endpoints are the first that mutate anything. The entry shape matches the `auditLog`
- * collection in docs/LLD/03-database-schema.md.
+ * collection in docs/LLD/database-schema.md.
  *
  * `APPROVE` and `REJECT` are distinct actions rather than `UPDATE`s. "Who approved this driver,
  * and when" is the question this collection exists to answer, and answering it should not

@@ -16,14 +16,14 @@
 # mobile code to the API server" — no, and there is nowhere for it to go.
 #
 # On a real host, nginx terminates TLS in front of web:3000 and api:4000 — see
-# docs/engineering/09-build-and-deploy.md.
+# docs/engineering/build-and-deploy.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
   mongo:
     image: mongo:7
     # A replica set, even with one node. Multi-document transactions require one, and the
-    # booking→ledger write in docs/05 needs a transaction to stay consistent.
+    # booking→ledger write in docs/LLD/pricing-and-commission.md needs a transaction to stay consistent.
     command: ['--replSet', 'rs0', '--bind_ip_all']
     # No `ports:` — deliberately. The database is reachable only on the compose network, by
     # api and worker. Publishing 27017 on a production host exposes an unauthenticated Mongo
@@ -61,8 +61,8 @@ services:
       timeout: 3s
       retries: 5
 
-  # Road distance for outstation band matching (docs/04). Commented out because it needs a
-  # prepared OSM extract (docs/engineering/09-build-and-deploy.md) — but unlike in the dev
+  # Road distance for outstation band matching (docs/LLD/zone-resolution.md). Commented out because it needs a
+  # prepared OSM extract (docs/engineering/build-and-deploy.md) — but unlike in the dev
   # file, a real deployment SHOULD enable this. Without it every quote falls back to a paid
   # API or a mock, and OSRM_BASE_URL below points at nothing.
   # osrm:

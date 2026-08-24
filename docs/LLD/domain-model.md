@@ -1,4 +1,4 @@
-# 02 — Domain Model
+# Domain Model
 
 ## Glossary
 
@@ -16,14 +16,14 @@
 | **Offer** | A single dispatch invitation sent to one driver for one booking. |
 | **Wave** | A round of offers sent simultaneously to a ranked batch of drivers. |
 | **Fare snapshot** | Immutable JSON of the full fare breakdown, written at confirmation. |
-| **Customer** | A phone-verified rider account. Owns saved addresses and vehicles — the *customer's* car, since the driver drives it, not their own (see `12-open-questions.md` Q5). |
+| **Customer** | A phone-verified rider account. Owns saved addresses and vehicles — the *customer's* car, since the driver drives it, not their own (see `open-questions.md` Q5). |
 | **Driver** | A phone-verified, admin-onboarded professional-driver account. Carries vehicle *preferences* (what they're competent to drive), never ownership. |
 | **AdminUser** | An internal ops account. Provisioned by another admin — never self-registered, never created by the auth flow itself. |
-| **Session** | One refresh-token lineage for a logged-in user. Rotates on every refresh; a reused token revokes the whole family. See `13-auth-and-user.md`. |
+| **Session** | One refresh-token lineage for a logged-in user. Rotates on every refresh; a reused token revokes the whole family. See `auth.md`. |
 
 ## Identity actors
 
-`customers`, `drivers` and `adminUsers` (`13-auth-and-user.md`) sit outside the pricing/booking pipeline drawn below, but every collection in it points back to one of them:
+`customers`, `drivers` and `adminUsers` (`user.md`) sit outside the pricing/booking pipeline drawn below, but every collection in it points back to one of them:
 
 ```
 customers ──► quotes ──► bookings ◄── drivers ──► dispatchOffers
@@ -32,7 +32,7 @@ customers ──► quotes ──► bookings ◄── drivers ──► dispat
                        adminUsers   (zones, packages, prices, drivers.documents, auditLog)
 ```
 
-`adminUsers` has no box of its own in the pipeline below because it never *flows* into a booking — it only ever authors or verifies the things that do (a zone, a package, a driver's documents). Every write an admin makes is itself an `auditLog` row (`03-database-schema.md`).
+`adminUsers` has no box of its own in the pipeline below because it never *flows* into a booking — it only ever authors or verifies the things that do (a zone, a package, a driver's documents). Every write an admin makes is itself an `auditLog` row (`database-schema.md`).
 
 ## Entity map
 
@@ -92,7 +92,7 @@ violation should be impossible to create, not merely detected later.
 >
 > That is a weaker guarantee, held up by two things: the `zones` module is the *only* code that
 > can write a zone — enforced by `module-internals-are-private` in `.dependency-cruiser.cjs`,
-> see [`engineering/04`](../engineering/04-boundaries-and-enforcement.md) — and a nightly integrity
+> see [`engineering/04`](../engineering/boundaries-and-enforcement.md) — and a nightly integrity
 > job re-checks every zone and alerts on drift.
 >
 > The upside is that the same code runs in the browser, so the admin map editor validates live

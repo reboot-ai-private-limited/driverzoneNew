@@ -14,7 +14,7 @@ export interface ActorContext {
  * APPLICATION — the admin side of driver verification.
  *
  * Every method here writes an audit entry, because these are exactly the actions
- * `09-architecture.md` means by "admin actions all audited". Grouped into one class because all
+ * `architecture.md` means by "admin actions all audited". Grouped into one class because all
  * three share the same actor context, the same audit shape, and the same "may an admin act on
  * this driver right now" question.
  */
@@ -50,7 +50,7 @@ export class VerifyDriverUseCase {
 
     // ONE write sets onboardingStatus, isVerified, verifiedBy and verifiedAt together. Two
     // writes is how a driver ends up showing "approved" while dispatch still refuses them
-    // (docs/LLD/03-database-schema.md).
+    // (docs/LLD/database-schema.md).
     const after = await this.drivers.approve(driverId, actor.adminId, new Date());
     if (after === undefined) throw AppError.notFound('That driver could not be found.');
 

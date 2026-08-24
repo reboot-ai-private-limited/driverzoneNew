@@ -8,7 +8,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
  * the error handler, nothing useful in the logs. Every async route goes through this.
  *
  * (Express 5 handles this natively. Revisit when we upgrade — see
- * docs/engineering/06-tech-choices.md.)
+ * docs/engineering/tech-choices.md.)
  */
 export function asyncHandler(
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>,

@@ -2,10 +2,10 @@ import mongoose, { Schema } from 'mongoose';
 import type { DocumentStatus, DocumentType } from '@driverzone/contracts';
 
 /**
- * INFRASTRUCTURE — the `driverDocuments` collection (docs/LLD/03-database-schema.md).
+ * INFRASTRUCTURE — the `driverDocuments` collection (docs/LLD/database-schema.md).
  *
  * `fileUrl` holds the object's storage KEY, not a fetchable URL. A presigned download link is
- * minted on demand and expires in minutes (docs/LLD/09-architecture.md), so persisting one would
+ * minted on demand and expires in minutes (docs/LLD/architecture.md), so persisting one would
  * store a value that is broken by the time anybody reads it — and briefly publicly fetchable
  * before that, which is worse.
  */
@@ -57,7 +57,7 @@ const driverDocumentSchema = new Schema<DriverDocumentDoc>(
 // admin has to sift through to find the current one.
 driverDocumentSchema.index({ driverId: 1, docType: 1 }, { unique: true });
 
-// The expiry-warning job (docs/LLD/10-admin-panel.md: "documents expiring within 7 days").
+// The expiry-warning job (docs/LLD/admin-panel.md: "documents expiring within 7 days").
 driverDocumentSchema.index({ expiresOn: 1 });
 
 export const DriverDocumentModel =

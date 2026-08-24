@@ -19,7 +19,7 @@ import { buildContainers } from './container.js';
  * precisely so this process never constructs an Express router it has no listener to serve.
  *
  * This is where dispatch waves, scheduled dispatch and the sweeper will run
- * (docs/LLD/06-dispatch-and-assignment.md).
+ * (docs/LLD/dispatch-and-assignment.md).
  */
 async function main(): Promise<void> {
   loadEnv();

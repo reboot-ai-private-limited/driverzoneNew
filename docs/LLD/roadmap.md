@@ -1,4 +1,4 @@
-# 11 — Roadmap
+# Roadmap
 
 Phases are ordered by **risk retirement**, not by feature count. The two things that can
 sink this build are zone/pricing correctness and dispatch reliability, so both get proven
@@ -30,7 +30,7 @@ The riskiest logic, built first, with no UI in the way.
 - OSRM integration + H3 route cache
 - Terrain classification by route intersection
 - `coverage_requests` / `unserved_distance_requests`
-- **Full test suite from `04-zone-resolution.md`, including the border cases**
+- **Full test suite from `zone-resolution.md`, including the border cases**
 
 **Done when:** every case in the zone-resolution test table passes, and a deliberately
 misconfigured zone is rejected by `createZone.usecase.ts` — with `lint:deps` green, proving no
@@ -154,7 +154,7 @@ Add pickup zones by `coverage_requests` density. Add cities. Add outstation band
 
 With parallel work (one backend, one mobile, one frontend developer) roughly **16–18
 weeks** to pilot. Phases 6 and 7 overlap with 4 and 5 once the API contracts in
-`08-api-contracts.md` are frozen — freeze them early, they're the critical path for the
+`api-contracts.md` are frozen — freeze them early, they're the critical path for the
 mobile team.
 
 ## Sequencing rules

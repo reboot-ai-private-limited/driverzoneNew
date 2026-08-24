@@ -24,7 +24,7 @@ export type UpdateVehicleInput = Partial<AddVehicleInput>;
  * Same read-modify-write shape as `ManageAddressesUseCase`, and grouped for the same reason.
  *
  * These are the CUSTOMER's vehicles: the driver drives the customer's car rather than supplying
- * one (docs/LLD/12-open-questions.md Q5), which is why this lives on the customer profile and
+ * one (docs/LLD/open-questions.md Q5), which is why this lives on the customer profile and
  * why `category` is free text rather than a car-category reference.
  */
 export class ManageVehiclesUseCase {

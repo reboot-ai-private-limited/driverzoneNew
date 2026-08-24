@@ -4,7 +4,7 @@
  * Single source of truth for four consumers — the API that produces it, the admin panel, and
  * both mobile apps. Under waagent this file was hand-mirrored into the API and drifted; here
  * `apps/api` depends on this package directly, because a mismatch that reaches a store binary
- * cannot be hotfixed (docs/engineering/07-shared-packages.md).
+ * cannot be hotfixed (docs/engineering/shared-packages.md).
  */
 
 export interface RequestMeta {

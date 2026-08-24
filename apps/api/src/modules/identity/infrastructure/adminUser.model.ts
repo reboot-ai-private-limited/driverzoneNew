@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 
 /**
- * INFRASTRUCTURE — the `adminUsers` collection (docs/LLD/03-database-schema.md).
+ * INFRASTRUCTURE — the `adminUsers` collection (docs/LLD/database-schema.md).
  *
  * No password, no TOTP secret, no recovery codes: admin authenticates with phone + OTP like
  * every other role (docs/decision-log.md, 2026-08-24).

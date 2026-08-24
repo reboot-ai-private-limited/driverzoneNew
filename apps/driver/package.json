@@ -7,7 +7,7 @@
     "dev": "expo start",
     "start": "expo start",
     "android": "expo run:android",
-    "build": "echo 'mobile builds ship via EAS, not turbo — see docs/engineering/09-build-and-deploy.md'",
+    "build": "echo 'mobile builds ship via EAS, not turbo — see docs/engineering/build-and-deploy.md'",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit"
   },

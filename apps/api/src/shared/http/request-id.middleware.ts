@@ -11,7 +11,7 @@ export const REQUEST_ID_HEADER = 'x-request-id';
  * An inbound header wins when present, so a trace started at nginx (or by a mobile client
  * retrying) stays one trace instead of becoming two unrelated ones. Generated otherwise.
  *
- * The `req_` + UUID v7 shape comes from docs/LLD/08-api-contracts.md, which specifies
+ * The `req_` + UUID v7 shape comes from docs/LLD/api-contracts.md, which specifies
  * `"request_id": "req_01J…"` and keys internal causes in the logs by it. v7 sorts by creation
  * time, so a request's log lines group in the order they happened — see `shared/ids.ts`.
  *

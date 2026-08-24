@@ -1,5 +1,5 @@
 /**
- * Auth and user wire types (docs/LLD/13-auth-and-user.md).
+ * Auth and user wire types (docs/LLD/auth.md, docs/LLD/user.md).
  *
  * Types only, like everything else in this package — the API validates these shapes with Zod in
  * `identity/interface/identity.validation.ts`, and a compile-only assertion there checks the
@@ -108,7 +108,7 @@ export interface EmergencyContactDto {
  * Every profile field is nullable, and that is the design rather than laziness.
  *
  * A customer account is created by `otp/verify` holding nothing but a phone number, and no
- * endpoint in this module ever requires more (docs/LLD/13-auth-and-user.md §Customer). A client
+ * endpoint in this module ever requires more (docs/LLD/user.md §Customer). A client
  * must therefore be able to render a profile where everything except `mobile_number` is absent.
  */
 export interface CustomerProfileDto {
@@ -182,7 +182,7 @@ export type FuelType = (typeof FUEL_TYPES)[number];
 
 /**
  * The CUSTOMER's own car — the driver drives it rather than supplying one
- * (docs/LLD/12-open-questions.md Q5). `category` is a free string, not a car-category id: a
+ * (docs/LLD/open-questions.md Q5). `category` is a free string, not a car-category id: a
  * customer describes their car before any admin has to agree it maps to a priced category.
  */
 export interface VehicleDto {
@@ -283,7 +283,7 @@ export interface RequestDocumentUploadRequest {
 
 /**
  * Two-step upload: the client `PUT`s the file straight to `upload_url`, never through the API
- * (docs/LLD/09-architecture.md). The row exists as `PENDING` from the moment this returns.
+ * (docs/LLD/architecture.md). The row exists as `PENDING` from the moment this returns.
  */
 export interface RequestDocumentUploadResponse {
   document_id: string;

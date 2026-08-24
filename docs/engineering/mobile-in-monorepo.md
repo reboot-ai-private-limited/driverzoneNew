@@ -1,4 +1,4 @@
-# 08 — Mobile in the Monorepo
+# Mobile in the Monorepo
 
 Two React Native apps live alongside the API and the admin panel. That works well, and there is
 exactly one trap. This doc is mostly about the trap.
@@ -39,7 +39,7 @@ one: without it the other two do nothing.
 The cost is losing pnpm's protection against **phantom dependencies** — importing a package you
 never declared, which works locally and breaks when the hoisting order changes. We accept that
 because `not-to-unresolvable` in
-[dependency-cruiser](04-boundaries-and-enforcement.md#not-to-unresolvable) catches the same
+[dependency-cruiser](boundaries-and-enforcement.md#not-to-unresolvable) catches the same
 class of mistake in CI.
 
 ### 2. `metro.config.js` in each app
@@ -106,7 +106,7 @@ not a rewrite.
 
 ## The driver app's real risk: the foreground service
 
-[`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) requires the driver app
+[`../LLD/dispatch-and-assignment.md`](../LLD/dispatch-and-assignment.md) requires the driver app
 to hold a **persistent socket** while on duty, because FCM alone will not reliably deliver a
 45-second ringing trip offer.
 
@@ -162,6 +162,6 @@ pnpm --filter @driverzone/driver exec eas build --profile preview   --platform a
 pnpm --filter @driverzone/driver exec eas build --profile production --platform android
 ```
 
-They deploy to stores, not servers. See [09](09-build-and-deploy.md) — this is the concrete
+They deploy to stores, not servers. See [09](build-and-deploy.md) — this is the concrete
 answer to "do I need to ship the mobile code to the API server": no, and there is nowhere for
 it to go.

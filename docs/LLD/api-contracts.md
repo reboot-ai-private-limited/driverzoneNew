@@ -1,4 +1,4 @@
-# 08 — API Contracts
+# API Contracts
 
 `https://api.driverzone.in/v1`
 
@@ -27,7 +27,7 @@
 `request_id`, never into the response.
 
 **"We can't serve this" is not an error.** Zone-resolution outcomes return `200` with
-`available: false` — see `04-zone-resolution.md`. This keeps genuine faults visible in
+`available: false` — see `zone-resolution.md`. This keeps genuine faults visible in
 error dashboards instead of drowning in expected outcomes.
 
 ---
@@ -116,7 +116,7 @@ have to build copy from a code — new reasons then render correctly on old app 
 calls into `identity`'s `CustomerBookingProfileContract` to upsert them onto the customer's
 saved addresses/vehicles as a side effect of placing the booking, so the booking flow is the
 capture point rather than a separate profile-setup step. See
-`13-auth-and-user.md` §Module contract.
+`user.md` §Module contract.
 
 **201**
 
@@ -188,7 +188,7 @@ flushes on reconnect, which is why `recorded_at` is client-supplied and the arra
 ordered.
 
 Server writes to Redis (live) and appends to the trip trace during an active trip. It does
-**not** write `drivers.last_location` on every ping — see `09-architecture.md`.
+**not** write `drivers.last_location` on every ping — see `architecture.md`.
 
 ### `POST /driver/offers/:id/accept`
 

@@ -128,7 +128,7 @@ describe('redaction', () => {
 
 describe('request ids', () => {
   it('uses the prefixed shape the API contract specifies', () => {
-    // docs/LLD/08-api-contracts.md: "request_id": "req_01J…"
+    // docs/LLD/api-contracts.md: "request_id": "req_01J…"
     expect(newRequestId()).toMatch(/^req_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 

@@ -31,7 +31,7 @@ export interface UpsertVehicleFromBookingInput {
  *
  * This is the mechanism for customer progressive profile completion: rather than sending someone
  * through a setup wizard, the booking flow offers to keep the pickup address and car they just
- * chose (docs/LLD/13-auth-and-user.md §Module contract).
+ * chose (docs/LLD/user.md §Module contract).
  *
  * Separate from `ManageAddressesUseCase` despite the overlap, because the semantics differ in a
  * way that matters: these are UPSERTS keyed on the real-world identity of the thing — position

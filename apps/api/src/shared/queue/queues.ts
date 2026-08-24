@@ -10,7 +10,7 @@ import { getRedis } from './redis.js';
  * because nothing failed. A customer watches a spinner while the system believes it is working.
  *
  * BullMQ persists to Redis, survives restarts, retries, and is inspectable when something goes
- * wrong. See docs/LLD/06-dispatch-and-assignment.md §Non-negotiable.
+ * wrong. See docs/LLD/dispatch-and-assignment.md §Non-negotiable.
  *
  * Constructed on first use rather than at import, for the same reason as the Redis connection
  * itself — a `new Queue(...)` at module scope connects, so importing anything downstream of

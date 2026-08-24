@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { OTP_LENGTH } from '../domain/otpChallenge.entity.js';
 
 /**
- * INTERFACE — Zod at the boundary, per docs/engineering/05-coding-standards.md.
+ * INTERFACE — Zod at the boundary, per docs/engineering/coding-standards.md.
  *
  * Parsed once here into a typed DTO; the use cases receive validated data and never re-check it.
  * Shapes are snake_case because that is the wire convention — the mapping to camelCase domain
@@ -91,7 +91,7 @@ export const updateCustomerProfileSchema = z.object({
  *
  * A swapped lat/lng — the single most common coordinate bug — lands outside these and is
  * rejected here rather than resolving to a zone in the Indian Ocean
- * (docs/engineering/05-coding-standards.md §Coordinates).
+ * (docs/engineering/coding-standards.md §Coordinates).
  */
 const latitude = z.number().min(6).max(38);
 const longitude = z.number().min(68).max(98);

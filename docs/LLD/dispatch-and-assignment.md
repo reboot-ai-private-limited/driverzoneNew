@@ -1,4 +1,4 @@
-# 06 — Dispatch & Assignment
+# Dispatch & Assignment
 
 The riskiest subsystem in the product. Everything here is about two failure modes:
 **a booking that silently hangs with no driver**, and **two drivers assigned to one trip**.

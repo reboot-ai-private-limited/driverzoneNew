@@ -104,6 +104,19 @@ export function checkValidity(geom: Polygon): ZoneViolation[] {
   return violations;
 }
 
+export interface ZoneStats {
+  areaKm2: number;
+  vertexCount: number;
+}
+
+/**
+ * Informational only — not an invariant, nothing here blocks a save. Backs the `stats` field on
+ * `POST /admin/zones/validate` (docs/LLD/api-contracts.md) and the editor's live area readout.
+ */
+export function zoneStats(geom: Polygon): ZoneStats {
+  return { areaKm2: area(asFeature(geom)) / 1_000_000, vertexCount: vertexCount(geom) };
+}
+
 /** Z-MIN-AREA — a zone too small to contain a pickup is a mis-draw, not a zone. */
 export function checkMinimumArea(geom: Polygon): ZoneViolation[] {
   const sqm = area(asFeature(geom));

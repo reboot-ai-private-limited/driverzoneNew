@@ -15,6 +15,23 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **`zones` module** (tier 3) — the first domain module beyond `identity`: zone CRUD with
+  geometry validation (Z-1–Z-5) via `@driverzone/geo`, point→zone resolution
+  (`GET /coverage/check`, and a `ZoneResolutionContract` for future modules), versioned edits
+  (Z-5 — editing geometry writes a new version and supersedes the old one, never mutates in
+  place), and the admin lifecycle at `/admin/zones/*` — create, update geometry, validate (dry
+  run), deactivate with a blast-radius confirmation, hard delete, dependents. 22 unit tests
+  exercising real Z-1/Z-2/Z-3 geometry, not a mock of it.
+- `@driverzone/geo` gains `zoneStats()` (area/vertex count — informational, not an invariant)
+  and re-exports `Polygon`/`Point`/`LineString`, so consumers never import the bare `geojson`
+  package directly — it ships types only, which `dependency-cruiser` cannot resolve the way
+  `tsc` can.
+- `@driverzone/contracts` gains the `zones` request/response DTOs:
+  `CreateZoneRequest`/`UpdateZoneGeometryRequest`/`DeactivateZoneRequest`,
+  `ListZonesQuery`/`Response`, `ZoneDependentsResponse`, `CoverageCheckQuery`/`Response`.
+- `apps/api/src/shared/db/auditLog.model.ts` — the generic `auditLog` collection, extracted out
+  of `identity` so `zones` (and future modules) can write to it without reaching into another
+  module's `infrastructure/`.
 - HTTP access logging (`pino-http`): one line per request with method, route pattern, status,
   duration and `requestId`. `/api/health` and the driver location ping are excluded — see
   `docs/decision-log.md` for why.
@@ -50,6 +67,9 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Changed
 
+- The generic `auditLog` model moved from `identity/infrastructure/` to
+  `apps/api/src/shared/db/auditLog.model.ts`. `identity/infrastructure/audit.mongo.ts` is now a
+  thin adapter over the shared model — no behaviour change.
 - Low-level design docs `02`–`12` moved to `docs/LLD/`. The PRD, `README.md` and
   `setup-development.md` stay at `docs/` root.
 - `apps/api/.env.example`: `MONGO_URI` now carries `?replicaSet=rs0&directConnection=true`.

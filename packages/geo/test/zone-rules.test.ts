@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkOverlap, checkWithinParent, clipToParent, validateZone } from '../src/zone-rules.js';
+import { checkOverlap, checkWithinParent, clipToParent, validateZone, zoneStats } from '../src/zone-rules.js';
 import {
   BOWTIE,
   CENTRAL_PICKUP,
@@ -116,5 +116,14 @@ describe('validateZone — the full gate', () => {
       siblings: [{ id: 'o', name: 'Overlapper', geom: NORTHERN_OVERLAPPER }],
     });
     expect(vs.map((v) => v.rule).sort()).toEqual(['Z-1', 'Z-2']);
+  });
+});
+
+describe('zoneStats — informational only, not an invariant', () => {
+  it('reports a positive area and the ring vertex count, closing point included', () => {
+    const stats = zoneStats(CENTRAL_PICKUP);
+    expect(stats.areaKm2).toBeGreaterThan(0);
+    // 4 distinct corners plus the closing repeat of the first point.
+    expect(stats.vertexCount).toBe(5);
   });
 });

@@ -1,14 +1,21 @@
 import mongoose, { Schema } from 'mongoose';
-import type { AuditAction } from '../domain/audit.port.js';
 
 /**
- * INFRASTRUCTURE — the `auditLog` collection (docs/LLD/database-schema.md).
+ * SHARED — the `auditLog` collection (docs/LLD/database-schema.md).
+ *
+ * Lives in `shared/`, not inside one module, because the shape is already entity-agnostic
+ * (`entityType` is the discriminator) and more than one module needs to write to it —
+ * `identity` first, `zones` next. A module cannot reach into another module's
+ * `infrastructure/` (`module-internals-are-private`), so a shared, entity-agnostic collection
+ * belongs below every module rather than owned by whichever one happened to need it first.
  *
  * Append-only in intent: nothing in the application ever updates or deletes a row, and
  * `timestamps: { updatedAt: false }` says so in the schema. The `bookingEvents` collection gets
  * this enforced at the database role; this one should follow when that role is next revised —
  * an audit log the application can rewrite answers no question worth asking.
  */
+
+export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE' | 'APPROVE' | 'REJECT';
 
 export interface AuditLogDoc {
   _id: mongoose.Types.ObjectId;
@@ -44,7 +51,7 @@ const auditLogSchema = new Schema<AuditLogDoc>(
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
-// "What happened to this driver" — the entity timeline, newest first.
+// "What happened to this entity" — the entity timeline, newest first.
 auditLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 // "What did this admin do" — the accountability view.
 auditLogSchema.index({ adminId: 1, createdAt: -1 });

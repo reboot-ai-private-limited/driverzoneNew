@@ -25,5 +25,14 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/driver', c.identity.buildRoleRouter('DRIVER'));
   router.use('/admin', c.identity.buildRoleRouter('ADMIN'));
 
+  /**
+   * More specific than `/admin` above, so it must be registered after it: a request to
+   * `/admin/zones/...` first enters identity's ADMIN router, finds no matching route inside it,
+   * and falls through via `next()` to this mount — standard Express behaviour for two `.use()`
+   * calls with overlapping prefixes, not a hack. `/coverage` has no such overlap.
+   */
+  router.use('/admin/zones', c.zones.buildAdminRouter());
+  router.use('/coverage', c.zones.buildCoverageRouter());
+
   return router;
 }

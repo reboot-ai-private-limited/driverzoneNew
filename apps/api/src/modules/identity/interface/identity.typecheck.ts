@@ -1,10 +1,35 @@
 import type {
+  CreateAddressRequest,
+  CreateVehicleRequest,
   LogoutRequest,
   OtpSendRequest,
   OtpVerifyRequest,
   RefreshRequest,
+  RejectDriverRequest,
+  RequestDocumentUploadRequest,
+  ReviewDocumentRequest,
+  UpdateAddressRequest,
+  UpdateAdminProfileRequest,
+  UpdateCustomerProfileRequest,
+  UpdateDriverProfileRequest,
+  UpdateVehicleRequest,
 } from '@driverzone/contracts';
-import type { LogoutInput, OtpSendInput, OtpVerifyInput, RefreshInput } from './identity.validation.js';
+import type {
+  CreateAddressInput,
+  CreateVehicleInput,
+  LogoutInput,
+  OtpSendInput,
+  OtpVerifyInput,
+  RefreshInput,
+  RejectDriverInput,
+  RequestDocumentUploadInput,
+  ReviewDocumentInput,
+  UpdateAddressInput,
+  UpdateAdminProfileInput,
+  UpdateCustomerProfileInput,
+  UpdateDriverProfileInput,
+  UpdateVehicleInput,
+} from './identity.validation.js';
 
 /**
  * Compile-only drift guard between the Zod schemas and the shared wire types.
@@ -44,3 +69,24 @@ export type OtpSendMatches = AssertTrue<Exact<OtpSendInput, OtpSendRequest>>;
 export type OtpVerifyMatches = AssertTrue<Exact<OtpVerifyInput, OtpVerifyRequest>>;
 export type RefreshMatches = AssertTrue<Exact<RefreshInput, RefreshRequest>>;
 export type LogoutMatches = AssertTrue<Exact<LogoutInput, LogoutRequest>>;
+
+// ─── Phase 2 request shapes ─────────────────────────────────────────────────────────────────
+
+export type UpdateCustomerProfileMatches = AssertTrue<
+  Exact<UpdateCustomerProfileInput, UpdateCustomerProfileRequest>
+>;
+export type CreateAddressMatches = AssertTrue<Exact<CreateAddressInput, CreateAddressRequest>>;
+export type UpdateAddressMatches = AssertTrue<Exact<UpdateAddressInput, UpdateAddressRequest>>;
+export type CreateVehicleMatches = AssertTrue<Exact<CreateVehicleInput, CreateVehicleRequest>>;
+export type UpdateVehicleMatches = AssertTrue<Exact<UpdateVehicleInput, UpdateVehicleRequest>>;
+export type UpdateDriverProfileMatches = AssertTrue<
+  Exact<UpdateDriverProfileInput, UpdateDriverProfileRequest>
+>;
+export type RequestDocumentUploadMatches = AssertTrue<
+  Exact<RequestDocumentUploadInput, RequestDocumentUploadRequest>
+>;
+export type UpdateAdminProfileMatches = AssertTrue<
+  Exact<UpdateAdminProfileInput, UpdateAdminProfileRequest>
+>;
+export type RejectDriverMatches = AssertTrue<Exact<RejectDriverInput, RejectDriverRequest>>;
+export type ReviewDocumentMatches = AssertTrue<Exact<ReviewDocumentInput, ReviewDocumentRequest>>;

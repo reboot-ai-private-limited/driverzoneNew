@@ -42,15 +42,17 @@ export interface AccountDirectoryContract {
  *
  * Called when `POST /bookings` carries `save_pickup_address` or `save_vehicle` — the mechanism
  * behind customer progressive profile completion (docs/LLD/13-auth-and-user.md §Module contract).
- * Both are upserts keyed on the natural identity of the thing (plate number, coordinates), so a
- * customer booking twice from home does not accumulate duplicate addresses.
  *
- * NOT IMPLEMENTED YET — phase 2, alongside the address and vehicle endpoints.
+ * **Both are upserts keyed on the real-world identity of the thing** — coordinates for an
+ * address, number plate for a vehicle — and both return the id of the existing entry when one
+ * matches. A customer booking twice from home ends with one saved address, and neither method
+ * ever fails on a duplicate: a booking must not be lost because its optional side effect had
+ * nothing new to do.
  */
 export interface CustomerBookingProfileContract {
   upsertVehicleFromBooking(
     customerId: string,
-    vehicle: { category: string; plateNumber: string; fuelType?: string },
+    vehicle: { category: string; plateNumber: string; fuelType?: string | undefined },
   ): Promise<string>;
 
   upsertAddressFromBooking(
@@ -60,7 +62,7 @@ export interface CustomerBookingProfileContract {
       address: string;
       lat: number;
       lng: number;
-      isPreferredPickup?: boolean;
+      isPreferredPickup?: boolean | undefined;
     },
   ): Promise<string>;
 }
@@ -68,8 +70,10 @@ export interface CustomerBookingProfileContract {
 /**
  * The whole surface, as returned by `buildIdentityContainer()`.
  *
- * Empty in phase 1: authentication is consumed over HTTP and through the shared JWT verifier,
- * not through a module contract, so nothing else needs anything from `identity` yet. It gains
- * the two interfaces above when the profile endpoints land.
+ * Only the write-side contract so far. Authentication is consumed over HTTP and through the
+ * shared JWT verifier rather than through a module contract, and nothing has yet needed
+ * `AccountDirectoryContract` — it stays declared but unimplemented until `bookings` or `admin`
+ * actually renders a name, because a contract with no consumer is a guess about what the
+ * consumer will want.
  */
-export type IdentityPublicContract = Record<string, never>;
+export type IdentityPublicContract = CustomerBookingProfileContract;

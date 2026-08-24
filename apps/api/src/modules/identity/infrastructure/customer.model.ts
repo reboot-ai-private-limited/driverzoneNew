@@ -53,19 +53,28 @@ const customerSchema = new Schema<CustomerDoc>(
       default: null,
     },
 
-    // Shapes land in phase 2 with the address/vehicle endpoints; declared now so `strictQuery`
-    // does not reject a filter on them and so the collection shape matches the schema doc.
+    /**
+     * `entryId` rather than Mongo's `_id`, and `_id: false` to stop a second identifier
+     * existing alongside it.
+     *
+     * These lists are rewritten whole (the "only one default" invariant spans every element, so
+     * a per-item update could interleave and leave two defaults set). A Mongo-generated `_id`
+     * would be regenerated on every such rewrite, so an address id a client held would silently
+     * stop resolving. An application-generated `adr_` id survives, and is self-describing when
+     * it turns up pasted into a support ticket.
+     */
     savedAddresses: {
       type: [
         new Schema(
           {
+            entryId: { type: String, required: true },
             label: { type: String, enum: ['HOME', 'OFFICE', 'OTHER'], required: true },
             address: { type: String, required: true },
             point: { type: { type: String, enum: ['Point'] }, coordinates: [Number] },
             isDefault: { type: Boolean, default: false },
             isPreferredPickup: { type: Boolean, default: false },
           },
-          { _id: true },
+          { _id: false },
         ),
       ],
       default: [],
@@ -77,12 +86,14 @@ const customerSchema = new Schema<CustomerDoc>(
       type: [
         new Schema(
           {
+            // Same `entryId` reasoning as savedAddresses above.
+            entryId: { type: String, required: true },
             category: { type: String, required: true },
             plateNumber: { type: String, required: true },
-            fuelType: { type: String, enum: ['PETROL', 'DIESEL', 'EV', 'CNG'] },
+            fuelType: { type: String, enum: ['PETROL', 'DIESEL', 'EV', 'CNG', null], default: null },
             isDefault: { type: Boolean, default: false },
           },
-          { _id: true },
+          { _id: false },
         ),
       ],
       default: [],

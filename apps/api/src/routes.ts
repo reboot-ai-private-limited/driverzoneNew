@@ -12,15 +12,18 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/health', c.health.buildRouter());
 
   /**
-   * One auth surface per role, each with its own JWT audience.
+   * One surface per role — auth plus that role's own account routes.
    *
-   * Mounted separately rather than as a single `/auth` with a role in the body: the path IS the
-   * role, so a caller cannot request one, and the admin cookie can be scoped to
-   * `/api/admin/auth` alone rather than riding along on every request the mobile apps make.
+   * The path IS the role, rather than a role field in a body a caller could set. That also lets
+   * the admin refresh cookie be scoped to `/api/admin/auth` alone instead of riding along on
+   * every request the mobile apps make.
+   *
+   * Each role's routes are composed inside its container, so this list stays at three entries
+   * however many endpoints the module grows.
    */
-  router.use('/customer/auth', c.identity.buildAuthRouter('CUSTOMER'));
-  router.use('/driver/auth', c.identity.buildAuthRouter('DRIVER'));
-  router.use('/admin/auth', c.identity.buildAuthRouter('ADMIN'));
+  router.use('/customer', c.identity.buildRoleRouter('CUSTOMER'));
+  router.use('/driver', c.identity.buildRoleRouter('DRIVER'));
+  router.use('/admin', c.identity.buildRoleRouter('ADMIN'));
 
   return router;
 }

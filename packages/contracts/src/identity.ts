@@ -93,3 +93,242 @@ export interface LogoutRequest {
 export interface LogoutResponse {
   logged_out: true;
 }
+
+// ─── Shared profile pieces ──────────────────────────────────────────────────────────────────
+
+export const GENDERS = ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] as const;
+export type Gender = (typeof GENDERS)[number];
+
+export interface EmergencyContactDto {
+  name: string;
+  number: string;
+}
+
+/**
+ * Every profile field is nullable, and that is the design rather than laziness.
+ *
+ * A customer account is created by `otp/verify` holding nothing but a phone number, and no
+ * endpoint in this module ever requires more (docs/LLD/13-auth-and-user.md §Customer). A client
+ * must therefore be able to render a profile where everything except `mobile_number` is absent.
+ */
+export interface CustomerProfileDto {
+  id: string;
+  mobile_number: string;
+  full_name: string | null;
+  dob: string | null;
+  gender: Gender | null;
+  languages_known: string[];
+  alternate_number: string | null;
+  emergency_contact: EmergencyContactDto | null;
+  saved_addresses: SavedAddressDto[];
+  vehicles: VehicleDto[];
+}
+
+/**
+ * `PATCH` semantics: an omitted key leaves the field alone, an explicit `null` clears it.
+ *
+ * Those are genuinely different intents — "I'm only updating my name" versus "remove my
+ * alternate number" — and a shape that could not express both would make clearing a field
+ * impossible without a second endpoint.
+ */
+export interface UpdateCustomerProfileRequest {
+  full_name?: string | undefined;
+  dob?: string | null | undefined;
+  gender?: Gender | null | undefined;
+  languages_known?: string[] | undefined;
+  alternate_number?: string | null | undefined;
+  emergency_contact?: EmergencyContactDto | null | undefined;
+}
+
+// ─── Saved addresses ────────────────────────────────────────────────────────────────────────
+
+export const ADDRESS_LABELS = ['HOME', 'OFFICE', 'OTHER'] as const;
+export type AddressLabel = (typeof ADDRESS_LABELS)[number];
+
+export interface SavedAddressDto {
+  id: string;
+  label: AddressLabel;
+  address: string;
+  lat: number;
+  lng: number;
+  /** Shown first in the address book. */
+  is_default: boolean;
+  /** Prefills the quote flow's pickup point. Independent of `is_default`. */
+  is_preferred_pickup: boolean;
+}
+
+export interface CreateAddressRequest {
+  label: AddressLabel;
+  address: string;
+  lat: number;
+  lng: number;
+  is_default?: boolean | undefined;
+  is_preferred_pickup?: boolean | undefined;
+}
+
+export interface UpdateAddressRequest {
+  label?: AddressLabel | undefined;
+  address?: string | undefined;
+  lat?: number | undefined;
+  lng?: number | undefined;
+  is_default?: boolean | undefined;
+  is_preferred_pickup?: boolean | undefined;
+}
+
+// ─── Vehicles ───────────────────────────────────────────────────────────────────────────────
+
+export const FUEL_TYPES = ['PETROL', 'DIESEL', 'EV', 'CNG'] as const;
+export type FuelType = (typeof FUEL_TYPES)[number];
+
+/**
+ * The CUSTOMER's own car — the driver drives it rather than supplying one
+ * (docs/LLD/12-open-questions.md Q5). `category` is a free string, not a car-category id: a
+ * customer describes their car before any admin has to agree it maps to a priced category.
+ */
+export interface VehicleDto {
+  id: string;
+  category: string;
+  plate_number: string;
+  fuel_type: FuelType | null;
+  is_default: boolean;
+}
+
+export interface CreateVehicleRequest {
+  category: string;
+  plate_number: string;
+  fuel_type?: FuelType | undefined;
+  is_default?: boolean | undefined;
+}
+
+export interface UpdateVehicleRequest {
+  category?: string | undefined;
+  plate_number?: string | undefined;
+  fuel_type?: FuelType | undefined;
+  is_default?: boolean | undefined;
+}
+
+// ─── Driver ─────────────────────────────────────────────────────────────────────────────────
+
+export const ONBOARDING_STATUSES = ['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED'] as const;
+export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
+
+export const VEHICLE_TYPE_PREFERENCES = ['AUTO', 'MANUAL', 'EV'] as const;
+export type VehicleTypePreference = (typeof VEHICLE_TYPE_PREFERENCES)[number];
+
+export interface DriverProfileDto {
+  id: string;
+  mobile_number: string;
+  full_name: string | null;
+  dob: string | null;
+  gender: Gender | null;
+  experience_years: number | null;
+  alternate_number: string | null;
+  emergency_contact: EmergencyContactDto | null;
+  address: string | null;
+
+  /** What this driver is COMPETENT to drive, not what they own. */
+  vehicle_type_preference: VehicleTypePreference | null;
+  vehicle_category_preference: string[];
+
+  /** Self-declared. Gates nothing on its own — hill dispatch reads the `_verified` flag. */
+  can_drive_hill: boolean;
+  can_drive_hill_verified: boolean;
+
+  onboarding_status: OnboardingStatus;
+  onboarding_rejection_reason: string | null;
+  /** The single flag dispatch and `POST /driver/duty` gate on. */
+  is_verified: boolean;
+}
+
+export interface UpdateDriverProfileRequest {
+  full_name?: string | undefined;
+  dob?: string | null | undefined;
+  gender?: Gender | null | undefined;
+  experience_years?: number | null | undefined;
+  alternate_number?: string | null | undefined;
+  emergency_contact?: EmergencyContactDto | null | undefined;
+  address?: string | null | undefined;
+  vehicle_type_preference?: VehicleTypePreference | null | undefined;
+  vehicle_category_preference?: string[] | undefined;
+  can_drive_hill?: boolean | undefined;
+}
+
+// ─── Driver documents ───────────────────────────────────────────────────────────────────────
+
+export const DOCUMENT_TYPES = ['LICENCE', 'AADHAAR', 'POLICE_VERIFICATION', 'VEHICLE_RC', 'INSURANCE'] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+
+export const DOCUMENT_STATUSES = ['PENDING', 'VERIFIED', 'REJECTED'] as const;
+export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
+
+export interface DriverDocumentDto {
+  id: string;
+  doc_type: DocumentType;
+  status: DocumentStatus;
+  /** Why an admin rejected it, so the driver knows what to re-upload. */
+  rejection_reason: string | null;
+  number: string | null;
+  sub_type: string | null;
+  issued_on: string | null;
+  expires_on: string | null;
+}
+
+export interface RequestDocumentUploadRequest {
+  doc_type: DocumentType;
+  number?: string | undefined;
+  sub_type?: string | undefined;
+  issued_on?: string | undefined;
+  expires_on?: string | undefined;
+}
+
+/**
+ * Two-step upload: the client `PUT`s the file straight to `upload_url`, never through the API
+ * (docs/LLD/09-architecture.md). The row exists as `PENDING` from the moment this returns.
+ */
+export interface RequestDocumentUploadResponse {
+  document_id: string;
+  upload_url: string;
+  expires_in_seconds: number;
+}
+
+// ─── Onboarding ─────────────────────────────────────────────────────────────────────────────
+
+export interface SubmitOnboardingResponse {
+  onboarding_status: OnboardingStatus;
+}
+
+// ─── Admin ──────────────────────────────────────────────────────────────────────────────────
+
+export interface AdminProfileDto {
+  id: string;
+  mobile_number: string;
+  full_name: string;
+}
+
+/** `mobile_number` is deliberately absent — it is the credential, not a self-service field. */
+export interface UpdateAdminProfileRequest {
+  full_name?: string | undefined;
+}
+
+export interface ApproveDriverResponse {
+  onboarding_status: OnboardingStatus;
+  is_verified: boolean;
+}
+
+export interface RejectDriverRequest {
+  reason: string;
+}
+
+export interface RejectDriverResponse {
+  onboarding_status: OnboardingStatus;
+}
+
+export interface ReviewDocumentRequest {
+  status: DocumentStatus;
+  reason?: string | undefined;
+}
+
+export interface ReviewDocumentResponse {
+  document_id: string;
+  status: DocumentStatus;
+}

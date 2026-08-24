@@ -318,6 +318,20 @@ private-bucket policy — and the client `PUT`s the file directly to storage, ne
 API. The row starts `PENDING`; only an admin verification action moves it to
 `VERIFIED`/`REJECTED` (`08-api-contracts.md` §Admin, `CRUD /admin/drivers`).
 
+The row is created **before** the file exists, holding the storage key the client is about to
+upload to. That ordering is what makes the flow recoverable: an upload that fails or an app
+killed mid-transfer leaves a `PENDING` document the driver can retry, rather than no record that
+they ever tried. The cost, accepted: a row can reference an object that was never uploaded, and
+an admin reviewing an empty document rejects it — which is the correct outcome and needs no
+extra machinery.
+
+> **No object storage exists yet.** `09-architecture.md` specifies an S3-compatible private
+> bucket; nothing in the repo or the compose stack provides one. `StubDocumentStorage` stands in
+> for local development — it mints a plausible key and a URL that accepts nothing, so the whole
+> onboarding flow is exercisable end to end — and **refuses to run in production**, so a deploy
+> cannot silently accept uploads into nowhere. Swapping in the real adapter is one line in
+> `identity.container.ts`.
+
 ### Driver onboarding & verification
 
 Unlike customer, a driver's profile is **not** progressive — see the decision log, 2026-08-24,
@@ -433,6 +447,9 @@ again — rejection is not terminal.
 ```jsonc
 { "status": "REJECTED", "reason": "Expired at time of submission." }
 ```
+
+`reason` is **required when rejecting** and is stored on the document as `rejectionReason`. A
+driver told only "rejected" has nothing to act on and re-uploads the same unreadable photo.
 
 **200**
 

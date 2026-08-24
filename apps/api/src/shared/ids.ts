@@ -38,3 +38,18 @@ export function newSessionId(): string {
 export function newSessionFamilyId(): string {
   return `fam_${uuidv7()}`;
 }
+
+/**
+ * Identifiers for entries embedded in a parent document — a customer's saved addresses and
+ * vehicles.
+ *
+ * v7 rather than v4 because these render as ordered lists in the apps, and a sortable id gives
+ * "oldest first" for free without carrying a separate `createdAt` on every subdocument.
+ */
+export function newAddressId(): string {
+  return `adr_${uuidv7()}`;
+}
+
+export function newVehicleId(): string {
+  return `veh_${uuidv7()}`;
+}

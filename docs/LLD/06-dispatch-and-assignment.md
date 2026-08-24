@@ -79,7 +79,7 @@ WHERE d.is_on_duty
   AND dcc.car_category_id = $carCategory
   AND d.last_location_at > now() - interval '2 minutes'   -- stale = probably offline
   AND ST_DWithin(d.last_location, $pickup, $radius)
-  AND ($terrain <> 'HILL' OR d.can_drive_hill)
+  AND ($terrain <> 'HILL' OR d.can_drive_hill_verified)
   AND d.wallet_balance_paise > $minBalance
   AND NOT EXISTS (                       -- no overlapping committed trip
     SELECT 1 FROM bookings b

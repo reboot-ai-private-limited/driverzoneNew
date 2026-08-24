@@ -20,6 +20,82 @@ entry links to it.
 
 ---
 
+## 2026-08-24 — Hill capability: driver self-declares, admin approval gates dispatch
+
+**Decision:** closes [`LLD/12-open-questions.md`](LLD/12-open-questions.md) Q6. A driver
+self-declares `can_drive_hill` any time via `PATCH /driver/profile`, not only at onboarding.
+That claim gates nothing by itself — an admin must separately verify it via the new
+`POST /admin/drivers/:id/hill-capability`, which sets `can_drive_hill_verified`. The dispatch
+eligibility query checks `can_drive_hill_verified` only.
+
+**Why:** matches the original recommendation's safety reasoning — hill driving in the
+Darjeeling region is a genuine safety matter, so a driver's own claim cannot be sufficient —
+while not requiring it be decided at onboarding specifically. A driver may reasonably gain hill
+experience, or a licence endorsement, after they're already on duty for plains trips; gating the
+request to onboarding-only would force a full re-onboarding for something that's really a
+standalone capability grant.
+
+**Bug found and fixed while closing this:** the dispatch eligibility query
+(`06-dispatch-and-assignment.md` §Eligibility) was checking `d.can_drive_hill` — the
+self-declared, unverified field — not `d.can_drive_hill_verified`. The schema's own comment
+already documented the intent ("actual hill dispatch checks this, not canDriveHill"); the query
+just didn't match it. As written, any driver could self-declare hill capability and be
+dispatched onto a hill route with zero admin review — the exact failure mode Q6 was raised to
+prevent. Fixed to read `can_drive_hill_verified`.
+
+**Consequences:** `drivers` gains `hillCapabilityVerifiedBy` / `hillCapabilityVerifiedAt` for
+audit, mirroring the onboarding `verifiedBy`/`verifiedAt` pair. Setting `can_drive_hill: false`
+(withdrawing the claim) resets `can_drive_hill_verified` to `false` in the same write, so
+dispatch only ever needs to read one field and it's never stale relative to current consent.
+`POST /admin/drivers/:id/hill-capability` 409s if the driver hasn't self-declared — nothing to
+verify against.
+
+**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#post-admindriversidhill-capability),
+[`LLD/03-database-schema.md`](LLD/03-database-schema.md#drivers),
+[`LLD/06-dispatch-and-assignment.md`](LLD/06-dispatch-and-assignment.md#eligibility)
+
+---
+
+## 2026-08-24 — Round trip: multi-day in scope, driver expenses paid direct and off-app
+
+**Decision:** closes [`LLD/12-open-questions.md`](LLD/12-open-questions.md) Q4, reversing its
+same-day-only recommendation.
+
+- Multi-day round trips (driver stays overnight, one or more nights) are **in scope for v1**.
+- `base_fare_paise` on a `ROUND_TRIP` price row is flat for the whole trip regardless of how
+  many days it takes — no per-extra-day charge through the app.
+- The driver's meals and night-halt are **not an app transaction**. The customer pays the
+  driver directly, in cash; no fare line, no ledger entry, no commission split, no admin
+  visibility into the amount.
+- Because real money still changes hands outside the app, it must be disclosed on the quote and
+  explicitly accepted before the booking confirms — `direct_expenses` on the quote,
+  `round_trip_terms_accepted` required on `POST /bookings`, rejected with
+  `ROUND_TRIP_TERMS_NOT_ACCEPTED` if missing.
+
+**Why:** the original objection to multi-day was "different driver economics, highest-dispute
+product" — driven by the app trying to price and adjudicate the driver's on-trip costs. Taking
+that money out of the app entirely removes the dispute surface the recommendation was written
+against; what's left is a disclosure-and-consent problem, not a pricing one.
+
+**Consequences:** `driverAllowancePaise` dropped from `outstationPriceSchema`, replaced by an
+admin-edited `directExpensesNotice` on the package (informational only, never priced).
+`bookingSchema` gains `roundTripTermsAcceptedAt`, required in practice (validated in the use
+case, not the schema) whenever `serviceType=OUTSTATION` and `direction=ROUND_TRIP`. The
+commission-split assertion drops the `allowance` term: `driverShare + companyShare + tax ==
+total`.
+
+**Known limit, accepted:** the app has no record of what the customer actually paid the driver
+for meals/night-halt, and cannot arbitrate a dispute over that amount — only that the customer
+was shown the term and agreed to it. If direct-payment disputes turn out to be common, the next
+step is a suggested/capped indicative range enforced more strongly than an admin-edited notice,
+not bringing the payment back into the app.
+
+**Refs:** [`LLD/05-pricing-and-commission.md`](LLD/05-pricing-and-commission.md#round-trip--multi-day-and-driver-expenses),
+[`LLD/03-database-schema.md`](LLD/03-database-schema.md#outstationpackages),
+[`LLD/08-api-contracts.md`](LLD/08-api-contracts.md#post-bookings)
+
+---
+
 ## 2026-08-24 — Driver requires admin approval before duty; customer profile stays fully progressive
 
 **Decision:** Customer profile fields are never required beyond `mobile_number` — they fill in
@@ -164,6 +240,26 @@ leaked pepper only devalues in-flight OTP challenges (5-minute blast radius), no
 credential.
 
 **Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#otp)
+
+---
+
+## 2026-08-24 — Outstation band pricing is flat, not base + per-km
+
+**Decision:** an outstation band charges one flat `base_fare_paise` for any trip inside
+`[minKm, maxKm)`. Closes [`LLD/12-open-questions.md`](LLD/12-open-questions.md) Q3, reversing
+the base+per-km assumption in `LLD/05-pricing-and-commission.md`.
+
+**Why:** product intent is that 50, 80 and 90 km inside a 50–100 km band all cost the
+customer the same — no per-km charge on top of the band price.
+
+**Consequences:** `extraKmRatePaise` dropped from `outstationPriceSchema`
+(`LLD/03-database-schema.md`) — there is no per-km rate left to store. Because nothing now
+absorbs the cost variance inside a band, bands must be cut narrow (e.g. `50–60`, `60–70`,
+not one wide `50–100`); a wide flat band pays a driver the same for a 51 km trip and a 99 km
+trip. Package/band design in the admin panel should default to narrow bands, not wide ones.
+
+**Refs:** [`LLD/05-pricing-and-commission.md`](LLD/05-pricing-and-commission.md#outstation-fare),
+[`LLD/03-database-schema.md`](LLD/03-database-schema.md#outstationpackages)
 
 ---
 

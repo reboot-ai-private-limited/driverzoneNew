@@ -37,32 +37,6 @@ customer gets a "confirm trip ended" push whose timestamp wins if it comes first
 
 ---
 
-### 🔴 Q3 — Outstation band pricing: flat or base + per-km?
-
-Does a 70–100 km package charge the same for 72 km and 98 km, or does the price cover
-70 km with a per-km rate on top?
-
-`05-pricing-and-commission.md` assumes **base + per-km beyond `min_km`**. If you intend a
-flat band price, `extra_km_rate_paise` is simply 0 and the formula still holds — but say
-so now, because it determines how narrow your bands need to be. Flat pricing needs many
-narrow bands; base+per-km works with a few wide ones.
-
----
-
-### 🔴 Q4 — Round trip: what is actually included?
-
-A round-trip price implies the driver waits at the destination. For how long? Is a
-multi-day trip (driver stays overnight) the same product?
-
-**Needs defining:** maximum included wait, per-day driver allowance, night-halt charge,
-and what happens when the customer extends on the day. Without this, round-trip outstation
-is your highest-dispute product.
-
-**Recommendation for v1:** cap round trips at same-day return, defer multi-day entirely.
-Multi-day is a genuinely different product with different driver economics.
-
----
-
 ### 🟡 Q5 — Car category: whose car is it?
 
 The driver drives the **customer's** car, so `driver_car_categories` means "categories
@@ -72,17 +46,6 @@ booking should actually cost more, given the driver isn't supplying the vehicle.
 Defensible either way (an SUV is harder to drive in city traffic), but be deliberate: if
 the answer is "no difference", collapse pricing to one category and delete a whole
 dimension from the pricing matrix.
-
----
-
-### 🟡 Q6 — Hill zones and driver capability
-
-`drivers.can_drive_hill` gates hill dispatch. How is it granted — self-declared,
-admin-verified, or earned after N plains trips?
-
-**Recommendation:** admin-verified at onboarding. Hill driving in the Darjeeling region is
-a genuine safety matter, and self-declaration is how you end up with an inexperienced
-driver on a mountain road at night.
 
 ---
 

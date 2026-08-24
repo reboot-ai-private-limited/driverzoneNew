@@ -181,8 +181,10 @@ const outstationPriceSchema = new Schema({
   carCategoryId:        { type: Schema.Types.ObjectId, ref: 'CarCategory', required: true },
   direction:            { type: String, enum: ['ONE_WAY', 'ROUND_TRIP'], required: true },
   baseFarePaise:        { type: Number, required: true, min: 0 },
-  extraKmRatePaise:     { type: Number, default: 0, min: 0 },
-  driverAllowancePaise: { type: Number, default: 0, min: 0 },   // night halt / food
+  // Flat for the whole [minKm, maxKm) band, and flat regardless of trip duration — a multi-day
+  // ROUND_TRIP is not charged extra per day. No driverAllowancePaise: the driver's meals and
+  // night-halt are paid by the customer directly, off-app — see 05-pricing-and-commission.md
+  // §Round trip.
 
   driverCommissionType:   { type: String, enum: ['PERCENT', 'FLAT'], required: true },
   driverCommissionValue:  { type: Number, required: true },
@@ -193,13 +195,17 @@ const outstationPriceSchema = new Schema({
 }, { _id: true });
 
 const outstationPackageSchema = new Schema({
-  name:          { type: String, required: true },       // 'PKG-1'
-  terrain:       { type: String, enum: ['PLAIN', 'HILL'], required: true },
-  minKm:         { type: Number, required: true, min: 0 },
-  maxKm:         { type: Number, required: true },       // band is [minKm, maxKm)
-  pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
-  prices:        [outstationPriceSchema],
-  isActive:      { type: Boolean, default: true },
+  name:                 { type: String, required: true },       // 'PKG-1'
+  terrain:              { type: String, enum: ['PLAIN', 'HILL'], required: true },
+  minKm:                { type: Number, required: true, min: 0 },
+  maxKm:                { type: Number, required: true },       // band is [minKm, maxKm)
+  pickupZoneIds:        [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
+  prices:               [outstationPriceSchema],
+  // Customer-facing disclosure shown on any ROUND_TRIP quote from this package, e.g. "Meals and
+  // night-halt are paid to the driver directly, in cash — typically ₹300–500/day." Admin-edited,
+  // never priced — see 05-pricing-and-commission.md §Round trip.
+  directExpensesNotice: { type: String },
+  isActive:             { type: Boolean, default: true },
 }, { timestamps: true });
 
 outstationPackageSchema.index({ terrain: 1, minKm: 1, maxKm: 1, isActive: 1 });
@@ -207,7 +213,8 @@ outstationPackageSchema.index({ pickupZoneIds: 1, isActive: 1 });
 ```
 
 Bands are **half-open** `[minKm, maxKm)`, so adjacent bands (0–70, 70–100, 100–150) tile with no
-gap and no overlap at the boundary.
+gap and no overlap at the boundary. Band pricing is flat (see `05-pricing-and-commission.md`),
+so keep bands narrow — a wide band charges a 51 km trip and a 99 km trip the same.
 
 **Invariant P-2** — for a given (pickup zone, terrain), bands must not overlap. Two matches means
 an ambiguous price. Enforced in the use case:
@@ -422,6 +429,11 @@ const bookingSchema = new Schema({
 
   actualMinutes:   Number,
   actualDistanceM: Number,
+
+  // Required (set at confirmation) when serviceType=OUTSTATION and the quote's direction was
+  // ROUND_TRIP — the customer explicitly accepted that driver meals/night-halt are paid
+  // directly, off-app. See 05-pricing-and-commission.md §Round trip.
+  roundTripTermsAcceptedAt: Date,
 }, { timestamps: true });
 
 bookingSchema.index({ customerId: 1, createdAt: -1 });
@@ -539,10 +551,16 @@ const driverSchema = new Schema({
   rating:         Number,
   acceptanceRate: Number,                        // rolling 30-day, recomputed nightly
   walletBalancePaise: { type: Number, default: 0 },   // negative = owes the company
+  // Self-declared, settable any time via PATCH /driver/profile — not just at onboarding.
+  // Gates nothing on its own; hill driving is a safety matter, so the dispatch eligibility
+  // query (06-dispatch-and-assignment.md §Eligibility) checks canDriveHillVerified, never this.
   canDriveHill:   { type: Boolean, default: false },
-  // Self-declared at onboarding. Gates nothing on its own — hill driving is a safety matter,
-  // so actual hill dispatch checks this, not canDriveHill (12-open-questions.md Q6).
+  // Admin-only, set by POST /admin/drivers/:id/hill-capability. Setting canDriveHill to false
+  // (the driver withdrawing their claim) resets this to false too, in the same write — a driver
+  // who un-declares cannot stay hill-eligible on a stale approval.
   canDriveHillVerified: { type: Boolean, default: false },
+  hillCapabilityVerifiedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
+  hillCapabilityVerifiedAt: Date,
 
   // Identity/profile fields, added alongside the auth module (13-auth-and-user.md).
   dob:    Date,

@@ -67,28 +67,60 @@ Decisions baked in above, all of which favour the customer at the margin:
 
 ## Outstation fare
 
+Band pricing is **flat**: any trip whose road distance falls inside `[minKm, maxKm)` pays the
+same `base_fare_paise`, whether that's 51 km or 99 km against a 50–100 band. There is no
+per-km charge inside a band — see the decision log entry below.
+
 ```
 computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt)
 
-  base        = price.base_fare_paise
-  extra_km    = max(0, distanceKm - pkg.min_km)       -- band price covers up to min_km
-  dist_charge = extra_km * price.extra_km_rate_paise
-  allowance   = price.driver_allowance_paise          -- night halt / food
+  base        = price.base_fare_paise                 -- flat for the whole [minKm, maxKm) band,
+                                                        -- and flat regardless of trip duration
   pickup_fee  = (as incity)
   night_fee   = ...
 
-  subtotal    = base + dist_charge + allowance + pickup_fee + night_fee
+  subtotal    = base + pickup_fee + night_fee
   tax         = round(subtotal * TAX_BPS / 10000)
   total       = roundToRupee(subtotal + tax)
 ```
 
-🔴 **Open question:** does the band price cover the whole band flat (70–100 km all cost
-the same) or does it cover `min_km` with per-km on top? The formula above assumes the
-latter. See `12-open-questions.md` Q3.
+**Consequence for band design:** because there's no per-km charge to absorb the variance
+inside a band, bands must be cut narrow enough that the cheapest and most expensive trip in
+the band are close in actual driver cost — e.g. `50–60`, `60–70`, `70–80`, not one wide
+`50–100`. A 51 km and a 99 km trip in the same band earn the driver the same amount for
+very different work, so band width is now a pricing decision, not just a matching one.
 
 For `ROUND_TRIP`, the price row is separate rather than a computed 2× — round trips are
 usually less than double one-way (the driver is returning anyway) and you want that
 pricing power explicit rather than derived.
+
+### Round trip — multi-day, and driver expenses
+
+Multi-day round trips (driver waits overnight, or several nights) are **in scope**: `total`
+above is quoted for the whole trip and does not change with how many days it actually takes.
+There is no per-extra-day charge through the app — the fixed-price promise holds however long
+the trip runs.
+
+**The driver's meals and night-halt are not an app transaction.** There is no
+`driver_allowance_paise` in the fare, no line in `fare_snapshot.lines`, no ledger entry, and no
+commission implication — the customer pays the driver directly, in cash, with zero admin or app
+involvement in that money. This is why the `outstationPriceSchema` allowance field was removed;
+see `03-database-schema.md`.
+
+Because it's real money the customer will pay outside the app, it must be **disclosed and
+explicitly accepted before booking**, not buried in fine print:
+
+- The quote response carries a `direct_expenses` block for any `ROUND_TRIP` quote — a
+  customer-facing notice (e.g. *"You pay the driver's meals and night-halt directly, in cash —
+  not collected by DriverZone."*) plus an admin-editable indicative range where set.
+- `POST /bookings` requires `round_trip_terms_accepted: true` on the request when the quote is
+  an outstation round trip; omitting or falsifying it is rejected with
+  `ROUND_TRIP_TERMS_NOT_ACCEPTED` (422), the same way an unaccepted cancellation policy would be.
+- The acceptance timestamp is stamped onto the booking (`roundTripTermsAcceptedAt`) — not because
+  the app mediates the payment, but so a dispute eight weeks later has a record that the
+  customer was shown and agreed to the term before confirming.
+
+See `08-api-contracts.md` for the exact shapes.
 
 ## Commission split
 
@@ -104,12 +136,12 @@ splitFare(total, price) -> { driver, company }
   companyShare = commissionable - driverShare
 ```
 
-Where `commissionable = subtotal` — **tax and the driver allowance are excluded**. Tax is
-passed through to the government, not split. The allowance goes to the driver whole; it
-reimburses a cost, it isn't earnings.
+Where `commissionable = subtotal` — **tax is excluded**; it's passed through to the government,
+not split. There is no driver-allowance line to exclude any more — see Round trip above; a
+round trip's meals/night-halt money never enters `subtotal` because it never enters the app.
 
 ```
-assert driverShare + companyShare + allowance + tax == total
+assert driverShare + companyShare + tax == total
 ```
 
 Make that a runtime assertion in the fare builder, and a property-based test. Fare
@@ -157,8 +189,7 @@ Written once into `bookings.fare_snapshot` at confirmation, never updated:
   "split": {
     "commissionable_paise": 100000,
     "driver_paise": 75000,  "driver_commission_type": "PERCENT",  "driver_commission_value": 7500,
-    "company_paise": 25000, "company_commission_type": "PERCENT", "company_commission_value": 2500,
-    "allowance_paise": 0
+    "company_paise": 25000, "company_commission_type": "PERCENT", "company_commission_value": 2500
   }
 }
 ```

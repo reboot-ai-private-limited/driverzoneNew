@@ -281,7 +281,8 @@ field directly.
   "full_name": "Bimal Rai", "dob": "1988-07-04", "gender": "MALE", "experience_years": 6,
   "address": "Matigara, Siliguri",
   "vehicle_type_preference": "MANUAL",
-  "vehicle_category_preference": ["SEDAN", "SUV"]
+  "vehicle_category_preference": ["SEDAN", "SUV"],
+  "can_drive_hill": true
 }
 ```
 
@@ -290,16 +291,24 @@ field directly.
 ```jsonc
 {
   "id": "…", "full_name": "Bimal Rai", "mobile_number": "+919800011122",
-  "can_drive_hill": false, "can_drive_hill_verified": false,
+  "can_drive_hill": true, "can_drive_hill_verified": false,
   "vehicle_type_preference": "MANUAL", "vehicle_category_preference": ["SEDAN", "SUV"]
 }
 ```
 
 `vehicle_category_preference` is what this driver is **competent to drive**, not what they own —
 it feeds matching against the *customer's* vehicle (`12-open-questions.md` Q5).
-`can_drive_hill` is self-declared at signup and gates nothing by itself;
-`can_drive_hill_verified` is set only by an admin and is what actual hill dispatch checks — hill
-driving is a safety matter, not a self-certification (`12-open-questions.md` Q6).
+
+`can_drive_hill` is self-declared, settable any time through this endpoint — not just at
+onboarding — and gates nothing by itself. `can_drive_hill_verified` is set only by an admin
+(`POST /admin/drivers/:id/hill-capability` below) and is the **only** field the dispatch
+eligibility query reads (`06-dispatch-and-assignment.md` §Eligibility) — hill driving is a
+safety matter, not a self-certification (decision log, 2026-08-24).
+
+Setting `can_drive_hill: false` here — the driver withdrawing their claim — resets
+`can_drive_hill_verified` to `false` in the same write. A driver who un-declares stops being
+hill-eligible immediately rather than staying eligible on a stale approval until an admin
+happens to notice.
 
 ### `POST /driver/documents`
 
@@ -371,6 +380,7 @@ document, rather than dumping the driver back at a generic "complete your profil
 | `POST` | `/admin/drivers/:id/approve` | See §Driver verification below |
 | `POST` | `/admin/drivers/:id/reject` | `{ reason }` |
 | `PATCH` | `/admin/drivers/:id/documents/:doc_id` | `{ status, reason? }` — per-document verify/reject |
+| `POST` | `/admin/drivers/:id/hill-capability` | `{ verified, reason? }` — see §Driver verification below |
 
 **No admin registration endpoint exists anywhere in this API.** An `AdminUser` document is
 inserted by direct ops action, outside the HTTP surface entirely — matching "admin actions all
@@ -433,6 +443,29 @@ again — rejection is not terminal.
 
 Per-document, independent of the overall `onboarding/approve` action — a driver can have three
 verified documents and one rejected one, and the app should say which.
+
+#### `POST /admin/drivers/:id/hill-capability`
+
+```jsonc
+{ "verified": true }
+```
+
+```jsonc
+{ "verified": false, "reason": "No hill-route experience on record; declined for now." }
+```
+
+**200**
+
+```jsonc
+{ "can_drive_hill_verified": true, "hill_capability_verified_by": "…", "hill_capability_verified_at": "…" }
+```
+
+Independent of `onboarding/approve` — a driver can be `APPROVED` and on duty for plains trips
+long before (or without ever) requesting hill capability, and can request it at any point after
+onboarding, not only during it. Rejects with `409` if the driver hasn't self-declared
+`can_drive_hill: true` — there is nothing to verify against. `reason` is required when
+`verified: false` and is surfaced to the driver the same way a document rejection is; not stored
+when `verified: true`.
 
 ---
 

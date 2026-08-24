@@ -79,6 +79,7 @@ error dashboards instead of drowning in expected outcomes.
         "billing_block_minutes": 30,
         "notice": "Includes 3 hours and 30 km. Beyond that: ₹150 per 30 min, ₹12 per km. 15-minute grace applies."
       },
+      "direct_expenses": null,
       "expires_at": "2026-08-20T09:24:22Z"
     }
   ]
@@ -103,13 +104,28 @@ error dashboards instead of drowning in expected outcomes.
 Every `available: false` response carries a displayable `message`. The app should never
 have to build copy from a code — new reasons then render correctly on old app versions.
 
+**`direct_expenses` on an outstation round trip** — `null` for every other quote (as above);
+populated only when `service_type: "OUTSTATION"` and `direction: "ROUND_TRIP"`:
+
+```jsonc
+"direct_expenses": {
+  "requires_acceptance": true,
+  "notice": "This is a round trip. You pay the driver's meals and night-halt directly, in cash — not collected by DriverZone.",
+  "indicative_range_display": "₹300–500/day"
+}
+```
+
+Not a fare line — it's never added into `fare.lines` or `total_paise`. It exists purely to be
+shown to the customer before they book; `requires_acceptance` gates `POST /bookings` below.
+
 ### `POST /bookings`
 
 ```jsonc
 { "quote_id": "…", "customer_car_plate": "WB74AB1234",
   "scheduled_at": "2026-08-21T09:30:00+05:30", "payment_mode": "CASH",
   "save_pickup_address": { "label": "HOME", "is_preferred_pickup": true },
-  "save_vehicle": true }
+  "save_vehicle": true,
+  "round_trip_terms_accepted": true }
 ```
 
 `save_pickup_address` and `save_vehicle` are optional and opt-in — when present, this endpoint
@@ -117,6 +133,18 @@ calls into `identity`'s `CustomerBookingProfileContract` to upsert them onto the
 saved addresses/vehicles as a side effect of placing the booking, so the booking flow is the
 capture point rather than a separate profile-setup step. See
 `13-auth-and-user.md` §Module contract.
+
+`round_trip_terms_accepted` is **required and must be `true`** when the quote's
+`direct_expenses.requires_acceptance` was `true` (i.e. an outstation round trip) — omitted,
+`false`, or missing on a round-trip quote is rejected:
+
+```jsonc
+// 422
+{ "error": { "code": "ROUND_TRIP_TERMS_NOT_ACCEPTED",
+  "message": "Please confirm you understand the driver's meals and night-halt are paid directly." } }
+```
+
+Ignored (no validation) for any quote where `direct_expenses` was `null`.
 
 **201**
 
@@ -131,10 +159,13 @@ capture point rather than a separate profile-setup step. See
     "cancellation_policy": {
       "free_until": "2026-08-21T08:30:00+05:30",
       "fee_after_paise": 5000
-    }
+    },
+    "round_trip_terms_accepted_at": null
   }
 }
 ```
+
+`round_trip_terms_accepted_at` is set only for an outstation round trip; `null` otherwise.
 
 Idempotent on `quote_id`: replaying the same quote returns the same booking with `200`
 rather than creating a second one.

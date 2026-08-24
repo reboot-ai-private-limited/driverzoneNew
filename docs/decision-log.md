@@ -20,6 +20,45 @@ entry links to it.
 
 ---
 
+## 2026-08-24 — A dev-only fixed OTP, scoped to seeded accounts
+
+**Decision:** `DEV_FIXED_OTP` — unset by default — makes `otp/verify` accept one fixed code, but
+only for the four accounts `pnpm seed` creates, and only outside production.
+
+**Why:** logging in locally meant calling `otp/send` and reading the code off a log line, on every
+attempt, for every role. That friction is paid dozens of times a day. The alternative designs were
+worse: accepting a fixed code for *any* number in development would mean the real generation,
+hashing and attempt-burning paths are never exercised until staging, so a bug in them surfaces
+somewhere expensive.
+
+**Consequences:** four independent conditions must hold — the variable set, `NODE_ENV` not
+production, the number on the seed allowlist, and the code matching. Wiring lives in exactly one
+expression in `identity.container.ts`, so "can this happen in production" is answerable by reading
+one line rather than auditing a branch inside application logic. `loadEnv()` is the second lock:
+a production process with the variable set **does not start**, rather than ignoring it — an
+ignored bypass variable in a prod env file is a landmine for whoever later "fixes" the code that
+ignores it.
+
+The bypass skips the challenge, not the account rules. It routes into the same `completeSignIn`
+as a real code, so an unprovisioned admin number still fails — a shortcut with its own
+token-issuing path is how a dev convenience quietly acquires different rules from the thing it
+shortcuts.
+
+**Also decided here:** `src/scripts/*` is exempted from the `no-restricted-imports` module
+boundary. The seed has to create an admin, and `identity` exposes no way to do that *on purpose* —
+`account.repository.impl.ts` throws for `create('ADMIN', …)`. There is no contract route to take,
+so an exemption is more honest than widening a public contract to accommodate a dev fixture.
+
+**Known limit, accepted:** anyone who reads the repository knows the seeded numbers and, if the
+variable is set, the code. That is fine for a local database and catastrophic against a shared
+one — which is what the production guards are for. If a shared staging environment ever appears,
+this needs revisiting: `NODE_ENV !== 'production'` would no longer be a sufficient test.
+
+**Refs:** `apps/api/src/scripts/seed.ts`, `apps/api/src/config/devAccounts.ts`,
+[`setup-development.md`](setup-development.md)
+
+---
+
 ## 2026-08-24 — Numeric prefixes dropped from every doc; `check-doc-links.sh` now checks prose
 
 **Decision:** Every file in `docs/`, `docs/LLD/` and `docs/engineering/` loses its `NN-` prefix.

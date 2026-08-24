@@ -21,6 +21,21 @@ export interface VerifyOtpResult {
 }
 
 /**
+ * DEVELOPMENT ONLY — a fixed code accepted for a fixed list of seeded numbers.
+ *
+ * Deliberately an optional constructor argument rather than something read from `env` in here.
+ * The use case has no way to switch itself on: it can only do this if a caller hands it the
+ * config, and the only caller that does is `identity.container.ts`, which passes it exclusively
+ * when `NODE_ENV` is not production. That makes "can this run in prod" a question about one line
+ * in one file, and leaves every existing test on the real OTP path by default.
+ */
+export interface DevOtpBypass {
+  code: string;
+  /** Seeded numbers only. Any other number still gets a real, random, hashed challenge. */
+  phones: readonly string[];
+}
+
+/**
  * APPLICATION — trade a correct code for a session.
  *
  * Two rules carry the weight here, and both are about what the caller is NOT told:
@@ -37,10 +52,35 @@ export class VerifyOtpUseCase {
     private readonly accounts: AccountRepositoryPort,
     private readonly tokens: TokenIssuer,
     private readonly pepper: string,
+    /** Absent in production and in every test that does not deliberately opt in. */
+    private readonly devBypass?: DevOtpBypass | undefined,
   ) {}
+
+  /**
+   * Whether this exact (number, code) pair is the development shortcut.
+   *
+   * Both halves must match: the code alone is not enough, and a seeded number alone is not
+   * enough. A number that is not seeded takes the ordinary path even with the bypass configured.
+   */
+  private isDevBypass(phone: string, code: string): boolean {
+    if (this.devBypass === undefined) return false;
+    return this.devBypass.code === code && this.devBypass.phones.includes(phone);
+  }
 
   async execute(input: VerifyOtpInput): Promise<VerifyOtpResult> {
     const { role, phone } = input;
+
+    /**
+     * The development shortcut, checked before anything is read or counted.
+     *
+     * It skips the challenge entirely — no `otp/send` needed first — because the friction it
+     * exists to remove is exactly that round trip through a log line. It does NOT skip the
+     * account rules below: an admin number that was never provisioned still fails, because that
+     * check lives past this branch.
+     */
+    if (this.isDevBypass(phone, input.code)) {
+      return this.completeSignIn(input);
+    }
 
     const challenge = await this.store.find(role, phone);
 
@@ -65,6 +105,20 @@ export class VerifyOtpUseCase {
       await this.store.burn(role, phone);
       throw otpAttemptsExceeded();
     }
+
+    return this.completeSignIn(input);
+  }
+
+  /**
+   * Everything that happens once a code is accepted, however it was accepted.
+   *
+   * Shared with the development bypass on purpose: the account rules below — above all the
+   * refusal to create an admin — must hold identically on both paths. A bypass that returned
+   * early with its own token-issuing logic is exactly how a shortcut quietly acquires different
+   * rules from the thing it is shortcutting.
+   */
+  private async completeSignIn(input: VerifyOtpInput): Promise<VerifyOtpResult> {
+    const { role, phone } = input;
 
     const existing = await this.accounts.findByPhone(role, phone);
 

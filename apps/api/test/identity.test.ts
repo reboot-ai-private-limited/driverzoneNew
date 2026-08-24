@@ -432,3 +432,107 @@ describe('VerifyOtpUseCase', () => {
     expect(accounts.created).toBe(0);
   });
 });
+
+// ─── Development OTP bypass ─────────────────────────────────────────────────────────────────
+
+/**
+ * A deliberate authentication bypass earns more test than it looks like it needs, and the
+ * NEGATIVE cases are the ones that matter: that it does nothing unless explicitly configured,
+ * and that configuring it does not open every number.
+ */
+describe('VerifyOtpUseCase — dev bypass', () => {
+  const DEV_CODE = '000000';
+  const SEEDED = '+919000000001';
+  const NOT_SEEDED = '+919111111111';
+
+  function withBypass(
+    store: OtpStorePort,
+    accounts: AccountRepositoryPort,
+    bypass?: { code: string; phones: readonly string[] },
+  ): VerifyOtpUseCase {
+    return new VerifyOtpUseCase(store, accounts, new TokenIssuer(fakeSessions()), PEPPER, bypass);
+  }
+
+  const seededAccount = (): Account => ({ id: 'acc_1', mobileNumber: SEEDED, fullName: 'Dev Admin' });
+
+  it('signs in a seeded number with the fixed code and no challenge at all', async () => {
+    // No challenge stored: the whole point is skipping the otp/send round trip.
+    const store = fakeStore();
+
+    const result = await withBypass(store, fakeAccounts(seededAccount()), {
+      code: DEV_CODE,
+      phones: [SEEDED],
+    }).execute({ role: 'ADMIN', phone: SEEDED, code: DEV_CODE });
+
+    expect(result.accessToken).toBeTruthy();
+    expect(result.isNewUser).toBe(false);
+  });
+
+  /**
+   * The default. Every other test in this file constructs the use case without a bypass, so this
+   * asserts the thing they all rely on: absent configuration, the fixed code is just a wrong code.
+   */
+  it('is inert when no bypass is configured', async () => {
+    const store = fakeStore();
+
+    const code = await codeOfRejection(
+      withBypass(store, fakeAccounts(seededAccount())).execute({
+        role: 'ADMIN',
+        phone: SEEDED,
+        code: DEV_CODE,
+      }),
+    );
+
+    expect(code).toBe('OTP_INVALID_OR_EXPIRED');
+  });
+
+  /** Configured, but scoped — a number outside the seed list takes the ordinary path. */
+  it('refuses the fixed code for a number that is not seeded', async () => {
+    const store = fakeStore();
+
+    const code = await codeOfRejection(
+      withBypass(store, fakeAccounts(), { code: DEV_CODE, phones: [SEEDED] }).execute({
+        role: 'CUSTOMER',
+        phone: NOT_SEEDED,
+        code: DEV_CODE,
+      }),
+    );
+
+    expect(code).toBe('OTP_INVALID_OR_EXPIRED');
+  });
+
+  it('refuses a wrong code on a seeded number', async () => {
+    const store = fakeStore();
+
+    const code = await codeOfRejection(
+      withBypass(store, fakeAccounts(seededAccount()), { code: DEV_CODE, phones: [SEEDED] }).execute({
+        role: 'ADMIN',
+        phone: SEEDED,
+        code: '999999',
+      }),
+    );
+
+    expect(code).toBe('OTP_INVALID_OR_EXPIRED');
+  });
+
+  /**
+   * The bypass skips the CHALLENGE, not the account rules. An unprovisioned admin number must
+   * still fail — otherwise the shortcut would quietly acquire different rules from the thing it
+   * shortcuts, which is exactly how a dev convenience becomes a privilege-escalation path.
+   */
+  it('still refuses to create an admin account it cannot find', async () => {
+    const store = fakeStore();
+    const accounts = fakeAccounts();
+
+    const code = await codeOfRejection(
+      withBypass(store, accounts, { code: DEV_CODE, phones: [SEEDED] }).execute({
+        role: 'ADMIN',
+        phone: SEEDED,
+        code: DEV_CODE,
+      }),
+    );
+
+    expect(code).toBe('OTP_INVALID_OR_EXPIRED');
+    expect(accounts.created).toBe(0);
+  });
+});

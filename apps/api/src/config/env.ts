@@ -27,6 +27,24 @@ const schema = z.object({
 
   /** Self-hosted OSRM. Road distance is required to match outstation bands (docs/04). */
   OSRM_BASE_URL: z.string().url().default('http://localhost:5000'),
+
+  /**
+   * Token signing secrets — SEPARATE, and that is the point (docs/decision-log.md, 2026-08-24).
+   * A leaked access secret must not also forge refresh tokens: the two have very different
+   * blast radii, 15 minutes against up to 30 days.
+   *
+   * 32 characters minimum so a placeholder like "secret" fails at boot rather than shipping.
+   * Generate with `openssl rand -base64 48`.
+   */
+  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+
+  /**
+   * Keys the HMAC that login OTPs are stored under. Not a password-grade hash, deliberately —
+   * see docs/decision-log.md, 2026-08-24. A leak devalues only in-flight challenges (5 minutes),
+   * never a long-lived credential.
+   */
+  OTP_PEPPER: z.string().min(32, 'OTP_PEPPER must be at least 32 characters'),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -44,9 +62,20 @@ type Env = z.infer<typeof schema>;
 
 export const env: Env = parsed.success
   ? parsed.data
-  : // The two required fields relaxed to empty, everything else at its schema default. Derived
-    // from the schema rather than written out, so a new variable cannot be forgotten here.
-    schema.extend({ MONGO_URI: z.string().default(''), REDIS_URL: z.string().default('') }).parse({});
+  : // Every required field relaxed to a harmless value, everything else at its schema default.
+    // Derived from the schema rather than written out, so a new variable cannot be forgotten
+    // here. The secrets get throwaway values long enough to satisfy their own min(32) — they
+    // are never reachable at runtime, because `loadEnv()` has already exited the process by
+    // then; this branch exists only so that IMPORTING this file in a test cannot kill it.
+    schema
+      .extend({
+        MONGO_URI: z.string().default(''),
+        REDIS_URL: z.string().default(''),
+        JWT_ACCESS_SECRET: z.string().default('test-only-access-secret-not-for-any-real-use'),
+        JWT_REFRESH_SECRET: z.string().default('test-only-refresh-secret-not-for-any-real-use'),
+        OTP_PEPPER: z.string().default('test-only-otp-pepper-not-for-any-real-use-x'),
+      })
+      .parse({});
 export type { Env };
 
 export const isProduction = env.NODE_ENV === 'production';

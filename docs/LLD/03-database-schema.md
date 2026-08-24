@@ -597,6 +597,9 @@ const driverDocumentSchema = new Schema({
   // 'LICENCE','AADHAAR','POLICE_VERIFICATION','VEHICLE_RC','INSURANCE'
   docType:    { type: String, required: true },
   status:     { type: String, default: 'PENDING', enum: ['PENDING', 'VERIFIED', 'REJECTED'] },
+  // Why a rejected document says why: a driver told only "rejected" has nothing to act on and
+  // re-uploads the same unreadable photo. Set by PATCH /admin/drivers/:id/documents/:doc_id.
+  rejectionReason: String,
   fileUrl:    { type: String, required: true },
   number:     String,
   subType:    String,   // e.g. licence category LMV/LMV-TR when docType='LICENCE'
@@ -726,7 +729,11 @@ const auditLogSchema = new Schema({
   adminId:    { type: Schema.Types.ObjectId, ref: 'AdminUser', required: true },
   entityType: { type: String, required: true },
   entityId:   { type: Schema.Types.ObjectId, required: true },
-  action:     { type: String, required: true },   // 'CREATE','UPDATE','DELETE','ACTIVATE'
+  // 'CREATE','UPDATE','DELETE','ACTIVATE','APPROVE','REJECT'
+  // APPROVE/REJECT are not folded into UPDATE: "who approved this driver, and when" is the
+  // question this collection exists to answer, and it must not require reading `after` to tell
+  // an approval from an edit to a phone number.
+  action:     { type: String, required: true },
   before:     Schema.Types.Mixed,
   after:      Schema.Types.Mixed,
   ip:         String,

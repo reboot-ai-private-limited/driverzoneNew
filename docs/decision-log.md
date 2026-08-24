@@ -20,6 +20,63 @@ entry links to it.
 
 ---
 
+## 2026-08-24 — Identity admin actions are audited, and APPROVE/REJECT are their own verbs
+
+**Decision:** Every admin mutation in the `identity` module — driver approve, driver reject,
+per-document review — writes an `auditLog` row. `auditLog.action` gains `APPROVE` and `REJECT`
+alongside the existing `CREATE`/`UPDATE`/`DELETE`/`ACTIVATE`.
+
+**Why:** `LLD/09-architecture.md` requires every admin action to be audited, and these are the
+first admin endpoints that mutate anything — retrofitting an audit trail onto actions already
+shipped is how gaps get missed. The new verbs exist because none of the original four describe
+approving a person: folding an approval into `UPDATE` makes "who approved this driver, and
+when" answerable only by decoding the `after` blob and comparing it against the previous row,
+which is exactly the question the collection exists to answer directly.
+
+**Consequences:** the audit write is deliberately **non-fatal** — `MongoAuditLog` catches, logs
+at `error`, and returns. An audit outage must not roll back an approval the admin already
+watched succeed, and the main write has usually already committed by then anyway.
+
+**Known limit, accepted:** a dropped audit entry is therefore invisible to the actor. That is
+the right trade for an availability-critical path, and it is why the failure logs loudly enough
+to alert on. Unlike `bookingEvents`, this collection is not yet append-only at the database
+role; it should be when that role is next revised — an audit log the application can rewrite
+answers no question worth asking.
+
+**Refs:** `apps/api/src/modules/identity/infrastructure/audit.mongo.ts`,
+[`LLD/03-database-schema.md`](LLD/03-database-schema.md)
+
+---
+
+## 2026-08-24 — Driver documents ship behind a storage port with a dev stub
+
+**Decision:** `DocumentStoragePort` is defined in `identity/domain/`, and `StubDocumentStorage`
+implements it for development — minting a plausible storage key and a URL that accepts nothing.
+No object storage is wired up.
+
+**Why:** `LLD/09-architecture.md` specifies an S3-compatible private bucket with 5-minute
+presigned URLs, and nothing in the repo or either compose file provides one. The alternative was
+dropping the document requirement from `POST /driver/onboarding/submit`, which would have
+shipped a verification gate weaker than the one specified and left no code path to strengthen
+later. Behind a port, the entire flow — upload request, document row, submission gate, admin
+review — is exercisable today and the real adapter is one line in `identity.container.ts`.
+
+**Consequences:** the stub **refuses to run in production**, the same posture as
+`LoggingOtpSender`. A deploy that silently accepted document uploads into nowhere would look
+like it worked and surface weeks later as an admin opening a licence and finding nothing. The
+port stays inside the module for now; it moves to `shared/storage/` when `bookings` needs
+receipt URLs, which `09-architecture.md` already anticipates.
+
+**Also decided here:** the document row is written *before* the file is uploaded, holding the
+key the client is about to `PUT` to. A failed upload then leaves a `PENDING` document the driver
+can retry rather than no record at all. The cost — a row referencing an object that never
+arrived — resolves itself: an admin reviewing an empty document rejects it.
+
+**Refs:** `apps/api/src/modules/identity/infrastructure/documentStorage.stub.ts`,
+[`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md)
+
+---
+
 ## 2026-08-24 — Driver requires admin approval before duty; customer profile stays fully progressive
 
 **Decision:** Customer profile fields are never required beyond `mobile_number` — they fill in

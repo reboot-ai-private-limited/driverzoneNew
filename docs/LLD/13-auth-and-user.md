@@ -318,6 +318,20 @@ private-bucket policy — and the client `PUT`s the file directly to storage, ne
 API. The row starts `PENDING`; only an admin verification action moves it to
 `VERIFIED`/`REJECTED` (`08-api-contracts.md` §Admin, `CRUD /admin/drivers`).
 
+The row is created **before** the file exists, holding the storage key the client is about to
+upload to. That ordering is what makes the flow recoverable: an upload that fails or an app
+killed mid-transfer leaves a `PENDING` document the driver can retry, rather than no record that
+they ever tried. The cost, accepted: a row can reference an object that was never uploaded, and
+an admin reviewing an empty document rejects it — which is the correct outcome and needs no
+extra machinery.
+
+> **No object storage exists yet.** `09-architecture.md` specifies an S3-compatible private
+> bucket; nothing in the repo or the compose stack provides one. `StubDocumentStorage` stands in
+> for local development — it mints a plausible key and a URL that accepts nothing, so the whole
+> onboarding flow is exercisable end to end — and **refuses to run in production**, so a deploy
+> cannot silently accept uploads into nowhere. Swapping in the real adapter is one line in
+> `identity.container.ts`.
+
 ### Driver onboarding & verification
 
 Unlike customer, a driver's profile is **not** progressive — see the decision log, 2026-08-24,
@@ -377,11 +391,20 @@ inserted by direct ops action, outside the HTTP surface entirely — matching "a
 audited" (`09-architecture.md`), since the one action that *creates* admin access is
 deliberately not something exposed to be automated or scripted against from outside.
 
-`otp/send` looks up `mobile_number` against `AdminUser` first. If it isn't there, the response
-is the *same shape* as an invalid code — see §Errors, `OTP_INVALID_OR_EXPIRED` — so a prober
-outside the system cannot distinguish "not an admin number" from "wrong code" from "expired
-challenge". A provisioned-but-never-logged-in admin can request and verify an OTP completely
-normally; what's disabled is the auth flow ever *creating* the document.
+`otp/send` looks up `mobile_number` against `AdminUser` first — but an unprovisioned number
+still gets the ordinary **`200 { "sent": true }`**, identical to a real one. No SMS is
+dispatched and no challenge is stored, so the subsequent `otp/verify` fails with the ordinary
+`OTP_INVALID_OR_EXPIRED` because there is nothing to verify against.
+
+> **Corrected 2026-08-24.** An earlier version of this section had `otp/send` return
+> `OTP_INVALID_OR_EXPIRED` for an unprovisioned number and called that anti-enumeration. It is
+> the opposite: a 401 for unknown numbers and a 200 for known ones makes this endpoint a
+> directory of who works here — walk a number range and keep whatever doesn't error. The
+> enumeration defence has to live in the *send* response being invariant, which is what is
+> implemented.
+
+A provisioned-but-never-logged-in admin can request and verify an OTP completely normally; what
+is disabled is the auth flow ever *creating* the document.
 
 ### Driver verification
 
@@ -424,6 +447,9 @@ again — rejection is not terminal.
 ```jsonc
 { "status": "REJECTED", "reason": "Expired at time of submission." }
 ```
+
+`reason` is **required when rejecting** and is stored on the document as `rejectionReason`. A
+driver told only "rejected" has nothing to act on and re-uploads the same unreadable photo.
 
 **200**
 

@@ -107,8 +107,16 @@ have to build copy from a code — new reasons then render correctly on old app 
 
 ```jsonc
 { "quote_id": "…", "customer_car_plate": "WB74AB1234",
-  "scheduled_at": "2026-08-21T09:30:00+05:30", "payment_mode": "CASH" }
+  "scheduled_at": "2026-08-21T09:30:00+05:30", "payment_mode": "CASH",
+  "save_pickup_address": { "label": "HOME", "is_preferred_pickup": true },
+  "save_vehicle": true }
 ```
+
+`save_pickup_address` and `save_vehicle` are optional and opt-in — when present, this endpoint
+calls into `identity`'s `CustomerBookingProfileContract` to upsert them onto the customer's
+saved addresses/vehicles as a side effect of placing the booking, so the booking flow is the
+capture point rather than a separate profile-setup step. See
+`13-auth-and-user.md` §Module contract.
 
 **201**
 
@@ -154,7 +162,7 @@ yet" on the home screen, before the customer invests effort in picking a destina
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `POST` | `/driver/duty` | `{ on_duty: true }` — 409 if documents expired or wallet blocked |
+| `POST` | `/driver/duty` | `{ on_duty: true }` — 409 if not yet admin-verified, documents expired, or wallet blocked |
 | `POST` | `/driver/location` | Batched pings; see below |
 | `GET` | `/driver/offers/current` | Recovery path after an app restart mid-offer |
 | `POST` | `/driver/offers/:id/accept` | The atomic claim |

@@ -193,8 +193,12 @@ band-boundary bugs that matter.
 
 ## Security
 
-- Phone + OTP auth for customers and drivers; email + password + TOTP for admins
-- JWT with a 15-minute access token and a rotating refresh token
+- Phone + OTP auth for all three roles — customer, driver, admin. Admin accounts are never
+  auto-provisioned by the auth flow; a number must already exist in `admins` before it can log
+  in. See the decision log, 2026-08-24, for why this reverses an earlier email+password+TOTP
+  design.
+- JWT with a 15-minute access token and a rotating refresh token; refresh TTL is 30 days for
+  customer/driver, 12 hours for admin. See [`13-auth-and-user.md`](13-auth-and-user.md).
 - Driver and customer phone numbers **masked** through a telephony provider — neither side
   ever sees the other's real number
 - Driver documents in a private bucket, presigned URLs with a 5-minute expiry

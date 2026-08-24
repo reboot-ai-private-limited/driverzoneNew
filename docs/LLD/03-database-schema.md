@@ -225,6 +225,107 @@ const conflict = await OutstationPackage.findOne({
 
 ---
 
+## `customers`
+
+```ts
+const customerSchema = new Schema({
+  phone: { type: String, required: true, unique: true },   // primary identity, the OTP target
+
+  // Set to null by otp/verify on a first-ever login; filled in by the client's onboarding
+  // screens afterward. There is no separate registration endpoint — see 13-auth-and-user.md.
+  fullName: String,
+  dob:      Date,
+  gender:   { type: String, enum: ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] },
+  languagesKnown: [String],
+
+  alternatePhone:   String,
+  emergencyContact: { name: String, phone: String },
+
+  savedAddresses: [{
+    label:             { type: String, enum: ['HOME', 'OFFICE', 'OTHER'], required: true },
+    address:           { type: String, required: true },
+    point:             { type: { type: String, enum: ['Point'] }, coordinates: [Number] },
+    isDefault:         { type: Boolean, default: false },   // shown first in the address book
+    isPreferredPickup: { type: Boolean, default: false },   // prefills the quote flow's pickup
+  }],
+
+  // The CUSTOMER's own car — the driver drives it, they don't supply one (12-open-questions.md
+  // Q5). `category` is a free string, not a CarCategory ref: a customer describes their car
+  // before any admin has to agree it matches one, and pricing keys off the booking's own
+  // carCategoryId, never off this field.
+  vehicles: [{
+    category:    { type: String, required: true },
+    plateNumber: { type: String, required: true },
+    fuelType:    { type: String, enum: ['PETROL', 'DIESEL', 'EV', 'CNG'] },
+    isDefault:   { type: Boolean, default: false },
+  }],
+
+  isBlocked: { type: Boolean, default: false },
+}, { timestamps: true });
+
+customerSchema.index({ phone: 1 }, { unique: true });
+```
+
+---
+
+## `adminUsers`
+
+```ts
+const adminUserSchema = new Schema({
+  phone:    { type: String, required: true, unique: true },
+  fullName: { type: String, required: true },
+  isActive: { type: Boolean, default: true },
+}, { timestamps: true });
+
+adminUserSchema.index({ phone: 1 }, { unique: true });
+```
+
+No password, no TOTP secret — admin authenticates with phone + OTP like every other role
+(decision log, 2026-08-24). **Deliberately no self-service creation path.** A document here is
+inserted by direct ops action, outside the HTTP surface; `otp/send`/`otp/verify` for an
+unprovisioned number fail the same way an invalid code would, rather than creating one — see
+`13-auth-and-user.md` §Admin.
+
+---
+
+## `sessions`
+
+```ts
+const sessionSchema = new Schema({
+  // Polymorphic by design: resolved via `role` against the matching collection in application
+  // code, not a Mongoose ref — a session's owner is one of three different collections.
+  userId: { type: Schema.Types.ObjectId, required: true },
+  role:   { type: String, enum: ['CUSTOMER', 'DRIVER', 'ADMIN'], required: true },
+
+  tokenHash:  { type: String, required: true },   // sha256 of the current refresh JWT
+  familyId:   { type: String, required: true },   // shared across a full rotation chain
+  usedAt:     Date,                                // set the instant this token is redeemed
+  replacedBy: { type: Schema.Types.ObjectId, ref: 'Session', default: null },
+  revokedAt:  Date,
+
+  createdIp:        String,
+  createdUserAgent: String,
+}, { timestamps: true });
+
+sessionSchema.index({ userId: 1, role: 1 });
+sessionSchema.index({ familyId: 1 });
+// A session outlives its own refresh token's max TTL (30d customer/driver, 12h admin) by a
+// day, so a client retrying slightly past expiry gets a clean "log in again" rather than a
+// dangling row with nothing left to look up.
+sessionSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 31 });
+```
+
+**Rotation + reuse detection**, the reason this collection exists at all: refreshing marks the
+presented token's row `usedAt` and inserts a new row in the same `familyId`. A refresh call
+presenting a token whose row already has `usedAt` set is a replay — the signature of a stolen
+token racing the legitimate client — and revokes every row in that `familyId`, not just the one
+being replayed (decision log, 2026-08-24).
+
+OTP challenges are **not** in this collection, or in Mongo at all — they're ephemeral, Redis
+TTL-native, and never need a rotation history. See `13-auth-and-user.md` §OTP.
+
+---
+
 ## `quotes`
 
 ```ts
@@ -439,6 +540,34 @@ const driverSchema = new Schema({
   acceptanceRate: Number,                        // rolling 30-day, recomputed nightly
   walletBalancePaise: { type: Number, default: 0 },   // negative = owes the company
   canDriveHill:   { type: Boolean, default: false },
+  // Self-declared at onboarding. Gates nothing on its own — hill driving is a safety matter,
+  // so actual hill dispatch checks this, not canDriveHill (12-open-questions.md Q6).
+  canDriveHillVerified: { type: Boolean, default: false },
+
+  // Identity/profile fields, added alongside the auth module (13-auth-and-user.md).
+  dob:    Date,
+  gender: { type: String, enum: ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] },
+  experienceYears: Number,
+  alternatePhone:   String,
+  emergencyContact: { name: String, phone: String },
+  address:          String,
+
+  // What this driver is COMPETENT to drive, not what they own — the driver drives the
+  // customer's car, never their own (12-open-questions.md Q5). Matched against
+  // customers.vehicles[].category at dispatch time, not enforced here.
+  vehicleTypePreference:     { type: String, enum: ['AUTO', 'MANUAL', 'EV'] },
+  vehicleCategoryPreference: [String],   // CarCategory.code[]
+
+  // Onboarding state machine — see 13-auth-and-user.md §Driver. `isVerified` above stays the
+  // ONE field dispatch/duty actually gate on (it's already in the index below); this is the
+  // richer status the app shows and the admin approve/reject action drives. One action
+  // (approve) sets both isVerified and onboardingStatus together, so they never drift apart —
+  // this is not a second, independent source of truth.
+  onboardingStatus: { type: String, default: 'INCOMPLETE',
+                       enum: ['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED'] },
+  onboardingRejectionReason: String,
+  verifiedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
+  verifiedAt: Date,
 }, { timestamps: true });
 
 driverSchema.index({ lastLocation: '2dsphere' });
@@ -448,14 +577,30 @@ driverSchema.index({ isOnDuty: 1, isVerified: 1, isBlocked: 1, carCategoryIds: 1
 Note `carCategoryIds` is embedded rather than a join collection — a driver has a handful, and
 the dispatch eligibility query needs it in the same document to stay a single index scan.
 
+**Why `isVerified` survives instead of being replaced by `onboardingStatus`**: the dispatch
+eligibility index above already reads `isVerified` directly, and it is a cheap boolean to
+filter on. `onboardingStatus` carries the extra states (`SUBMITTED`, `REJECTED` with a reason)
+that the driver app needs to render but that dispatch has no reason to know about — a rejected
+driver and an incomplete one are the same "cannot go on duty" fact to the matching query, and
+different facts to a driver reading why they're blocked.
+
+**License number and expiry live in `driverDocuments` below, not here** — `docType: 'LICENCE'`
+already carries `number` and (with the addition below) `issuedOn`/`expiresOn`. A second copy on
+`driverSchema` would be two sources of truth for the same fact; the auth module reads the
+license row from `driverDocuments` rather than duplicating it.
+
 ## `driverDocuments`
 
 ```ts
 const driverDocumentSchema = new Schema({
   driverId:   { type: Schema.Types.ObjectId, ref: 'Driver', required: true },
-  docType:    { type: String, required: true },   // 'LICENCE','AADHAAR','POLICE_VERIFICATION'
+  // 'LICENCE','AADHAAR','POLICE_VERIFICATION','VEHICLE_RC','INSURANCE'
+  docType:    { type: String, required: true },
+  status:     { type: String, default: 'PENDING', enum: ['PENDING', 'VERIFIED', 'REJECTED'] },
   fileUrl:    { type: String, required: true },
   number:     String,
+  subType:    String,   // e.g. licence category LMV/LMV-TR when docType='LICENCE'
+  issuedOn:   Date,
   expiresOn:  Date,
   verifiedAt: Date,
   verifiedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },

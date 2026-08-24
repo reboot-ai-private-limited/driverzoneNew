@@ -20,6 +20,153 @@ entry links to it.
 
 ---
 
+## 2026-08-24 — Driver requires admin approval before duty; customer profile stays fully progressive
+
+**Decision:** Customer profile fields are never required beyond `mobile_number` — they fill in
+progressively through normal app usage, including a new booking-time save
+(`save_pickup_address`/`save_vehicle` on `POST /bookings`). Driver is the opposite: a full
+profile plus a `LICENCE` and an `AADHAAR` document must be submitted
+(`POST /driver/onboarding/submit`) and explicitly approved by an admin
+(`POST /admin/drivers/:id/approve`) before `POST /driver/duty` will succeed.
+
+**Why:** the two roles share the exact same OTP login mechanism, so without this entry the
+asymmetry reads like an inconsistency rather than a decision. Customer: low trust required, the
+product wants friction-free signup, a missing field just means a slightly worse trip experience.
+Driver: an unverified person shows up at someone's pickup location and drives their car — the
+admin-approval gate is a safety/liability control, not bureaucracy.
+
+**Consequences:** `driverSchema` gains an `onboardingStatus` state machine
+(`INCOMPLETE → SUBMITTED → APPROVED/REJECTED`) alongside the existing `isVerified` boolean,
+which stays the one field the dispatch-eligibility index and the duty gate actually read — one
+admin action sets both together rather than two independently-driftable flags. `identity`
+gains a write-side contract, `CustomerBookingProfileContract`, for `bookings` (tier 6) to call
+into `identity` (tier 1) — tier-legal with no dependency-cruiser exception needed.
+
+**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#driver),
+[`LLD/03-database-schema.md`](LLD/03-database-schema.md#drivers),
+[`LLD/08-api-contracts.md`](LLD/08-api-contracts.md)
+
+---
+
+## 2026-08-24 — Admin auth unified to phone + OTP, reversing email+password+TOTP
+
+**Decision:** All three roles — customer, driver, admin — authenticate with phone + OTP.
+`09-architecture.md`'s "email + password + TOTP for admins" is reversed; nothing in the system
+stores a password.
+
+**Why:** Admin was originally password+TOTP because it's the highest-privilege role and SMS OTP
+is interceptable via SIM-swap fraud or SS7 signaling — TOTP has no telecom dependency, which is
+a real security argument for password+TOTP. Reversed anyway: admin is a small,
+individually-provisioned population, not self-service, and carrying a separate
+password-hashing-plus-TOTP-enrollment stack for one role — when the other two already need a
+full OTP pipeline — was judged not worth the duplication at this stage. One consistent auth flow
+won on simplicity.
+
+**Consequences:** no password field, no TOTP secret, no recovery codes anywhere in `identity`.
+Admin reuses the same `otp/send`/`otp/verify`/`refresh`/`logout` use cases as customer/driver,
+parameterized by role.
+
+**Known limit, accepted:** losing TOTP means losing the one factor immune to SIM-swap/SS7
+interception, on the role with the largest blast radius if compromised — zone geometry, pricing,
+booking reassignment, full PII access (`09-architecture.md` §Security). Mitigated by two cheap
+knobs, not a second factor: (1) `otp/verify` never auto-provisions an admin account — the number
+must already exist in `admins`, inserted out-of-band by another admin; (2) admin's refresh token
+TTL is 12h vs. 30d for customer/driver, shrinking how long a stolen session stays valid. If
+admin-account compromise becomes a real incident, this is the first reversal to reconsider.
+
+**Refs:** [`LLD/09-architecture.md`](LLD/09-architecture.md#security),
+[`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md)
+
+---
+
+## 2026-08-24 — JWT via `jose`, HS256, separate access/refresh secrets
+
+**Decision:** Access and refresh tokens are both JWTs, signed with `jose` rather than
+`jsonwebtoken`, algorithm pinned to `HS256` on verify, signed with two different secrets
+(`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`).
+
+**Why:** `jose` is ESM-native — this repo is `"type": "module"` throughout — and its verify API
+takes an explicit algorithm allowlist rather than trusting the token's own `alg` header, which is
+what closes algorithm-confusion attacks outright rather than by convention. HS256 over RS256
+because this is a modular monolith (`LLD/12-open-questions.md` A11): one process signs, the same
+process verifies, so there is no second service that needs to verify without holding the signing
+secret. Two secrets, not one, so a leaked access-token secret cannot forge a refresh token and
+vice versa — the two have very different blast radii, 15 minutes against up to 30 days.
+
+**Consequences:** two new required env vars. Access-token verification is entirely stateless, no
+DB round-trip — the standard trade-off for a short TTL: a revoked user stays valid on
+already-issued access tokens for up to 15 minutes, accepted rather than solved with a
+per-request revocation check.
+
+**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#token-lifecycle)
+
+---
+
+## 2026-08-24 — Refresh tokens rotate; reuse revokes the whole session family
+
+**Decision:** Every refresh call issues a new refresh token and invalidates the old one.
+Presenting an already-used refresh token — the signature of a stolen token racing the
+legitimate one — revokes every session in that token's family, not just the one being refreshed.
+
+**Why:** Adapted from a pattern in an earlier project (`waagent`'s `refreshSession.usecase.ts`)
+that proved out well there. A stolen refresh token is only useful to an attacker until it is
+used once; rotation converts "the token leaked" into "the token leaked and was used before the
+legitimate client's next refresh" — a much narrower window — and reuse detection turns that race
+into a hard signal instead of a silent compromise. A small grace window (~5s) tolerates a
+genuine double-submit from a flaky mobile network without false-flagging it as theft.
+
+**Consequences:** every refresh needs a session-record lookup (`tokenHash`, `usedAt`,
+`familyId`) in Mongo, not just a stateless JWT verify — a small latency cost accepted for a
+security property a stateless design cannot provide. A reuse event logs at `error` with
+`isExpected: false`, which per `shared/http/error-handler.ts` is what pages someone.
+
+**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#token-lifecycle)
+
+---
+
+## 2026-08-24 — Refresh token delivery splits by role, not by a client-type flag
+
+**Decision:** Admin's refresh token is set as an httpOnly, Secure, SameSite=Strict cookie scoped
+to `/api/admin/auth`. Customer and driver both get the refresh token in the JSON response body.
+No generic "client type" parameter exists anywhere in the auth flow.
+
+**Why:** The three roles already imply the channel — admin is the web-only ops panel; customer
+and driver are mobile-only apps that cannot rely on an httpOnly cookie the way a browser can.
+Building a channel-negotiation flag for a distinction that never actually varies (an admin token
+request never comes from a mobile app, and vice versa) would be an abstraction for something the
+routing layer (`/admin/auth/*` vs `/customer/auth/*` vs `/driver/auth/*`) already expresses.
+
+**Consequences:** the mobile apps own their own secure storage of the refresh token (Keychain /
+EncryptedSharedPreferences) — an app-side concern, not an API one. If a web-based customer or
+driver product ever ships, this decision needs revisiting; it is not designed to generalize past
+the current three clients.
+
+**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#token-lifecycle)
+
+---
+
+## 2026-08-24 — Login OTPs are stored as a keyed HMAC, not password-grade hashed
+
+**Decision:** OTP challenges in Redis store `HMAC-SHA256(code, server_pepper)`, not a
+bcrypt/Argon2 hash.
+
+**Why:** A 6-digit code carries roughly 20 bits of entropy and a 5-minute TTL — a slow,
+memory-hard hash defends against offline brute-force of a secret that is already
+effectively unbrute-forceable within its lifetime by the attempt limit and cooldown alone (see
+`LLD/13-auth-and-user.md`). What a memory-hard hash *would* cost here is verify-time latency
+under legitimate retry, for no matching security gain. A keyed HMAC is fast, non-invertible
+without the server-held pepper, and is the right tool for a short-lived, low-entropy,
+rate-limited secret — distinct from the admin-auth-unification entry above, which removes the
+need for any password hash at all.
+
+**Consequences:** `OTP_PEPPER` becomes a required env var, distinct from the JWT secrets — a
+leaked pepper only devalues in-flight OTP challenges (5-minute blast radius), not a long-lived
+credential.
+
+**Refs:** [`LLD/13-auth-and-user.md`](LLD/13-auth-and-user.md#otp)
+
+---
+
 ## 2026-08-22 — winston replaced with pino
 
 **Decision:** pino for application logging, reversing the winston choice in

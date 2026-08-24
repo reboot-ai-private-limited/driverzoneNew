@@ -19,3 +19,22 @@ import { v7 as uuidv7 } from 'uuid';
 export function newRequestId(): string {
   return `req_${uuidv7()}`;
 }
+
+/**
+ * A refresh-session identifier, carried as the `sid` claim.
+ *
+ * v7 again, and for a reason beyond habit: sessions in one rotation family are read in the order
+ * they were issued when investigating a token-reuse alert, and a sortable id makes "which came
+ * first" a string comparison rather than a timestamp join.
+ */
+export function newSessionId(): string {
+  return `ses_${uuidv7()}`;
+}
+
+/**
+ * A refresh-token FAMILY identifier — shared by every session in one rotation chain, from first
+ * login until the chain ends. Reuse detection revokes by this, not by session id.
+ */
+export function newSessionFamilyId(): string {
+  return `fam_${uuidv7()}`;
+}

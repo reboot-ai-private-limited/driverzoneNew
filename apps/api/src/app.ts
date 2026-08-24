@@ -1,3 +1,4 @@
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
 import type { Express } from 'express';
@@ -29,6 +30,10 @@ export function createApp(): Express {
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGINS, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
+  // The admin panel's refresh token travels as an httpOnly cookie; the mobile apps never send
+  // one. Unsigned, deliberately — the value is a JWT that already carries its own signature,
+  // and a second one would be a second secret to rotate for no additional guarantee.
+  app.use(cookieParser());
 
   app.use('/api', buildApiRouter(buildContainers()));
 

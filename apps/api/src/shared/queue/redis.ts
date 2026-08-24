@@ -45,12 +45,32 @@ export function disconnectRedis(): void {
   connection = undefined;
 }
 
+/**
+ * Same budget and same reasoning as Mongo's probe (`shared/db/mongo.ts`): a health check that
+ * can outlast the orchestrator polling it is worse than none.
+ */
+const PING_TIMEOUT_MS = 2_000;
+
+/**
+ * Whether Redis can actually serve a command right now.
+ *
+ * The race is not belt-and-braces — without it this function NEVER RETURNS when Redis is
+ * unreachable. `maxRetriesPerRequest: null` above (required by BullMQ) means a command issued
+ * while the connection is down sits in ioredis's offline queue indefinitely rather than
+ * rejecting, so `ping()` simply never settles and `/api/health` hangs with it. That turns the
+ * one endpoint whose job is to report trouble into another casualty of it.
+ */
 export async function redisHealth(): Promise<{ ok: boolean; state: string }> {
   const redis = getRedis();
   try {
-    const pong = await redis.ping();
+    const pong = await Promise.race([
+      redis.ping(),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error('ping timed out')), PING_TIMEOUT_MS).unref(),
+      ),
+    ]);
     return { ok: pong === 'PONG', state: redis.status };
-  } catch {
-    return { ok: false, state: redis.status };
+  } catch (err) {
+    return { ok: false, state: err instanceof Error ? err.message : redis.status };
   }
 }

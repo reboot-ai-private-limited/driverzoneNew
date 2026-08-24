@@ -32,6 +32,15 @@ export const FAULT_CODES = [
   'CONFLICT',
   'RATE_LIMITED',
   'INTERNAL',
+
+  // Identity (docs/LLD/13-auth-and-user.md). One generic code covers wrong/expired/no-challenge
+  // and an unprovisioned admin number alike — telling those apart is an enumeration oracle.
+  'OTP_INVALID_OR_EXPIRED',
+  'OTP_ATTEMPTS_EXCEEDED',
+  'OTP_COOLDOWN_ACTIVE',
+  'OTP_SEND_LIMIT_EXCEEDED',
+  'SESSION_REVOKED',
+  'REFRESH_TOKEN_INVALID',
 ] as const;
 export type FaultCode = (typeof FAULT_CODES)[number];
 

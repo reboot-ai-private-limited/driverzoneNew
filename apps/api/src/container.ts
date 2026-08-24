@@ -1,4 +1,5 @@
 import { buildHealthContainer } from '@/modules/health/health.container.js';
+import { buildIdentityContainer } from '@/modules/identity/identity.container.js';
 
 /**
  * THE APPLICATION COMPOSITION ROOT.
@@ -16,11 +17,15 @@ import { buildHealthContainer } from '@/modules/health/health.container.js';
  */
 export interface AppContainers {
   health: ReturnType<typeof buildHealthContainer>;
+  identity: ReturnType<typeof buildIdentityContainer>;
 }
 
 export function buildContainers(): AppContainers {
   // tier 0 — depends on no other module
   const health = buildHealthContainer();
 
-  return { health };
+  // tier 1 — customers, drivers, admins, auth
+  const identity = buildIdentityContainer();
+
+  return { health, identity };
 }

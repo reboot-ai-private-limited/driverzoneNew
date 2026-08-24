@@ -25,5 +25,7 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/driver', c.identity.buildRoleRouter('DRIVER'));
   router.use('/admin', c.identity.buildRoleRouter('ADMIN'));
 
+  router.use('/packages', c.packages.buildRouter());
+
   return router;
 }

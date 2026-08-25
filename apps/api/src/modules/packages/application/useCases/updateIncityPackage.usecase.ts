@@ -13,7 +13,6 @@ export class UpdateIncityPackageUseCase {
     // If changing variants/pickupZones/isActive, validate activation rules
     if (data.isActive !== false) {
       const mergedForValidation = {
-        pickupZoneIds: data.pickupZoneIds ?? existing.pickupZoneIds,
         variants: data.variants ?? existing.variants,
       };
 

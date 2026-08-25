@@ -13,7 +13,6 @@ export class UpdateOutstationPackageUseCase {
     const mergedMinKm = data.minKm ?? existing.minKm;
     const mergedMaxKm = data.maxKm ?? existing.maxKm;
     const mergedTerrain = data.terrain ?? existing.terrain;
-    const mergedPickupZoneIds = data.pickupZoneIds ?? existing.pickupZoneIds;
     const mergedPrices = data.prices ?? existing.prices;
     const mergedIsActive = data.isActive ?? existing.isActive;
 
@@ -22,7 +21,6 @@ export class UpdateOutstationPackageUseCase {
 
     if (mergedIsActive !== false) {
       const reason = validateOutstationPackageActivation({
-        pickupZoneIds: mergedPickupZoneIds,
         prices: mergedPrices,
       });
       if (reason) throw new InvalidPackageError(reason);
@@ -32,7 +30,6 @@ export class UpdateOutstationPackageUseCase {
       terrain: mergedTerrain,
       minKm: mergedMinKm,
       maxKm: mergedMaxKm,
-      pickupZoneIds: mergedPickupZoneIds,
       excludeId: id,
     });
     if (conflict) throw new OverlappingBandError(conflict.id);

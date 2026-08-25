@@ -5,7 +5,6 @@ import type { Direction } from './outstationPackage.entity.js';
 
 export interface CreateIncityPackageData {
   cityZoneId: string;
-  pickupZoneIds: string[];
   name: string;
   description?: string | undefined;
   variants: Array<{
@@ -36,7 +35,6 @@ export interface CreateOutstationPackageData {
   terrain: Terrain;
   minKm: number;
   maxKm: number;
-  pickupZoneIds: string[];
   prices: Array<{
     carCategoryId: string;
     direction: Direction;
@@ -64,7 +62,6 @@ export interface OverlapQuery {
   terrain: Terrain;
   minKm: number;
   maxKm: number;
-  pickupZoneIds: string[];
   excludeId?: string;
 }
 
@@ -78,11 +75,10 @@ export interface PackageRepositoryPort {
   listIncity(filter: ListPackageFilter): Promise<IncityPackage[]>;
   listOutstation(filter: ListOutstationFilter): Promise<OutstationPackage[]>;
 
-  findIncityForQuote(query: { cityZoneId: string; pickupZoneId: string }): Promise<IncityPackage[]>;
+  findIncityForQuote(query: { cityZoneId: string }): Promise<IncityPackage[]>;
   findOutstationForQuote(query: {
     terrain: Terrain;
     distanceKm: number;
-    pickupZoneId: string;
   }): Promise<OutstationPackage[]>;
 
   findOverlappingBands(query: OverlapQuery): Promise<OutstationPackage | null>;

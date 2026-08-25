@@ -12,6 +12,13 @@ const incityPriceSchema = z.object({
   driverCommissionValue: z.number().int().min(0),
   companyCommissionType: commissionType,
   companyCommissionValue: z.number().int().min(0),
+}).superRefine((data, ctx) => {
+  if (data.driverCommissionType === 'PERCENT' && data.driverCommissionValue > 10000) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Percent commission cannot exceed 10000 BPS', path: ['driverCommissionValue'] });
+  }
+  if (data.companyCommissionType === 'PERCENT' && data.companyCommissionValue > 10000) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Percent commission cannot exceed 10000 BPS', path: ['companyCommissionValue'] });
+  }
 });
 
 const incityVariantSchema = z.object({
@@ -42,6 +49,13 @@ const outstationPriceSchema = z.object({
   driverCommissionValue: z.number().int().min(0),
   companyCommissionType: commissionType,
   companyCommissionValue: z.number().int().min(0),
+}).superRefine((data, ctx) => {
+  if (data.driverCommissionType === 'PERCENT' && data.driverCommissionValue > 10000) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Percent commission cannot exceed 10000 BPS', path: ['driverCommissionValue'] });
+  }
+  if (data.companyCommissionType === 'PERCENT' && data.companyCommissionValue > 10000) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Percent commission cannot exceed 10000 BPS', path: ['companyCommissionValue'] });
+  }
 });
 
 export const createOutstationPackageSchema = z.object({

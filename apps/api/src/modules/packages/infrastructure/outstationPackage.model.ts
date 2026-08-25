@@ -32,6 +32,5 @@ const outstationPackageSchema = new Schema(
 );
 
 outstationPackageSchema.index({ terrain: 1, minKm: 1, maxKm: 1, isActive: 1 });
-outstationPackageSchema.index({ pickupZoneIds: 1, isActive: 1 });
 
 export const OutstationPackageModel = model('OutstationPackage', outstationPackageSchema);

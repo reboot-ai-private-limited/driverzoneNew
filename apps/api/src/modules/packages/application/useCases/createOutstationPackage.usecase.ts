@@ -19,7 +19,6 @@ export class CreateOutstationPackageUseCase {
       terrain: data.terrain,
       minKm: data.minKm,
       maxKm: data.maxKm,
-      pickupZoneIds: data.pickupZoneIds,
     });
     if (conflict) throw new OverlappingBandError(conflict.id);
 

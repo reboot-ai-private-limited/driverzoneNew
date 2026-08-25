@@ -16,7 +16,7 @@ export class OverlappingBandError extends AppError {
   constructor(conflictId: string) {
     super({
       statusCode: 409,
-      code: 'CONFLICT',
+      code: 'PACKAGE_BAND_OVERLAP',
       message: 'Distance band overlaps with an existing outstation package',
       publicDetails: { conflictingPackageId: conflictId },
       isExpected: true,
@@ -38,8 +38,8 @@ export class InvalidBandError extends AppError {
 export class InvalidPackageError extends AppError {
   constructor(reason: string) {
     super({
-      statusCode: 400,
-      code: 'VALIDATION_FAILED',
+      statusCode: 422,
+      code: 'PACKAGE_NOT_SELLABLE',
       message: reason,
       isExpected: true,
     });

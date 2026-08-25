@@ -45,6 +45,6 @@ const incityPackageSchema = new Schema(
   { timestamps: true },
 );
 
-incityPackageSchema.index({ cityZoneId: 1, pickupZoneIds: 1, isActive: 1 });
+incityPackageSchema.index({ cityZoneId: 1, isActive: 1 });
 
 export const IncityPackageModel = model('IncityPackage', incityPackageSchema);

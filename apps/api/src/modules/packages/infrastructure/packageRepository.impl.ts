@@ -17,7 +17,6 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
   return {
     id: String(obj._id),
     cityZoneId: String(obj.cityZoneId),
-    pickupZoneIds: obj.pickupZoneIds.map((id) => String(id)),
     name: obj.name,
     description: obj.description ? obj.description : undefined,
     variants: obj.variants.map((v) => ({
@@ -31,8 +30,7 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
         carCategoryId: String(p.carCategoryId),
         baseFarePaise: p.baseFarePaise,
         extraMinuteRatePaise: p.extraMinuteRatePaise,
-        extraKmRatePaise: p.extraKmRatePaise,
-        nightChargePaise: p.nightChargePaise,
+                nightChargePaise: p.nightChargePaise,
         driverCommissionType: p.driverCommissionType as CommissionType,
         driverCommissionValue: p.driverCommissionValue,
         companyCommissionType: p.companyCommissionType as CommissionType,
@@ -56,7 +54,6 @@ function toOutstationEntity(doc: InstanceType<typeof OutstationPackageModel>): O
     terrain: obj.terrain as Terrain,
     minKm: obj.minKm,
     maxKm: obj.maxKm,
-    pickupZoneIds: obj.pickupZoneIds.map((id) => String(id)),
     prices: obj.prices.map((p) => ({
       id: String(p._id),
       carCategoryId: String(p.carCategoryId),
@@ -114,11 +111,9 @@ export class MongoPackageRepository implements PackageRepositoryPort {
 
   async findIncityForQuote(query: {
     cityZoneId: string;
-    pickupZoneId: string;
   }): Promise<IncityPackage[]> {
     const docs = await IncityPackageModel.find({
       cityZoneId: query.cityZoneId,
-      pickupZoneIds: query.pickupZoneId,
       isActive: true,
     });
     return docs.map(toIncityEntity);
@@ -127,13 +122,11 @@ export class MongoPackageRepository implements PackageRepositoryPort {
   async findOutstationForQuote(query: {
     terrain: string;
     distanceKm: number;
-    pickupZoneId: string;
   }): Promise<OutstationPackage[]> {
     const docs = await OutstationPackageModel.find({
       terrain: query.terrain,
       minKm: { $lte: query.distanceKm },
       maxKm: { $gt: query.distanceKm },
-      pickupZoneIds: query.pickupZoneId,
       isActive: true,
     });
     return docs.map(toOutstationEntity);
@@ -143,7 +136,6 @@ export class MongoPackageRepository implements PackageRepositoryPort {
     const filter: Record<string, unknown> = {
       isActive: true,
       terrain: query.terrain,
-      pickupZoneIds: { $in: query.pickupZoneIds },
       minKm: { $lt: query.maxKm },
       maxKm: { $gt: query.minKm },
     };

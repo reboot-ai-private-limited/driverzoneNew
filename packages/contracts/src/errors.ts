@@ -32,6 +32,8 @@ export const FAULT_CODES = [
   'CONFLICT',
   'RATE_LIMITED',
   'INTERNAL',
+  'PACKAGE_BAND_OVERLAP',
+  'PACKAGE_NOT_SELLABLE',
 
   // Identity (docs/LLD/auth.md). One generic code covers wrong/expired/no-challenge
   // and an unprovisioned admin number alike — telling those apart is an enumeration oracle.

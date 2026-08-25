@@ -5,8 +5,7 @@ export interface IncityPrice {
   carCategoryId: string;
   baseFarePaise: number;
   extraMinuteRatePaise: number;
-  extraKmRatePaise: number;
-  nightChargePaise: number;
+    nightChargePaise: number;
   driverCommissionType: CommissionType;
   driverCommissionValue: number;
   companyCommissionType: CommissionType;
@@ -28,7 +27,6 @@ export interface IncityVariant {
 export interface IncityPackage {
   id: string;
   cityZoneId: string;
-  pickupZoneIds: string[];
   name: string;
   description?: string | undefined;
   variants: IncityVariant[];
@@ -46,12 +44,8 @@ export function hasActiveVariantWithPrice(pkg: {
 }
 
 export function validateIncityPackageActivation(pkg: {
-  pickupZoneIds: string[];
   variants: Array<{ isActive?: boolean; prices: Array<{ isActive?: boolean }> }>;
 }): string | null {
-  if (pkg.pickupZoneIds.length === 0) {
-    return 'An active incity package must have at least one pickup zone';
-  }
   if (!hasActiveVariantWithPrice(pkg)) {
     return 'An active incity package must have at least one active variant with an active price';
   }

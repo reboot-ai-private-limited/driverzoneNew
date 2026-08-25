@@ -23,7 +23,6 @@ export interface OutstationPackage {
   terrain: Terrain;
   minKm: number;
   maxKm: number;
-  pickupZoneIds: string[];
   prices: OutstationPrice[];
   isActive: boolean;
   createdAt: Date;
@@ -37,12 +36,8 @@ export function validateOutstationBand(minKm: number, maxKm: number): string | n
 }
 
 export function validateOutstationPackageActivation(pkg: {
-  pickupZoneIds: string[];
   prices: Array<{ isActive?: boolean }>;
 }): string | null {
-  if (pkg.pickupZoneIds.length === 0) {
-    return 'An active outstation package must have at least one pickup zone';
-  }
   if (!pkg.prices.some((p) => p.isActive !== false)) {
     return 'An active outstation package must have at least one active price';
   }

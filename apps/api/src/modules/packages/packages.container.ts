@@ -8,6 +8,7 @@ import { UpdateOutstationPackageUseCase } from './application/useCases/updateOut
 import { ListIncityPackagesUseCase } from './application/useCases/listIncityPackages.usecase.js';
 import { ListOutstationPackagesUseCase } from './application/useCases/listOutstationPackages.usecase.js';
 import { GetPackageByIdUseCase } from './application/useCases/getPackageById.usecase.js';
+import { ResolveForTripUseCase } from './application/useCases/resolveForTrip.usecase.js';
 import {
   makeCreateIncityPackageController,
   makeCreateOutstationPackageController,
@@ -35,11 +36,11 @@ export function buildPackagesContainer(): PackagesContainer {
   const listIncity = new ListIncityPackagesUseCase(repo);
   const listOutstation = new ListOutstationPackagesUseCase(repo);
   const getById = new GetPackageByIdUseCase(repo);
+  const resolveForTrip = new ResolveForTripUseCase(repo);
 
   return {
     contract: {
-      findIncityPackages: (query) => repo.findIncityForQuote(query),
-      findOutstationPackage: (query) => repo.findOutstationForQuote(query),
+      resolveForTrip: (input) => resolveForTrip.execute(input),
     },
     buildRouter: () =>
       buildPackagesRouter({

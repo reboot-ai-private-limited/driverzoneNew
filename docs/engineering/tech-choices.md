@@ -157,7 +157,7 @@ Format for each entry:
 - **Why this one:** dispatch timers must survive a process restart. This is the single most
   important operational decision in the codebase: an in-memory `setTimeout` dies on deploy, and
   the booking it was tracking sits in `SEARCHING` forever — no driver, no error, no alert,
-  because nothing *failed*. A customer watches a spinner while the system believes it is
+  because nothing _failed_. A customer watches a spinner while the system believes it is
   working. BullMQ persists to Redis, retries, and is inspectable.
 - **Rejected:** `setTimeout` (see above); Agenda (Mongo-backed, so no extra infrastructure, but
   weaker primitives and no usable UI); Temporal (the right model for this problem, and too much
@@ -212,6 +212,59 @@ Standard hardening. `trust proxy: 1` is set because the API runs behind nginx �
 - **Monorepo config that matters:** `outputFileTracingRoot` must point at the repo root, or
   tracing stops at `apps/web` and ships an image missing half its imports.
   `transpilePackages` is required because the workspace packages ship TypeScript source.
+
+### Tailwind v4
+
+- **Chosen for:** every style in the admin panel.
+- **Why this one:** v4's theme is CSS — `@theme` in a stylesheet, no `tailwind.config.js` — which
+  means `@driverzone/design-system` can ship a `theme.css` alongside its components and an app
+  gets the whole design language with one import. For dense admin screens the utility model is
+  also simply faster than a stylesheet per component, and it keeps the styles next to the markup
+  they describe, which is where they are read.
+- **Rejected:** CSS Modules + custom properties (no dependency at all, and the honest
+  alternative — but noticeably slower to build tables and forms, and no escape hatch for a
+  one-off); shadcn/ui (a large head start, at the cost of ~30 vendored files we then own and a
+  second token layer to keep in sync with `tokens.ts`); vanilla-extract (typed and zero-runtime,
+  but a build step in a package that deliberately has none).
+- **The config that matters:** `apps/web/src/app/globals.css` must declare
+  `@source "…/packages/design-system/src"`. Without it, every class used inside a design-system
+  component is absent from the generated CSS and the primitives render unstyled — which looks
+  like a broken build rather than a missing line of config.
+- **Note:** `tokens.ts` stays the source of truth and `theme.css` mirrors it, held together by a
+  test rather than codegen. See [`design-language.md`](design-language.md) §Guards.
+
+### TanStack Query v5
+
+- **Chosen for:** all server state in the admin panel — caching, invalidation, refetching,
+  mutation lifecycle.
+- **Why this one:** the panel is a pure client application (see
+  [`frontend-architecture.md`](frontend-architecture.md)), so every screen owns fetch, cache,
+  loading, error, retry and invalidation. Hand-writing that per screen produces six subtly
+  different versions of the same bug. The zone editor is what settled it: debounced validation on
+  every geometry change, invalidation across a list and a detail view at once, and a map that must
+  not blank on a background refetch.
+- **Rejected:** SWR (lighter, but weaker mutation and invalidation primitives, which is most of
+  what an editor needs); plain `fetch` in `useEffect` (this is the thing being avoided); RTK Query
+  (brings Redux for a panel with no client state to manage).
+- **Previously:** deliberately absent. `tech-choices.md` said "add it when the admin panel
+  actually needs it, not before" — this is that moment. See [`../decision-log.md`](../decision-log.md).
+- **Load-bearing config:** never retry a 4xx, and let the API client's single-flight refresh own
+  401 rather than the retry logic. Both are in
+  [`frontend-architecture.md`](frontend-architecture.md).
+
+### Radix primitives
+
+- **Chosen for:** dialog, sheet, dropdown menu, select, tooltip, tabs, popover.
+- **Why this one:** these are the components whose focus trapping, escape and outside-click
+  handling, typeahead and ARIA wiring are genuinely hard, and where a hand-rolled version is
+  wrong in ways that only show up for a keyboard or screen-reader user. Unstyled, so the design
+  language stays ours.
+- **Rejected:** a full component library (Mantine, MUI — brings a whole visual system we would
+  then fight); hand-rolling (fine for a button, not for a focus trap); Headless UI (comparable,
+  smaller primitive set).
+- **Note:** these are the **first runtime dependencies `@driverzone/design-system` has ever had**.
+  Deliberate, and the bar for the next one is the same: a component we would otherwise get
+  subtly wrong. See [`../decision-log.md`](../decision-log.md).
 
 ### MapLibre GL + Mapbox Draw
 
@@ -274,10 +327,9 @@ nginx. See [09](build-and-deploy.md).
 
 ## Deliberately absent
 
-| Not used | Why |
-|---|---|
-| An ORM beyond Mongoose | Mongoose is already the schema layer. A second abstraction over it buys nothing. |
+| Not used                               | Why                                                                                                                                                                         |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An ORM beyond Mongoose                 | Mongoose is already the schema layer. A second abstraction over it buys nothing.                                                                                            |
 | A DI container (tsyringe, InversifyJS) | `<module>.container.ts` is ~30 lines of explicit wiring per module, greppable and debuggable. A decorator-driven container trades that for magic and a metadata dependency. |
-| GraphQL | Four known clients and a fixed set of screens. REST with typed contracts is less machinery for the same result. |
-| A state-management library (web) | Server state via fetch + cache. Add TanStack Query when the admin panel actually needs it, not before. |
-| Sentry / APM | Should be added before the pilot. Not scaffolded yet — tracked in [`../LLD/roadmap.md`](../LLD/roadmap.md). |
+| GraphQL                                | Four known clients and a fixed set of screens. REST with typed contracts is less machinery for the same result.                                                             |
+| Sentry / APM                           | Should be added before the pilot. Not scaffolded yet — tracked in [`../LLD/roadmap.md`](../LLD/roadmap.md).                                                                 |

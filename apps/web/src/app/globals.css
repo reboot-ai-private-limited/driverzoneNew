@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@import '@driverzone/design-system/theme.css';
+
+/**
+ * REQUIRED. Tailwind only generates classes it can SEE, and by default it scans this app's
+ * source only. Without this line every class used inside a design-system component is absent
+ * from the bundle and the primitives render unstyled — which looks like a broken build rather
+ * than a missing line of config.
+ */
+@source "../../../../packages/design-system/src";

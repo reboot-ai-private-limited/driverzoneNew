@@ -34,13 +34,13 @@ failed to compute cache key: "/packages/mobile-ui/package.json": not found
 
 ## What gets produced
 
-| Artifact | Built from | Contains | Goes to |
-|---|---|---|---|
-| `driverzone-api` | `apps/api/Dockerfile` | `dist/` + prod deps | VM / ECS |
-| `driverzone-worker` | **the same image**, different `CMD` | — | VM / ECS |
-| `driverzone-web` | `apps/web/Dockerfile` | Next standalone output | VM / ECS |
-| `driverzone-customer.aab` | `apps/customer` via EAS | — | Play Store / App Store |
-| `driverzone-driver.aab` | `apps/driver` via EAS | — | Play Store |
+| Artifact                  | Built from                          | Contains               | Goes to                |
+| ------------------------- | ----------------------------------- | ---------------------- | ---------------------- |
+| `driverzone-api`          | `apps/api/Dockerfile`               | `dist/` + prod deps    | VM / ECS               |
+| `driverzone-worker`       | **the same image**, different `CMD` | —                      | VM / ECS               |
+| `driverzone-web`          | `apps/web/Dockerfile`               | Next standalone output | VM / ECS               |
+| `driverzone-customer.aab` | `apps/customer` via EAS             | —                      | Play Store / App Store |
+| `driverzone-driver.aab`   | `apps/driver` via EAS               | —                      | Play Store             |
 
 **Two server artifacts, two store binaries.** The mobile apps never touch a server.
 
@@ -98,7 +98,7 @@ Details that took a while to get right and should not be casually changed:
 
 ### The trap: do not blanket-externalise with source-only workspace packages
 
-`--packages=external` marks *everything* external, and it cannot be selectively undone. With
+`--packages=external` marks _everything_ external, and it cannot be selectively undone. With
 workspace packages that publish TypeScript source (`exports: "./src/index.ts"`), that means the
 runtime tries to `import` a `.ts` file from inside `node_modules`, and Node refuses:
 
@@ -132,7 +132,7 @@ docker run --rm -e MONGO_URI=… -e REDIS_URL=… driverzone-api
 - `output: 'standalone'` — traces only the files the server loads.
 - `outputFileTracingRoot` must point at the repo root, or tracing stops at `apps/web` and ships
   an image missing half its imports.
-- **Three** COPY lines are required. `.next/static` and `public/` are *not* part of standalone
+- **Three** COPY lines are required. `.next/static` and `public/` are _not_ part of standalone
   output; missing them renders the page unstyled with a 404 on every chunk, which looks like a
   broken app rather than a missing COPY.
 - `HOSTNAME=0.0.0.0` — the standalone server binds localhost by default, which inside a
@@ -237,11 +237,11 @@ Nothing here needs rearchitecting to reach 10× the year-one target.
 
 ## Environment variables
 
-| Where | How | Why |
-|---|---|---|
-| API (runtime) | compose `env_file` | Secrets must never enter an image layer — a baked `.env` leaks to anyone who can pull |
-| Web (`NEXT_PUBLIC_*`) | Docker build args | Inlined into the client bundle at build time |
-| Mobile | EAS secrets + `app.config.ts` | Baked into the binary |
+| Where                 | How                           | Why                                                                                   |
+| --------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
+| API (runtime)         | compose `env_file`            | Secrets must never enter an image layer — a baked `.env` leaks to anyone who can pull |
+| Web (`NEXT_PUBLIC_*`) | Docker build args             | Inlined into the client bundle at build time                                          |
+| Mobile                | EAS secrets + `app.config.ts` | Baked into the binary                                                                 |
 
 `apps/api/src/config/env.ts` parses everything through Zod at boot. A missing variable fails the
 process immediately with the variable named, rather than surfacing as `undefined` inside a
@@ -257,3 +257,29 @@ connection string an hour into a deploy.
 - [ ] Contract change? Both mobile apps still typecheck against the new `@driverzone/contracts`
 - [ ] Mobile release? Confirm the **oldest supported app version** still works against the new
       API — users sit on old binaries for months
+
+---
+
+## The admin panel must be same-site with the API
+
+`apps/web` calls the API directly from the browser
+([`frontend-architecture.md`](frontend-architecture.md)), and the admin refresh token is an
+httpOnly cookie that the **API** sets with `SameSite=Strict`.
+
+So the panel has to be served from the same registrable domain as the API:
+
+```
+✓  admin.driverzone.in   +  api.driverzone.in       same site
+✗  driverzone-admin.com  +  api.driverzone.in       cookie never sent
+```
+
+The failure mode is quiet and confusing: login appears to succeed — `otp/verify` returns an access
+token in the body, the panel renders — and then the first refresh twelve minutes later gets a 401
+with no cookie attached, and the admin is signed out for no visible reason. A hard reload fails
+the same way, because session restore _is_ the refresh call.
+
+Local development is unaffected. `localhost:3000` and `localhost:4000` are the same site; ports do
+not enter into the same-site computation.
+
+`CORS_ORIGINS` on the API must also list the panel's origin — that is a separate mechanism and
+setting it does not make a cross-site cookie work.

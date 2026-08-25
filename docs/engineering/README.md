@@ -7,24 +7,26 @@ Decisions already made are logged in [`../decision-log.md`](../decision-log.md);
 recently is in [`../../CHANGELOG.md`](../../CHANGELOG.md).
 
 The product documentation lives one level up in [`../`](../README.md): what DriverZone does,
-the zone model, pricing, dispatch. This directory is about the *code*.
+the zone model, pricing, dispatch. This directory is about the _code_.
 
 ## Read in this order
 
-| Doc | Answers |
-|-----|---------|
-| [Day one](#day-one) | Clone to running stack |
-| [Monorepo layout](monorepo-layout.md) | What's in `apps/` vs `packages/`, and where new code goes |
-| [Clean architecture & SOLID](clean-architecture-and-solid.md) | The layer rules, each SOLID principle with a real example from this codebase |
-| [Module anatomy](module-anatomy.md) | `.public.ts`, the container, tiers, how a request flows end to end |
-| [Boundaries & enforcement](boundaries-and-enforcement.md) | Every lint rule, what it catches, what breaks without it |
-| [Coding standards](coding-standards.md) | Naming, errors, money, comments |
-| [Tech choices](tech-choices.md) | Every dependency: why it's here, what was rejected, when to revisit |
-| [Shared packages](shared-packages.md) | What belongs in `contracts` / `geo` / `design-system` / `mobile-ui` — and what must never |
-| [Mobile in the monorepo](mobile-in-monorepo.md) | Expo + pnpm + Metro, and the resolution trap |
-| [Build & deploy](build-and-deploy.md) | Artifacts, images, CI filtering, what deploys where |
-| [Testing](testing.md) | What to test at which level, and with what |
-| [Adding a module](adding-a-module.md) | The checklist |
+| Doc                                                           | Answers                                                                                   |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| [Day one](#day-one)                                           | Clone to running stack                                                                    |
+| [Monorepo layout](monorepo-layout.md)                         | What's in `apps/` vs `packages/`, and where new code goes                                 |
+| [Clean architecture & SOLID](clean-architecture-and-solid.md) | The layer rules, each SOLID principle with a real example from this codebase              |
+| [Module anatomy](module-anatomy.md)                           | `.public.ts`, the container, tiers, how a request flows end to end                        |
+| [Boundaries & enforcement](boundaries-and-enforcement.md)     | Every lint rule, what it catches, what breaks without it                                  |
+| [Coding standards](coding-standards.md)                       | Naming, errors, money, comments                                                           |
+| [Frontend architecture](frontend-architecture.md)             | How `apps/web` fetches, holds a session, and renders the four states of data              |
+| [Design language](design-language.md)                         | What the admin panel looks like: colour, density, the nav, the component inventory        |
+| [Tech choices](tech-choices.md)                               | Every dependency: why it's here, what was rejected, when to revisit                       |
+| [Shared packages](shared-packages.md)                         | What belongs in `contracts` / `geo` / `design-system` / `mobile-ui` — and what must never |
+| [Mobile in the monorepo](mobile-in-monorepo.md)               | Expo + pnpm + Metro, and the resolution trap                                              |
+| [Build & deploy](build-and-deploy.md)                         | Artifacts, images, CI filtering, what deploys where                                       |
+| [Testing](testing.md)                                         | What to test at which level, and with what                                                |
+| [Adding a module](adding-a-module.md)                         | The checklist                                                                             |
 
 ## Day one
 

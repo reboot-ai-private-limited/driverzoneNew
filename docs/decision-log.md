@@ -20,6 +20,35 @@ entry links to it.
 
 ---
 
+## 2026-08-25 — Hard delete is back, as a separate route from soft deactivate
+
+**Decision:** `DELETE /admin/zones/:id/hard` permanently removes a zone document. Blocked with
+`409 ZONE_STILL_ACTIVE` unless the zone is already inactive — deactivate it first via the
+existing `DELETE /admin/zones/:id`, which is unchanged and still blocks on nothing. This
+reverses the "Pickup zones are a serviceability gate and a fee" entry below, which retired hard
+delete entirely on the reasoning that `DELETE` should just mean soft-deactivate.
+
+**Why:** product wants a real permanent-removal path, not only "make it stop resolving." With
+Z-1 retired there is no longer a parent/child relationship between zones for a delete to check —
+that was FR-Z6's original blocking mechanism — so the only gate `zones` can still enforce on its
+own is "not currently active." `catalog`/`bookings` referencing this id is invisible to `zones`
+(tier 3, below both) and stays that way; this is the same limitation `GetZoneDependentsUseCase`
+already accepts for its own CITY warning.
+
+**Why a separate route, not `DELETE /:id?hard=true`:** one HTTP verb performing two very
+different operations — one reversible, one not — based on a query flag is easy to get wrong from
+a client. A distinct path makes the irreversible action harder to trigger by accident.
+
+**Consequences:** `ZoneRepositoryPort.deleteById` and `DeleteZoneUseCase` are back (a hard
+delete existed before the 2026-08-25 redesign, in a different shape — blocked on parent/child
+links that no longer exist, rather than on `isActive`). `ZONE_STILL_ACTIVE` added to
+`FAULT_CODES`. `zones.md`'s HTTP surface and Codes tables updated to match.
+
+**Refs:** [`LLD/zones.md`](LLD/zones.md) §HTTP surface, §Codes,
+`apps/api/src/modules/zones/application/useCases/deleteZone.usecase.ts`
+
+---
+
 ## 2026-08-25 — Brand primary is `#C0FF72`, and it is a surface, not an ink
 
 **Decision:** the admin panel's primary colour is `#C0FF72`, replacing `#0b6bcb` in

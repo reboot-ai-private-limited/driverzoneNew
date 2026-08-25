@@ -320,7 +320,8 @@ public routes below exist only for the home-screen coverage pre-check.
 | `GET` | `/admin/zones/:id` | 200 | |
 | `PATCH` | `/admin/zones/:id` | 200 | Metadata only — name, code, priority, pickup charge |
 | `PATCH` | `/admin/zones/:id/geometry` | 200 | Creates a version. Returns the new one |
-| `DELETE` | `/admin/zones/:id` | 200 | Soft deactivate. Returns the updated zone |
+| `DELETE` | `/admin/zones/:id` | 200 | Soft deactivate. Blocks on nothing. Returns the updated zone |
+| `DELETE` | `/admin/zones/:id/hard` | 200 | **Permanent.** Blocked (`409 ZONE_STILL_ACTIVE`) unless the zone is already inactive — deactivate it first. See the decision log, 2026-08-25 |
 | `GET` | `/admin/zones/:id/versions` | 200 | Version history, newest first |
 | `GET` | `/admin/zones/:id/dependents` | 200 | Blast radius, before deactivating |
 | `GET` | `/admin/coverage/heatmap` | 200 | `$geoNear` cluster over `coverageRequests` |
@@ -359,6 +360,7 @@ The rule that governs the whole surface, because it is the one people get wrong:
 | `ZONE_VALIDATION_FAILED` | 422 | Save refused on ERROR violations. `data` carries `violations[]` with `offending_geometry` |
 | `ZONE_CODE_TAKEN` | 409 | An active zone already holds that code |
 | `ZONE_ALREADY_SUPERSEDED` | 409 | Editing a version that is no longer current |
+| `ZONE_STILL_ACTIVE` | 409 | Hard delete refused — deactivate the zone first |
 | `INVALID_COORDINATE` | 422 | `assertPlausibleCoordinate` rejected the point — nearly always a lat/lng swap |
 | `ZONE_CONFIG_FAULT` | 500 | Now narrow: a resolution that is internally inconsistent in a way the write path should have prevented. **High-priority alert. The cause is never exposed to the customer.** |
 | `AMBIGUOUS_ZONE_MATCH` | 500 | Two active same-type zones matched — invariant Z-2 breached |

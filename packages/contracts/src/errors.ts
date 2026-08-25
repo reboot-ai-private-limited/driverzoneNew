@@ -12,6 +12,8 @@
 
 export const UNAVAILABLE_REASONS = [
   'ZONE_NO_PICKUP_COVERAGE',
+  /** From resolves to a PICKUP zone but not the CITY zone — incity is not offered, outstation is. */
+  'PICKUP_OUTSIDE_CITY',
   'DROP_OUTSIDE_CITY',
   'NO_PACKAGE_AVAILABLE',
   'NO_PACKAGE_FOR_DISTANCE',
@@ -20,7 +22,15 @@ export const UNAVAILABLE_REASONS = [
 export type UnavailableReason = (typeof UNAVAILABLE_REASONS)[number];
 
 export const FAULT_CODES = [
+  // Zones (docs/LLD/zones.md §Codes). ZONE_CONFIG_FAULT is now narrow — there is no
+  // pickup/city parent link left to disagree, so it fires only on a resolution that is
+  // internally inconsistent in a way the write path should have prevented.
   'ZONE_CONFIG_FAULT',
+  'ZONE_VALIDATION_FAILED',
+  'ZONE_CODE_TAKEN',
+  'ZONE_ALREADY_SUPERSEDED',
+  /** Hard delete refused — the zone must be deactivated first. See `deleteZone.usecase.ts`. */
+  'ZONE_STILL_ACTIVE',
   'AMBIGUOUS_ZONE_MATCH',
   'QUOTE_EXPIRED',
   'QUOTE_ALREADY_CONSUMED',

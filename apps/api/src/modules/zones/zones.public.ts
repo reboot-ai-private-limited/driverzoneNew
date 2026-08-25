@@ -2,11 +2,11 @@ import type { LatLng, LineString } from '@driverzone/geo';
 import type { ActorContext } from './application/actorContext.js';
 import type { CreateZoneInput } from './application/useCases/createZone.usecase.js';
 import type { UpdateZoneGeometryInput } from './application/useCases/updateZoneGeometry.usecase.js';
+import type { UpdateZoneMetadataInput } from './application/useCases/updateZoneMetadata.usecase.js';
 import type {
   ValidateZoneGeometryInput,
   ValidateZoneGeometryResult,
 } from './application/useCases/validateZoneGeometry.usecase.js';
-import type { DeactivateZoneInput } from './application/useCases/deactivateZone.usecase.js';
 import type { ZoneDependents } from './application/useCases/getZoneDependents.usecase.js';
 import type { ResolvedZones, Zone } from './domain/zone.entity.js';
 import type { ZoneListFilter } from './domain/zone.repository.port.js';
@@ -39,11 +39,17 @@ export interface ZoneResolutionContract {
 /** Zone authoring — admin only, and the only path that may write a polygon. */
 export interface ZoneAdminContract {
   create(input: CreateZoneInput, actor: ActorContext): Promise<Zone>;
+  /** `expectedVersion` on the input refuses a stale edit with ZONE_ALREADY_SUPERSEDED. */
   updateGeometry(zoneId: string, input: UpdateZoneGeometryInput, actor: ActorContext): Promise<Zone>;
-  deactivate(zoneId: string, input: DeactivateZoneInput, actor: ActorContext): Promise<Zone>;
+  /** Name, code, priority, pickup charge — never geometry, never `version`. */
+  updateMetadata(zoneId: string, input: UpdateZoneMetadataInput, actor: ActorContext): Promise<Zone>;
+  /** Soft deactivate. Unconditionally allowed — see `deactivateZone.usecase.ts`. */
+  deactivate(zoneId: string, actor: ActorContext): Promise<Zone>;
+  /** Permanent. Blocked unless the zone is already inactive — see `deleteZone.usecase.ts`. */
   delete(zoneId: string, actor: ActorContext): Promise<void>;
   /** Dry run — no write. Backs `POST /admin/zones/validate` and the live editor. */
   validate(input: ValidateZoneGeometryInput): Promise<ValidateZoneGeometryResult>;
+  /** Blast-radius warnings shown before deactivating. Never blocks. */
   getDependents(zoneId: string): Promise<ZoneDependents>;
   list(filter: ZoneListFilter): Promise<Zone[]>;
   get(zoneId: string): Promise<Zone>;

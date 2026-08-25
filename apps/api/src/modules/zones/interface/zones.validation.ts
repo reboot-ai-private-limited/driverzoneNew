@@ -33,12 +33,13 @@ const queryBoolean = z
   .transform((v) => (v === undefined ? undefined : v === 'true'));
 
 // ─── Zone CRUD ──────────────────────────────────────────────────────────────────────────────
+// No `parent_zone_id` anywhere below — Z-1 is retired, nothing supplies one any more
+// (docs/LLD/zones.md, docs/decision-log.md).
 
 export const createZoneSchema = z.object({
   type: z.enum(ZONE_TYPES),
   name: zoneName,
   code: zoneCode,
-  parent_zone_id: objectIdString.optional(),
   geometry: polygonGeometry,
   priority: z.number().int().optional(),
   pickup_charge_type: z.enum(['FREE', 'PAID']).optional(),
@@ -47,22 +48,25 @@ export const createZoneSchema = z.object({
 
 export const updateZoneGeometrySchema = z.object({
   geometry: polygonGeometry,
+  expected_version: z.number().int().min(1),
+});
+
+export const updateZoneMetadataSchema = z.object({
+  name: zoneName.optional(),
+  code: zoneCode.optional(),
+  priority: z.number().int().optional(),
+  pickup_charge_type: z.enum(['FREE', 'PAID']).nullable().optional(),
+  pickup_charge_paise: z.number().int().min(0).nullable().optional(),
 });
 
 export const validateZoneSchema = z.object({
   type: z.enum(ZONE_TYPES),
-  parent_zone_id: objectIdString.optional(),
   geometry: polygonGeometry,
   exclude_zone_id: objectIdString.optional(),
 });
 
-export const deactivateZoneSchema = z.object({
-  force: z.boolean().optional(),
-});
-
 export const listZonesQuerySchema = z.object({
   type: z.enum(ZONE_TYPES).optional(),
-  parent_zone_id: objectIdString.optional(),
   is_active: queryBoolean,
 });
 
@@ -73,7 +77,7 @@ export const coverageCheckQuerySchema = z.object({
 
 export type CreateZoneInput = z.infer<typeof createZoneSchema>;
 export type UpdateZoneGeometryInput = z.infer<typeof updateZoneGeometrySchema>;
+export type UpdateZoneMetadataInput = z.infer<typeof updateZoneMetadataSchema>;
 export type ValidateZoneInput = z.infer<typeof validateZoneSchema>;
-export type DeactivateZoneInput = z.infer<typeof deactivateZoneSchema>;
 export type ListZonesQueryInput = z.infer<typeof listZonesQuerySchema>;
 export type CoverageCheckQueryInput = z.infer<typeof coverageCheckQuerySchema>;

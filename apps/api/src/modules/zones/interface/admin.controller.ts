@@ -10,6 +10,7 @@ import { asyncHandler } from '@/shared/http/asyncHandler.js';
 import { sendSuccess } from '@/shared/http/response.util.js';
 import type { CreateZoneUseCase } from '../application/useCases/createZone.usecase.js';
 import type { UpdateZoneGeometryUseCase } from '../application/useCases/updateZoneGeometry.usecase.js';
+import type { UpdateZoneMetadataUseCase } from '../application/useCases/updateZoneMetadata.usecase.js';
 import type { ValidateZoneGeometryUseCase } from '../application/useCases/validateZoneGeometry.usecase.js';
 import type { DeactivateZoneUseCase } from '../application/useCases/deactivateZone.usecase.js';
 import type { DeleteZoneUseCase } from '../application/useCases/deleteZone.usecase.js';
@@ -19,9 +20,9 @@ import type { GetZoneUseCase } from '../application/useCases/getZone.usecase.js'
 import { zoneToDto, violationToDto } from './zoneDto.mapper.js';
 import {
   createZoneSchema,
-  deactivateZoneSchema,
   listZonesQuerySchema,
   updateZoneGeometrySchema,
+  updateZoneMetadataSchema,
   validateZoneSchema,
 } from './zones.validation.js';
 
@@ -36,6 +37,7 @@ function actorId(req: Request): string {
 export interface AdminControllerDeps {
   create: CreateZoneUseCase;
   updateGeometry: UpdateZoneGeometryUseCase;
+  updateMetadata: UpdateZoneMetadataUseCase;
   validate: ValidateZoneGeometryUseCase;
   deactivate: DeactivateZoneUseCase;
   delete: DeleteZoneUseCase;
@@ -49,6 +51,7 @@ export interface AdminControllers {
   get: RequestHandler;
   create: RequestHandler;
   updateGeometry: RequestHandler;
+  updateMetadata: RequestHandler;
   deactivate: RequestHandler;
   delete: RequestHandler;
   validate: RequestHandler;
@@ -61,7 +64,6 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
       const q = listZonesQuerySchema.parse(req.query);
       const zones = await deps.list.execute({
         ...(q.type === undefined ? {} : { type: q.type }),
-        ...(q.parent_zone_id === undefined ? {} : { parentZoneId: q.parent_zone_id }),
         ...(q.is_active === undefined ? {} : { isActive: q.is_active }),
       });
       const body: ListZonesResponse = { zones: zones.map(zoneToDto) };
@@ -80,7 +82,6 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
           type: input.type,
           name: input.name,
           code: input.code,
-          parentZoneId: input.parent_zone_id,
           geometry: input.geometry,
           priority: input.priority,
           pickupChargeType: input.pickup_charge_type,
@@ -88,40 +89,56 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
         },
         { adminId: actorId(req), ip: req.ip },
       );
-      sendSuccess(req, res, zoneToDto(zone), 'Zone created', 201);
+      sendSuccess(req, res, zoneToDto(zone), `Zone saved as version ${zone.version}.`, 201);
     }),
 
     updateGeometry: asyncHandler(async (req, res) => {
       const input = updateZoneGeometrySchema.parse(req.body);
       const zone = await deps.updateGeometry.execute(
         req.params['id'] ?? '',
-        { geometry: input.geometry },
+        { geometry: input.geometry, expectedVersion: input.expected_version },
+        { adminId: actorId(req), ip: req.ip },
+      );
+      sendSuccess(req, res, zoneToDto(zone), `Zone saved as version ${zone.version}.`);
+    }),
+
+    updateMetadata: asyncHandler(async (req, res) => {
+      const input = updateZoneMetadataSchema.parse(req.body);
+      const zone = await deps.updateMetadata.execute(
+        req.params['id'] ?? '',
+        {
+          name: input.name,
+          code: input.code,
+          priority: input.priority,
+          pickupChargeType: input.pickup_charge_type,
+          pickupChargePaise: input.pickup_charge_paise,
+        },
         { adminId: actorId(req), ip: req.ip },
       );
       sendSuccess(req, res, zoneToDto(zone), 'Zone updated');
     }),
 
+    // DELETE /admin/zones/:id — soft, reversible. Blocks on nothing.
     deactivate: asyncHandler(async (req, res) => {
-      const input = deactivateZoneSchema.parse(req.body);
-      const zone = await deps.deactivate.execute(
-        req.params['id'] ?? '',
-        { force: input.force },
-        { adminId: actorId(req), ip: req.ip },
-      );
+      const zone = await deps.deactivate.execute(req.params['id'] ?? '', {
+        adminId: actorId(req),
+        ip: req.ip,
+      });
       sendSuccess(req, res, zoneToDto(zone), 'Zone deactivated');
     }),
 
+    // DELETE /admin/zones/:id/hard — permanent. Blocked unless already inactive.
     delete: asyncHandler(async (req, res) => {
       await deps.delete.execute(req.params['id'] ?? '', { adminId: actorId(req), ip: req.ip });
       const body: DeleteZoneResponse = { deleted: true };
       sendSuccess(req, res, body, 'Zone deleted');
     }),
 
+    // Always 200 — a violation is a valid answer, not a 422 (docs/LLD/zones.md).
     validate: asyncHandler(async (req, res) => {
       const input = validateZoneSchema.parse(req.body);
       const result = await deps.validate.execute({
         type: input.type,
-        parentZoneId: input.parent_zone_id,
         geometry: input.geometry,
         excludeZoneId: input.exclude_zone_id,
       });
@@ -135,9 +152,7 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
 
     getDependents: asyncHandler(async (req, res) => {
       const result = await deps.getDependents.execute(req.params['id'] ?? '');
-      const body: ZoneDependentsResponse = {
-        child_pickup_zones: result.childPickupZones.map(zoneToDto),
-      };
+      const body: ZoneDependentsResponse = { warnings: result.warnings };
       sendSuccess(req, res, body, 'Zone dependents');
     }),
   };

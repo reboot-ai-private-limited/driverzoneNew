@@ -19,15 +19,10 @@ export const zonesApi = {
   list: (token: string, query?: ListZonesQuery) =>
     request<ListZonesResponse>('/admin/zones', {
       token,
-      ...(query === undefined
-        ? {}
-        : {
-            query: {
-              type: query.type,
-              parent_zone_id: query.parent_zone_id,
-              is_active: query.is_active,
-            },
-          }),
+      // `parent_zone_id` is gone from the query: Z-1 is retired and a pickup zone is not a
+      // child of anything (docs/decision-log.md, 2026-08-25). `ZoneDto` still carries the
+      // field, dormant and always null.
+      ...(query === undefined ? {} : { query: { type: query.type, is_active: query.is_active } }),
     }),
 
   get: (token: string, id: string) => request<ZoneDto>(`/admin/zones/${id}`, { token }),
@@ -39,7 +34,18 @@ export const zonesApi = {
   validate: (token: string, body: ValidateZoneRequest) =>
     request<ValidateZoneResponse>('/admin/zones/validate', { method: 'POST', token, body }),
 
-  /** Read BEFORE anything happens, to show the blast radius. */
+  /**
+   * Read BEFORE anything happens, to show the blast radius. Returns human-readable warnings
+   * and never blocks — deactivation is always allowed, and the admin decides.
+   */
   dependents: (token: string, id: string) =>
     request<ZoneDependentsResponse>(`/admin/zones/${id}/dependents`, { token }),
+
+  /**
+   * Soft-deactivate. `DELETE` here is not destructive: the zone stays for the bookings that
+   * resolved against it, and the permanent removal is a separate route (`/hard`) that only
+   * works once the zone is already inactive. Two verbs, two routes, on purpose.
+   */
+  deactivate: (token: string, id: string) =>
+    request<ZoneDto>(`/admin/zones/${id}`, { method: 'DELETE', token }),
 };

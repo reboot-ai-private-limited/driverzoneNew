@@ -4,9 +4,14 @@ import type { Polygon } from '@driverzone/geo';
 /**
  * INFRASTRUCTURE — the `zones` collection (docs/LLD/database-schema.md).
  *
- * Only Z-4 (a document-local check: PICKUP requires a parent+charge type, CITY/HILL must not
- * have a parent) is enforceable here. Z-1/Z-2/Z-3/Z-MIN-AREA need siblings or a parent document,
- * so they live in `CreateZoneUseCase`/`UpdateZoneGeometryUseCase`, calling `validateZone()` from
+ * `parentZoneId` is retained, always `null` — Z-1 (pickup ⊆ city) was retired 2026-08-25
+ * (docs/LLD/zones.md, docs/decision-log.md). Kept rather than deleted because
+ * `checkWithinParent` still exists in `@driverzone/geo`, dormant, and a future nested-zone
+ * design would switch it back on rather than re-add the field.
+ *
+ * Only the document-local half of Z-4 is enforceable here (a PICKUP needs a charge type). The
+ * geometric invariants (Z-2/Z-3/Z-MIN-AREA/Z-MAX-AREA) need siblings, so they live in
+ * `CreateZoneUseCase`/`UpdateZoneGeometryUseCase`, calling `validateZone()` from
  * `@driverzone/geo`.
  */
 
@@ -34,6 +39,7 @@ const zoneSchema = new Schema<ZoneDoc>(
     name: { type: String, required: true },
     code: { type: String, required: true }, // 'SLG', 'SLG-CENTRAL'
 
+    // DORMANT — always null. See the file header.
     parentZoneId: { type: Schema.Types.ObjectId, ref: 'Zone', default: null },
 
     geometry: {
@@ -60,16 +66,13 @@ const zoneSchema = new Schema<ZoneDoc>(
 // every quote request (docs/prd.md's p99 < 50ms target).
 zoneSchema.index({ geometry: '2dsphere' });
 zoneSchema.index({ type: 1, isActive: 1 });
-zoneSchema.index({ parentZoneId: 1, isActive: 1 });
+zoneSchema.index({ supersededBy: 1 }); // version history
 // Partial: superseded versions accumulate and must not block a new version reusing the code.
 zoneSchema.index({ code: 1 }, { unique: true, partialFilterExpression: { isActive: true } });
 
 zoneSchema.pre('validate', function (next) {
-  if (this.type === 'PICKUP') {
-    if (!this.parentZoneId) return next(new Error('A PICKUP zone requires a parent CITY zone'));
-    if (!this.pickupChargeType) return next(new Error('A PICKUP zone requires a charge type'));
-  } else if (this.parentZoneId) {
-    return next(new Error(`A ${this.type} zone must not have a parent`));
+  if (this.type === 'PICKUP' && !this.pickupChargeType) {
+    return next(new Error('A PICKUP zone requires a charge type'));
   }
   next();
 });

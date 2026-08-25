@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { checkOverlap, checkWithinParent, clipToParent, validateZone, zoneStats } from '../src/zone-rules.js';
+import {
+  checkMaximumArea,
+  checkOverlap,
+  checkWithinParent,
+  clipToParent,
+  normalizeWinding,
+  validateZone,
+  zoneStats,
+} from '../src/zone-rules.js';
 import {
   BOWTIE,
   CENTRAL_PICKUP,
@@ -125,5 +133,72 @@ describe('zoneStats — informational only, not an invariant', () => {
     expect(stats.areaKm2).toBeGreaterThan(0);
     // 4 distinct corners plus the closing repeat of the first point.
     expect(stats.vertexCount).toBe(5);
+  });
+});
+
+describe('Z-MAX-AREA — implausibly large for an operational zone', () => {
+  it('accepts an ordinary pickup-zone-sized polygon', () => {
+    expect(checkMaximumArea(CENTRAL_PICKUP)).toHaveLength(0);
+  });
+
+  it('rejects a polygon covering more than the operational ceiling', () => {
+    // A ~10° square near the equator is on the order of 1,000,000 km² — well past the
+    // 100,000 km² ceiling, without needing anywhere near hemisphere scale.
+    const huge = {
+      type: 'Polygon' as const,
+      coordinates: [
+        [
+          [70, 10],
+          [80, 10],
+          [80, 20],
+          [70, 20],
+          [70, 10],
+        ],
+      ],
+    };
+    const vs = checkMaximumArea(huge);
+    expect(vs).toHaveLength(1);
+    expect(vs[0]?.rule).toBe('Z-MAX-AREA');
+  });
+});
+
+describe('normalizeWinding — the ring-winding trap', () => {
+  it('reverses a clockwise exterior ring to counter-clockwise', () => {
+    // CENTRAL_PICKUP is drawn counter-clockwise; reverse its ring to force clockwise input.
+    const clockwise = {
+      type: 'Polygon' as const,
+      coordinates: [[...CENTRAL_PICKUP.coordinates[0]!].reverse()],
+    };
+    const normalized = normalizeWinding(clockwise);
+    expect(normalized.coordinates).toEqual(CENTRAL_PICKUP.coordinates);
+  });
+
+  it('leaves an already counter-clockwise ring unchanged', () => {
+    expect(normalizeWinding(CENTRAL_PICKUP).coordinates).toEqual(CENTRAL_PICKUP.coordinates);
+  });
+
+  it('does not throw on a ring with fewer than four points — hands it back for checkValidity to reject', () => {
+    // @turf/helpers' polygon() constructor throws on this; normalizeWinding must not propagate
+    // that, since it runs before validateZone/checkValidity gets a chance to report Z-3 nicely.
+    const tooShort = { type: 'Polygon' as const, coordinates: [[[88.4, 26.7], [88.5, 26.7], [88.4, 26.7]]] };
+    expect(() => normalizeWinding(tooShort)).not.toThrow();
+    expect(normalizeWinding(tooShort)).toEqual(tooShort);
+  });
+
+  it('does not throw on an unclosed ring — hands it back for checkValidity to reject', () => {
+    const unclosed = {
+      type: 'Polygon' as const,
+      coordinates: [[[88.4, 26.7], [88.5, 26.7], [88.5, 26.75], [88.4, 26.75]]],
+    };
+    expect(() => normalizeWinding(unclosed)).not.toThrow();
+  });
+
+  it('validateZone still reports Z-3 for these after normalizeWinding passes them through', () => {
+    const unclosed = {
+      type: 'Polygon' as const,
+      coordinates: [[[88.4, 26.7], [88.5, 26.7], [88.5, 26.75], [88.4, 26.75]]],
+    };
+    const vs = validateZone({ geom: normalizeWinding(unclosed) });
+    expect(vs.some((v) => v.rule === 'Z-3' && v.severity === 'ERROR')).toBe(true);
   });
 });

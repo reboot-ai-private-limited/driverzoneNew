@@ -1,7 +1,7 @@
 import type { Zone } from '../../domain/zone.entity.js';
 import type { ZoneListFilter, ZoneRepositoryPort } from '../../domain/zone.repository.port.js';
 
-/** APPLICATION — the admin tree UI: filter by type/parent/active. */
+/** APPLICATION — the admin list: filter by type/active. */
 export class ListZonesUseCase {
   constructor(private readonly zones: ZoneRepositoryPort) {}
 

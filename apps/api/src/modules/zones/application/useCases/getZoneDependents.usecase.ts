@@ -1,20 +1,21 @@
-import type { Zone } from '../../domain/zone.entity.js';
 import type { ZoneRepositoryPort } from '../../domain/zone.repository.port.js';
 import { zoneNotFound } from '../../domain/zone.errors.js';
 
 export interface ZoneDependents {
-  childPickupZones: Zone[];
+  /** Human-readable blast-radius warnings, shown before an admin deactivates. Empty if none. */
+  warnings: string[];
 }
 
 /**
- * APPLICATION — the blast radius, powering both `GET /admin/zones/:id/dependents` and the
- * deactivate-confirmation flow.
- * 
- * Zone-native dependents only. `catalog` and `bookings` don't exist yet, so "3 incity packages
- * reference this zone" / "8 scheduled bookings" (docs/LLD/admin-panel.md's example) can't be
- * computed here — `zones` sits below both in the tier graph and may not depend on either. Those
- * sections get added later by whichever module composes `zones` + `catalog` + `bookings`
- * (likely `admin`); the response shape is designed so adding them is additive, not breaking.
+ * APPLICATION — the blast radius, shown before deactivating (`GET /admin/zones/:id/dependents`).
+ * Informational only — deactivation is never blocked (`DeactivateZoneUseCase`); this is what an
+ * admin checks *before* deciding, not a gate.
+ *
+ * PICKUP: computed for real — "is this the last active pickup zone" is a question `zones` can
+ * answer on its own. CITY: the incity-packages warning is a fixed message, not a real count —
+ * `catalog` doesn't exist yet, and `zones` sits below it in the tier graph and may not depend on
+ * it. Once `catalog` exists, a real count is computed by whichever module composes `zones` +
+ * `catalog` (likely `admin`); this message is designed to be replaced, not built around.
  */
 export class GetZoneDependentsUseCase {
   constructor(private readonly zones: ZoneRepositoryPort) {}
@@ -22,9 +23,21 @@ export class GetZoneDependentsUseCase {
   async execute(zoneId: string): Promise<ZoneDependents> {
     const zone = await this.zones.findById(zoneId);
     if (zone === undefined) throw zoneNotFound();
-    if (zone.type !== 'CITY') return { childPickupZones: [] };
 
-    const childPickupZones = await this.zones.findChildren(zoneId);
-    return { childPickupZones };
+    const warnings: string[] = [];
+
+    if (zone.type === 'PICKUP') {
+      const activePickups = await this.zones.findMany({ type: 'PICKUP', isActive: true });
+      const isLastOne = activePickups.length === 1 && activePickups[0]?.id === zone.id;
+      if (isLastOne) warnings.push('All service stops — this is the only active pickup zone.');
+    }
+
+    if (zone.type === 'CITY') {
+      warnings.push(
+        'Incity packages for this city will stop being sellable. Outstation keeps working.',
+      );
+    }
+
+    return { warnings };
   }
 }

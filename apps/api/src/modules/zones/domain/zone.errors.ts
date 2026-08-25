@@ -15,32 +15,60 @@ export function zoneNotFound(): AppError {
 /**
  * Any ERROR-severity violation from `validateZone()` (`@driverzone/geo`). `publicDetails` carries
  * the full violation list — including `offendingGeometry` — so the admin map editor can render
- * exactly what is wrong, per FR-Z3/FR-Z4/FR-Z5 (docs/LLD/domain-model.md).
+ * exactly what is wrong. `docs/LLD/zones.md` §Codes: 422, `ZONE_VALIDATION_FAILED`.
  */
 export function zoneValidationFailed(violations: ZoneViolation[]): AppError {
-  return AppError.badRequest('This zone geometry fails validation.', { violations });
+  return new AppError({
+    statusCode: 422,
+    code: 'ZONE_VALIDATION_FAILED',
+    message: 'This zone geometry fails validation.',
+    publicDetails: { violations },
+  });
 }
 
-/** The partial unique index on `code` (active zones only) was about to be violated. */
+/** The partial unique index on `code` (active zones only) was about to be violated. 409. */
 export function zoneCodeInUse(code: string): AppError {
-  return AppError.conflict(`A zone with code "${code}" already exists.`, { code });
+  return new AppError({
+    statusCode: 409,
+    code: 'ZONE_CODE_TAKEN',
+    message: `A zone with code "${code}" already exists.`,
+    publicDetails: { code },
+  });
 }
 
 /**
- * FR-Z6 — deactivating/deleting a zone that something still depends on.
+ * `updateGeometry`'s `expectedVersion` didn't match the zone's current version — either it was
+ * already edited elsewhere, or the caller has a stale copy. 409, per `zones.md` §Codes.
  *
- * `details` names what depends on it, matching the admin-panel.md "blast radius" preview so the
- * same shape powers both the confirmation screen and the hard block.
+ * Two admins editing the same polygon from two tabs must produce one save and one clear error,
+ * never a silent last-write-wins.
  */
-export function zoneHasActiveDependents(details: unknown): AppError {
-  return AppError.conflict('This zone still has active dependents.', details);
+export function zoneAlreadySuperseded(zoneId: string, currentVersion: number): AppError {
+  return new AppError({
+    statusCode: 409,
+    code: 'ZONE_ALREADY_SUPERSEDED',
+    message: 'This zone was edited by someone else. Reload it and try again.',
+    publicDetails: { zoneId, currentVersion },
+  });
 }
 
 /**
- * The branch from `zone-resolution.md` steps 3–4 that should be unreachable: a PICKUP zone
- * resolved whose parent is not an active CITY. Only reachable if Z-1 was violated at write time —
- * which `createZone`/`updateZoneGeometry` are supposed to make impossible — so this pages ops
- * rather than reading as ordinary bad input.
+ * Hard delete refused — the zone is still active. 409. Deactivate it first
+ * (`DELETE /admin/zones/:id`), which is reversible; a hard delete is not.
+ */
+export function zoneStillActive(zoneId: string): AppError {
+  return new AppError({
+    statusCode: 409,
+    code: 'ZONE_STILL_ACTIVE',
+    message: 'Deactivate this zone before deleting it permanently.',
+    publicDetails: { zoneId },
+  });
+}
+
+/**
+ * A resolution that is internally inconsistent in a way the write path should have prevented.
+ * Narrow now that pickup zones have no parent to disagree with (docs/decision-log.md, 2026-08-25)
+ * — this is a genuine "should be impossible" fault, not routine bad input, so it pages ops.
  */
 export function zoneConfigFault(zoneId: string, reason: string): AppError {
   return AppError.internal('ZONE_CONFIG_FAULT', { zoneId, reason });

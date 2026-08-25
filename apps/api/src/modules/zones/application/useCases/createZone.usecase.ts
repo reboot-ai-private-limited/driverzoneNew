@@ -1,4 +1,4 @@
-import { validateZone, type Polygon } from '@driverzone/geo';
+import { normalizeWinding, validateZone, type Polygon } from '@driverzone/geo';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { ActorContext } from '../actorContext.js';
 import type { AuditPort } from '../../domain/audit.port.js';
@@ -10,10 +10,9 @@ export interface CreateZoneInput {
   type: ZoneType;
   name: string;
   code: string;
-  /** Required when `type === 'PICKUP'`; must be absent otherwise (Z-4). */
-  parentZoneId?: string | undefined;
   geometry: Polygon;
   priority?: number | undefined;
+  /** PICKUP only — ignored for CITY/HILL. */
   pickupChargeType?: PickupChargeType | undefined;
   pickupChargePaise?: number | undefined;
 }
@@ -21,11 +20,14 @@ export interface CreateZoneInput {
 /**
  * APPLICATION — the invariant choke point.
  *
- * Under PostGIS, Z-1/Z-2/Z-3/Z-MIN-AREA were database triggers: a bad polygon could not be
- * saved. MongoDB cannot express a cross-document geometric constraint, so this use case *is*
+ * Under PostGIS, Z-2/Z-3/Z-MIN-AREA/Z-MAX-AREA were database triggers: a bad polygon could not
+ * be saved. MongoDB cannot express a cross-document geometric constraint, so this use case *is*
  * the guarantee — and it is only a real guarantee because `module-internals-are-private` stops
  * any other module from reaching `zones/infrastructure/zone.model.ts` directly
  * (docs/engineering/boundaries-and-enforcement.md).
+ *
+ * No parent lookup: Z-1 is retired (docs/LLD/zones.md) — a PICKUP zone is a flat serviceability
+ * gate, not a sub-area of a city, and `parentZoneId` is always `null`.
  */
 export class CreateZoneUseCase {
   constructor(
@@ -34,38 +36,30 @@ export class CreateZoneUseCase {
   ) {}
 
   async execute(input: CreateZoneInput, actor: ActorContext): Promise<Zone> {
-    if (input.type === 'PICKUP' && !input.parentZoneId) {
-      throw AppError.badRequest('A PICKUP zone requires a parent CITY zone.', {
-        field: 'parent_zone_id',
+    /**
+     * The document-local half of Z-4. The Mongoose schema's `pre('validate')` hook checks this
+     * too, but that throws a raw `Error` rather than an `AppError` — a caller that reaches it
+     * gets an opaque 500 instead of a clean 400. Checking it here, before any I/O, is the real
+     * answer; the schema hook stays as a last-resort backstop.
+     */
+    if (input.type === 'PICKUP' && !input.pickupChargeType) {
+      throw AppError.badRequest('A PICKUP zone requires a charge type.', {
+        field: 'pickup_charge_type',
       });
     }
-    if (input.type !== 'PICKUP' && input.parentZoneId) {
-      throw AppError.badRequest(`A ${input.type} zone must not have a parent.`, {
-        field: 'parent_zone_id',
+    if (input.type !== 'PICKUP' && input.pickupChargeType) {
+      throw AppError.badRequest(`A ${input.type} zone must not have a pickup charge.`, {
+        field: 'pickup_charge_type',
       });
     }
 
-    let parentGeom: Polygon | undefined;
-    if (input.type === 'PICKUP' && input.parentZoneId) {
-      const parent = await this.zones.findById(input.parentZoneId);
-      if (parent === undefined) {
-        throw AppError.badRequest('Parent zone not found.', { field: 'parent_zone_id' });
-      }
-      if (parent.type !== 'CITY') {
-        throw AppError.badRequest('The parent zone must be a CITY zone.', {
-          field: 'parent_zone_id',
-        });
-      }
-      parentGeom = parent.geometry;
-    }
+    // MUST happen first — every check below, and the 2dsphere index itself, decides inside
+    // from outside by ring winding (docs/LLD/zones.md §Four MongoDB behaviours).
+    const geometry = normalizeWinding(input.geometry);
 
     const siblings = await this.zones.findSiblingsOfType(input.type);
 
-    const violations = validateZone({
-      geom: input.geometry,
-      ...(parentGeom === undefined ? {} : { parentGeom }),
-      siblings,
-    });
+    const violations = validateZone({ geom: geometry, siblings });
     if (violations.some((v) => v.severity === 'ERROR')) {
       throw zoneValidationFailed(violations);
     }
@@ -74,8 +68,8 @@ export class CreateZoneUseCase {
       type: input.type,
       name: input.name,
       code: input.code,
-      parentZoneId: input.type === 'PICKUP' ? (input.parentZoneId ?? null) : null,
-      geometry: input.geometry,
+      parentZoneId: null,
+      geometry,
       priority: input.priority ?? 0,
       pickupChargeType: input.type === 'PICKUP' ? (input.pickupChargeType ?? null) : null,
       pickupChargePaise: input.pickupChargePaise ?? null,

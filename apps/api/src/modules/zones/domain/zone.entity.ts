@@ -10,8 +10,12 @@ export interface Zone {
   type: ZoneType;
   name: string;
   code: string;
-  /** Set for PICKUP only — the CITY zone it must sit inside (docs/LLD/domain-model.md Z-1/Z-4). */
-  parentZoneId: string | null;
+  /**
+   * DORMANT, always `null`. Z-1 (pickup ⊆ city) retired 2026-08-25 — no zone type has a parent
+   * any more (Z-4). Retained on the entity rather than deleted so a future nested-zone design
+   * can switch it back on without a schema migration. See docs/decision-log.md.
+   */
+  parentZoneId: null;
   geometry: Polygon;
   /** Defensive tiebreak only — see `resolveZonesAtPoint.usecase.ts`. Should never actually decide anything. */
   priority: number;

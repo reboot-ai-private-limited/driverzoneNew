@@ -19,6 +19,7 @@ export interface ZoneDto {
   type: ZoneType;
   name: string;
   code: string;
+  /** DORMANT, always `null` — Z-1 retired 2026-08-25. See docs/LLD/zones.md. */
   parent_zone_id: string | null;
   geometry: Polygon;
   priority: number;
@@ -37,9 +38,9 @@ export interface ZoneViolationDto {
   offendingGeometry?: Polygon;
 }
 
+/** No `parent_zone_id` — Z-1 is retired, nothing supplies one any more (docs/LLD/zones.md). */
 export interface ValidateZoneRequest {
   type: ZoneType;
-  parent_zone_id?: string | undefined;
   geometry: Polygon;
   /** Set when editing, so the zone does not conflict with its own previous version. */
   exclude_zone_id?: string | undefined;
@@ -58,30 +59,30 @@ export interface CreateZoneRequest {
   type: ZoneType;
   name: string;
   code: string;
-  /** Required when `type === 'PICKUP'`; must be absent otherwise. */
-  parent_zone_id?: string | undefined;
   geometry: Polygon;
   priority?: number | undefined;
+  /** PICKUP only. */
   pickup_charge_type?: PickupChargeType | undefined;
   pickup_charge_paise?: number | null | undefined;
 }
 
 export interface UpdateZoneGeometryRequest {
   geometry: Polygon;
+  /** Must match the zone's current `version`, or the edit is refused (409 ZONE_ALREADY_SUPERSEDED). */
+  expected_version: number;
 }
 
-export interface DeactivateZoneRequest {
-  /** The admin-panel.md "[Deactivate anyway]" override. */
-  force?: boolean | undefined;
-}
-
-export interface DeleteZoneResponse {
-  deleted: true;
+/** Name, code, priority, pickup charge — never geometry, never `version`. Separate route, separate concerns. */
+export interface UpdateZoneMetadataRequest {
+  name?: string | undefined;
+  code?: string | undefined;
+  priority?: number | undefined;
+  pickup_charge_type?: PickupChargeType | null | undefined;
+  pickup_charge_paise?: number | null | undefined;
 }
 
 export interface ListZonesQuery {
   type?: ZoneType | undefined;
-  parent_zone_id?: string | undefined;
   /** Defaults to `true` — inactive/superseded versions are opt-in. */
   is_active?: boolean | undefined;
 }
@@ -91,12 +92,17 @@ export interface ListZonesResponse {
 }
 
 /**
- * Zone-native dependents only — `child_pickup_zones` for a CITY zone. `packages`/`bookings`
- * sections are added once the `catalog`/`bookings` modules exist; this shape is designed so that
- * addition is additive, not breaking.
+ * Human-readable blast-radius warnings, shown before an admin deactivates
+ * (`DELETE /admin/zones/:id` is soft-deactivate — see docs/LLD/zones.md). Never blocks;
+ * deactivation is always allowed. Empty when there's nothing to flag.
  */
 export interface ZoneDependentsResponse {
-  child_pickup_zones: ZoneDto[];
+  warnings: string[];
+}
+
+/** `DELETE /admin/zones/:id/hard` — permanent. Only allowed once the zone is already inactive. */
+export interface DeleteZoneResponse {
+  deleted: true;
 }
 
 export interface CoverageCheckQuery {

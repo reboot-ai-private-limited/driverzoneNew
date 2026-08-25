@@ -25,11 +25,13 @@ export {
 export type { LineString, Point, Polygon } from 'geojson';
 
 export {
+  checkMaximumArea,
   checkMinimumArea,
   checkOverlap,
   checkValidity,
   checkWithinParent,
   clipToParent,
+  normalizeWinding,
   validateZone,
   zoneStats,
   type NamedZone,

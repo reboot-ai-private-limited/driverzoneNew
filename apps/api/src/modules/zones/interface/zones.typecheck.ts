@@ -1,17 +1,17 @@
 import type {
   CoverageCheckQuery,
   CreateZoneRequest,
-  DeactivateZoneRequest,
   ListZonesQuery,
   UpdateZoneGeometryRequest,
+  UpdateZoneMetadataRequest,
   ValidateZoneRequest,
 } from '@driverzone/contracts';
 import type {
   CoverageCheckQueryInput,
   CreateZoneInput,
-  DeactivateZoneInput,
   ListZonesQueryInput,
   UpdateZoneGeometryInput,
+  UpdateZoneMetadataInput,
   ValidateZoneInput,
 } from './zones.validation.js';
 
@@ -30,10 +30,10 @@ export type CreateZoneMatches = AssertTrue<Exact<CreateZoneInput, CreateZoneRequ
 export type UpdateZoneGeometryMatches = AssertTrue<
   Exact<UpdateZoneGeometryInput, UpdateZoneGeometryRequest>
 >;
-export type ValidateZoneMatches = AssertTrue<Exact<ValidateZoneInput, ValidateZoneRequest>>;
-export type DeactivateZoneMatches = AssertTrue<
-  Exact<DeactivateZoneInput, DeactivateZoneRequest>
+export type UpdateZoneMetadataMatches = AssertTrue<
+  Exact<UpdateZoneMetadataInput, UpdateZoneMetadataRequest>
 >;
+export type ValidateZoneMatches = AssertTrue<Exact<ValidateZoneInput, ValidateZoneRequest>>;
 export type ListZonesQueryMatches = AssertTrue<Exact<ListZonesQueryInput, ListZonesQuery>>;
 export type CoverageCheckQueryMatches = AssertTrue<
   Exact<CoverageCheckQueryInput, CoverageCheckQuery>

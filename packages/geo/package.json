@@ -22,7 +22,8 @@
     "@turf/kinks": "^7.1.0",
     "@turf/length": "^7.1.0",
     "@turf/line-split": "^7.1.0",
-    "@turf/polygon-to-line": "^7.1.0"
+    "@turf/polygon-to-line": "^7.1.0",
+    "@turf/rewind": "^7.1.0"
   },
   "devDependencies": {
     "@driverzone/config": "workspace:*",

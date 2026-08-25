@@ -9,6 +9,7 @@ import { GetZoneDependentsUseCase } from './application/useCases/getZoneDependen
 import { ListZonesUseCase } from './application/useCases/listZones.usecase.js';
 import { ResolveZonesAtPointUseCase } from './application/useCases/resolveZonesAtPoint.usecase.js';
 import { UpdateZoneGeometryUseCase } from './application/useCases/updateZoneGeometry.usecase.js';
+import { UpdateZoneMetadataUseCase } from './application/useCases/updateZoneMetadata.usecase.js';
 import { ValidateZoneGeometryUseCase } from './application/useCases/validateZoneGeometry.usecase.js';
 import { ZonesAuditLog } from './infrastructure/audit.zones.js';
 import { MongoZoneRepository } from './infrastructure/zone.repository.impl.js';
@@ -26,6 +27,10 @@ import type { ZonesPublicContract } from './zones.public.js';
  * `/admin/zones` and `/coverage` — so `routes.ts` needs to mount each at its own prefix. Both
  * are still functions, not eager properties, for the same reason as `health`/`identity`: the
  * worker builds every container for its contract and serves no HTTP.
+ *
+ * `FindHillZonesForRouteUseCase` is wired but DORMANT — nothing calls it through the contract's
+ * real consumers, since terrain is decided by `resolveAt(to).hill` now. Kept for the same reason
+ * `checkWithinParent` is kept in `@driverzone/geo`: reviving it is a wiring change, not a rewrite.
  */
 export interface ZonesContainer {
   contract: ZonesPublicContract;
@@ -41,6 +46,7 @@ export function buildZonesContainer(): ZonesContainer {
   const findHillZonesForRoute = new FindHillZonesForRouteUseCase(zones);
   const createZone = new CreateZoneUseCase(zones, audit);
   const updateZoneGeometry = new UpdateZoneGeometryUseCase(zones, audit);
+  const updateZoneMetadata = new UpdateZoneMetadataUseCase(zones, audit);
   const validateZoneGeometry = new ValidateZoneGeometryUseCase(zones);
   const deactivateZone = new DeactivateZoneUseCase(zones, audit);
   const deleteZone = new DeleteZoneUseCase(zones, audit);
@@ -55,7 +61,8 @@ export function buildZonesContainer(): ZonesContainer {
       findHillZonesNear: (route) => findHillZonesForRoute.execute(route),
       create: (input, actor) => createZone.execute(input, actor),
       updateGeometry: (zoneId, input, actor) => updateZoneGeometry.execute(zoneId, input, actor),
-      deactivate: (zoneId, input, actor) => deactivateZone.execute(zoneId, input, actor),
+      updateMetadata: (zoneId, input, actor) => updateZoneMetadata.execute(zoneId, input, actor),
+      deactivate: (zoneId, actor) => deactivateZone.execute(zoneId, actor),
       delete: (zoneId, actor) => deleteZone.execute(zoneId, actor),
       validate: (input) => validateZoneGeometry.execute(input),
       getDependents: (zoneId) => getZoneDependents.execute(zoneId),
@@ -68,6 +75,7 @@ export function buildZonesContainer(): ZonesContainer {
         makeAdminControllers({
           create: createZone,
           updateGeometry: updateZoneGeometry,
+          updateMetadata: updateZoneMetadata,
           validate: validateZoneGeometry,
           deactivate: deactivateZone,
           delete: deleteZone,

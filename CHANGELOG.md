@@ -28,29 +28,25 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   picks exactly one of them, per-direction outstation pricing, the four layers of guard against
   overlapping distance bands (and the one guard against a *gap*, which is a different and
   quieter failure), plus the realignment surface for the existing `packages` module.
-
-### Changed
-
-- **Terrain now comes from the destination point, not the route.** A trip is `HILL` when its drop
-  point falls inside a hill zone. This reverses assumption A5 and retires
-  `outstation.hill_route_threshold_m`. `classifyTerrain` and `hillMetresOnRoute` are retained in
-  `@driverzone/geo`, tested but unused — the same treatment `checkWithinParent` got. The cost is
-  real and documented: a flat destination behind a mountain now prices as `PLAIN`, and the
-  mitigation is to draw the hill polygon over the approach corridor. OSRM stays for distance, but
-  is now called with `overview=false` since nothing needs the route geometry.
-- **The server picks the product.** A quote resolves from two points to exactly one package —
-  incity with all its variants, or outstation with the price row for the requested car category
-  and direction. The client no longer chooses a tab, which retires FR-B3.
-- `catalog` → `packages` throughout the docs, matching the module that already exists.
-- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
-  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
-  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
-  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
-- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
-  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
-- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
-  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
-  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
+- **`zones` module** (tier 3) — the first domain module beyond `identity`: zone CRUD with
+  geometry validation via `@driverzone/geo`, point→zone resolution
+  (`GET /coverage/check`, and a `ZoneResolutionContract` for future modules), versioned edits
+  (Z-5 — editing geometry writes a new version and supersedes the old one, never mutates in
+  place), and the admin lifecycle at `/admin/zones/*` — create, update geometry, validate (dry
+  run), deactivate with a blast-radius confirmation, hard delete, dependents. 22 unit tests
+  exercising real Z-1/Z-2/Z-3 geometry, not a mock of it. **This code predates the design
+  landed above** — it still enforces the retired Z-1 and requires a parent on every pickup
+  zone. Realignment is the next commit on this branch.
+- `@driverzone/geo` gains `zoneStats()` (area/vertex count — informational, not an invariant)
+  and re-exports `Polygon`/`Point`/`LineString`, so consumers never import the bare `geojson`
+  package directly — it ships types only, which `dependency-cruiser` cannot resolve the way
+  `tsc` can.
+- `@driverzone/contracts` gains the `zones` request/response DTOs:
+  `CreateZoneRequest`/`UpdateZoneGeometryRequest`/`DeactivateZoneRequest`,
+  `ListZonesQuery`/`Response`, `ZoneDependentsResponse`, `CoverageCheckQuery`/`Response`.
+- `apps/api/src/shared/db/auditLog.model.ts` — the generic `auditLog` collection, extracted out
+  of `identity` so `zones` (and future modules) can write to it without reaching into another
+  module's `infrastructure/`.
 
 - HTTP access logging (`pino-http`): one line per request with method, route pattern, status,
   duration and `requestId`. `/api/health` and the driver location ping are excluded — see
@@ -87,6 +83,39 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Changed
 
+- **Terrain now comes from the destination point, not the route.** A trip is `HILL` when its drop
+  point falls inside a hill zone. This reverses assumption A5 and retires
+  `outstation.hill_route_threshold_m`. `classifyTerrain` and `hillMetresOnRoute` are retained in
+  `@driverzone/geo`, tested but unused — the same treatment `checkWithinParent` got. The cost is
+  real and documented: a flat destination behind a mountain now prices as `PLAIN`, and the
+  mitigation is to draw the hill polygon over the approach corridor. OSRM stays for distance, but
+  is now called with `overview=false` since nothing needs the route geometry.
+- **The server picks the product.** A quote resolves from two points to exactly one package —
+  incity with all its variants, or outstation with the price row for the requested car category
+  and direction. The client no longer chooses a tab, which retires FR-B3.
+- `catalog` → `packages` throughout the docs, matching the module that already exists.
+- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
+  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
+  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
+  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
+- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
+  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
+- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
+  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
+  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
+
+- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
+  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
+  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
+  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
+- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
+  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
+- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
+  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
+  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
+- The generic `auditLog` model moved from `identity/infrastructure/` to
+  `apps/api/src/shared/db/auditLog.model.ts`. `identity/infrastructure/audit.mongo.ts` is now a
+  thin adapter over the shared model — no behaviour change.
 - Low-level design docs `02`–`12` moved to `docs/LLD/`. The PRD, `README.md` and
   `setup-development.md` stay at `docs/` root.
 - `apps/api/.env.example`: `MONGO_URI` now carries `?replicaSet=rs0&directConnection=true`.

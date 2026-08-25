@@ -1,15 +1,19 @@
+import type { AuditAction } from '@/shared/db/auditLog.model.js';
+
 /**
  * PORT — the record of what an admin did.
  *
  * `architecture.md` requires every admin action to be audited, and this module's admin
  * endpoints are the first that mutate anything. The entry shape matches the `auditLog`
- * collection in docs/LLD/database-schema.md.
+ * collection in docs/LLD/database-schema.md — `AuditAction` is defined once, in `shared/`,
+ * since `zones` needs the identical set of actions and a module cannot reach into another
+ * module's `domain/` to reuse a type it defined locally.
  *
  * `APPROVE` and `REJECT` are distinct actions rather than `UPDATE`s. "Who approved this driver,
  * and when" is the question this collection exists to answer, and answering it should not
  * require reading `after` to tell an approval from an edit to a phone number.
  */
-export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE' | 'APPROVE' | 'REJECT';
+export type { AuditAction };
 
 export interface AuditEntry {
   adminId: string;

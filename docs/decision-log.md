@@ -20,6 +20,35 @@ entry links to it.
 
 ---
 
+## 2026-08-25 — Hard delete is back, as a separate route from soft deactivate
+
+**Decision:** `DELETE /admin/zones/:id/hard` permanently removes a zone document. Blocked with
+`409 ZONE_STILL_ACTIVE` unless the zone is already inactive — deactivate it first via the
+existing `DELETE /admin/zones/:id`, which is unchanged and still blocks on nothing. This
+reverses the "Pickup zones are a serviceability gate and a fee" entry below, which retired hard
+delete entirely on the reasoning that `DELETE` should just mean soft-deactivate.
+
+**Why:** product wants a real permanent-removal path, not only "make it stop resolving." With
+Z-1 retired there is no longer a parent/child relationship between zones for a delete to check —
+that was FR-Z6's original blocking mechanism — so the only gate `zones` can still enforce on its
+own is "not currently active." `catalog`/`bookings` referencing this id is invisible to `zones`
+(tier 3, below both) and stays that way; this is the same limitation `GetZoneDependentsUseCase`
+already accepts for its own CITY warning.
+
+**Why a separate route, not `DELETE /:id?hard=true`:** one HTTP verb performing two very
+different operations — one reversible, one not — based on a query flag is easy to get wrong from
+a client. A distinct path makes the irreversible action harder to trigger by accident.
+
+**Consequences:** `ZoneRepositoryPort.deleteById` and `DeleteZoneUseCase` are back (a hard
+delete existed before the 2026-08-25 redesign, in a different shape — blocked on parent/child
+links that no longer exist, rather than on `isActive`). `ZONE_STILL_ACTIVE` added to
+`FAULT_CODES`. `zones.md`'s HTTP surface and Codes tables updated to match.
+
+**Refs:** [`LLD/zones.md`](LLD/zones.md) §HTTP surface, §Codes,
+`apps/api/src/modules/zones/application/useCases/deleteZone.usecase.ts`
+
+---
+
 ## 2026-08-25 — Terrain is a property of the destination point, not the route
 
 **Decision:** an outstation trip is `HILL` when its drop point falls inside a HILL zone, and `PLAIN`
@@ -174,6 +203,103 @@ and cannot return derived geometry (so the editor's red "offending area" is comp
 those are worked around — each is why the other half of the split exists.
 
 **Refs:** [`LLD/zones.md`](LLD/zones.md) §Why MongoDB geo, `packages/geo/`
+
+---
+
+## 2026-08-24 — Zone geometry crosses the wire as raw GeoJSON, not `{lat,lng}`
+
+**Decision:** every zone-geometry field in the API — `CreateZoneRequest.geometry`,
+`ValidateZoneRequest.geometry`, `ZoneDto.geometry`, and so on — is a GeoJSON `Polygon`
+(`[lng, lat]` per ring point). This is the one deliberate exception to this API's `{lat,lng}`
+convention for every other coordinate (`api-contracts.md`).
+
+**Why:** a polygon drawn in the admin map editor (Mapbox Draw / MapLibre) is already GeoJSON on
+the client. `@driverzone/geo`'s `{lat,lng}` ↔ GeoJSON helpers (`toPosition`/`fromPosition`) exist
+for a single point; round-tripping an entire ring through `{lat,lng}` objects just to convert it
+straight back on arrival adds a translation layer with nothing to gain, on the one payload shape
+that's already speaking the right protocol.
+
+**Consequences:** `zones/interface/zones.validation.ts` validates GeoJSON structurally, and its
+`Position` schema is `number[]` — not a fixed 2-tuple — matching `@types/geojson` exactly.
+Narrowing it to `[number, number]` looked reasonable and broke the compile-time drift guard in
+`zones.typecheck.ts`, since GeoJSON's own `Position` deliberately allows an optional third
+(elevation) element.
+
+**Refs:** `apps/api/src/modules/zones/interface/zones.validation.ts`,
+`packages/contracts/src/zones.ts`
+
+---
+
+## 2026-08-24 — Zone deactivation is reversible-with-confirmation; delete is FR-Z6's hard block
+
+**Decision:** `POST /admin/zones/:id/deactivate` implements `admin-panel.md`'s blast-radius UX —
+blocked when the zone has active dependents unless `force: true` is passed, after which it
+proceeds. `DELETE /admin/zones/:id` implements FR-Z6's literal "blocked" behaviour with no
+override: allowed only once the zone is already inactive and nothing still references it.
+
+**Why:** `prd.md` FR-Z6 says a zone with dependents is "blocked" on delete/deactivate;
+`admin-panel.md`'s actual UX shows the blast radius and offers "[Deactivate anyway]" — two
+different behaviours under one requirement. Resolved by mapping FR-Z6's hard block onto the
+truly destructive action and `admin-panel.md`'s softer UX onto the reversible one: a deactivated
+zone's version history and audit trail are never lost (Z-5), so "confirm and proceed" is a safe
+default there in a way it is not for an actual delete.
+
+**Also decided here:** dependents are zone-native only for now — a CITY's active PICKUP
+children. `catalog`/`bookings` don't exist yet, so the "3 packages reference this zone" / "8
+bookings in the queue" parts of `admin-panel.md`'s example dependents screen can't be computed
+inside `zones` (it sits below both in the tier graph and may not depend on either). The response
+shape is designed so those sections are additive later, not a breaking change.
+
+**Refs:** `apps/api/src/modules/zones/application/useCases/deactivateZone.usecase.ts`,
+`deleteZone.usecase.ts`, `getZoneDependents.usecase.ts`
+
+---
+
+## 2026-08-24 — Hill-zone resolution drops the `settings` dependency
+
+**Decision:** `ZoneResolutionContract.findHillZonesNear(route)` returns intersecting HILL
+zones only — geometry, not a PLAIN/HILL verdict. This reverses `adding-a-module.md`'s worked
+example for `zones`, which said the module "consumes `settings` (for the hill threshold)".
+
+**Why:** the threshold-based classification (`classifyTerrain()` in `@driverzone/geo`, which
+needs the threshold) is business logic belonging to whichever module actually needs the
+verdict — `quotes`, not built yet. Making `zones` depend on a `settings` module that doesn't
+exist yet, just to run one function call it doesn't otherwise need, was the wrong shape for the
+dependency; geometry is `zones`'s job, the threshold is `quotes`'s.
+
+**Consequences:** `zones` has one fewer tier dependency than the worked example sketched.
+`quotes`, once built, calls `classifyTerrain()` itself with the zones this method returns and
+its own `settings`-sourced threshold.
+
+**Refs:** `apps/api/src/modules/zones/application/useCases/findHillZonesForRoute.usecase.ts`,
+`docs/engineering/adding-a-module.md`, `docs/LLD/zone-resolution.md`
+
+---
+
+## 2026-08-24 — The generic `auditLog` model moved to `shared/`
+
+**Decision:** `identity/infrastructure/auditLog.model.ts` moved to
+`apps/api/src/shared/db/auditLog.model.ts`. `identity/infrastructure/audit.mongo.ts` and the new
+`zones/infrastructure/audit.zones.ts` are both thin adapters over the one shared model.
+
+**Why:** the schema was already entity-agnostic (`entityType` is the discriminator) and `zones`
+needed the identical thing. `module-internals-are-private` forbids `zones` importing
+`identity/infrastructure/`, and duplicating the schema in a second file would let the two drift.
+`shared/` is importable by every module (`shared-is-below-modules`), so a schema more than one
+module genuinely needs belongs there rather than inside whichever module happened to need it
+first.
+
+**Consequences:** no behaviour change for `identity` — its existing audit tests pass unchanged
+against the moved model. Each module still declares its own `AuditPort`/`AuditEntry` in its own
+`domain/` (a port is something each bounded context owns for itself, even when the adapter
+behind it is shared) — only the Mongoose schema moved.
+
+**Refs:** `apps/api/src/shared/db/auditLog.model.ts`,
+`apps/api/src/modules/identity/infrastructure/audit.mongo.ts`,
+`apps/api/src/modules/zones/infrastructure/audit.zones.ts`
+
+---
+
 
 ---
 

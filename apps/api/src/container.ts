@@ -1,5 +1,6 @@
 import { buildHealthContainer } from '@/modules/health/health.container.js';
 import { buildIdentityContainer } from '@/modules/identity/identity.container.js';
+import { buildZonesContainer } from '@/modules/zones/zones.container.js';
 
 /**
  * THE APPLICATION COMPOSITION ROOT.
@@ -18,6 +19,7 @@ import { buildIdentityContainer } from '@/modules/identity/identity.container.js
 export interface AppContainers {
   health: ReturnType<typeof buildHealthContainer>;
   identity: ReturnType<typeof buildIdentityContainer>;
+  zones: ReturnType<typeof buildZonesContainer>;
 }
 
 export function buildContainers(): AppContainers {
@@ -27,5 +29,8 @@ export function buildContainers(): AppContainers {
   // tier 1 — customers, drivers, admins, auth
   const identity = buildIdentityContainer();
 
-  return { health, identity };
+  // tier 3 — polygons, resolution, the invariant write guard
+  const zones = buildZonesContainer();
+
+  return { health, identity, zones };
 }

@@ -7,6 +7,31 @@ import { Tooltip, cn } from '@driverzone/design-system';
 import { useSession } from '@/lib/auth/SessionProvider';
 import { NAV_ITEMS } from './nav-items';
 
+/**
+ * When the nav is expanded. Three triggers, and they must stay in lockstep with the label
+ * reveal below — a width that grows while the labels stay hidden is a rail full of dead space.
+ *
+ * The media query is not decoration: on a touch device there is no hover state to LEAVE, so
+ * without it the panel opens over the content on first tap and stays there. The pin toggle is
+ * the only way in on touch.
+ *
+ * `hover:` and `focus-within:`, NOT `group-hover:`/`group-focus-within:`. The group variants
+ * compile to a descendant selector — `:is(:where(.group):hover *)` — and this class sits on the
+ * group element itself, which is not a descendant of itself. It would silently never match and
+ * the nav would stay stuck at 64px. The labels below are descendants, so they DO use the group
+ * variants; the two are not interchangeable.
+ */
+const EXPANDED_WIDTH = '[@media(hover:hover)]:hover:w-nav-open focus-within:w-nav-open';
+
+/**
+ * Labels are hidden by OPACITY, never `hidden` or conditional rendering.
+ *
+ * They stay in the accessibility tree at every width, so an admin using a screen reader hears
+ * "Zones", not "link". Layout width does not matter — the nav clips with `overflow-hidden`.
+ */
+const LABEL =
+  'opacity-0 transition-opacity duration-150 [@media(hover:hover)]:group-hover:opacity-100 group-focus-within:opacity-100';
+
 export interface SideNavProps {
   /** Persistent-expanded. Unlike hover, this DOES push the content region. */
   pinned: boolean;
@@ -16,44 +41,34 @@ export interface SideNavProps {
  * A 64px icon rail that expands to 240px as an OVERLAY.
  *
  * The content region keeps its 64px offset and never reflows — that is the entire point.
- * `position: fixed` plus a width change on the panel itself, with the rail's width unchanged,
- * is what makes hovering the nav free: no layout, no scroll jump, no table shifting under the
- * cursor.
- *
- * Animate `transform`, not `width`. Animating width relayouts the whole document on every
- * frame, which on a 128-row table is visible as a stutter.
+ * Hovering the nav is free: no layout, no scroll jump, no table shifting under the cursor.
  */
 export function SideNav({ pinned }: SideNavProps) {
   const pathname = usePathname();
   const { admin, signOut } = useSession();
 
+  const label = cn(LABEL, pinned && 'opacity-100');
+
   return (
     <nav
       aria-label="Main"
       className={cn(
-        'group fixed inset-y-0 left-0 z-40 flex flex-col',
+        'group fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden',
         'bg-surface border-r border-border',
         'w-rail transition-[width] duration-200 ease-out',
-        // Hover expansion is gated behind a real pointer. On a touch device there is no
-        // hover to LEAVE, so the panel would open over the content and stay there; the pin
-        // toggle in the TopBar is the only way in.
-        'hover:[@media(hover:hover)]:w-nav-open',
-        // Keyboard parity, and not optional. Hover-only expansion means an admin tabbing into
-        // the nav is navigating a column of unlabelled icons.
-        'focus-within:w-nav-open',
+        EXPANDED_WIDTH,
         pinned && 'w-nav-open',
       )}
     >
-      <div className="flex items-center h-14 px-3 shrink-0 overflow-hidden">
+      <div className="flex items-center h-14 px-3 shrink-0">
         {/*
-          The brand asset is a 236x126 horizontal lockup with no square mark, so the rail
-          crops it to its icon. This is a placeholder — see docs/engineering/design-language.md
-          §Brand assets.
+          The brand asset is a 236x126 horizontal lockup with no square mark, so the rail shows
+          a placeholder tile — see docs/engineering/design-language.md §Brand assets.
         */}
         <span className="size-10 shrink-0 rounded-md bg-accent grid place-items-center text-accent-ink font-bold">
           DZ
         </span>
-        <span className="ml-2 text-sm font-semibold text-text whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <span className={cn('ml-2 text-sm font-semibold text-text whitespace-nowrap', label)}>
           DriverZone
         </span>
       </div>
@@ -66,7 +81,11 @@ export function SideNav({ pinned }: SideNavProps) {
           const content = (
             <span
               className={cn(
-                'flex items-center h-10 rounded-md px-2.5 gap-3 whitespace-nowrap relative',
+                'flex items-center h-10 rounded-md gap-3 whitespace-nowrap relative',
+                // 14px, so the 20px icon sits centred in the 48px the rail leaves after the
+                // list's own padding. The rail has to read as a column of icons, not as a
+                // left-aligned row that happens to be cut off.
+                'pl-3.5 pr-2.5',
                 item.comingSoon === true
                   ? 'text-text-subtle opacity-50 cursor-default'
                   : 'text-text hover:bg-surface-muted',
@@ -82,59 +101,54 @@ export function SideNav({ pinned }: SideNavProps) {
                 />
               )}
               <Icon aria-hidden className="size-5 shrink-0" />
-              <span className="text-sm">{item.label}</span>
+              <span className={cn('text-sm', label)}>{item.label}</span>
             </span>
           );
 
-          return (
-            <li key={item.href}>
-              {/*
-                The tooltip labels the item while collapsed, but it is never the ONLY label:
-                the text above stays in the accessibility tree at every width, because a
-                tooltip is unreachable by touch and by a screen reader in browse mode.
-              */}
-              <Tooltip
-                content={item.comingSoon === true ? `${item.label} — not built yet` : item.label}
-              >
-                {item.comingSoon === true ? (
+          if (item.comingSoon === true) {
+            // The only nav tooltip worth having. A tooltip repeating a label would be pure
+            // noise: you cannot hover an item without hovering the nav, so by the time one
+            // could appear the label beside it is already visible.
+            return (
+              <li key={item.href}>
+                <Tooltip content={`${item.label} — not built yet`}>
                   <span aria-disabled className="block">
                     {content}
                   </span>
-                ) : (
-                  <Link
-                    href={item.href}
-                    aria-current={active ? 'page' : undefined}
-                    className="block"
-                  >
-                    {content}
-                  </Link>
-                )}
-              </Tooltip>
+                </Tooltip>
+              </li>
+            );
+          }
+
+          return (
+            <li key={item.href}>
+              <Link href={item.href} aria-current={active ? 'page' : undefined} className="block">
+                {content}
+              </Link>
             </li>
           );
         })}
       </ul>
 
       <div className="shrink-0 border-t border-border p-2">
-        <div className="flex items-center gap-3 h-10 px-2.5 whitespace-nowrap overflow-hidden">
-          <span className="size-6 shrink-0 rounded-pill bg-surface-muted grid place-items-center text-xs text-text-subtle">
+        <div className="flex items-center gap-3 h-10 pl-3.5 pr-2.5 whitespace-nowrap">
+          <span className="size-5 shrink-0 rounded-pill bg-surface-muted grid place-items-center text-[10px] text-text-subtle">
             {admin?.full_name.charAt(0).toUpperCase() ?? '?'}
           </span>
-          <span className="flex flex-col leading-tight min-w-0">
+          <span className={cn('flex flex-col leading-tight min-w-0', label)}>
             <span className="text-xs text-text truncate">{admin?.full_name ?? '—'}</span>
             <span className="text-xs text-text-subtle">Admin</span>
           </span>
         </div>
-        <Tooltip content="Sign out">
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="flex items-center h-10 w-full rounded-md px-2.5 gap-3 text-text-subtle hover:bg-surface-muted hover:text-text whitespace-nowrap"
-          >
-            <LogOut aria-hidden className="size-5 shrink-0" />
-            <span className="text-sm">Sign out</span>
-          </button>
-        </Tooltip>
+
+        <button
+          type="button"
+          onClick={() => void signOut()}
+          className="flex items-center h-10 w-full rounded-md pl-3.5 pr-2.5 gap-3 text-text-subtle hover:bg-surface-muted hover:text-text whitespace-nowrap"
+        >
+          <LogOut aria-hidden className="size-5 shrink-0" />
+          <span className={cn('text-sm', label)}>Sign out</span>
+        </button>
       </div>
     </nav>
   );

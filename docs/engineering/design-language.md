@@ -166,8 +166,18 @@ The component with the most behaviour, so it is specified rather than left to im
 - **Pin** — the TopBar toggle switches to persistent-expanded, which _does_ push content. That is
   the escape hatch for anyone who wants labels permanently. Persisted per admin.
 - **Keyboard** — expands on `:focus-within` as well as `:hover`. Hover-only is a trap: an admin
-  tabbing into the nav would be navigating a column of unlabelled icons. Labels stay in the
-  accessibility tree at all times, including when visually collapsed.
+  tabbing into the nav would be navigating a column of unlabelled icons.
+- **Labels are hidden by opacity**, never by `hidden` or by not rendering them, so they stay in
+  the accessibility tree at every width — a screen reader hears "Zones", not "link". The nav
+  clips them with `overflow-hidden`, so the width they still occupy costs nothing.
+- **The width variants target the nav itself; the label variants target descendants.** These are
+  not interchangeable: `group-hover:` compiles to `:is(:where(.group):hover *)`, a descendant
+  selector, so putting it on the group element leaves the rule matching nothing and the rail
+  stuck at 64px with no error anywhere. The nav uses plain `hover:` / `focus-within:`; the
+  labels inside it use `group-hover:` / `group-focus-within:`.
+- **Only disabled items get a tooltip**, explaining why they are disabled. A tooltip repeating a
+  label would be noise — you cannot hover an item without hovering the nav, so by the time one
+  could appear the label beside it is already visible.
 - **Touch** — the hover behaviour is gated behind `@media (hover: hover)`. On a touch device
   there is no hover state to leave, so the panel would open and stay open over the content; the
   pin toggle is the only way in.

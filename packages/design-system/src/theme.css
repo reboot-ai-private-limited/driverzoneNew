@@ -1,0 +1,170 @@
+/**
+ * The Tailwind v4 theme — the semantic layer over `tokens.ts`.
+ *
+ * Every value here also exists in `tokens.ts`, because @theme is CSS and cannot import
+ * TypeScript. `tokens.drift.test.ts` asserts the two agree. Generating one from the other would
+ * give a package that deliberately ships source a build step, and a stale generated file is
+ * worse than none — see docs/engineering/shared-packages.md.
+ *
+ * COMPONENTS USE THE NAMES BELOW, never a raw hex and never `colors.accent` from tokens.ts.
+ * This is the layer the contrast rules are stated against, and reaching past it is how the
+ * accent ends up as a text colour. See docs/engineering/design-language.md.
+ */
+
+@theme {
+  /* ── Surfaces ─────────────────────────────────────────────────────────────── */
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f7f8f5;
+  --color-surface-muted: #edefea;
+
+  /* ── Ink ──────────────────────────────────────────────────────────────────── */
+  --color-text: #1c1b1f;
+  --color-text-subtle: #5c635a;
+
+  /* ── Brand ────────────────────────────────────────────────────────────────────
+   * FILL ONLY. #c0ff72 is 1.18:1 against white — as text, an icon, a border or a
+   * focus ring it is not low-contrast, it is invisible. Use --color-interactive
+   * for anything that needs to be a coloured ink.
+   */
+  --color-accent: #c0ff72;
+  --color-accent-hover: #aef255;
+  --color-accent-ink: #1c1b1f;
+
+  /* The coloured ink: links, focus rings, selected state, active tab underline. */
+  --color-interactive: #3f6212;
+  --color-interactive-hover: #365314;
+
+  /* ── Lines ────────────────────────────────────────────────────────────────────
+   * Two, deliberately. A hairline light enough to sit unobtrusively between table
+   * rows is far too light to be the edge of a text input, which WCAG 1.4.11 wants
+   * at 3:1. One token for both means either heavy tables or invisible inputs.
+   */
+  --color-border: #d8dcd5;
+  --color-border-strong: #8a9281;
+
+  /* ── Status ───────────────────────────────────────────────────────────────── */
+  --color-success: #1a7f37;
+  --color-warning: #9a6700;
+  --color-danger: #cf222e;
+
+  /* ── Zone fills ───────────────────────────────────────────────────────────────
+   * Map polygons, not UI colour. Chosen to be distinguishable from each other on a
+   * basemap, which is a different problem from text contrast.
+   * docs/LLD/admin-panel.md is their specification.
+   */
+  --color-zone-city: #0b6bcb;
+  --color-zone-pickup-free: #1a7f37;
+  --color-zone-pickup-paid: #9a6700;
+  --color-zone-hill: #8250df;
+  --color-zone-violation: #cf222e;
+
+  /* ── Type ─────────────────────────────────────────────────────────────────────
+   * 14px base. The console default: 16px costs roughly three table rows per screen.
+   */
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  /* Tailwind pairs every --text-* with a line height, and its pairs for xs/sm/lg/xl
+   * survive being given new sizes above. `md` is not one of Tailwind's names, so
+   * without this `.text-md` compiles to a bare font-size with no line-height at all. */
+  --text-md--line-height: calc(1.5 / 1);
+  --text-lg: 20px;
+  --text-xl: 28px;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ── Spacing ──────────────────────────────────────────────────────────────────
+   * Tailwind's numeric scale, off the `--spacing: 0.25rem` base it already ships:
+   * 1 = 4px, 2 = 8px, 4 = 16px, 6 = 24px, 10 = 40px. `tokens.ts` carries the same
+   * five values for React Native, and `tokens.drift.test.ts` asserts each one is an
+   * exact multiple of that base, so the two scales cannot drift apart.
+   *
+   * DO NOT ADD A NAMED --spacing-* KEY USING ONE OF THESE WORDS:
+   *   3xs 2xs xs sm md lg xl 2xl 3xl 4xl 5xl 6xl 7xl
+   * They belong to Tailwind's --container-* scale, which is what max-w-* reads.
+   * max-w-* falls back to --spacing-* when a container key is missing, so a
+   * --spacing-sm here silently redefines max-w-sm from 24rem to 8px — every
+   * max-width in the app collapses to a vertical line, and nothing errors. It
+   * happened; see CHANGELOG.md. `tokens.drift.test.ts` now refuses those names.
+   *
+   * Names outside that list are fine, and are what this namespace is for.
+   */
+  --spacing-rail: 64px;
+  --spacing-nav-open: 240px;
+
+  /* ── Radii ────────────────────────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* ── Breakpoints ──────────────────────────────────────────────────────────── */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+  --breakpoint-3xl: 1920px;
+  --breakpoint-4xl: 2560px;
+  --breakpoint-5xl: 3440px;
+
+  /* ── Layout ───────────────────────────────────────────────────────────────────
+   * `--container-*`, not `--spacing-*`: that is the namespace max-w-* actually reads,
+   * so `max-w-content-max` resolves through the intended path rather than the spacing
+   * fallback that caused the collapse described above.
+   *
+   * The rail width lives in the spacing block, because `w-rail` and `pl-rail` are
+   * spacing utilities. The nav is fixed and overlays on hover, so the content
+   * region's offset is a constant — if the two disagree the layout shifts on every
+   * hover, which is the one thing the overlay design exists to prevent.
+   */
+  --container-content-max: 1920px;
+}
+
+/**
+ * NO SHADOWS. Separation is a hairline, a change of surface, or whitespace.
+ * Overlays — modal, dropdown, the hover-expanded nav — get an opaque surface plus a
+ * --color-border-strong edge, and modals add a scrim. That is the answer; do not add a
+ * shadow to "fix" a dropdown that looks flat.
+ */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    font-size: var(--text-sm);
+  }
+
+  body {
+    background: var(--color-surface-sunken);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Money, counts, distances and ids. Proportional digits make a column of rupee figures
+   * ragged and genuinely harder to scan for the wrong one. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus treatment, everywhere, in the one colour that is actually visible. */
+  :focus-visible {
+    outline: 2px solid var(--color-interactive);
+    outline-offset: 2px;
+  }
+}
+
+/* The indeterminate sweep for TopProgressBar. A determinate bar would be a lie — we do not
+ * know how long a refetch takes. */
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}

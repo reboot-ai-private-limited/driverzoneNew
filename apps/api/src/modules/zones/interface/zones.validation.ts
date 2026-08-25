@@ -12,7 +12,8 @@ import { ZONE_TYPES } from '@driverzone/contracts';
 
 const zoneName = z.string().trim().min(1).max(120);
 const zoneCode = z.string().trim().min(1).max(40);
-const objectIdString = z.string().trim().min(1);
+/** Exported: `zones.swagger.ts` reuses this for the `{id}` path param — one definition, not two. */
+export const objectIdString = z.string().trim().min(1);
 
 // geojson's `Position` is `number[]`, not a fixed tuple (it deliberately allows an optional
 // third/elevation element) — matching that exactly here is what lets `zones.typecheck.ts`
@@ -21,7 +22,8 @@ const objectIdString = z.string().trim().min(1);
 const position = z.array(z.number()).min(2);
 /** A closed ring needs at least three distinct corners plus the point that closes it. */
 const ring = z.array(position).min(4);
-const polygonGeometry = z.object({
+/** Exported: `zones.swagger.ts` reuses this for response DTOs too — the docs describe the real shape. */
+export const polygonGeometry = z.object({
   type: z.literal('Polygon'),
   coordinates: z.array(ring).min(1),
 });

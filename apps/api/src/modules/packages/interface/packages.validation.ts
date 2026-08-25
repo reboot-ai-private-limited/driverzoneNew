@@ -5,7 +5,6 @@ const commissionType = z.enum(['PERCENT', 'FLAT']);
 const incityPriceSchema = z.object({
   carCategoryId: z.string().min(1),
   baseFarePaise: z.number().int().min(0),
-  extraMinuteRatePaise: z.number().int().min(0).optional().default(0),
   extraKmRatePaise: z.number().int().min(0).optional().default(0),
   nightChargePaise: z.number().int().min(0).optional().default(0),
   driverCommissionType: commissionType,
@@ -32,7 +31,6 @@ const incityVariantSchema = z.object({
 
 export const createIncityPackageSchema = z.object({
   cityZoneId: z.string().min(1),
-  pickupZoneIds: z.array(z.string().min(1)).min(1),
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
   variants: z.array(incityVariantSchema).min(1),
@@ -63,7 +61,6 @@ export const createOutstationPackageSchema = z.object({
   terrain: z.enum(['PLAIN', 'HILL']),
   minKm: z.number().int().min(0),
   maxKm: z.number().int().min(1),
-  pickupZoneIds: z.array(z.string().min(1)).min(1),
   prices: z.array(outstationPriceSchema).min(1),
   isActive: z.boolean().optional().default(true),
 });

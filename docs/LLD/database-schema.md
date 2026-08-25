@@ -23,10 +23,10 @@ they moved to application code.
 
 | Invariant | Was | Is now |
 |---|---|---|
-| Z-1 pickup ⊆ city | `ST_Within` trigger | `@driverzone/geo` `checkWithinParent`, in `createZone.usecase.ts` |
-| Z-2 no same-type overlap | `ST_Overlaps` trigger | `checkOverlap` |
+| Z-2 no same-type overlap | `ST_Overlaps` trigger | `@driverzone/geo` `checkOverlap`, in `createZone.usecase.ts` |
 | Z-3 valid geometry | `ST_IsValid` CHECK | `checkValidity` (Turf `kinks` + ring closure) |
 | Z-MIN-AREA | `ST_Area` CHECK | `checkMinimumArea` |
+| Z-MAX-AREA | `ST_Area` CHECK | `checkMaximumArea` — **to add in Phase 1**; see `zones.md` on hemisphere polygons |
 | Fare snapshot immutable | `BEFORE UPDATE` trigger | Mongoose `immutable: true` |
 | `booking_events` append-only | `REVOKE UPDATE, DELETE` | MongoDB role with `insert`+`find` only |
 
@@ -49,6 +49,10 @@ const zoneSchema = new Schema({
   name:  { type: String, required: true },
   code:  { type: String, required: true },          // 'SLG', 'SLG-CENTRAL'
 
+  // Retained, always null. Invariant Z-1 was retired 2026-08-25 — pickup zones are a
+  // serviceability gate, not a sub-area of a city (zones.md). Kept because
+  // `checkWithinParent` still exists in @driverzone/geo and a future nested-zone design
+  // would switch it back on rather than re-add a field.
   parentZoneId: { type: Schema.Types.ObjectId, ref: 'Zone', default: null },
 
   geometry: {
@@ -72,7 +76,7 @@ const zoneSchema = new Schema({
 // every quote request.
 zoneSchema.index({ geometry: '2dsphere' });
 zoneSchema.index({ type: 1, isActive: 1 });
-zoneSchema.index({ parentZoneId: 1, isActive: 1 });
+zoneSchema.index({ supersededBy: 1 });                 // version history
 zoneSchema.index({ code: 1 }, { unique: true, partialFilterExpression: { isActive: true } });
 ```
 
@@ -90,18 +94,25 @@ act on.
 
 ```ts
 zoneSchema.pre('validate', function (next) {
-  if (this.type === 'PICKUP') {
-    if (!this.parentZoneId) return next(new Error('A PICKUP zone requires a parent CITY zone'));
-    if (!this.pickupChargeType) return next(new Error('A PICKUP zone requires a charge type'));
-  } else if (this.parentZoneId) {
-    return next(new Error(`A ${this.type} zone must not have a parent`));
+  if (this.type === 'PICKUP' && !this.pickupChargeType) {
+    return next(new Error('A PICKUP zone requires a charge type'));
+  }
+  if (this.parentZoneId) {
+    return next(new Error('Zones have no parent — invariant Z-1 was retired'));
   }
   next();
 });
 ```
 
-These are the checks a single document can make. The geometric ones need siblings and a parent,
-so they live in the use case.
+These are the checks a single document can make. The geometric ones need siblings, so they live
+in the use case.
+
+### Ring orientation is normalised before save
+
+`@turf/rewind` runs in the write path, before validation, so every stored exterior ring is
+counter-clockwise. This is not tidiness: the `2dsphere` index reads winding to decide which side
+of a ring is "inside", and a clockwise exterior ring on a large polygon is interpreted as the
+whole earth *minus* that shape — silently, with no error. See `zones.md` §Why MongoDB geo.
 
 ---
 
@@ -156,8 +167,9 @@ const incityVariantSchema = new Schema({
 }, { _id: true });
 
 const incityPackageSchema = new Schema({
+  // The only zone reference any package carries. Pickup zones are not referenced by
+  // packages at all — they gate serviceability and carry a fee, nothing more (zones.md).
   cityZoneId:    { type: Schema.Types.ObjectId, ref: 'Zone', required: true },
-  pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
   name:          { type: String, required: true },
   description:   String,
   variants:      [incityVariantSchema],
@@ -165,12 +177,12 @@ const incityPackageSchema = new Schema({
 }, { timestamps: true });
 
 // The package-matching query in docs/LLD/zone-resolution.md.
-incityPackageSchema.index({ cityZoneId: 1, pickupZoneIds: 1, isActive: 1 });
+incityPackageSchema.index({ cityZoneId: 1, isActive: 1 });
 ```
 
-**Invariant P-1** — every `pickupZoneIds` entry must have `cityZoneId` as its parent. Enforced
-in `catalog`'s use case, because it needs to read the zones. You cannot sell a Siliguri package
-from a Kolkata pickup.
+**Invariant P-1 was retired 2026-08-25**, along with the package ↔ pickup-zone link it enforced.
+There is no cross-collection check left on this schema: matching an incity package is a lookup on
+`cityZoneId` alone.
 
 ---
 
@@ -197,31 +209,66 @@ const outstationPackageSchema = new Schema({
   terrain:       { type: String, enum: ['PLAIN', 'HILL'], required: true },
   minKm:         { type: Number, required: true, min: 0 },
   maxKm:         { type: Number, required: true },       // band is [minKm, maxKm)
-  pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
   prices:        [outstationPriceSchema],
   isActive:      { type: Boolean, default: true },
 }, { timestamps: true });
 
 outstationPackageSchema.index({ terrain: 1, minKm: 1, maxKm: 1, isActive: 1 });
-outstationPackageSchema.index({ pickupZoneIds: 1, isActive: 1 });
 ```
+
+An outstation package references no zone at all. Terrain comes from the route, the band from the
+distance, and whether we serve the pickup point was already settled by the pickup-zone gate.
 
 Bands are **half-open** `[minKm, maxKm)`, so adjacent bands (0–70, 70–100, 100–150) tile with no
 gap and no overlap at the boundary.
 
-**Invariant P-2** — for a given (pickup zone, terrain), bands must not overlap. Two matches means
-an ambiguous price. Enforced in the use case:
+**Invariant P-2** — for a given terrain, bands must not overlap. Two matches means an ambiguous
+price. The check widened when the pickup-zone qualifier went: it is now global per terrain, which
+is both cheaper to run and stricter than what it replaced.
 
 ```ts
 const conflict = await OutstationPackage.findOne({
   _id: { $ne: candidateId },
   isActive: true,
   terrain,
-  pickupZoneIds: { $in: pickupZoneIds },
   minKm: { $lt: maxKm },
   maxKm: { $gt: minKm },        // half-open overlap test
 });
 ```
+
+---
+
+## `coverageRequests` / `unservedDistanceRequests`
+
+Two collections that cost almost nothing and are worth a great deal. Every lookup that failed for
+want of coverage is a demand signal, and clustering them gives ops a ranked list of exactly where
+to draw the next zone or band — and who to notify when they do.
+
+```ts
+const coverageRequestSchema = new Schema({
+  point:   { type: { type: String, enum: ['Point'] }, coordinates: [Number] },
+  address: String,
+  customerId:  { type: Schema.Types.ObjectId, ref: 'Customer' },
+  serviceType: { type: String, enum: ['INCITY', 'OUTSTATION'], required: true },
+  notifyWhenAvailable: { type: Boolean, default: false },
+}, { timestamps: { createdAt: true, updatedAt: false } });
+
+coverageRequestSchema.index({ point: '2dsphere' });
+
+const unservedDistanceRequestSchema = new Schema({
+  pickupZoneId: { type: Schema.Types.ObjectId, ref: 'Zone' },
+  distanceKm:   { type: Number, required: true },
+  terrain:      { type: String, enum: ['PLAIN', 'HILL'], required: true },
+}, { timestamps: { createdAt: true, updatedAt: false } });
+```
+
+The `2dsphere` index on `coverageRequests.point` is what makes the expansion heatmap a `$geoNear`
+aggregation rather than a full scan.
+
+Both are written **only** through `ZoneResolutionContract` (`zones.md`), and only when a lookup
+genuinely resolved to nothing. A row logged on a validation error or a client retry pollutes the
+signal, which is why the contract carries that obligation in its doc comment rather than leaving
+it to each caller.
 
 ---
 

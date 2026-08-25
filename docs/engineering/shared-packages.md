@@ -65,8 +65,9 @@ assertPlausibleCoordinate(p, 'pickup');
 toGeoJsonPoint(p);
 
 // zone-rules.ts — the invariants that used to be PostGIS triggers
-validateZone({ geom, parentGeom, siblings });   // → ZoneViolation[]
-clipToParent(child, parent);
+validateZone({ geom, siblings });               // → ZoneViolation[]
+// parentGeom is optional and nothing supplies one: Z-1 was retired with the
+// pickup→city parent link. checkWithinParent and clipToParent stay, dormant.
 
 // terrain.ts    — replaces ST_Length(ST_Intersection(route, hill))
 classifyTerrain(route, hillZones, thresholdMetres);
@@ -76,7 +77,7 @@ classifyTerrain(route, hillZones, thresholdMetres);
 
 Because the admin map editor needs the identical code.
 
-When an admin drags a pickup-zone corner outside its city, the editor must say so
+When an admin drags a pickup-zone corner across a neighbouring zone, the editor must say so
 *immediately*, with the offending area painted red — not after a round trip on save. And the
 editor's verdict must never disagree with the API's, because "it looked fine in the editor but
 the save failed" is the kind of bug that makes people stop trusting a tool.

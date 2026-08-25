@@ -9,6 +9,22 @@
 5. **Round once, at the end**, to the nearest rupee (`100` paise). Rounding intermediate
    components produces receipts whose lines don't sum to the total, and customers notice.
 
+## The pickup fee
+
+One rule, shared by both products, because a pickup zone is a global serviceability gate rather
+than an incity concept (`zones.md`):
+
+```
+pickup_fee = pickupZone.pickup_charge_type == 'PAID'
+               ? (pickupZone.pickup_charge_paise
+                  ?? settings['pickup.default_charge_paise'])
+               : 0
+```
+
+`pickup.default_charge_paise` is the number ops actually tunes. The per-zone override exists for
+the day a second paid zone needs a different figure, and costs nothing until then. A `FREE` zone
+adds nothing at all — there is no zero-value fee line on the receipt.
+
 ## InCity fare
 
 ```
@@ -16,10 +32,7 @@ computeInCityFare(variant, price, pickupZone, scheduledAt) -> FareBreakdown
 
   base        = price.base_fare_paise
 
-  pickup_fee  = pickupZone.pickup_charge_type == 'PAID'
-                  ? (pickupZone.pickup_charge_paise
-                     ?? settings['pickup.default_charge_paise'])
-                  : 0
+  pickup_fee  = as above — identical for both products
 
   night_fee   = isInNightWindow(scheduledAt) ? price.night_charge_paise : 0
 
@@ -74,7 +87,7 @@ computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt
   extra_km    = max(0, distanceKm - pkg.min_km)       -- band price covers up to min_km
   dist_charge = extra_km * price.extra_km_rate_paise
   allowance   = price.driver_allowance_paise          -- night halt / food
-  pickup_fee  = (as incity)
+  pickup_fee  = as above — identical for both products
   night_fee   = ...
 
   subtotal    = base + dist_charge + allowance + pickup_fee + night_fee

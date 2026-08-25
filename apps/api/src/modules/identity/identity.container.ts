@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Role } from '@driverzone/contracts';
-import { env } from '@/config/env.js';
+import { env, isProduction } from '@/config/env.js';
+import { DEV_ACCOUNT_PHONES } from '@/config/devAccounts.js';
 import { getRedis } from '@/shared/queue/redis.js';
 import { TokenIssuer } from './application/tokenIssuer.js';
 import { LogoutUseCase } from './application/useCases/logout.usecase.js';
@@ -79,8 +80,21 @@ export function buildIdentityContainer(): IdentityContainer {
 
   // The pepper is read here rather than inside the entity that uses it, which keeps
   // `otpChallenge.entity.ts` a pure function of its arguments and testable with no environment.
+  /**
+   * THE one line that decides whether a development login bypass exists at all.
+   *
+   * Both conditions, and both here rather than inside the use case: the use case cannot switch
+   * itself on, so "can this happen in production" is answerable by reading this expression
+   * instead of auditing a branch buried in application logic. `loadEnv()` is the second lock —
+   * it refuses to start a production process that has `DEV_FIXED_OTP` set at all.
+   */
+  const devBypass =
+    !isProduction && env.DEV_FIXED_OTP !== undefined
+      ? { code: env.DEV_FIXED_OTP, phones: DEV_ACCOUNT_PHONES }
+      : undefined;
+
   const sendOtp = new SendOtpUseCase(otpStore, otpSender, accounts, env.OTP_PEPPER);
-  const verifyOtp = new VerifyOtpUseCase(otpStore, accounts, tokenIssuer, env.OTP_PEPPER);
+  const verifyOtp = new VerifyOtpUseCase(otpStore, accounts, tokenIssuer, env.OTP_PEPPER, devBypass);
   const refreshSession = new RefreshSessionUseCase(sessions, tokenIssuer);
   const logout = new LogoutUseCase(sessions);
 

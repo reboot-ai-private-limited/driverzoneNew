@@ -33,6 +33,7 @@ the low-level design in [`LLD/`](LLD/):
 |-----|-----------------|
 | [Domain Model](LLD/domain-model.md) | Glossary, entities, and the invariants that must never break |
 | [Database Schema](LLD/database-schema.md) | Mongoose schemas, indexes, where the invariants live |
+| [Zones](LLD/zones.md) | The zones module: what each zone type is for, the write path, the HTTP surface, every edge case |
 | [Zone Resolution](LLD/zone-resolution.md) | The core algorithm: point → zones → packages |
 | [Pricing & Commission](LLD/pricing-and-commission.md) | Fare computation, snapshots, the earnings ledger |
 | [Dispatch & Assignment](LLD/dispatch-and-assignment.md) | Driver offer waves, accept races, reassignment |
@@ -52,11 +53,13 @@ clean architecture and SOLID, module boundaries, tech choices, build and deploy.
 
 ## The one-paragraph version
 
-Admin draws **zones** as polygons on a map — cities, pickup-coverage areas, and hill
-regions. Packages (incity hourly rentals, outstation trips) are attached to those zones.
-When a customer enters pickup and drop points, the backend resolves both points against
-the zone layers in a single spatial query, decides whether this is an incity or outstation
-trip, matches applicable packages, and returns priced variants. On confirmation the fare is
+Admin draws **zones** as polygons on a map: pickup zones, which decide where we operate at
+all and whether pickup carries a fee; one city zone, which defines what "incity" means; and
+hill zones, which classify terrain for outstation pricing. Packages — incity hourly rentals
+and outstation trips — are sold against the city zone and the distance band respectively, never
+against a pickup zone. When a customer enters pickup and drop points, the backend resolves both
+against the zone layers in a single spatial query, decides whether this is an incity or
+outstation trip, matches applicable packages, and returns priced variants. On confirmation the fare is
 frozen onto the booking and the trip is offered to drivers in expanding waves until one
 claims it.
 

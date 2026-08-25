@@ -169,15 +169,16 @@ and progressively more expensive later.
 
 | # | Assumption | Where |
 |---|-----------|-------|
-| A1 | One active zone per type contains any point (Z-2 enforced) | 02, 03, 04 |
-| A2 | Pickup zones are children of city zones, enforced at write time | 02, 03 |
+| A1 | One active zone per type contains any point (Z-2 enforced) | `domain-model.md`, `database-schema.md`, `zone-resolution.md` |
+| A2 | ~~Pickup zones are children of city zones~~ — **superseded 2026-08-25.** Pickup zones are flat: a serviceability gate and a fee, with no parent and no package links | `zones.md`, [`decision-log.md`](../decision-log.md) |
 | A3 | Money in paise, percentages in basis points | throughout |
-| A4 | Fare snapshots immutable; corrections are adjustment rows | 05 |
-| A5 | Terrain classified by route intersection, not destination point | 04 |
-| A6 | Dispatch is wave-based broadcast, 5 drivers, 45 s, 4 waves | 06 |
-| A7 | Scheduled bookings dispatch at T−90 min | 06 |
-| A8 | Trip start requires a customer OTP | 07 |
-| A9 | Commission excludes tax and driver allowance | 05 |
-| A10 | Self-hosted OSRM for road distance | 04, 09 |
-| A11 | Modular monolith, not microservices | 09 |
-| A12 | Android-first for drivers, foreground service while on duty | 06, 09 |
+| A4 | Fare snapshots immutable; corrections are adjustment rows | `pricing-and-commission.md` |
+| A5 | Terrain classified by route intersection, not destination point | `zone-resolution.md` |
+| A6 | Dispatch is wave-based broadcast, 5 drivers, 45 s, 4 waves | `dispatch-and-assignment.md` |
+| A7 | Scheduled bookings dispatch at T−90 min | `dispatch-and-assignment.md` |
+| A8 | Trip start requires a customer OTP | `booking-lifecycle.md` |
+| A9 | Commission excludes tax and driver allowance | `pricing-and-commission.md` |
+| A10 | Self-hosted OSRM for road distance | `zone-resolution.md`, `architecture.md` |
+| A11 | Modular monolith, not microservices | `architecture.md` |
+| A12 | Android-first for drivers, foreground service while on duty | `dispatch-and-assignment.md`, `architecture.md` |
+| A13 | MongoDB `2dsphere` for containment, Turf for geometric predicates | `zones.md` |

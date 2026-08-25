@@ -15,13 +15,24 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- `docs/LLD/zones.md` — the zones module LLD. What each zone type is actually for, the contract
+  split between resolution and admin, the write path and its choke point, versioning, the full
+  HTTP surface with success and fault codes, and an edge-case matrix covering the write path,
+  the read path and operations. The rows marked ⚠ are the ones that fail *silently* if skipped.
+- The MongoDB ring-winding trap, written down for the first time: a clockwise exterior ring is
+  read by a `2dsphere` index as the whole earth minus the shape, with no error anywhere. Fixed
+  by normalising with `@turf/rewind` in the write path.
+- `coverageRequests` and `unservedDistanceRequests` now have proper sections in
+  `docs/LLD/database-schema.md` instead of existing only inline in the resolution doc.
 - **`zones` module** (tier 3) — the first domain module beyond `identity`: zone CRUD with
-  geometry validation (Z-1–Z-5) via `@driverzone/geo`, point→zone resolution
+  geometry validation via `@driverzone/geo`, point→zone resolution
   (`GET /coverage/check`, and a `ZoneResolutionContract` for future modules), versioned edits
   (Z-5 — editing geometry writes a new version and supersedes the old one, never mutates in
   place), and the admin lifecycle at `/admin/zones/*` — create, update geometry, validate (dry
   run), deactivate with a blast-radius confirmation, hard delete, dependents. 22 unit tests
-  exercising real Z-1/Z-2/Z-3 geometry, not a mock of it.
+  exercising real Z-1/Z-2/Z-3 geometry, not a mock of it. **This code predates the design
+  landed above** — it still enforces the retired Z-1 and requires a parent on every pickup
+  zone. Realignment is the next commit on this branch.
 - `@driverzone/geo` gains `zoneStats()` (area/vertex count — informational, not an invariant)
   and re-exports `Polygon`/`Point`/`LineString`, so consumers never import the bare `geojson`
   package directly — it ships types only, which `dependency-cruiser` cannot resolve the way
@@ -32,6 +43,7 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 - `apps/api/src/shared/db/auditLog.model.ts` — the generic `auditLog` collection, extracted out
   of `identity` so `zones` (and future modules) can write to it without reaching into another
   module's `infrastructure/`.
+
 - HTTP access logging (`pino-http`): one line per request with method, route pattern, status,
   duration and `requestId`. `/api/health` and the driver location ping are excluded — see
   `docs/decision-log.md` for why.
@@ -67,6 +79,15 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Changed
 
+- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
+  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
+  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
+  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
+- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
+  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
+- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
+  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
+  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
 - The generic `auditLog` model moved from `identity/infrastructure/` to
   `apps/api/src/shared/db/auditLog.model.ts`. `identity/infrastructure/audit.mongo.ts` is now a
   thin adapter over the shared model — no behaviour change.

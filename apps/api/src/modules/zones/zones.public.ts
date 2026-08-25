@@ -29,7 +29,10 @@ import type { ZoneListFilter } from './domain/zone.repository.port.js';
 /** Read-only resolution — the hot path, every quote calls this. */
 export interface ZoneResolutionContract {
   resolveAt(point: LatLng): Promise<ResolvedZones>;
-  /** Geometry only — no terrain verdict. See `findHillZonesForRoute.usecase.ts` for why. */
+  /**
+   * DORMANT — no caller. Terrain is decided by the drop point falling inside a HILL zone
+   * (`resolveAt(to).hill`), not by measuring a route. See docs/LLD/packages.md §Terrain.
+   */
   findHillZonesNear(route: LineString): Promise<Zone[]>;
 }
 

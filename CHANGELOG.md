@@ -24,6 +24,10 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   by normalising with `@turf/rewind` in the write path.
 - `coverageRequests` and `unservedDistanceRequests` now have proper sections in
   `docs/LLD/database-schema.md` instead of existing only inline in the resolution doc.
+- `docs/LLD/packages.md` — the packages module LLD. The two products, the precedence ladder that
+  picks exactly one of them, per-direction outstation pricing, the four layers of guard against
+  overlapping distance bands (and the one guard against a *gap*, which is a different and
+  quieter failure), plus the realignment surface for the existing `packages` module.
 - **`zones` module** (tier 3) — the first domain module beyond `identity`: zone CRUD with
   geometry validation via `@driverzone/geo`, point→zone resolution
   (`GET /coverage/check`, and a `ZoneResolutionContract` for future modules), versioned edits
@@ -78,6 +82,27 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   resolve.
 
 ### Changed
+
+- **Terrain now comes from the destination point, not the route.** A trip is `HILL` when its drop
+  point falls inside a hill zone. This reverses assumption A5 and retires
+  `outstation.hill_route_threshold_m`. `classifyTerrain` and `hillMetresOnRoute` are retained in
+  `@driverzone/geo`, tested but unused — the same treatment `checkWithinParent` got. The cost is
+  real and documented: a flat destination behind a mountain now prices as `PLAIN`, and the
+  mitigation is to draw the hill polygon over the approach corridor. OSRM stays for distance, but
+  is now called with `overview=false` since nothing needs the route geometry.
+- **The server picks the product.** A quote resolves from two points to exactly one package —
+  incity with all its variants, or outstation with the price row for the requested car category
+  and direction. The client no longer chooses a tab, which retires FR-B3.
+- `catalog` → `packages` throughout the docs, matching the module that already exists.
+- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
+  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
+  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
+  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
+- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
+  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
+- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
+  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
+  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
 
 - **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
   package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted

@@ -40,4 +40,8 @@ export {
   type ZoneViolation,
 } from './zone-rules.js';
 
+/**
+ * `Terrain` is live — it is the outstation package matching key. `classifyTerrain` and
+ * `hillMetresOnRoute` are dormant: terrain comes from `resolveAt(to).hill` now. See terrain.ts.
+ */
 export { classifyTerrain, hillMetresOnRoute, type Terrain } from './terrain.js';

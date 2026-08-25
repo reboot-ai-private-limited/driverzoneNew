@@ -34,7 +34,7 @@ const MODULE_TIERS = [
   ['identity'],
   ['notifications', 'ledger'],
   ['zones'],
-  ['catalog'],
+  ['packages'],
   ['quotes'],
   ['bookings'],
   ['dispatch'],
@@ -173,12 +173,12 @@ error tier-3-zones: zones may import only: health, settings, pricing, identity,
 
 ## A worked example: `zones`
 
-Tier 3. Consumes `settings` (for the hill threshold). Consumed by `quotes`, `dispatch`, `admin`.
+Tier 3. Consumes `settings`. Consumed by `packages`, `quotes`, `dispatch`, `admin`.
 
 ```
 zones/
 ├── zones.public.ts
-│     ZoneResolutionContract   — resolveAt(), findHillZonesNear()   [hot path, read-only]
+│     ZoneResolutionContract   — resolveAt()   [hot path, read-only]
 │     ZoneAdminContract        — create(), updateGeometry(), validate()  [admin only]
 ├── zones.container.ts
 ├── domain/

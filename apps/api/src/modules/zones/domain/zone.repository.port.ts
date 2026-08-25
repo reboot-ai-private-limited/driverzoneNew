@@ -41,7 +41,7 @@ export interface ZoneRepositoryPort {
    */
   findSiblingsOfType(type: ZoneType, excludeId?: string): Promise<NamedZone[]>;
 
-  /** Active HILL zones whose geometry intersects a route — see `findHillZonesForRoute.usecase.ts`. */
+  /** DORMANT — terrain comes from the drop point now. See `findHillZonesForRoute.usecase.ts`. */
   findHillZonesIntersecting(route: LineString): Promise<Zone[]>;
 
   /** Inserts a new zone document, `version: 1` for a create or `old.version + 1` for an edit. */

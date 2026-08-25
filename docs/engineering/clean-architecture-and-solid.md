@@ -157,6 +157,7 @@ implementations are pluggable.
 /** Read-only resolution. The hot path — every quote calls this. */
 export interface ZoneResolutionContract {
   resolveAt(point: LatLng): Promise<ResolvedZones>;
+  /** Dormant — terrain now comes from resolveAt(to).hill. See docs/LLD/packages.md. */
   findHillZonesNear(route: LineString): Promise<Zone[]>;
 }
 

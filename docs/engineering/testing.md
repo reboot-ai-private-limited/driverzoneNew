@@ -137,8 +137,10 @@ STRADDLING_PICKUP    // PICKUP, crosses the north city boundary   → legal; the
 CLOCKWISE_RING       // valid shape, wrong winding                 → must be stored rewound
 BOWTIE               // self-intersecting                          → Z-3 violation
 DARJEELING_HILLS     // HILL
-ROUTE_TO_HILLS       // long climb                                 → HILL
-ROUTE_GRAZING_HILLS  // clips a corner                             → PLAIN
+HILL_DESTINATION     // point inside DARJEELING_HILLS              → HILL
+PLAINS_DESTINATION   // point outside every hill zone              → PLAIN
+ROUTE_TO_HILLS       // long climb        — dormant, route-based terrain
+ROUTE_GRAZING_HILLS  // clips a corner    — dormant, route-based terrain
 ```
 
 Each fixture exists to make one boundary case testable. When you add one, say in a comment which

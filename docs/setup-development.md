@@ -329,7 +329,7 @@ Deletes every collection `identity` owns — `sessions`, `auditlogs`, `driverdoc
 data is getting in the way, rather than `docker compose down -v`, which also throws away the
 replica-set setup and costs a minute to rebuild.
 
-It is **not** a `dropDatabase()`. The collection list is explicit so that when `zones`, `catalog`
+It is **not** a `dropDatabase()`. The collection list is explicit so that when `zones`, `packages`
 and `bookings` land, a reset cannot silently destroy data this script knows nothing about — each
 module's seed extends the list. Having to maintain that list is the point.
 
@@ -356,7 +356,7 @@ production, the number on the seed list, and the code matching. The process addi
 
 ### Still to build
 
-The seed covers identity only. `zones`, `catalog`, `quotes` and `bookings` do not exist yet, so
+The seed covers identity only. `zones`, `packages`, `quotes` and `bookings` do not exist yet, so
 there are still no polygons, no packages and therefore no quotes — a fresh database cannot
 produce a fare. When those modules land the seed should grow to cover them, and two properties
 matter more there than they do here:

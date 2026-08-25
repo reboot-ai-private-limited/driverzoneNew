@@ -69,7 +69,10 @@ validateZone({ geom, siblings });               // → ZoneViolation[]
 // parentGeom is optional and nothing supplies one: Z-1 was retired with the
 // pickup→city parent link. checkWithinParent and clipToParent stay, dormant.
 
-// terrain.ts    — replaces ST_Length(ST_Intersection(route, hill))
+// terrain.ts    — DORMANT. Terrain is now decided by whether the drop point falls inside a
+//                 hill zone, not by measuring the route (docs/LLD/packages.md §Terrain).
+//                 Retained and tested so reviving route-based classification is a wiring
+//                 change; the trigger is drivers reporting specific routes as underpaid.
 classifyTerrain(route, hillZones, thresholdMetres);
 ```
 

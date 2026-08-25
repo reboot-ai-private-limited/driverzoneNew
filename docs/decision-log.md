@@ -20,6 +20,86 @@ entry links to it.
 
 ---
 
+## 2026-08-25 — Terrain is a property of the destination point, not the route
+
+**Decision:** an outstation trip is `HILL` when its drop point falls inside a HILL zone, and `PLAIN`
+otherwise. The route is never measured. This reverses assumption **A5**
+([`LLD/open-questions.md`](LLD/open-questions.md)) and retires
+`outstation.hill_route_threshold_m`.
+
+**Why:** the classifier becomes a field read off a query that is already running — `resolveAt(to)`
+returns every zone containing the point, so terrain costs nothing. The design it replaces measured
+route metres inside a hill polygon against a threshold, and that was worse in four concrete ways:
+the threshold was an admitted guess with "tune it when drivers complain" as the plan; a contested
+fare could only be explained by walking a driver through a route-length sum, rather than pointing
+at a map pin; it carried a tail of geometry edge cases (`lineSplit` throwing, a route wholly inside
+a polygon with no boundary to split on, a route grazing two zones); and ops had no direct control,
+because the polygon and the threshold interacted in ways that were hard to predict from the map.
+
+**What it costs, and this is real:** a plains destination reached only by crossing a hill stretch
+now prices as `PLAIN`, and the driver is underpaid for the hardest part of the job. That was the
+original argument for route classification and it has not stopped being true.
+
+**The mitigation is operational, not technical.** A hill zone's edge is now a price boundary, so
+it must be drawn over the *approach corridor* and not just the summit towns. If a destination is
+reached through the hills, the road to it belongs inside the polygon. The admin editor says so
+when the zone type is `HILL`.
+
+**Consequences:** OSRM stays — the distance band still needs road distance, and haversine
+under-reports 30–50% in hills, worst exactly when the destination is in the hills. But the route
+*geometry* was only ever fetched for terrain, so OSRM is now called with `overview=false` and the
+H3 cache stores no polyline.
+
+`classifyTerrain` and `hillMetresOnRoute` are **retained in `@driverzone/geo`, tested and unused**,
+the same treatment `checkWithinParent` got when Z-1 was retired — reviving route-based
+classification is a wiring change rather than a rewrite. `findHillZonesNear` on
+`ZoneResolutionContract`, its use case and its repository method go dormant with them.
+
+**Known limit, accepted:** this is a bet that Siliguri's geography rarely produces a flat
+destination behind a mountain. If driver complaints show otherwise, the trigger to revive is
+explicit and the code is still there.
+
+**Refs:** [`LLD/packages.md`](LLD/packages.md) §Terrain,
+[`LLD/zone-resolution.md`](LLD/zone-resolution.md) §Terrain, `packages/geo/src/terrain.ts`
+
+---
+
+## 2026-08-25 — The server picks the product; a quote returns exactly one package
+
+**Decision:** resolution takes `from` + `to` and returns **one** package — incity with all its
+variants, or outstation with the price row for the requested car category and direction. The
+client no longer chooses incity vs outstation.
+
+**Why:** the customer should not have to know which product their trip is. They know where they
+are and where they are going; classifying that is the system's job, and it is the job the zone
+layers already do. It also retires FR-B3's carry-the-points-across-tabs behaviour, which existed
+only because the client was making a decision it lacked the data to make.
+
+**The precedence ladder**, first rung that separates two candidates wins: incity over outstation;
+`HILL` over `PLAIN`; lower computed total for this request; most recently created, then id.
+
+**The guard that makes rung one safe:** a 60 km drop that happens to land inside the city polygon
+matches both an incity package and an outstation band. Preferring incity blindly sells an hourly
+rental for what is plainly an outstation run — the extra-km rate collects roughly the right money,
+but it is the wrong product and nobody chose it. So incity wins only within
+`incity.max_distance_multiple` × the longest variant's `included_km`, and falls through above that.
+
+**A deliberate asymmetry, stated so it does not read as inconsistency:** the price rung resolves
+ties *downward* (never over-charge on a config error), while the terrain rung resolves *upward*
+(`HILL` over `PLAIN`, which costs more). The first protects the customer from our mistake; the
+second protects driver supply, because a driver underpaid on hill trips stops accepting them.
+Under destination-point terrain the second rung is unreachable anyway — a point is either in a
+hill zone or it is not — and it stays only as a defensive default.
+
+**Consequences:** `PackageLookupContract` returns one match rather than a list. That is
+deliberate: the ladder is the packages module's rule, and a caller that ranks candidates itself is
+a caller that will eventually rank them differently.
+
+**Refs:** [`LLD/packages.md`](LLD/packages.md) §Resolution,
+[`LLD/zone-resolution.md`](LLD/zone-resolution.md)
+
+---
+
 ## 2026-08-25 — Pickup zones are a serviceability gate and a fee; Z-1, P-1 and the package↔zone links are retired
 
 **Decision:** a pickup zone answers one question — *may we pick up here, and does it cost extra* —

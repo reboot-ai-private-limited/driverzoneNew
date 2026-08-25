@@ -165,8 +165,8 @@ const MODULE_TIERS = [
   ['identity'],                      // customers, drivers, admins, auth
   ['notifications', 'ledger'],       // push/socket fan-out; earnings entries
   ['zones'],                         // polygons, resolution, the invariant write guard
-  ['catalog'],                       // packages, variants, prices
-  ['quotes'],                        // zones + catalog + pricing
+  ['packages'],                      // packages, variants, prices
+  ['quotes'],                        // zones + packages + pricing
   ['bookings'],                      // quotes + pricing + identity + notifications + ledger
   ['dispatch'],                      // the only module permitted to set bookings.driverId
   ['admin', 'reporting'],            // top of the graph; nothing may depend on these
@@ -175,7 +175,7 @@ const MODULE_TIERS = [
 
 Two entries worth explaining:
 
-**`pricing` at tier 0.** It could sit above `catalog` and read price rows itself. Keeping it
+**`pricing` at tier 0.** It could sit above `packages` and read price rows itself. Keeping it
 pure — plain data in, a breakdown out — is what lets the fare logic be tested exhaustively with
 no database. Fares are the thing customers dispute; that test suite needs to be cheap enough
 that nobody skips it.

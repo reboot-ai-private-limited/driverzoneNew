@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import swaggerUi from 'swagger-ui-express';
+import { isProduction } from '@/config/env.js';
+import { generateOpenApiDocument } from '@/shared/http/swagger.util.js';
 import type { AppContainers } from './container.js';
 
 /**
@@ -10,6 +13,22 @@ import type { AppContainers } from './container.js';
 export function buildApiRouter(c: AppContainers): Router {
   const router = Router();
   router.use('/health', c.health.buildRouter());
+
+  /**
+   * Zones only, for now — no other module registers OpenAPI paths yet
+   * (`zones.container.ts` calls `registerZonesSwaggerPaths()` as a side effect of being built,
+   * which has already happened by the time this function runs — `c` is built first). The
+   * document is generated once per process start, not per request: nothing here changes without
+   * a redeploy.
+   *
+   * Off in production. This is generated straight from the same validators the API enforces
+   * requests with, which is exactly why it is not something to hand an unauthenticated internet
+   * a map of by default.
+   */
+  if (!isProduction) {
+    const openApiDocument = generateOpenApiDocument();
+    router.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
+  }
 
   /**
    * One surface per role — auth plus that role's own account routes.

@@ -17,6 +17,7 @@ import { makeAdminControllers } from './interface/admin.controller.js';
 import { buildAdminRouter } from './interface/admin.routes.js';
 import { makeCustomerControllers } from './interface/customer.controller.js';
 import { buildCoverageRouter } from './interface/customer.routes.js';
+import { registerZonesSwaggerPaths } from './interface/zones.swagger.js';
 import type { ZonesPublicContract } from './zones.public.js';
 
 /**
@@ -39,6 +40,13 @@ export interface ZonesContainer {
 }
 
 export function buildZonesContainer(): ZonesContainer {
+  // A side effect of building this module, same as constructing its repository or its routes —
+  // registers this module's OpenAPI paths against the shared registry in
+  // `@/shared/http/swagger.util.js`. `shared/` cannot import a module (`shared-is-below-modules`
+  // in `.dependency-cruiser.cjs`), so the registration has to be triggered from inside the
+  // module itself rather than pulled in from outside.
+  registerZonesSwaggerPaths();
+
   const zones = new MongoZoneRepository();
   const audit = new ZonesAuditLog();
 

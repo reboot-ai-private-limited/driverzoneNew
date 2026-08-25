@@ -72,6 +72,11 @@ left to draw — the three types are flat and independent (`domain-model.md`).
 └──────────────┴────────────────────────────────────────────┘
 ```
 
+**A hill zone's edge is a price boundary.** Terrain is decided by whether the customer's drop
+point lands inside the polygon, not by measuring the route (`packages.md` §Terrain), so drawing
+a hill zone *is* a pricing action. Draw it over the approach corridor, not just the summit
+towns. The editor should say so when the type is `HILL`.
+
 No Parent picker: a pickup zone is not a child of anything. A pickup zone drawn partly or wholly
 outside the city boundary is **legal** — it stays serviceable for outstation, and incity quotes
 from it return `PICKUP_OUTSIDE_CITY` (`zone-resolution.md`). The map still draws the city
@@ -205,6 +210,11 @@ That coverage strip catches the failure nobody notices until a customer hits it:
 the distance bands where no package matches and the customer gets
 `NO_PACKAGE_FOR_DISTANCE` for a trip you'd happily take. It is now per terrain rather than per
 pickup zone — two strips, `PLAIN` and `HILL`, and both must tile without a gap.
+
+**The strip is the only guard against a gap.** Overlap is caught at save time and again by the
+nightly job; a gap is caught by nobody, because nothing is wrong with any individual package.
+Two adjacent bands that fail to meet is a silence, not an error — which is exactly why it needs
+to be visible on the screen where bands are edited (`packages.md` §Overlap).
 
 ## Pricing preview (FR-P6)
 

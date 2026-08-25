@@ -16,7 +16,7 @@ Three types, three jobs, no overlap between them.
 |---|---|---|
 | **PICKUP** | The serviceability gate, and a fee. `from` must fall inside one — outside it we do not operate. `FREE` adds nothing; `PAID` adds a pickup charge. | **Both** incity and outstation |
 | **CITY** | Defines what "incity" means. Scopes the incity package and answers the `to` check. | Incity only |
-| **HILL** | Terrain classification for outstation pricing. | Outstation only |
+| **HILL** | Terrain for outstation pricing, decided by whether the **drop point** falls inside. | Outstation only |
 
 The important thing about that table is what it **doesn't** say. A pickup zone has no parent, no
 package links, and no relationship to the city zone. It answers one question — *may we pick up
@@ -24,6 +24,11 @@ here, and does it cost extra* — for both products, and nothing else depends on
 
 Packages reference exactly one zone between them: the incity package's `cityZoneId`. Outstation
 packages reference no zone at all; they are matched on terrain and distance band.
+
+**A hill zone's edge is a price boundary.** Terrain is decided by the destination point landing
+inside the polygon, not by measuring the route ([`packages.md`](packages.md) §Terrain), so where
+the polygon is drawn *is* the pricing decision. Draw it over the approach corridor, not just the
+summit towns: if a destination is reached through the hills, the road to it belongs inside.
 
 ### The Siliguri instance
 
@@ -51,7 +56,7 @@ compromise — each side does the thing the other genuinely cannot.
 | Question | Answered by | Why not the other |
 |---|---|---|
 | Which polygons contain this point? | Mongo `$geoIntersects` + `2dsphere` | The only part that needs an index |
-| Which hill zones does this route touch at all? | Mongo `$geoIntersects` on a `LineString` | Same index, cheap candidate narrowing |
+| Which hill zone is this drop point in? | Mongo `$geoIntersects` + 2dsphere | The same query that resolves city and pickup |
 | Is this polygon legal? (Z-2, Z-3) | Turf, in `@driverzone/geo` | Mongo cannot express a cross-document geometric constraint |
 | How many metres of the route are inside? | Turf `lineSplit` + `length` | Mongo has no `$geoIntersection` and no length aggregation |
 | Which 0.42 km² is at fault? | Turf `difference` / `intersect` | Mongo cannot return derived geometry |
@@ -82,9 +87,11 @@ with a test asserting a deliberately clockwise input is stored counter-clockwise
 of problem, same silence. `Z-MAX-AREA` sits beside the existing `Z-MIN-AREA` and rejects anything
 implausibly large for an operational zone long before it reaches that limit.
 
-**3. No `$geoIntersection`, no length or area aggregation.** This is why terrain classification is
-two steps — narrow the candidate hill zones in Mongo, measure the metres with Turf in process.
-See [`zone-resolution.md`](zone-resolution.md) §Terrain classification.
+**3. No `$geoIntersection`, no length or area aggregation.** Mongo can tell you *that* a line
+crosses a polygon, never *how much of it* does. That limitation is part of why terrain is now
+decided by the destination point rather than measured along the route — see
+[`packages.md`](packages.md) §Terrain. It still binds wherever a measured intersection is needed,
+such as painting the offending area of a failed containment check.
 
 **4. The `2dsphere` index rejects *some* malformed polygons on insert, with unhelpful errors.**
 Its coverage is narrower than `ST_IsValid` was and its messages are not something an admin can
@@ -107,7 +114,8 @@ zones/
 ├── domain/
 │   ├── zone.entity.ts            Zone, ZoneType, PickupChargeType, ResolvedZones
 │   ├── zone.errors.ts            ZoneValidationFailedError, ZoneCodeTakenError, …
-│   └── zone.repository.port.ts   findContaining, findIntersectingRoute, findSiblings, …
+│   └── zone.repository.port.ts   findContaining, findSiblings, findByCode, save, supersede
+│                                  (findIntersectingRoute — dormant, see the contract)
 ├── application/useCases/
 │   ├── resolveZonesAtPoint.usecase.ts
 │   ├── getCoverageAt.usecase.ts
@@ -139,7 +147,12 @@ export interface ZoneResolutionContract {
   /** City + pickup + hill for one point, in a single indexed query. */
   resolveAt(p: LatLng): Promise<ResolvedZones>;
 
-  /** Candidate hill zones a route touches. The caller measures with classifyTerrain(). */
+  /**
+   * DORMANT. Terrain now comes from `resolveAt(to).hill` — a destination-point lookup, not a
+   * route measurement (packages.md §Terrain). Retained with `classifyTerrain` in
+   * `@driverzone/geo` so route-based classification is a wiring change rather than a rewrite;
+   * the trigger to revive is drivers reporting specific routes as underpaid. No caller today.
+   */
   findHillZonesOnRoute(route: LineString): Promise<Polygon[]>;
 
   /**
@@ -386,11 +399,10 @@ writing down.
 | ⚠ Unpopulated `0, 0` | `INVALID_COORDINATE`, same guard |
 | Point exactly on a polygon vertex | Resolves. `$geoIntersects`, not `$geoWithin` |
 | Zone deactivated mid-session | The existing quote is honoured; new quotes fail (Q11) |
-| Route grazing a hill zone for 500 m | `PLAIN` — below the 5 km threshold |
-| Route through 30 km of hill zone | `HILL` |
-| Route crossing two hill zones | Metres summed. Safe because Z-2 forbids same-type overlap, so nothing is double-counted |
-| ⚠ `lineSplit` throws on a degenerate route | That zone is skipped and the other zones still count. Already handled in `terrain.ts` |
-| ⚠ Route wholly inside a hill zone, never crossing its boundary | `pieces.length === 0` branch: test the midpoint, count the whole route. Already handled in `terrain.ts` |
+| Drop point inside a hill zone | `HILL`, whatever the route crossed |
+| Drop point outside every hill zone | `PLAIN`, even if the route climbed for 30 km. The known cost of destination-point classification — mitigated by drawing the polygon over the approach corridor |
+| Drop point exactly on a hill-zone border | Resolves, and resolves the same way twice — `$geoIntersects`, and Z-2 forbids two active hill zones overlapping |
+| Drop point in a hill zone that overlaps the city zone | Both candidates exist; precedence picks incity (`packages.md`). Legal — Z-2 is same-type only |
 
 ### Operational
 
@@ -451,7 +463,7 @@ Every case in the edge-case tables above is a test. The ⚠ rows are the ones to
 |---|---|
 | A second city | A second CITY zone is drawn. Resolution already works; only the admin switcher is missing |
 | Per-zone package catalogues | Ops wants the paid zone to sell something the free zone does not. Re-adding an optional `pickupZoneIds` array to a Mongoose schema needs no migration |
-| Hill grading (tiers rather than one `HILL`) | Drivers report specific hill routes as underpaid in a way one threshold cannot fix |
+| Per-hill-zone pricing (Darjeeling ≠ Kalimpong) | Ops wants them to differ. `resolveAt` already returns *which* hill zone, so this is a package key change, not new plumbing (`packages.md`) |
 | Nested zones (Z-1 back on) | A zone genuinely needs to be contained by another. `checkWithinParent` and its tests are still there, unused |
 
 ## Dependencies Phase 1 will need

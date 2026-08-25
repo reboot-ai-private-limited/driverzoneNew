@@ -759,7 +759,7 @@ Seed values:
   ['booking.overage_grace_minutes',      15,     'Free grace before extra-time billing'],
   ['booking.billing_block_minutes',      30,     'Overage billed in blocks of this size'],
   ['booking.night_window',               { start: '22:00', end: '06:00' }, 'Night charge window'],
-  ['outstation.hill_route_threshold_m',  5000,   'Route metres in a hill zone to price as hill'],
+  ['incity.max_distance_multiple',       2,      'InCity wins over outstation only within this multiple of a variant included_km'],
   ['cancellation.free_window_seconds',   300,    'Free cancellation after confirmation'],
   ['driver.max_negative_balance_paise',  500000, 'Block duty past ₹5,000 owed'],
 ]

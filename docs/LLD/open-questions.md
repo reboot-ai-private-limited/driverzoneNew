@@ -84,6 +84,11 @@ admin-verified, or earned after N plains trips?
 a genuine safety matter, and self-declaration is how you end up with an inexperienced
 driver on a mountain road at night.
 
+The gating signal is now the same one that prices the trip: a booking is a hill booking when its
+drop point falls inside a hill zone (`packages.md`). Dispatch and pricing therefore agree by
+construction — there is no state where a trip is priced as hill but offered to a driver who is
+not cleared for it.
+
 ---
 
 ### 🟡 Q7 — Payment timing
@@ -173,7 +178,7 @@ and progressively more expensive later.
 | A2 | ~~Pickup zones are children of city zones~~ — **superseded 2026-08-25.** Pickup zones are flat: a serviceability gate and a fee, with no parent and no package links | `zones.md`, [`decision-log.md`](../decision-log.md) |
 | A3 | Money in paise, percentages in basis points | throughout |
 | A4 | Fare snapshots immutable; corrections are adjustment rows | `pricing-and-commission.md` |
-| A5 | Terrain classified by route intersection, not destination point | `zone-resolution.md` |
+| A5 | ~~Terrain classified by route intersection, not destination point~~ — **superseded 2026-08-25.** Terrain is decided by whether the drop point falls inside a hill zone; the route is never measured | `packages.md`, [`decision-log.md`](../decision-log.md) |
 | A6 | Dispatch is wave-based broadcast, 5 drivers, 45 s, 4 waves | `dispatch-and-assignment.md` |
 | A7 | Scheduled bookings dispatch at T−90 min | `dispatch-and-assignment.md` |
 | A8 | Trip start requires a customer OTP | `booking-lifecycle.md` |

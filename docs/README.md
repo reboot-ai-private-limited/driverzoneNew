@@ -35,6 +35,7 @@ the low-level design in [`LLD/`](LLD/):
 | [Database Schema](LLD/database-schema.md) | Mongoose schemas, indexes, where the invariants live |
 | [Zones](LLD/zones.md) | The zones module: what each zone type is for, the write path, the HTTP surface, every edge case |
 | [Zone Resolution](LLD/zone-resolution.md) | The core algorithm: point → zones → packages |
+| [Packages](LLD/packages.md) | The two products, how the server picks one, and the guards against overlapping bands |
 | [Pricing & Commission](LLD/pricing-and-commission.md) | Fare computation, snapshots, the earnings ledger |
 | [Dispatch & Assignment](LLD/dispatch-and-assignment.md) | Driver offer waves, accept races, reassignment |
 | [Booking Lifecycle](LLD/booking-lifecycle.md) | State machine and the event log |
@@ -58,8 +59,8 @@ all and whether pickup carries a fee; one city zone, which defines what "incity"
 hill zones, which classify terrain for outstation pricing. Packages — incity hourly rentals
 and outstation trips — are sold against the city zone and the distance band respectively, never
 against a pickup zone. When a customer enters pickup and drop points, the backend resolves both
-against the zone layers in a single spatial query, decides whether this is an incity or
-outstation trip, matches applicable packages, and returns priced variants. On confirmation the fare is
+against the zone layers in a single spatial query, decides on its own whether this is an incity
+or outstation trip — the customer never picks — and returns exactly one package, priced. On confirmation the fare is
 frozen onto the booking and the trip is offered to drivers in expanding waves until one
 claims it.
 

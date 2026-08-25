@@ -5,12 +5,21 @@ import { lineSplit } from '@turf/line-split';
 import type { LineString, Polygon, Position } from 'geojson';
 
 /**
- * Terrain classification for outstation pricing — the replacement for
- * `ST_Length(ST_Intersection(route, hill_zone))`.
+ * Route-based terrain classification. **DORMANT — nothing calls this.**
  *
- * Classified on the ROUTE, never on the destination point. Siliguri to a plains town reached
- * only by crossing a hill stretch is a hill trip for the driver: the destination is flat, the
- * work is not, and pricing it as plains underpays them for the hardest part of the job.
+ * Terrain is now decided by whether the drop point falls inside a HILL zone, which is a field
+ * read off the `resolveAt(to)` query that already runs (docs/LLD/packages.md §Terrain). This
+ * file measured it along the OSRM route instead, against a threshold in global settings.
+ *
+ * The argument it was built on is still true, and is the cost the current model accepts:
+ * Siliguri to a plains town reached only by crossing a hill stretch is a hill trip for the
+ * driver — the destination is flat, the work is not, and pricing it as plains underpays them
+ * for the hardest part of the job. The mitigation is operational: draw the hill polygon over
+ * the approach corridor, not just the summit towns.
+ *
+ * Kept, and kept tested, so reviving route-based classification is a wiring change rather than
+ * a rewrite. The trigger is drivers reporting specific routes as underpaid. See
+ * docs/decision-log.md.
  */
 
 /** Midpoint of the segment's two most central coordinates. */
@@ -77,6 +86,7 @@ export function hillMetresOnRoute(route: LineString, hillZones: Polygon[]): numb
   return Math.round(metres);
 }
 
+/** LIVE — the package matching key. Set from `resolveAt(to).hill`, not from this file. */
 export type Terrain = 'PLAIN' | 'HILL';
 
 /**
@@ -84,8 +94,11 @@ export type Terrain = 'PLAIN' | 'HILL';
  *
  * The threshold exists because a route clipping the corner of a hill zone for 800 m is not a
  * hill trip, while one that spends 30 km climbing plainly is. Default 5 km, and it lives in
- * global settings (`outstation.hill_route_threshold_m`) because it is a guess until there is
- * real data — the signal to tune it is drivers reporting specific routes as underpaid.
+ * global settings because it is a guess until there is real data — the signal to tune it is
+ * drivers reporting specific routes as underpaid.
+ *
+ * Dormant: the setting that fed it was removed with the switch to destination-point terrain.
+ * Reviving this means re-adding it (see the file header).
  */
 export function classifyTerrain(
   route: LineString,

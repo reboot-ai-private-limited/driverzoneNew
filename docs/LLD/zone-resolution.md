@@ -132,10 +132,12 @@ resolveOutstation(from, to, direction, carCategoryId) -> Quote[] | Error
  1. fromZones ← resolveZones(from)
  2. if fromZones.pickup is null → ERROR ZONE_NO_PICKUP_COVERAGE
 
- 3. route ← routing.route(from, to)          -- OSRM; see §Road distance
-    if route is null → ERROR ROUTE_NOT_FOUND
+ 3. toZones ← resolveZones(to)
+    terrain ← toZones.hill ? 'HILL' : 'PLAIN'     -- see §Terrain
+    no extra query: the same $geoIntersects that resolves the city resolves the hill zone
 
- 4. terrain ← classifyTerrain(route)         -- see §Terrain
+ 4. route ← routing.route(from, to)          -- OSRM; see §Road distance
+    if route is null → ERROR ROUTE_NOT_FOUND
 
  5. distanceKm ← ceil(route.distance_m / 1000)
 
@@ -153,8 +155,12 @@ resolveOutstation(from, to, direction, carCategoryId) -> Quote[] | Error
           side effect: log to unserved_distance_requests — tells ops which band to add
 
  8. if packages.length > 1                   -- invariant P-2 says impossible
-        → alert admin; pick lowest total for the customer, never the highest
+        → alert admin; the precedence ladder in packages.md decides, and its price
+          rung picks the lowest total for the customer, never the highest
           (silently over-charging on a config error is far worse than under-charging)
+
+    NOTE: a HILL destination with no HILL band does NOT fall back to the PLAIN
+          ladder. It returns NO_PACKAGE_FOR_DISTANCE — see packages.md.
 
  9. fare ← computeOutstationFare(...)
 10. persist quote, return
@@ -168,8 +174,8 @@ bands, that error puts trips in the wrong band constantly and mis-prices them.
 Use **OSRM**, self-hosted on the India OSM extract:
 
 ```
-GET /route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=geojson
-→ { routes: [ { distance: 87421.3, duration: 7200.1, geometry: {...} } ] }
+GET /route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=false
+→ { routes: [ { distance: 87421.3, duration: 7200.1 } ] }
 ```
 
 Self-hosting is the right call here — Google Distance Matrix priced per call becomes a
@@ -180,49 +186,46 @@ volume. One `c6g.xlarge` handles the India extract comfortably.
 
 ```
 key: route:{h3(from,8)}:{h3(to,8)}
-val: { distance_m, duration_s, polyline }
+val: { distance_m, duration_s }
 ```
 
 Hit rate in practice runs 60–80% because pickup and drop points cluster hard around towns
-and landmarks. Store the polyline in the cache too — terrain classification needs it.
+and landmarks.
 
-### Terrain classification
+`overview=false`, and no polyline in the cache: the route geometry was only ever fetched so
+terrain classification could measure it, and terrain now comes from the destination point. We
+need the distance and nothing else — a smaller response and a smaller cache value.
 
-Do **not** classify on the destination point alone. Siliguri → a plains town reached only
-by crossing a hill stretch is a hill trip for the driver, and pricing it as plains
-under-pays them.
+### Terrain
 
-Classify on **route intersection**. MongoDB can find the candidate hill zones but cannot
-measure how much of the route lies inside one — there is no `$geoIntersection` and no length
-aggregation — so this is a two-step: narrow in the database, measure with Turf.
+Terrain is a property of the **destination point**, not of the route.
 
 ```ts
-// 1. Which hill zones does this route touch at all? Indexed, cheap.
-const hillZones = await Zone.find({
-  isActive: true,
-  type: 'HILL',
-  geometry: { $geoIntersects: { $geometry: routeLineString } },
-}).lean();
-
-// 2. How many metres are actually inside them? @driverzone/geo, in process.
-const { terrain, hillMetres } = classifyTerrain(
-  routeLineString,
-  hillZones.map((z) => z.geometry),
-  settings['outstation.hill_route_threshold_m'],
-);
+const { city, hill } = await zones.resolveAt(to);
+const terrain = hill ? 'HILL' : 'PLAIN';
 ```
 
-`classifyTerrain` splits the route on each polygon boundary and sums the segments whose
-midpoint falls inside — the midpoint rather than a vertex, because a split vertex sits exactly
-*on* the boundary where point-in-polygon is a coin flip. Zones are summed independently, which
-is safe because Z-2 forbids two active hill zones from overlapping, so no stretch is
-double-counted.
+That is the whole classifier. `resolveAt` is already running to answer the `to`-in-city question,
+and it returns every zone type containing the point, so terrain costs nothing extra — no second
+query, no threshold, no geometry measurement.
 
-Default threshold 5,000 m. A route that clips a hill zone corner for 800 m is not a hill
-trip; one that spends 30 km climbing is.
+**This reverses the earlier route-intersection design**, which measured how many metres of the
+route fell inside a hill polygon and compared that to
+`outstation.hill_route_threshold_m`. That approach was more faithful in principle and worse in
+practice: the threshold was an admitted guess, a contested fare could only be explained by
+walking a driver through a route-length sum, and it carried a tail of geometry edge cases. See
+[`packages.md`](packages.md) §Terrain and the decision-log entry.
 
-The 5 km threshold is a guess and should be tuned once there's real data — the metric to
-watch is driver complaints about specific routes being under-paid.
+**The cost, stated plainly:** a plains destination reached only by crossing a hill stretch now
+prices as `PLAIN`, and the driver is underpaid for the hardest part of the job.
+
+**The mitigation is where the polygon gets drawn.** A hill zone's edge is now a price boundary,
+so it must cover the *approach corridor* and not just the summit towns. If a destination is
+reached through the hills, the road to it belongs inside the hill polygon.
+
+`classifyTerrain` and `hillMetresOnRoute` are retained in `@driverzone/geo`, tested but unused.
+Reviving route-based classification is a wiring change rather than a rewrite — the trigger is
+drivers reporting specific routes as underpaid.
 
 ## Error codes
 
@@ -305,5 +308,8 @@ Cases every implementation must pass:
   normally. Left unnormalised MongoDB reads it as the whole earth minus the shape, silently
   (`zones.md` §Why MongoDB geo).
 - pickup zone deactivated mid-session → existing quote still honoured, new quotes fail
-- route grazing a hill zone for 500 m → `PLAIN`
-- route through 30 km of hill zone → `HILL`
+- **drop point inside a hill zone → `HILL`; drop point outside every hill zone → `PLAIN`**,
+  regardless of what the route between them crosses
+- drop point exactly on a hill-zone border → resolves, and resolves the same way twice
+- drop point inside a hill zone that also overlaps the city zone → both candidates exist and
+  incity wins on precedence (`packages.md`). Legal: Z-2 only forbids same-*type* overlap

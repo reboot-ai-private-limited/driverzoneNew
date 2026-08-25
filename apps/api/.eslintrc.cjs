@@ -58,7 +58,7 @@ module.exports = {
             ],
             message:
               "A module's internals are private. Import its '<name>.public.js' contract instead — " +
-              'see docs/engineering/04-boundaries-and-enforcement.md.',
+              'see docs/engineering/boundaries-and-enforcement.md.',
           },
         ],
       },
@@ -84,6 +84,24 @@ module.exports = {
        */
       files: ['src/container.ts', 'src/app.ts', 'src/server.ts', 'src/worker.ts'],
       rules: { 'no-restricted-imports': 'off' },
+    },
+    {
+      /*
+       * `src/scripts/*` are operational scripts, not application code, and they legitimately
+       * reach past module contracts.
+       *
+       * The seed is the case that forced this: it has to create an admin, and `identity` exposes
+       * no way to do that ON PURPOSE — `account.repository.impl.ts` throws for
+       * `create('ADMIN', …)` because admin accounts are provisioned out of band. There is no
+       * contract route to take, so the exemption is the honest answer rather than widening a
+       * public contract to accommodate a dev fixture.
+       *
+       * Kept narrow to `scripts/` deliberately. `dependency-cruiser` needs no matching
+       * exemption: its rule is scoped to `from: ^src/modules/`, so a file outside a module was
+       * never in scope — the same asymmetry documented at the top of `.dependency-cruiser.cjs`.
+       */
+      files: ['src/scripts/*.ts'],
+      rules: { 'no-restricted-imports': 'off', 'no-console': 'off' },
     },
   ],
 };

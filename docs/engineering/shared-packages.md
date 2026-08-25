@@ -1,4 +1,4 @@
-# 07 — Shared Packages
+# Shared Packages
 
 Five packages in `packages/`. Each has a narrow job and a clear rule about what must never go
 in it.
@@ -65,10 +65,14 @@ assertPlausibleCoordinate(p, 'pickup');
 toGeoJsonPoint(p);
 
 // zone-rules.ts — the invariants that used to be PostGIS triggers
-validateZone({ geom, parentGeom, siblings });   // → ZoneViolation[]
-clipToParent(child, parent);
+validateZone({ geom, siblings });               // → ZoneViolation[]
+// parentGeom is optional and nothing supplies one: Z-1 was retired with the
+// pickup→city parent link. checkWithinParent and clipToParent stay, dormant.
 
-// terrain.ts    — replaces ST_Length(ST_Intersection(route, hill))
+// terrain.ts    — DORMANT. Terrain is now decided by whether the drop point falls inside a
+//                 hill zone, not by measuring the route (docs/LLD/packages.md §Terrain).
+//                 Retained and tested so reviving route-based classification is a wiring
+//                 change; the trigger is drivers reporting specific routes as underpaid.
 classifyTerrain(route, hillZones, thresholdMetres);
 ```
 
@@ -76,7 +80,7 @@ classifyTerrain(route, hillZones, thresholdMetres);
 
 Because the admin map editor needs the identical code.
 
-When an admin drags a pickup-zone corner outside its city, the editor must say so
+When an admin drags a pickup-zone corner across a neighbouring zone, the editor must say so
 *immediately*, with the offending area painted red — not after a round trip on save. And the
 editor's verdict must never disagree with the API's, because "it looked fine in the editor but
 the save failed" is the kind of bug that makes people stop trusting a tool.
@@ -86,13 +90,13 @@ in the browser, so this is possible; making it a package is what makes it happen
 
 ### Why it is load-bearing
 
-The invariants in [`../02-domain-model.md`](../LLD/02-domain-model.md) were PostGIS triggers. Under
+The invariants in [`../LLD/domain-model.md`](../LLD/domain-model.md) were PostGIS triggers. Under
 MongoDB they live here.
 
 That means a bug in `zone-rules.ts` is not a UI defect — it is a bad polygon in production, a
 customer being told a city you serve is unserved, and a `ZONE_CONFIG_FAULT` alert at an
 inconvenient hour. It has 31 tests covering every case in
-[`../04-zone-resolution.md`](../LLD/04-zone-resolution.md), including the awkward ones: a point
+[`../LLD/zone-resolution.md`](../LLD/zone-resolution.md), including the awkward ones: a point
 exactly on a shared border, neighbours whose hand-drawn edges nearly coincide, a route grazing a
 hill zone for 800m.
 

@@ -19,7 +19,7 @@ import { getRequestId } from '@/shared/http/request-context.js';
 /**
  * Fields that must never reach a log, whatever wraps them.
  *
- * Names come from the payloads in docs/LLD/08-api-contracts.md rather than from imagination,
+ * Names come from the payloads in docs/LLD/api-contracts.md rather than from imagination,
  * so this list tracks the real API surface. `*.x` covers one level of nesting, which is where
  * these actually appear — inside `booking`, `customer`, `driver`, `req.body`.
  *

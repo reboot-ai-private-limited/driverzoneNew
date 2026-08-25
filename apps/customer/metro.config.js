@@ -19,7 +19,7 @@ const { getDefaultConfig } = require('expo/metro-config');
  *
  * The third piece is not here — it is `node-linker=hoisted` in the repo-root `.npmrc`. pnpm's
  * default symlinked layout is not something Metro can follow, and that setting is what makes
- * the tree walkable at all. See docs/engineering/08-mobile-in-monorepo.md.
+ * the tree walkable at all. See docs/engineering/mobile-in-monorepo.md.
  */
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');

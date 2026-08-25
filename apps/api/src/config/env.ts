@@ -22,10 +22,10 @@ const schema = z.object({
     .default('http://localhost:3000')
     .transform((s) => s.split(',').map((o) => o.trim()).filter(Boolean)),
 
-  /** pino's six, ordered by severity. See docs/engineering/05-coding-standards.md §Logging. */
+  /** pino's six, ordered by severity. See docs/engineering/coding-standards.md §Logging. */
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
-  /** Self-hosted OSRM. Road distance is required to match outstation bands (docs/04). */
+  /** Self-hosted OSRM. Road distance is required to match outstation bands (docs/LLD/zone-resolution.md). */
   OSRM_BASE_URL: z.string().url().default('http://localhost:5000'),
 
   /**
@@ -45,6 +45,22 @@ const schema = z.object({
    * never a long-lived credential.
    */
   OTP_PEPPER: z.string().min(32, 'OTP_PEPPER must be at least 32 characters'),
+
+  /**
+   * DEVELOPMENT ONLY — a fixed OTP accepted for the seeded accounts in `devAccounts.ts`.
+   *
+   * Unset by default, and it takes three independent conditions to do anything: this variable
+   * set, `NODE_ENV` not production, and the number on the seed allowlist. `loadEnv()` below
+   * additionally refuses to start if it is set in production, so a value leaking into a prod env
+   * file kills the process instead of quietly opening a login.
+   *
+   * Any other number still gets a real random code, so the generation, hashing and
+   * attempt-burning paths stay exercised locally.
+   */
+  DEV_FIXED_OTP: z
+    .string()
+    .regex(/^\d{6}$/, 'DEV_FIXED_OTP must be exactly 6 digits')
+    .optional(),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -88,10 +104,28 @@ export const isTest = env.NODE_ENV === 'test';
  * surfacing as `undefined` inside a connection string an hour into a deploy.
  */
 export function loadEnv(): Env {
-  if (parsed.success) return parsed.data;
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
+    // Not the logger: the logger reads LOG_LEVEL from this very object, so it may not exist yet.
+    console.error(`Invalid environment:\n${issues}`);
+    process.exit(1);
+  }
 
-  const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
-  // Not the logger: the logger reads LOG_LEVEL from this very object, so it may not exist yet.
-  console.error(`Invalid environment:\n${issues}`);
-  process.exit(1);
+  /**
+   * A development login bypass must never reach production, and the container already refuses to
+   * wire it there. This is the second, louder lock: if the variable is present in a production
+   * environment at all, the process does not start.
+   *
+   * Failing here rather than ignoring the value is the whole point — a silently-ignored bypass
+   * variable in a prod env file is a landmine for whoever later "fixes" the code that ignores it.
+   */
+  if (parsed.data.NODE_ENV === 'production' && parsed.data.DEV_FIXED_OTP !== undefined) {
+    console.error(
+      'Invalid environment:\n  DEV_FIXED_OTP: must not be set when NODE_ENV=production — ' +
+        'it is a development login bypass',
+    );
+    process.exit(1);
+  }
+
+  return parsed.data;
 }

@@ -9,7 +9,7 @@ import { v7 as uuidv7 } from 'uuid';
  */
 
 /**
- * A request correlation ID, in the form specified by docs/LLD/08-api-contracts.md: `req_01J…`.
+ * A request correlation ID, in the form specified by docs/LLD/api-contracts.md: `req_01J…`.
  *
  * Ordering matters here more than anywhere: these are the keys log lines are grouped by, and a
  * sortable ID means a log viewer with no clock skew problem puts a request's lines in the order

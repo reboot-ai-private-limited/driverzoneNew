@@ -1,4 +1,4 @@
-# 05 — Pricing & Commission
+# Pricing & Commission
 
 ## Rules
 
@@ -9,6 +9,22 @@
 5. **Round once, at the end**, to the nearest rupee (`100` paise). Rounding intermediate
    components produces receipts whose lines don't sum to the total, and customers notice.
 
+## The pickup fee
+
+One rule, shared by both products, because a pickup zone is a global serviceability gate rather
+than an incity concept (`zones.md`):
+
+```
+pickup_fee = pickupZone.pickup_charge_type == 'PAID'
+               ? (pickupZone.pickup_charge_paise
+                  ?? settings['pickup.default_charge_paise'])
+               : 0
+```
+
+`pickup.default_charge_paise` is the number ops actually tunes. The per-zone override exists for
+the day a second paid zone needs a different figure, and costs nothing until then. A `FREE` zone
+adds nothing at all — there is no zero-value fee line on the receipt.
+
 ## InCity fare
 
 ```
@@ -16,10 +32,7 @@ computeInCityFare(variant, price, pickupZone, scheduledAt) -> FareBreakdown
 
   base        = price.base_fare_paise
 
-  pickup_fee  = pickupZone.pickup_charge_type == 'PAID'
-                  ? (pickupZone.pickup_charge_paise
-                     ?? settings['pickup.default_charge_paise'])
-                  : 0
+  pickup_fee  = as above — identical for both products
 
   night_fee   = isInNightWindow(scheduledAt) ? price.night_charge_paise : 0
 
@@ -74,7 +87,7 @@ computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt
   extra_km    = max(0, distanceKm - pkg.min_km)       -- band price covers up to min_km
   dist_charge = extra_km * price.extra_km_rate_paise
   allowance   = price.driver_allowance_paise          -- night halt / food
-  pickup_fee  = (as incity)
+  pickup_fee  = as above — identical for both products
   night_fee   = ...
 
   subtotal    = base + dist_charge + allowance + pickup_fee + night_fee
@@ -84,7 +97,7 @@ computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt
 
 🔴 **Open question:** does the band price cover the whole band flat (70–100 km all cost
 the same) or does it cover `min_km` with per-km on top? The formula above assumes the
-latter. See `12-open-questions.md` Q3.
+latter. See `open-questions.md` Q3.
 
 For `ROUND_TRIP`, the price row is separate rather than a computed 2× — round trips are
 usually less than double one-way (the driver is returning anyway) and you want that
@@ -258,7 +271,7 @@ raise it for drivers with history.
 
 ## Things not in v1 but designed around
 
-- **Surge** — deliberately excluded (`01-prd.md` §6). If it ever arrives it becomes a
+- **Surge** — deliberately excluded (`prd.md` §6). If it ever arrives it becomes a
   multiplier line in `lines[]`, which the snapshot shape already accommodates.
 - **Coupons** — another negative line item; needs `applied_promotions` on the quote.
 - **Tolls / parking** — reimbursables the driver adds mid-trip with a photo. Add as

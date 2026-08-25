@@ -1,4 +1,4 @@
-# 11 — Roadmap
+# Roadmap
 
 Phases are ordered by **risk retirement**, not by feature count. The two things that can
 sink this build are zone/pricing correctness and dispatch reliability, so both get proven
@@ -23,22 +23,26 @@ gives a working stack with seeded Siliguri zones, and CI is green.
 
 The riskiest logic, built first, with no UI in the way.
 
-- `zones` collection + `2dsphere` index
-- Invariants Z-1…Z-3 in `@driverzone/geo` — **done**, 31 tests
+- `zones` collection + `2dsphere` index — the module LLD is [`zones.md`](zones.md)
+- Invariants Z-2, Z-3, Z-MIN-AREA in `@driverzone/geo` — **done**, 31 tests. Z-1 is retired
+  but its code stays, dormant (`domain-model.md`)
+- `@turf/rewind` ring normalisation in the write path, plus `Z-MAX-AREA` — the two MongoDB
+  winding traps in `zones.md`, both of which fail *silently* if skipped
 - `resolveZones` + typed wrapper with the lat/lng guard
 - Incity and outstation resolution algorithms
 - OSRM integration + H3 route cache
 - Terrain classification by route intersection
 - `coverage_requests` / `unserved_distance_requests`
-- **Full test suite from `04-zone-resolution.md`, including the border cases**
+- **Full test suite from `zone-resolution.md`, including the border cases**
 
-**Done when:** every case in the zone-resolution test table passes, and a deliberately
+**Done when:** every case in the zone-resolution test table passes, a deliberately
 misconfigured zone is rejected by `createZone.usecase.ts` — with `lint:deps` green, proving no
-other module can bypass it.
+other module can bypass it — and a zone saved with a clockwise exterior ring comes back
+counter-clockwise.
 
 ## Phase 2 — Packages, pricing, quotes (~2 weeks)
 
-- Incity and outstation package/variant/price tables + P-1…P-4 triggers
+- Incity and outstation package/variant/price tables + P-2…P-4 checks (P-1 retired)
 - `pricing` module as **pure functions** at tier 0, with property-based tests on the reconciliation
   assertion (`driver + company + allowance + tax == total`)
 - Quote generation, TTL, single-consumption
@@ -51,8 +55,8 @@ path can produce a non-reconciling breakdown.
 
 Ops needs to configure the system before anyone can book anything.
 
-- Zone tree + MapLibre polygon editor with live `POST /admin/zones/validate`
-- Violation rendering (`offending_geometry` in red), clip-to-city
+- One Coverage screen + MapLibre polygon editor with live `POST /admin/zones/validate`
+- Violation rendering (`offending_geometry` in red)
 - Zone versioning and version history
 - Incity + outstation package editors with the live commission split preview
 - Pricing preview tool (FR-P6) including rejected-package reasons
@@ -122,9 +126,9 @@ Ledger writes ship in Phase 4/5; this phase is the finance surface on top.
 - Invoices with GST
 - Payment gateway (UPI first — it's what the market uses)
 
-## Phase 9 — Pilot: one city, one zone (~3 weeks)
+## Phase 9 — Pilot: one city (~3 weeks)
 
-Siliguri only. One pickup zone. Ten drivers. Staff-and-friends bookings.
+Siliguri only. Two pickup zones — one free, one paid. Ten drivers. Staff-and-friends bookings.
 
 Watch: assignment rate, time to assignment, offer delivery rate, overage disputes,
 `ZONE_CONFIG_FAULT` count (must be zero).
@@ -154,7 +158,7 @@ Add pickup zones by `coverage_requests` density. Add cities. Add outstation band
 
 With parallel work (one backend, one mobile, one frontend developer) roughly **16–18
 weeks** to pilot. Phases 6 and 7 overlap with 4 and 5 once the API contracts in
-`08-api-contracts.md` are frozen — freeze them early, they're the critical path for the
+`api-contracts.md` are frozen — freeze them early, they're the critical path for the
 mobile team.
 
 ## Sequencing rules
@@ -166,5 +170,5 @@ mobile team.
    drivers is a demo.
 4. **Ledger from day one.** Reconstructing months of financial history from booking rows
    is genuinely miserable work.
-5. **Pilot small.** One zone, ten drivers, real money. Every assumption in these docs meets
+5. **Pilot small.** One city, ten drivers, real money. Every assumption in these docs meets
    reality there, and some of them will lose.

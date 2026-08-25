@@ -10,7 +10,7 @@ import { defineConfig } from 'vitest/config';
  *   docker compose -f docker-compose.dev.yml up -d
  *   pnpm --filter @driverzone/api test:integration
  *
- * See docs/engineering/10-testing.md.
+ * See docs/engineering/testing.md.
  */
 export default defineConfig({
   resolve: {

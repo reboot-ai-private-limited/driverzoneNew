@@ -15,7 +15,7 @@
  * mattering. ESLint is the echo; this file is the authority.
  *
  * Under MongoDB this file also carries DATA INTEGRITY, not just tidiness. The zone invariants
- * in docs/LLD/02-domain-model.md were PostGIS triggers — a bad polygon could not be saved. Mongo
+ * in docs/LLD/domain-model.md were PostGIS triggers — a bad polygon could not be saved. Mongo
  * cannot express a cross-document geometric constraint, so those checks live in
  * @driverzone/geo and run in the zones module's write path. That is only a real guarantee
  * while `module-internals-are-private` holds: it is what stops another module reaching
@@ -39,13 +39,13 @@
  */
 const MODULE_TIERS = [
   // pricing is PURE: rates and durations in, a FareBreakdown out, no I/O. That is what lets
-  // the most dispute-prone logic in the product be tested without a database (docs/09).
+  // the most dispute-prone logic in the product be tested without a database (docs/LLD/architecture.md).
   ['health', 'settings', 'pricing'],
   ['identity'], //                     customers, drivers, admins, auth
   ['notifications', 'ledger'], //      push/socket fan-out; earnings entries
   ['zones'], //                        polygons, resolution, the invariant write guard
   ['packages'], //                     packages, variants, prices
-  ['quotes'], //                       zones + catalog + pricing
+  ['quotes'], //                       zones + packages + pricing
   ['bookings'], //                     quotes + pricing + identity + notifications + ledger
   ['dispatch'], //                     the only module permitted to set bookings.driverId
   ['admin', 'reporting'], //           top of the graph; nothing may depend on these

@@ -1,7 +1,7 @@
 # `health` — reference module
 
 The smallest complete example of the architecture every other module follows. Copy this
-shape when adding a module; see `docs/engineering/11-adding-a-module.md`.
+shape when adding a module; see `docs/engineering/adding-a-module.md`.
 
 ```
 health/

@@ -4,7 +4,7 @@
  * Deliberately small. The architectural rules that matter live in
  * `apps/api/.dependency-cruiser.cjs`, because they are properties of the resolved
  * dependency GRAPH and ESLint can only see one import string at a time. See
- * docs/engineering/04-boundaries-and-enforcement.md for why both exist.
+ * docs/engineering/boundaries-and-enforcement.md for why both exist.
  */
 module.exports = {
   parser: '@typescript-eslint/parser',

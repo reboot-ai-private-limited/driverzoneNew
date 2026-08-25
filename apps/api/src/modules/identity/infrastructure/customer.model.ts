@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 
 /**
- * INFRASTRUCTURE — the `customers` collection (docs/LLD/03-database-schema.md).
+ * INFRASTRUCTURE — the `customers` collection (docs/LLD/database-schema.md).
  *
  * The first Mongoose model in this repository, so it sets the pattern the other twelve modules
  * will copy:
@@ -37,7 +37,7 @@ export interface CustomerDoc {
 const customerSchema = new Schema<CustomerDoc>(
   {
     // Primary identity and the OTP target. Everything else may be absent forever — customer
-    // profiles complete progressively (docs/LLD/13-auth-and-user.md §Customer).
+    // profiles complete progressively (docs/LLD/user.md §Customer).
     // `unique: true` declares the index — a separate schema.index({phone:1},{unique:true})
     // would define the same one twice, which Mongoose warns about at startup.
     phone: { type: String, required: true, unique: true },
@@ -81,7 +81,7 @@ const customerSchema = new Schema<CustomerDoc>(
     },
 
     // The CUSTOMER's own car — the driver drives it, they do not supply one
-    // (docs/LLD/12-open-questions.md Q5).
+    // (docs/LLD/open-questions.md Q5).
     vehicles: {
       type: [
         new Schema(

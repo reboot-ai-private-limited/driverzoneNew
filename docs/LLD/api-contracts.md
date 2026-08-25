@@ -1,4 +1,4 @@
-# 08 — API Contracts
+# API Contracts
 
 `https://api.driverzone.in/v1`
 
@@ -10,24 +10,43 @@
   (`"₹1,050"`) so every client renders identically.
 - `Idempotency-Key` header is **required** on all POSTs that create or move money.
 
-## Errors
+## The envelope
+
+Every response — success and failure alike — is wrapped. The shapes are `HttpSuccessBody` and
+`HttpErrorBody` in `packages/contracts/src/http.ts`, which `apps/api` imports directly so the
+four clients and the server cannot drift apart.
 
 ```jsonc
+// success
 {
-  "error": {
-    "code": "QUOTE_EXPIRED",
-    "message": "Prices have updated. Please review the new fare.",
-    "details": { "quote_id": "…", "expired_at": "…" },
-    "request_id": "req_01J…"
-  }
+  "success": true,
+  "statusCode": 200,
+  "request": { "method": "POST", "url": "/v1/quotes", "requestId": "req_01J…" },
+  "message": "Quote generated.",
+  "data": { /* the payload documented for each endpoint below */ }
+}
+
+// failure
+{
+  "success": false,
+  "statusCode": 409,
+  "code": "QUOTE_EXPIRED",
+  "request": { "method": "POST", "url": "/v1/bookings", "requestId": "req_01J…" },
+  "message": "Prices have updated. Please review the new fare.",
+  "data": { "quote_id": "…", "expired_at": "…" }
 }
 ```
 
-`message` is customer-safe and displayable as-is. Internal causes go to logs keyed by
-`request_id`, never into the response.
+`message` is customer-safe and displayable as-is. `data` on an error carries only what the
+*caller* needs in order to act — field-level validation errors, most often. Internal causes go to
+the logs keyed by `requestId`, never into the response; `AppError` keeps the two apart via
+`publicDetails` and `details`. `trace` appears outside production only.
+
+**Every payload below is the `data` field.** The envelope is omitted from the examples for
+brevity, not because those endpoints skip it.
 
 **"We can't serve this" is not an error.** Zone-resolution outcomes return `200` with
-`available: false` — see `04-zone-resolution.md`. This keeps genuine faults visible in
+`available: false` — see `zone-resolution.md`. This keeps genuine faults visible in
 error dashboards instead of drowning in expected outcomes.
 
 ---
@@ -116,7 +135,7 @@ have to build copy from a code — new reasons then render correctly on old app 
 calls into `identity`'s `CustomerBookingProfileContract` to upsert them onto the customer's
 saved addresses/vehicles as a side effect of placing the booking, so the booking flow is the
 capture point rather than a separate profile-setup step. See
-`13-auth-and-user.md` §Module contract.
+`user.md` §Module contract.
 
 **201**
 
@@ -154,7 +173,18 @@ rather than creating a second one.
 | `POST` | `/coverage/waitlist` | Notify me when my area is covered |
 
 `GET /coverage/check` is worth having: it lets the app show "we serve your area" or "not
-yet" on the home screen, before the customer invests effort in picking a destination.
+yet" on the home screen, before the customer invests effort in picking a destination. It answers
+from the pickup-zone gate alone, so it also returns the charge type — the app can warn about a
+paid-zone pickup fee up front rather than at the fare card.
+
+```jsonc
+{ "available": true, "pickup_zone": { "charge_type": "PAID", "charge": { "amount_paise": 10000, "amount_display": "₹100" } } }
+{ "available": false, "reason": "ZONE_NO_PICKUP_COVERAGE", "message": "We don't have drivers at your pickup location yet." }
+```
+
+A miss is `available: false` at `200`, never a `404` — see `zone-resolution.md` §Error codes.
+Both routes are served by the `zones` module (`zones.md`); they are the only customer-facing
+routes it has.
 
 ---
 
@@ -188,7 +218,7 @@ flushes on reconnect, which is why `recorded_at` is client-supplied and the arra
 ordered.
 
 Server writes to Redis (live) and appends to the trip trace during an active trip. It does
-**not** write `drivers.last_location` on every ping — see `09-architecture.md`.
+**not** write `drivers.last_location` on every ping — see `architecture.md`.
 
 ### `POST /driver/offers/:id/accept`
 
@@ -216,9 +246,12 @@ count against the driver's acceptance rate.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `GET/POST` | `/admin/zones` | `POST` body carries GeoJSON |
-| `PATCH/DELETE` | `/admin/zones/:id` | `PATCH` on geometry creates a new version |
-| `POST` | `/admin/zones/validate` | **Dry run** — returns violations without saving |
+| `GET/POST` | `/admin/zones` | `POST` body carries GeoJSON. `201` on create |
+| `GET/PATCH` | `/admin/zones/:id` | `PATCH` is **metadata only** — name, code, priority, pickup charge |
+| `PATCH` | `/admin/zones/:id/geometry` | Its own route: creates a new version, takes `expected_version` |
+| `DELETE` | `/admin/zones/:id` | Soft deactivate; returns the updated zone |
+| `POST` | `/admin/zones/validate` | **Dry run** — returns violations without saving. Always `200` |
+| `GET` | `/admin/zones/:id/versions` | Version history, newest first |
 | `GET` | `/admin/zones/:id/dependents` | What breaks if this is deactivated |
 | CRUD | `/admin/incity-packages` | + nested variants and prices |
 | CRUD | `/admin/outstation-packages` | + nested prices |
@@ -241,18 +274,17 @@ as the admin draws rather than an error after they hit Save.
 
 ```jsonc
 // request
-{ "type": "PICKUP", "parent_zone_id": "…", "geometry": { "type": "Polygon", "coordinates": […] } }
+{ "type": "PICKUP", "geometry": { "type": "Polygon", "coordinates": […] } }
 
-// response
+// response — 200, because a violation is a valid answer, not a request error
 {
   "valid": false,
   "violations": [
-    { "rule": "Z-1", "severity": "ERROR",
-      "message": "Polygon extends 0.42 km² outside city zone \"Siliguri\".",
-      "offending_geometry": { "type": "Polygon", "coordinates": […] } },
     { "rule": "Z-2", "severity": "ERROR",
       "message": "Overlaps active PICKUP zone \"Siliguri Central\".",
-      "offending_geometry": { … } }
+      "offending_geometry": { "type": "Polygon", "coordinates": […] } },
+    { "rule": "Z-COMPLEXITY", "severity": "WARN",
+      "message": "612 vertices. The editor will feel sluggish above ~500." }
   ],
   "stats": { "area_km2": 12.4, "existing_bookings_in_area": 843 }
 }

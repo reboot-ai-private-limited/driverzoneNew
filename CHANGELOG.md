@@ -4,7 +4,7 @@ Notable changes to this repository. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 There are no releases yet — the first shippable milestone is the phase 9 pilot in
-[`docs/LLD/11-roadmap.md`](docs/LLD/11-roadmap.md). Everything lands under `Unreleased` until
+[`docs/LLD/roadmap.md`](docs/LLD/roadmap.md). Everything lands under `Unreleased` until
 then.
 
 This is not the commit log. Commits are written for someone bisecting a regression; this is for
@@ -15,6 +15,43 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- `docs/LLD/zones.md` — the zones module LLD. What each zone type is actually for, the contract
+  split between resolution and admin, the write path and its choke point, versioning, the full
+  HTTP surface with success and fault codes, and an edge-case matrix covering the write path,
+  the read path and operations. The rows marked ⚠ are the ones that fail *silently* if skipped.
+- The MongoDB ring-winding trap, written down for the first time: a clockwise exterior ring is
+  read by a `2dsphere` index as the whole earth minus the shape, with no error anywhere. Fixed
+  by normalising with `@turf/rewind` in the write path.
+- `coverageRequests` and `unservedDistanceRequests` now have proper sections in
+  `docs/LLD/database-schema.md` instead of existing only inline in the resolution doc.
+- `docs/LLD/packages.md` — the packages module LLD. The two products, the precedence ladder that
+  picks exactly one of them, per-direction outstation pricing, the four layers of guard against
+  overlapping distance bands (and the one guard against a *gap*, which is a different and
+  quieter failure), plus the realignment surface for the existing `packages` module.
+
+### Changed
+
+- **Terrain now comes from the destination point, not the route.** A trip is `HILL` when its drop
+  point falls inside a hill zone. This reverses assumption A5 and retires
+  `outstation.hill_route_threshold_m`. `classifyTerrain` and `hillMetresOnRoute` are retained in
+  `@driverzone/geo`, tested but unused — the same treatment `checkWithinParent` got. The cost is
+  real and documented: a flat destination behind a mountain now prices as `PLAIN`, and the
+  mitigation is to draw the hill polygon over the approach corridor. OSRM stays for distance, but
+  is now called with `overview=false` since nothing needs the route geometry.
+- **The server picks the product.** A quote resolves from two points to exactly one package —
+  incity with all its variants, or outstation with the price row for the requested car category
+  and direction. The client no longer chooses a tab, which retires FR-B3.
+- `catalog` → `packages` throughout the docs, matching the module that already exists.
+- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
+  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
+  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
+  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
+- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
+  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
+- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
+  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
+  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
+
 - HTTP access logging (`pino-http`): one line per request with method, route pattern, status,
   duration and `requestId`. `/api/health` and the driver location ping are excluded — see
   `docs/decision-log.md` for why.
@@ -22,7 +59,7 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   stdout, enforced by config and proved by `apps/api/test/logging.test.ts`.
 - An ESLint rule requiring static log messages, because path-based redaction cannot see inside
   an interpolated string.
-- A documented level policy in `docs/engineering/05-coding-standards.md`.
+- A documented level policy in `docs/engineering/coding-standards.md`.
 - Request correlation. Every response carries an `x-request-id` header and a `requestId` in its
   envelope; every log line written during that request is stamped with it, via
   `AsyncLocalStorage` rather than a threaded parameter. An inbound header is reused, so a trace
@@ -32,7 +69,7 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 - `apps/api/test/app.test.ts` — the HTTP layer under supertest: envelope, 404, error
   translation, the 503-when-degraded rule, request-id propagation. 10 tests.
 - `apps/api/vitest.integration.config.ts` and the `test:integration` script that
-  `docs/engineering/10-testing.md` had documented for a while without it existing.
+  `docs/engineering/testing.md` had documented for a while without it existing.
 - `docker-compose.dev.yml` — infrastructure only (Mongo, Redis, OSRM commented out). Ports bind
   loopback and are overridable via `MONGO_PORT` / `REDIS_PORT` / `OSRM_PORT`.
 - `docker-compose.prod.yml` — the full stack from built images, with the databases unpublished
@@ -55,10 +92,10 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 - `apps/api/.env.example`: `MONGO_URI` now carries `?replicaSet=rs0&directConnection=true`.
   Without it the first multi-document transaction fails, far from the setup that caused it.
 - **winston replaced with pino.** Chosen for built-in redaction rather than speed; reverses the
-  choice recorded in `06-tech-choices.md`. Note the reversed argument order —
+  choice recorded in `tech-choices.md`. Note the reversed argument order —
   `logger.info({ data }, 'message')`.
 - Request IDs are now `req_` + UUID v7 (`req_01J…`), matching
-  `docs/LLD/08-api-contracts.md` and sorting in creation order. Previously a bare UUID v4.
+  `docs/LLD/api-contracts.md` and sorting in creation order. Previously a bare UUID v4.
 - Module containers expose `buildRouter()` instead of a `router` property, and
   `buildContainers()` moved from `routes.ts` to a new `src/container.ts`. The worker builds
   modules without constructing an HTTP surface it has no listener for.

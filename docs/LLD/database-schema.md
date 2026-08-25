@@ -1,4 +1,4 @@
-# 03 — Database Schema (MongoDB 7 + Mongoose 8)
+# Database Schema (MongoDB 7 + Mongoose 8)
 
 > **Requires a replica set**, even single-node. Multi-document transactions need one, and the
 > booking→ledger write uses one. Both compose files handle the init; without it Mongo starts
@@ -10,7 +10,7 @@
 - **Percentages** are basis points: `2500` = 25%.
 - **Geometry** is GeoJSON, so coordinates are `[lng, lat]` — the reverse of how humans write
   them. Conversion happens only in `@driverzone/geo`; see
-  [`engineering/05`](../engineering/05-coding-standards.md#coordinates).
+  [`engineering/05`](../engineering/coding-standards.md#coordinates).
 - **Enums** are string unions validated by Zod at the boundary and constrained by `enum:` in the
   schema.
 - Every collection carries `createdAt`/`updatedAt` via `{ timestamps: true }`.
@@ -23,10 +23,10 @@ they moved to application code.
 
 | Invariant | Was | Is now |
 |---|---|---|
-| Z-1 pickup ⊆ city | `ST_Within` trigger | `@driverzone/geo` `checkWithinParent`, in `createZone.usecase.ts` |
-| Z-2 no same-type overlap | `ST_Overlaps` trigger | `checkOverlap` |
+| Z-2 no same-type overlap | `ST_Overlaps` trigger | `@driverzone/geo` `checkOverlap`, in `createZone.usecase.ts` |
 | Z-3 valid geometry | `ST_IsValid` CHECK | `checkValidity` (Turf `kinks` + ring closure) |
 | Z-MIN-AREA | `ST_Area` CHECK | `checkMinimumArea` |
+| Z-MAX-AREA | `ST_Area` CHECK | `checkMaximumArea` — **to add in Phase 1**; see `zones.md` on hemisphere polygons |
 | Fare snapshot immutable | `BEFORE UPDATE` trigger | Mongoose `immutable: true` |
 | `booking_events` append-only | `REVOKE UPDATE, DELETE` | MongoDB role with `insert`+`find` only |
 
@@ -34,7 +34,7 @@ This is a **weaker guarantee** than a trigger, and it is held up by two things:
 
 1. The `zones` module is the only code that can write a zone, enforced by
    `module-internals-are-private` in `.dependency-cruiser.cjs`. See
-   [`engineering/04`](../engineering/04-boundaries-and-enforcement.md).
+   [`engineering/04`](../engineering/boundaries-and-enforcement.md).
 2. A **nightly integrity job** re-checks every zone and alerts on drift.
 
 Do not add a second write path to `zones`. That is the whole guarantee.
@@ -49,6 +49,10 @@ const zoneSchema = new Schema({
   name:  { type: String, required: true },
   code:  { type: String, required: true },          // 'SLG', 'SLG-CENTRAL'
 
+  // Retained, always null. Invariant Z-1 was retired 2026-08-25 — pickup zones are a
+  // serviceability gate, not a sub-area of a city (zones.md). Kept because
+  // `checkWithinParent` still exists in @driverzone/geo and a future nested-zone design
+  // would switch it back on rather than re-add a field.
   parentZoneId: { type: Schema.Types.ObjectId, ref: 'Zone', default: null },
 
   geometry: {
@@ -72,7 +76,7 @@ const zoneSchema = new Schema({
 // every quote request.
 zoneSchema.index({ geometry: '2dsphere' });
 zoneSchema.index({ type: 1, isActive: 1 });
-zoneSchema.index({ parentZoneId: 1, isActive: 1 });
+zoneSchema.index({ supersededBy: 1 });                 // version history
 zoneSchema.index({ code: 1 }, { unique: true, partialFilterExpression: { isActive: true } });
 ```
 
@@ -90,18 +94,25 @@ act on.
 
 ```ts
 zoneSchema.pre('validate', function (next) {
-  if (this.type === 'PICKUP') {
-    if (!this.parentZoneId) return next(new Error('A PICKUP zone requires a parent CITY zone'));
-    if (!this.pickupChargeType) return next(new Error('A PICKUP zone requires a charge type'));
-  } else if (this.parentZoneId) {
-    return next(new Error(`A ${this.type} zone must not have a parent`));
+  if (this.type === 'PICKUP' && !this.pickupChargeType) {
+    return next(new Error('A PICKUP zone requires a charge type'));
+  }
+  if (this.parentZoneId) {
+    return next(new Error('Zones have no parent — invariant Z-1 was retired'));
   }
   next();
 });
 ```
 
-These are the checks a single document can make. The geometric ones need siblings and a parent,
-so they live in the use case.
+These are the checks a single document can make. The geometric ones need siblings, so they live
+in the use case.
+
+### Ring orientation is normalised before save
+
+`@turf/rewind` runs in the write path, before validation, so every stored exterior ring is
+counter-clockwise. This is not tidiness: the `2dsphere` index reads winding to decide which side
+of a ring is "inside", and a clockwise exterior ring on a large polygon is interpreted as the
+whole earth *minus* that shape — silently, with no error. See `zones.md` §Why MongoDB geo.
 
 ---
 
@@ -146,7 +157,7 @@ const incityVariantSchema = new Schema({
   includedMinutes: { type: Number, required: true, min: 1 },
   includedKm:      { type: Number, required: true, min: 0 },
 
-  // See docs/12-open-questions.md Q1. Defaults from duration: a 10-hour rental's destination is
+  // See open-questions.md Q1. Defaults from duration: a 10-hour rental's destination is
   // advisory, a 3-hour one's is not.
   enforceDropInCity: { type: Boolean, default: true },
 
@@ -156,21 +167,22 @@ const incityVariantSchema = new Schema({
 }, { _id: true });
 
 const incityPackageSchema = new Schema({
+  // The only zone reference any package carries. Pickup zones are not referenced by
+  // packages at all — they gate serviceability and carry a fee, nothing more (zones.md).
   cityZoneId:    { type: Schema.Types.ObjectId, ref: 'Zone', required: true },
-  pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
   name:          { type: String, required: true },
   description:   String,
   variants:      [incityVariantSchema],
   isActive:      { type: Boolean, default: true },
 }, { timestamps: true });
 
-// The package-matching query in docs/04.
-incityPackageSchema.index({ cityZoneId: 1, pickupZoneIds: 1, isActive: 1 });
+// The package-matching query in docs/LLD/zone-resolution.md.
+incityPackageSchema.index({ cityZoneId: 1, isActive: 1 });
 ```
 
-**Invariant P-1** — every `pickupZoneIds` entry must have `cityZoneId` as its parent. Enforced
-in `catalog`'s use case, because it needs to read the zones. You cannot sell a Siliguri package
-from a Kolkata pickup.
+**Invariant P-1 was retired 2026-08-25**, along with the package ↔ pickup-zone link it enforced.
+There is no cross-collection check left on this schema: matching an incity package is a lookup on
+`cityZoneId` alone.
 
 ---
 
@@ -197,31 +209,66 @@ const outstationPackageSchema = new Schema({
   terrain:       { type: String, enum: ['PLAIN', 'HILL'], required: true },
   minKm:         { type: Number, required: true, min: 0 },
   maxKm:         { type: Number, required: true },       // band is [minKm, maxKm)
-  pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
   prices:        [outstationPriceSchema],
   isActive:      { type: Boolean, default: true },
 }, { timestamps: true });
 
 outstationPackageSchema.index({ terrain: 1, minKm: 1, maxKm: 1, isActive: 1 });
-outstationPackageSchema.index({ pickupZoneIds: 1, isActive: 1 });
 ```
+
+An outstation package references no zone at all. Terrain comes from the route, the band from the
+distance, and whether we serve the pickup point was already settled by the pickup-zone gate.
 
 Bands are **half-open** `[minKm, maxKm)`, so adjacent bands (0–70, 70–100, 100–150) tile with no
 gap and no overlap at the boundary.
 
-**Invariant P-2** — for a given (pickup zone, terrain), bands must not overlap. Two matches means
-an ambiguous price. Enforced in the use case:
+**Invariant P-2** — for a given terrain, bands must not overlap. Two matches means an ambiguous
+price. The check widened when the pickup-zone qualifier went: it is now global per terrain, which
+is both cheaper to run and stricter than what it replaced.
 
 ```ts
 const conflict = await OutstationPackage.findOne({
   _id: { $ne: candidateId },
   isActive: true,
   terrain,
-  pickupZoneIds: { $in: pickupZoneIds },
   minKm: { $lt: maxKm },
   maxKm: { $gt: minKm },        // half-open overlap test
 });
 ```
+
+---
+
+## `coverageRequests` / `unservedDistanceRequests`
+
+Two collections that cost almost nothing and are worth a great deal. Every lookup that failed for
+want of coverage is a demand signal, and clustering them gives ops a ranked list of exactly where
+to draw the next zone or band — and who to notify when they do.
+
+```ts
+const coverageRequestSchema = new Schema({
+  point:   { type: { type: String, enum: ['Point'] }, coordinates: [Number] },
+  address: String,
+  customerId:  { type: Schema.Types.ObjectId, ref: 'Customer' },
+  serviceType: { type: String, enum: ['INCITY', 'OUTSTATION'], required: true },
+  notifyWhenAvailable: { type: Boolean, default: false },
+}, { timestamps: { createdAt: true, updatedAt: false } });
+
+coverageRequestSchema.index({ point: '2dsphere' });
+
+const unservedDistanceRequestSchema = new Schema({
+  pickupZoneId: { type: Schema.Types.ObjectId, ref: 'Zone' },
+  distanceKm:   { type: Number, required: true },
+  terrain:      { type: String, enum: ['PLAIN', 'HILL'], required: true },
+}, { timestamps: { createdAt: true, updatedAt: false } });
+```
+
+The `2dsphere` index on `coverageRequests.point` is what makes the expansion heatmap a `$geoNear`
+aggregation rather than a full scan.
+
+Both are written **only** through `ZoneResolutionContract` (`zones.md`), and only when a lookup
+genuinely resolved to nothing. A row logged on a validation error or a client retry pollutes the
+signal, which is why the contract carries that obligation in its doc comment rather than leaving
+it to each caller.
 
 ---
 
@@ -232,7 +279,7 @@ const customerSchema = new Schema({
   phone: { type: String, required: true, unique: true },   // primary identity, the OTP target
 
   // Set to null by otp/verify on a first-ever login; filled in by the client's onboarding
-  // screens afterward. There is no separate registration endpoint — see 13-auth-and-user.md.
+  // screens afterward. There is no separate registration endpoint — see user.md.
   fullName: String,
   dob:      Date,
   gender:   { type: String, enum: ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] },
@@ -249,7 +296,7 @@ const customerSchema = new Schema({
     isPreferredPickup: { type: Boolean, default: false },   // prefills the quote flow's pickup
   }],
 
-  // The CUSTOMER's own car — the driver drives it, they don't supply one (12-open-questions.md
+  // The CUSTOMER's own car — the driver drives it, they don't supply one (open-questions.md
   // Q5). `category` is a free string, not a CarCategory ref: a customer describes their car
   // before any admin has to agree it matches one, and pricing keys off the booking's own
   // carCategoryId, never off this field.
@@ -284,7 +331,7 @@ No password, no TOTP secret — admin authenticates with phone + OTP like every 
 (decision log, 2026-08-24). **Deliberately no self-service creation path.** A document here is
 inserted by direct ops action, outside the HTTP surface; `otp/send`/`otp/verify` for an
 unprovisioned number fail the same way an invalid code would, rather than creating one — see
-`13-auth-and-user.md` §Admin.
+`auth.md` §Admin provisioning.
 
 ---
 
@@ -322,7 +369,7 @@ token racing the legitimate client — and revokes every row in that `familyId`,
 being replayed (decision log, 2026-08-24).
 
 OTP challenges are **not** in this collection, or in Mongo at all — they're ephemeral, Redis
-TTL-native, and never need a rotation history. See `13-auth-and-user.md` §OTP.
+TTL-native, and never need a rotation history. See `auth.md` §OTP.
 
 ---
 
@@ -541,10 +588,10 @@ const driverSchema = new Schema({
   walletBalancePaise: { type: Number, default: 0 },   // negative = owes the company
   canDriveHill:   { type: Boolean, default: false },
   // Self-declared at onboarding. Gates nothing on its own — hill driving is a safety matter,
-  // so actual hill dispatch checks this, not canDriveHill (12-open-questions.md Q6).
+  // so actual hill dispatch checks this, not canDriveHill (open-questions.md Q6).
   canDriveHillVerified: { type: Boolean, default: false },
 
-  // Identity/profile fields, added alongside the auth module (13-auth-and-user.md).
+  // Identity/profile fields, added alongside the auth module (user.md).
   dob:    Date,
   gender: { type: String, enum: ['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY'] },
   experienceYears: Number,
@@ -553,12 +600,12 @@ const driverSchema = new Schema({
   address:          String,
 
   // What this driver is COMPETENT to drive, not what they own — the driver drives the
-  // customer's car, never their own (12-open-questions.md Q5). Matched against
+  // customer's car, never their own (open-questions.md Q5). Matched against
   // customers.vehicles[].category at dispatch time, not enforced here.
   vehicleTypePreference:     { type: String, enum: ['AUTO', 'MANUAL', 'EV'] },
   vehicleCategoryPreference: [String],   // CarCategory.code[]
 
-  // Onboarding state machine — see 13-auth-and-user.md §Driver. `isVerified` above stays the
+  // Onboarding state machine — see user.md §Driver. `isVerified` above stays the
   // ONE field dispatch/duty actually gate on (it's already in the index below); this is the
   // richer status the app shows and the admin approve/reject action drives. One action
   // (approve) sets both isVerified and onboardingStatus together, so they never drift apart —
@@ -712,7 +759,7 @@ Seed values:
   ['booking.overage_grace_minutes',      15,     'Free grace before extra-time billing'],
   ['booking.billing_block_minutes',      30,     'Overage billed in blocks of this size'],
   ['booking.night_window',               { start: '22:00', end: '06:00' }, 'Night charge window'],
-  ['outstation.hill_route_threshold_m',  5000,   'Route metres in a hill zone to price as hill'],
+  ['incity.max_distance_multiple',       2,      'InCity wins over outstation only within this multiple of a variant included_km'],
   ['cancellation.free_window_seconds',   300,    'Free cancellation after confirmation'],
   ['driver.max_negative_balance_paise',  500000, 'Block duty past ₹5,000 owed'],
 ]

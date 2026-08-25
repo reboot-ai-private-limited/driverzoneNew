@@ -1,4 +1,4 @@
-# 02 — Clean Architecture & SOLID
+# Clean Architecture & SOLID
 
 Every principle here is illustrated with code that is actually in this repository. If an
 example does not match what you find, the code moved and this doc is wrong — please fix it.
@@ -51,7 +51,7 @@ This is not a claim — it is a thing that already happened to this project. See
 The container is the deliberate exception. Somewhere has to name a concrete class; confining
 that to one file per module is the whole trick.
 
-All of this is machine-checked — see [04](04-boundaries-and-enforcement.md). You do not need
+All of this is machine-checked — see [04](boundaries-and-enforcement.md). You do not need
 to remember the table; you need to recognise the error message when CI prints it.
 
 ---
@@ -157,6 +157,7 @@ implementations are pluggable.
 /** Read-only resolution. The hot path — every quote calls this. */
 export interface ZoneResolutionContract {
   resolveAt(point: LatLng): Promise<ResolvedZones>;
+  /** Dormant — terrain now comes from resolveAt(to).hill. See docs/LLD/packages.md. */
   findHillZonesNear(route: LineString): Promise<Zone[]>;
 }
 
@@ -173,7 +174,7 @@ mutating a polygon — not by convention, not by code review, but because the me
 the object it was handed.
 
 That matters more here than in most systems. Under MongoDB the zone invariants are application
-guards rather than database triggers ([04](04-boundaries-and-enforcement.md)), so "only the
+guards rather than database triggers ([04](boundaries-and-enforcement.md)), so "only the
 zones module writes zones" is what keeps them true. A single wide `ZoneContract` with
 `updateGeometry` on it would hand every consumer the ability to bypass them.
 
@@ -223,7 +224,7 @@ a single greppable answer.
 The strongest argument for this structure is not theoretical — it is this project's own
 history.
 
-The original design ([`../03-database-schema.md`](../LLD/03-database-schema.md)) was PostgreSQL +
+The original design ([`../LLD/database-schema.md`](../LLD/database-schema.md)) was PostgreSQL +
 PostGIS: `ST_Contains` for zone resolution, database triggers for the invariants. That was
 changed to MongoDB before a line of feature code was written.
 
@@ -237,7 +238,7 @@ What that change touches, under this architecture:
 | `infrastructure/` | **all of it** — `ST_Contains` → `$geoIntersects`, DDL → Mongoose schemas |
 | `@driverzone/geo` | **added** — the invariants Postgres enforced with triggers |
 
-The algorithm in [`../04-zone-resolution.md`](../LLD/04-zone-resolution.md) — resolve the point,
+The algorithm in [`../LLD/zone-resolution.md`](../LLD/zone-resolution.md) — resolve the point,
 find the pickup zone, check the drop, match packages, return variants — did not change by a
 single step. Only the sentence "how do I ask the database which polygons contain this point"
 changed, and that sentence lives in one file per module.
@@ -261,7 +262,7 @@ place to look.
 **Tier assignment is a real decision.** Choosing a module's tier in
 `.dependency-cruiser.cjs` decides what it may ever depend on. Getting it wrong is not fatal but
 it is annoying to unwind once siblings rely on it. See
-[11](11-adding-a-module.md#choosing-a-tier).
+[11](adding-a-module.md#choosing-a-tier).
 
 **It can be over-applied.** A module with one adapter that will never have another does not
 need a port. Use judgement: the ceremony earns its place when the thing behind the interface is

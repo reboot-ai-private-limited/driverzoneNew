@@ -1,14 +1,14 @@
-# 02 — Domain Model
+# Domain Model
 
 ## Glossary
 
 | Term | Meaning |
 |------|---------|
 | **Zone** | A named polygon. One of three types: CITY, PICKUP, HILL. |
-| **City zone** | Operational boundary of a city. Defines "incity". |
-| **Pickup zone** | A serviceable sub-area *inside* a city zone. `FREE` or `PAID`. |
+| **City zone** | Operational boundary of a city. Defines "incity" — the `to` check, and the incity package's scope. Never consulted for pickup. |
+| **Pickup zone** | The serviceability gate, and a fee. `from` must fall inside one, for incity *and* outstation alike. `FREE` adds nothing; `PAID` adds a pickup charge. Top-level: no parent, no package links. |
 | **Hill zone** | Terrain classifier for outstation routing. Not tied to a city. |
-| **Package** | A sellable service definition attached to zones. Incity or outstation. |
+| **Package** | A sellable service definition. Incity (scoped to a city zone) or outstation (scoped to terrain and a distance band). Neither references a pickup zone. |
 | **Variant** | A duration option on an incity package (3H, 10H). |
 | **Car category** | Hatchback / Sedan / SUV / Luxury / EV. Prices are per category. |
 | **Quote** | A server-computed, time-limited price for a specific pickup/drop/variant/car. |
@@ -16,14 +16,14 @@
 | **Offer** | A single dispatch invitation sent to one driver for one booking. |
 | **Wave** | A round of offers sent simultaneously to a ranked batch of drivers. |
 | **Fare snapshot** | Immutable JSON of the full fare breakdown, written at confirmation. |
-| **Customer** | A phone-verified rider account. Owns saved addresses and vehicles — the *customer's* car, since the driver drives it, not their own (see `12-open-questions.md` Q5). |
+| **Customer** | A phone-verified rider account. Owns saved addresses and vehicles — the *customer's* car, since the driver drives it, not their own (see `open-questions.md` Q5). |
 | **Driver** | A phone-verified, admin-onboarded professional-driver account. Carries vehicle *preferences* (what they're competent to drive), never ownership. |
 | **AdminUser** | An internal ops account. Provisioned by another admin — never self-registered, never created by the auth flow itself. |
-| **Session** | One refresh-token lineage for a logged-in user. Rotates on every refresh; a reused token revokes the whole family. See `13-auth-and-user.md`. |
+| **Session** | One refresh-token lineage for a logged-in user. Rotates on every refresh; a reused token revokes the whole family. See `auth.md`. |
 
 ## Identity actors
 
-`customers`, `drivers` and `adminUsers` (`13-auth-and-user.md`) sit outside the pricing/booking pipeline drawn below, but every collection in it points back to one of them:
+`customers`, `drivers` and `adminUsers` (`user.md`) sit outside the pricing/booking pipeline drawn below, but every collection in it points back to one of them:
 
 ```
 customers ──► quotes ──► bookings ◄── drivers ──► dispatchOffers
@@ -32,26 +32,25 @@ customers ──► quotes ──► bookings ◄── drivers ──► dispat
                        adminUsers   (zones, packages, prices, drivers.documents, auditLog)
 ```
 
-`adminUsers` has no box of its own in the pipeline below because it never *flows* into a booking — it only ever authors or verifies the things that do (a zone, a package, a driver's documents). Every write an admin makes is itself an `auditLog` row (`03-database-schema.md`).
+`adminUsers` has no box of its own in the pipeline below because it never *flows* into a booking — it only ever authors or verifies the things that do (a zone, a package, a driver's documents). Every write an admin makes is itself an `auditLog` row (`database-schema.md`).
 
 ## Entity map
 
 ```
                         ┌──────────────┐
                         │    zones     │
-                        │  CITY        │◄────┐ parent_zone_id
-                        │  PICKUP      │─────┘ (PICKUP → CITY)
-                        │  HILL        │
-                        └──────┬───────┘
-                               │
-             ┌─────────────────┴──────────────────┐
-             │                                    │
-   ┌─────────▼──────────┐              ┌──────────▼───────────┐
+                        │  CITY        │──┐
+                        │  PICKUP      │  │  three flat types.
+                        │  HILL        │  │  no parents, no links between them.
+                        └──────────────┘  │
+                               │          │
+             ┌─────────────────┘          └──── PICKUP: gate + fee, referenced by
+             │                                  no package. HILL: terrain only.
+   ┌─────────▼──────────┐              ┌──────────────────────┐
    │ incity_packages    │              │ outstation_packages  │
-   │  city_zone_id      │              │  terrain             │
-   │  + pickup zones (M:N)             │  min_km / max_km     │
-   └─────────┬──────────┘              │  + pickup zones (M:N)│
-             │                         └──────────┬───────────┘
+   │  city_zone_id ─────┘              │  terrain             │
+   │                    │              │  min_km / max_km     │
+   └─────────┬──────────┘              └──────────┬───────────┘
    ┌─────────▼──────────┐                         │
    │ incity_variants    │              ┌──────────▼──────────────┐
    │  included_minutes  │              │ outstation_prices       │
@@ -88,11 +87,11 @@ violation should be impossible to create, not merely detected later.
 
 > **Where enforcement lives.** These were originally PostGIS triggers, so a violation was
 > literally impossible to save. MongoDB cannot express a cross-document geometric constraint,
-> so Z-1, Z-2 and Z-3 now live in `@driverzone/geo` and run in the `zones` module's write path.
+> so Z-2 and Z-3 now live in `@driverzone/geo` and run in the `zones` module's write path.
 >
 > That is a weaker guarantee, held up by two things: the `zones` module is the *only* code that
 > can write a zone — enforced by `module-internals-are-private` in `.dependency-cruiser.cjs`,
-> see [`engineering/04`](../engineering/04-boundaries-and-enforcement.md) — and a nightly integrity
+> see [`engineering/04`](../engineering/boundaries-and-enforcement.md) — and a nightly integrity
 > job re-checks every zone and alerts on drift.
 >
 > The upside is that the same code runs in the browser, so the admin map editor validates live
@@ -100,12 +99,11 @@ violation should be impossible to create, not merely detected later.
 
 ### Zone invariants
 
-- **Z-1** Every `PICKUP` zone has a `parent_zone_id` pointing at a `CITY` zone, and
-  the pickup polygon is geometrically within the city polygon.
-  *Enforced by:* `checkWithinParent` (Turf `booleanWithin`) in `createZone`/`updateZoneGeometry`.
-  *Why it matters:* this is what makes the FR-B4 runtime fault unreachable.
-  *Violation carries the spilling area as geometry*, so the editor paints exactly which corner
-  is wrong — "0.42 km² outside Siliguri" is a ten-second fix, "invalid zone" is a guessing game.
+- **Z-1** *Retired 2026-08-25.* Pickup zones no longer have a parent — they are a
+  serviceability gate, not a sub-area of a city (`zones.md`, [`decision-log.md`](../decision-log.md)).
+  The label is kept so Z-2…Z-5 hold their numbers and existing references stay valid.
+  `checkWithinParent` and its tests remain in `@driverzone/geo`, dormant: `validateZone` runs it
+  only when a `parentGeom` is supplied, and nothing supplies one.
 
 - **Z-2** No two **active** zones of the same `type` overlap.
   *Enforced by:* `checkOverlap` (Turf `booleanOverlap` + `intersect`, with a 100 m² tolerance).
@@ -122,21 +120,23 @@ violation should be impossible to create, not merely detected later.
   *A 2dsphere index rejects some malformed polygons on insert; do not rely on it.* Its coverage
   is narrower and its errors are unhelpful.
 
-- **Z-4** A `CITY` zone has no parent. A `HILL` zone has no parent.
+- **Z-4** No zone of any type has a parent. All three types are flat and independent.
 
 - **Z-5** Editing a zone's geometry never mutates the row in place — it writes a new
   version and supersedes the old one.
 
 ### Package invariants
 
-- **P-1** Every pickup zone linked to an incity package must have that package's
-  `city_zone_id` as its parent. (You can't sell a Siliguri package from a Kolkata pickup.)
+- **P-1** *Retired 2026-08-25*, with the package ↔ pickup-zone link it enforced. Packages do
+  not reference pickup zones at all (`zones.md`). Label kept so P-2…P-4 hold their numbers.
 
-- **P-2** For a given (pickup zone, terrain, car category, direction), outstation distance
-  bands must not overlap. Two matching packages = ambiguous price.
+- **P-2** For a given (terrain, car category, direction), outstation distance bands must not
+  overlap. Two matching packages = ambiguous price. *Scope widened* when the pickup-zone
+  qualifier went: this is now a global check per terrain, which is both simpler to run and
+  stricter than what it replaced.
 
-- **P-3** An active package has at least one active pickup zone and at least one active
-  price row. A package that can never be sold must not be marked active.
+- **P-3** An active package has at least one active price row. A package that can never be sold
+  must not be marked active.
 
 - **P-4** `min_km < max_km`. Bands are `[min_km, max_km)` — half-open, so adjacent bands
   (0–70, 70–100, 100–150) tile cleanly with no gap and no overlap at the boundary.
@@ -171,16 +171,47 @@ violation should be impossible to create, not merely detected later.
 
 - **M-3** Commission is computed from the snapshot, never from the live package.
 
-## Why pickup zones are children of city zones
+## Why pickup zones are free-floating
 
-A reasonable alternative is to leave pickup zones free-floating and derive the city by
-spatial lookup at booking time. We deliberately don't:
+A pickup zone answers one question — *may we pick up here, and does it cost extra* — and it
+answers it identically for incity and outstation. Nothing about that question involves a city.
 
-1. It makes invariant **Z-1** enforceable at save time, which deletes the entire FR-B4
-   failure class from production.
-2. It makes "show me all pickup zones in Siliguri" an index lookup on `parentZoneId` rather
-   than a geometric query.
-3. It gives the admin UI a natural tree: city → pickup zones → packages.
+The earlier design made every pickup zone a child of a city zone, geometrically contained by it
+and enforced at save time (invariant Z-1). Three arguments carried it, and the model above
+dissolves all three:
 
-The cost is that a pickup zone straddling two cities is unrepresentable. That is a
-feature — such a zone has no coherent incity pricing anyway.
+1. **It made a runtime config fault unreachable.** But the fault only existed *because* of the
+   parent link: a `parentZoneId` that disagreed with the polygon it sat in. With no parent there
+   is nothing to disagree, so the branch is gone rather than merely unreachable — a 500 that
+   paged someone became a 200 that offers the customer outstation instead.
+2. **It made "all pickup zones in Siliguri" an index lookup.** Worth nothing against two zones,
+   and `resolveAt` already returns city and pickup together from a single `$geoIntersects`.
+3. **It gave the admin UI a tree: city → pickup zones → packages.** That tree no longer exists.
+   Packages do not reference pickup zones.
+
+What the change buys, beyond the deleted fault: a pickup zone may now sit outside the city
+entirely. Bagdogra airport and NJP station are the two highest-value outstation pickups in
+Siliguri, and whether they fall inside a municipal boundary drawn by an ops person should not
+determine whether we can serve them.
+
+What it costs: a pickup zone drawn somewhere absurd is no longer caught at save time. Z-2 still
+prevents the dangerous case (two overlapping pickup zones making resolution non-deterministic);
+a pickup zone in the wrong district is merely useless, and the nightly integrity job plus the
+`dependents` view make it visible.
+
+## Cardinality: generic schema, singleton operations
+
+Siliguri runs one city zone, two pickup zones and a handful of hill zones, and is expected to
+for one to two years. Nothing in the schema or the resolution code assumes that — `resolveAt`
+would answer correctly for five cities unchanged.
+
+What we have *not* built is the operational surface for more than one: no city switcher, no zone
+tree, no per-city package scoping in the admin panel. That is where the build time actually
+goes, and it is the part that can be added later without touching stored data.
+
+The distinction matters when someone proposes a shortcut. Hard-coding "the city zone" as a
+constant would save about a day and cost a data migration plus a rewrite of zone resolution.
+Skipping the admin city switcher costs nothing and is reversible in an afternoon. Cut the
+second, never the first.
+
+**Trigger to revisit:** a second `CITY` zone gets drawn.

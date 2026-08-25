@@ -62,7 +62,7 @@ export function normalisePlate(plate: string): string {
  *
  * `isDefault` and `isPreferredPickup` are cleared INDEPENDENTLY, which is the whole point of
  * them being two flags: a customer may default to their office address in the address book
- * while still preferring pickup from home (docs/LLD/13-auth-and-user.md §Customer). Collapsing
+ * while still preferring pickup from home (docs/LLD/user.md §Customer). Collapsing
  * them into one field would make that unrepresentable.
  */
 export function applyAddressFlags(addresses: SavedAddress[], winnerId: string): SavedAddress[] {

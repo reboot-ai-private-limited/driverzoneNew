@@ -1,4 +1,4 @@
-# 05 — Coding Standards
+# Coding Standards
 
 Conventions that are not enforced by a linter, plus the reasoning for the ones that are.
 
@@ -117,7 +117,7 @@ distance — return **HTTP 200** with `available: false`:
 
 These are the system working correctly. Returning 4xx buries genuine faults under expected
 traffic and makes the error rate meaningless. See
-[`../04-zone-resolution.md`](../LLD/04-zone-resolution.md).
+[`../LLD/zone-resolution.md`](../LLD/zone-resolution.md).
 
 Clients render `message` verbatim and never build copy from `reason` — that way a reason added
 server-side displays correctly on app versions that predate it, which matters when the old
@@ -167,7 +167,7 @@ unique per request.
 ### What is never logged
 
 Configured in `shared/logging/logger.ts`, derived from the payloads in
-[`../LLD/08-api-contracts.md`](../LLD/08-api-contracts.md): OTPs (`otp`, `start_otp`), phone
+[`../LLD/api-contracts.md`](../LLD/api-contracts.md): OTPs (`otp`, `start_otp`), phone
 numbers (`phone`, `masked_phone`), credentials (`token`, `password`, `refresh_token`,
 `authorization`), `idempotency-key`, and `address` / `customer_car_plate`.
 
@@ -182,7 +182,7 @@ Two paths are excluded from the access log, and both would otherwise drown every
 - `/api/health` — polled every 15 s by the container healthcheck, ~5,700 lines a day carrying
   no information. Excluded only while it succeeds.
 - The driver location ping — 200 writes/s sustained
-  ([`../LLD/09-architecture.md`](../LLD/09-architecture.md)). That is a metric, not a log; at
+  ([`../LLD/architecture.md`](../LLD/architecture.md)). That is a metric, not a log; at
   one line each it is ~17M lines a day.
 
 The access log records the route **pattern** (`/api/bookings/:id`), never the raw URL. Raw paths
@@ -279,7 +279,7 @@ the model.
 
 Why this change, and what was rejected.
 
-Refs: docs/06-dispatch-and-assignment.md §Waves
+Refs: docs/LLD/dispatch-and-assignment.md §Waves
 ```
 
 `dispatch: escalate wave on empty candidate set`, not `fix dispatch`. The module prefix makes

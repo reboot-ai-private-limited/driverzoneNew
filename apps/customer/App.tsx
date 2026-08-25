@@ -6,7 +6,7 @@ export default function App() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>DriverZone</Text>
-      <Text style={styles.body}>Scaffold. Booking flow lands in phase 7 — see docs/11-roadmap.md.</Text>
+      <Text style={styles.body}>Scaffold. Booking flow lands in phase 7 — see docs/LLD/roadmap.md.</Text>
       <StatusBar style="auto" />
     </View>
   );

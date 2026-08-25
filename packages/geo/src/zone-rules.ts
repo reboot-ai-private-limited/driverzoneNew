@@ -8,7 +8,7 @@ import { kinks } from '@turf/kinks';
 import type { Feature, Polygon } from 'geojson';
 
 /**
- * The zone invariants from docs/LLD/02-domain-model.md, as pure functions.
+ * The zone invariants from docs/LLD/domain-model.md, as pure functions.
  *
  * Under PostGIS these were database triggers, so an invalid polygon was impossible to save.
  * MongoDB cannot express a cross-document geometric constraint, so the checks moved here —
@@ -18,10 +18,10 @@ import type { Feature, Polygon } from 'geojson';
  * module outside `zones` from reaching `zones/infrastructure/`, so the zones module's write
  * path is the only way a polygon reaches the database. `pnpm lint:deps` is therefore
  * load-bearing for data integrity here, not merely tidiness — see
- * docs/engineering/04-boundaries-and-enforcement.md.
+ * docs/engineering/boundaries-and-enforcement.md.
  *
  * These run unchanged in the browser, so the admin map editor validates live as the polygon
- * is drawn rather than on submit (docs/LLD/10-admin-panel.md §Live validation).
+ * is drawn rather than on submit (docs/LLD/admin-panel.md §Live validation).
  */
 
 export type ZoneRule = 'Z-1' | 'Z-2' | 'Z-3' | 'Z-MIN-AREA' | 'Z-COMPLEXITY';
@@ -120,7 +120,7 @@ export function checkMinimumArea(geom: Polygon): ZoneViolation[] {
 /**
  * Z-1 — a PICKUP zone lies entirely inside its parent CITY zone.
  *
- * This is the invariant that makes the ZONE_CONFIG_FAULT branch in docs/04 unreachable: if a
+ * This is the invariant that makes the ZONE_CONFIG_FAULT branch in docs/LLD/zone-resolution.md unreachable: if a
  * pickup polygon can never be saved outside its city, resolution can never find one there.
  *
  * The violation carries the spilling area as geometry so the editor can paint exactly which
@@ -196,8 +196,8 @@ export interface ZoneValidationInput {
 }
 
 /**
- * Every invariant, in one call. Backs `POST /admin/zones/validate` (docs/08) and the live
- * editor feedback (docs/10). Save is blocked while any ERROR stands.
+ * Every invariant, in one call. Backs `POST /admin/zones/validate` (docs/LLD/api-contracts.md) and the live
+ * editor feedback (docs/LLD/admin-panel.md). Save is blocked while any ERROR stands.
  */
 export function validateZone(input: ZoneValidationInput): ZoneViolation[] {
   const violations = checkValidity(input.geom);

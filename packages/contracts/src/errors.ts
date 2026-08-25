@@ -1,7 +1,7 @@
 /**
  * Error and unavailability codes.
  *
- * Two categories, and the split matters operationally (docs/LLD/04-zone-resolution.md §Error codes):
+ * Two categories, and the split matters operationally (docs/LLD/zone-resolution.md §Error codes):
  *
  *   UNAVAILABLE — an expected answer. "We don't serve your pickup point yet" is the system
  *   working correctly. These return HTTP 200 with `available: false`, so they stay out of
@@ -33,7 +33,7 @@ export const FAULT_CODES = [
   'RATE_LIMITED',
   'INTERNAL',
 
-  // Identity (docs/LLD/13-auth-and-user.md). One generic code covers wrong/expired/no-challenge
+  // Identity (docs/LLD/auth.md). One generic code covers wrong/expired/no-challenge
   // and an unprovisioned admin number alike — telling those apart is an enumeration oracle.
   'OTP_INVALID_OR_EXPIRED',
   'OTP_ATTEMPTS_EXCEEDED',

@@ -2,7 +2,7 @@ import mongoose, { Schema } from 'mongoose';
 import type { AuditAction } from '../domain/audit.port.js';
 
 /**
- * INFRASTRUCTURE — the `auditLog` collection (docs/LLD/03-database-schema.md).
+ * INFRASTRUCTURE — the `auditLog` collection (docs/LLD/database-schema.md).
  *
  * Append-only in intent: nothing in the application ever updates or deletes a row, and
  * `timestamps: { updatedAt: false }` says so in the schema. The `bookingEvents` collection gets

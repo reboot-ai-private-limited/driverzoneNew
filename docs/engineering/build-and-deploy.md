@@ -1,4 +1,4 @@
-# 09 — Build & Deploy
+# Build & Deploy
 
 ## Monorepo ≠ monodeploy
 
@@ -47,7 +47,7 @@ failed to compute cache key: "/packages/mobile-ui/package.json": not found
 ### One image, two processes
 
 `server.ts` and `worker.ts` are two composition roots over the same modules
-([03](03-module-anatomy.md)). They ship in one image:
+([03](module-anatomy.md)). They ship in one image:
 
 ```yaml
 # docker-compose.prod.yml
@@ -173,7 +173,7 @@ docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend \
 
 Takes about an hour and needs ~8GB RAM. Worth doing once — without it, every developer's quote
 flow either hits a paid API or gets mocked, and mocked distances hide exactly the band-boundary
-bugs that matter ([`../04-zone-resolution.md`](../LLD/04-zone-resolution.md)).
+bugs that matter ([`../LLD/zone-resolution.md`](../LLD/zone-resolution.md)).
 
 ## CI
 
@@ -228,7 +228,7 @@ which is the entire reason for the split.
 The parts that strain first, in order:
 
 1. **Driver location writes** — already tiered through Redis
-   ([`../09-architecture.md`](../LLD/09-architecture.md)); next step is a dedicated write path
+   ([`../LLD/architecture.md`](../LLD/architecture.md)); next step is a dedicated write path
 2. **Socket connections** — Socket.IO's Redis adapter allows horizontal scaling from day one
 3. **OSRM** — stateless; add containers behind a load balancer
 4. **Mongo** — replica set already required; add read preference for reporting queries

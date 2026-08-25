@@ -17,7 +17,7 @@ import { getRequestId } from './request-context.js';
  *                      it succeeds: a failing health check is exactly what you want to see.
  *
  *   driver location  — 2,000 on-duty drivers × 1 ping / 10 s = 200 writes/s sustained, all day
- *                      (docs/LLD/09-architecture.md §Driver location). That is a metric, not a
+ *                      (docs/LLD/architecture.md §Driver location). That is a metric, not a
  *                      log; at one line each it is ~17M lines a day and the single largest
  *                      item on any log bill.
  */

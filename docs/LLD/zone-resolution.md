@@ -1,4 +1,4 @@
-# 04 — Zone Resolution
+# Zone Resolution
 
 This is the core algorithm. Everything the customer sees flows from it.
 
@@ -64,75 +64,48 @@ resolveInCity(from: LatLng, to: LatLng, carCategoryId) -> Quote[] | Error
           side effect: log coverage_requests(point, customer_id, timestamp)
                        this table is the expansion roadmap
 
- 3. if fromZones.city is null                 -- invariant Z-1 says impossible
-        → ERROR ZONE_CONFIG_FAULT
-          customer sees: "Something went wrong. Please try again shortly."
-          side effect: PagerDuty/Slack alert with zone id, point, and the failing check
-          NOTE: unreachable if the DB trigger is installed. This branch exists to detect
-                a trigger that was dropped during a migration.
+ 3. if fromZones.city is null
+        → PICKUP_OUTSIDE_CITY
+          "Hourly rentals aren't available from this pickup point.
+           Try an outstation trip."
+          payload carries: suggested_service = 'OUTSTATION', from, to
+          NOT a fault. A pickup zone is a serviceability gate, not a child of a city
+          (zones.md) — a pickup point outside the city is simply a point we will not
+          sell an hourly rental from.
 
- 4. if fromZones.pickup.parent_zone_id != fromZones.city.id
-        → ERROR ZONE_CONFIG_FAULT   -- same handling as above
+ 4. toZones ← resolveZones(to)
 
- 5. toZones ← resolveZones(to)
-
- 6. if toZones.city is null OR toZones.city.id != fromZones.city.id
-        → ERROR DROP_OUTSIDE_CITY
+ 5. if toZones.city is null OR toZones.city.id != fromZones.city.id
+        → DROP_OUTSIDE_CITY
           "That drop-off is outside <City>. This looks like an outstation trip."
           payload carries: suggested_service = 'OUTSTATION', from, to
           the app switches tab and keeps both points — no re-entry
 
- 7. packages ← incity packages where
+ 6. packages ← incity packages where
         city_zone_id = fromZones.city.id
         AND is_active
-        AND fromZones.pickup.id ∈ package pickup zones
+        -- no pickup-zone filter. Packages do not reference pickup zones; the pickup
+        -- zone has already done its whole job at step 2. See zones.md.
 
- 8. if packages is empty
-        → ERROR NO_PACKAGE_AVAILABLE
+ 7. if packages is empty
+        → NO_PACKAGE_AVAILABLE
           "No packages are configured for your area right now."
           side effect: admin alert (a serviceable pickup zone with nothing to sell
                        is a configuration gap, not a customer problem)
 
- 9. variants ← active variants of those packages,
+ 8. variants ← active variants of those packages,
                 with an active price row for carCategoryId,
                 ordered by included_minutes
 
-10. for each variant: fare ← computeInCityFare(variant, carCategory, fromZones.pickup, when)
-11. persist quotes, return them
+ 9. for each variant: fare ← computeInCityFare(variant, carCategory, fromZones.pickup, when)
+10. persist quotes, return them
 ```
 
-### Steps 3–4 in one query
+Step 2 is the only serviceability gate, and it is shared with outstation. Steps 3 and 5 are
+about the *product*: an hourly rental only makes sense when both ends sit inside the city we
+sell hourly rentals in. Neither is a fault — both hand the customer outstation instead.
 
-Rather than two lookups plus a comparison, the check collapses into the resolution query
-itself:
-
-```ts
-await Zone.aggregate([
-  { $match: {
-      isActive: true,
-      type: 'PICKUP',
-      geometry: { $geoIntersects: { $geometry: point } },
-  } },
-  { $limit: 1 },
-  { $lookup: {
-      from: 'zones',
-      let: { parentId: '$parentZoneId' },
-      pipeline: [
-        { $match: { $expr: { $eq: ['$_id', '$$parentId'] }, type: 'CITY', isActive: true } },
-      ],
-      as: 'city',
-  } },
-  { $addFields: { city: { $first: '$city' } } },
-  { $addFields: { configFault: { $eq: [{ $type: '$city' }, 'missing'] } } },
-]);
-```
-
-Zero documents → `ZONE_NO_PICKUP_COVERAGE`. One with `configFault` → alert. Otherwise proceed.
-
-The `$limit: 1` before the `$lookup` matters: invariant Z-2 guarantees at most one match, and
-limiting first means the join runs once rather than over a scan.
-
-### On step 6 — the destination check
+### On step 5 — the destination check
 
 **This rule is too strict for long variants.** For a 10-hour rental the destination is
 mostly a formality: the customer is doing errands, multiple stops, possibly a nearby town
@@ -159,10 +132,12 @@ resolveOutstation(from, to, direction, carCategoryId) -> Quote[] | Error
  1. fromZones ← resolveZones(from)
  2. if fromZones.pickup is null → ERROR ZONE_NO_PICKUP_COVERAGE
 
- 3. route ← routing.route(from, to)          -- OSRM; see §Road distance
-    if route is null → ERROR ROUTE_NOT_FOUND
+ 3. toZones ← resolveZones(to)
+    terrain ← toZones.hill ? 'HILL' : 'PLAIN'     -- see §Terrain
+    no extra query: the same $geoIntersects that resolves the city resolves the hill zone
 
- 4. terrain ← classifyTerrain(route)         -- see §Terrain
+ 4. route ← routing.route(from, to)          -- OSRM; see §Road distance
+    if route is null → ERROR ROUTE_NOT_FOUND
 
  5. distanceKm ← ceil(route.distance_m / 1000)
 
@@ -170,8 +145,9 @@ resolveOutstation(from, to, direction, carCategoryId) -> Quote[] | Error
         is_active
         AND terrain = terrain
         AND min_km <= distanceKm < max_km
-        AND fromZones.pickup.id ∈ package pickup zones
         AND has an active price for (carCategoryId, direction)
+        -- no pickup-zone filter, and no city zone either: outstation never consults
+        -- the city. Step 2 already decided whether we serve this pickup point.
 
  7. if packages is empty
         → ERROR NO_PACKAGE_FOR_DISTANCE
@@ -179,8 +155,12 @@ resolveOutstation(from, to, direction, carCategoryId) -> Quote[] | Error
           side effect: log to unserved_distance_requests — tells ops which band to add
 
  8. if packages.length > 1                   -- invariant P-2 says impossible
-        → alert admin; pick lowest total for the customer, never the highest
+        → alert admin; the precedence ladder in packages.md decides, and its price
+          rung picks the lowest total for the customer, never the highest
           (silently over-charging on a config error is far worse than under-charging)
+
+    NOTE: a HILL destination with no HILL band does NOT fall back to the PLAIN
+          ladder. It returns NO_PACKAGE_FOR_DISTANCE — see packages.md.
 
  9. fare ← computeOutstationFare(...)
 10. persist quote, return
@@ -194,8 +174,8 @@ bands, that error puts trips in the wrong band constantly and mis-prices them.
 Use **OSRM**, self-hosted on the India OSM extract:
 
 ```
-GET /route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=geojson
-→ { routes: [ { distance: 87421.3, duration: 7200.1, geometry: {...} } ] }
+GET /route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=false
+→ { routes: [ { distance: 87421.3, duration: 7200.1 } ] }
 ```
 
 Self-hosting is the right call here — Google Distance Matrix priced per call becomes a
@@ -206,60 +186,58 @@ volume. One `c6g.xlarge` handles the India extract comfortably.
 
 ```
 key: route:{h3(from,8)}:{h3(to,8)}
-val: { distance_m, duration_s, polyline }
+val: { distance_m, duration_s }
 ```
 
 Hit rate in practice runs 60–80% because pickup and drop points cluster hard around towns
-and landmarks. Store the polyline in the cache too — terrain classification needs it.
+and landmarks.
 
-### Terrain classification
+`overview=false`, and no polyline in the cache: the route geometry was only ever fetched so
+terrain classification could measure it, and terrain now comes from the destination point. We
+need the distance and nothing else — a smaller response and a smaller cache value.
 
-Do **not** classify on the destination point alone. Siliguri → a plains town reached only
-by crossing a hill stretch is a hill trip for the driver, and pricing it as plains
-under-pays them.
+### Terrain
 
-Classify on **route intersection**. MongoDB can find the candidate hill zones but cannot
-measure how much of the route lies inside one — there is no `$geoIntersection` and no length
-aggregation — so this is a two-step: narrow in the database, measure with Turf.
+Terrain is a property of the **destination point**, not of the route.
 
 ```ts
-// 1. Which hill zones does this route touch at all? Indexed, cheap.
-const hillZones = await Zone.find({
-  isActive: true,
-  type: 'HILL',
-  geometry: { $geoIntersects: { $geometry: routeLineString } },
-}).lean();
-
-// 2. How many metres are actually inside them? @driverzone/geo, in process.
-const { terrain, hillMetres } = classifyTerrain(
-  routeLineString,
-  hillZones.map((z) => z.geometry),
-  settings['outstation.hill_route_threshold_m'],
-);
+const { city, hill } = await zones.resolveAt(to);
+const terrain = hill ? 'HILL' : 'PLAIN';
 ```
 
-`classifyTerrain` splits the route on each polygon boundary and sums the segments whose
-midpoint falls inside — the midpoint rather than a vertex, because a split vertex sits exactly
-*on* the boundary where point-in-polygon is a coin flip. Zones are summed independently, which
-is safe because Z-2 forbids two active hill zones from overlapping, so no stretch is
-double-counted.
+That is the whole classifier. `resolveAt` is already running to answer the `to`-in-city question,
+and it returns every zone type containing the point, so terrain costs nothing extra — no second
+query, no threshold, no geometry measurement.
 
-Default threshold 5,000 m. A route that clips a hill zone corner for 800 m is not a hill
-trip; one that spends 30 km climbing is.
+**This reverses the earlier route-intersection design**, which measured how many metres of the
+route fell inside a hill polygon and compared that to
+`outstation.hill_route_threshold_m`. That approach was more faithful in principle and worse in
+practice: the threshold was an admitted guess, a contested fare could only be explained by
+walking a driver through a route-length sum, and it carried a tail of geometry edge cases. See
+[`packages.md`](packages.md) §Terrain and the decision-log entry.
 
-The 5 km threshold is a guess and should be tuned once there's real data — the metric to
-watch is driver complaints about specific routes being under-paid.
+**The cost, stated plainly:** a plains destination reached only by crossing a hill stretch now
+prices as `PLAIN`, and the driver is underpaid for the hardest part of the job.
+
+**The mitigation is where the polygon gets drawn.** A hill zone's edge is now a price boundary,
+so it must cover the *approach corridor* and not just the summit towns. If a destination is
+reached through the hills, the road to it belongs inside the hill polygon.
+
+`classifyTerrain` and `hillMetresOnRoute` are retained in `@driverzone/geo`, tested but unused.
+Reviving route-based classification is a wiring change rather than a rewrite — the trigger is
+drivers reporting specific routes as underpaid.
 
 ## Error codes
 
 | Code | HTTP | Customer message | Side effect |
 |------|------|------------------|-------------|
 | `ZONE_NO_PICKUP_COVERAGE` | 200¹ | "We don't have drivers at your pickup location yet." | Log to `coverage_requests`; offer waitlist |
+| `PICKUP_OUTSIDE_CITY` | 200¹ | "Hourly rentals aren't available from this pickup point. Try an outstation trip." | Return `suggested_service: OUTSTATION` + both points |
 | `DROP_OUTSIDE_CITY` | 200¹ | "That drop-off is outside \<City\>. This looks like an outstation trip." | Return `suggested_service: OUTSTATION` + both points |
 | `NO_PACKAGE_AVAILABLE` | 200¹ | "No packages are available for your area right now." | Admin alert — serviceable zone with nothing to sell |
 | `NO_PACKAGE_FOR_DISTANCE` | 200¹ | "We don't cover \<N\> km trips from your area yet." | Log to `unserved_distance_requests` |
 | `ROUTE_NOT_FOUND` | 200¹ | "We couldn't find a driving route between these points." | Log; often a bad map pin (in water, wrong country) |
-| `ZONE_CONFIG_FAULT` | 500 | "Something went wrong. Please try again shortly." | **High-priority admin alert.** Never expose the cause. |
+| `ZONE_CONFIG_FAULT` | 500 | "Something went wrong. Please try again shortly." | **High-priority admin alert.** Never expose the cause. Narrow since pickup zones lost their parent link — there is no longer a pickup/city relationship that can disagree. |
 | `AMBIGUOUS_ZONE_MATCH` | 500 | as above | High-priority alert; invariant Z-2 breached |
 | `QUOTE_EXPIRED` | 409 | "Prices have updated. Please review the new fare." | Re-quote automatically and show a diff |
 
@@ -283,32 +261,14 @@ helpful screen instead of a generic failure. Reserve 4xx/5xx for genuine faults.
 
 ## Coverage intelligence
 
-Two tables that cost almost nothing and are worth a great deal:
+Two collections that cost almost nothing and are worth a great deal: `coverageRequests` and
+`unservedDistanceRequests`. Schemas in [`database-schema.md`](database-schema.md); the write
+obligation — log a row only when a lookup genuinely resolved to nothing, never on a validation
+error or a retry — is on `ZoneResolutionContract` in [`zones.md`](zones.md).
 
-```ts
-const coverageRequestSchema = new Schema({
-  point:   { type: { type: String, enum: ['Point'] }, coordinates: [Number] },
-  address: String,
-  customerId:  { type: Schema.Types.ObjectId, ref: 'Customer' },
-  serviceType: { type: String, enum: ['INCITY', 'OUTSTATION'], required: true },
-  notifyWhenAvailable: { type: Boolean, default: false },
-}, { timestamps: { createdAt: true, updatedAt: false } });
-
-coverageRequestSchema.index({ point: '2dsphere' });
-
-const unservedDistanceRequestSchema = new Schema({
-  pickupZoneId: { type: Schema.Types.ObjectId, ref: 'Zone' },
-  distanceKm:   { type: Number, required: true },
-  terrain:      { type: String, enum: ['PLAIN', 'HILL'], required: true },
-}, { timestamps: { createdAt: true, updatedAt: false } });
-```
-
-The `2dsphere` index on `coverageRequests.point` is what makes the expansion heatmap a
-`$geoNear` aggregation rather than a full scan.
-
-Every failed lookup becomes a demand signal. Cluster `coverage_requests` and you have a
-ranked list of exactly where to draw the next pickup zone — and when you draw it, you can
-notify everyone who asked.
+Every failed lookup becomes a demand signal. Cluster `coverageRequests` and you have a ranked
+list of exactly where to draw the next pickup zone — and when you draw it, you can notify
+everyone who asked.
 
 ## Testing this
 
@@ -321,9 +281,11 @@ you can picture.
 
 ```ts
 SILIGURI_CITY        // CITY,   lng 88.35–88.50, lat 26.65–26.78
-CENTRAL_PICKUP       // PICKUP, well inside
+CENTRAL_PICKUP       // PICKUP, FREE, well inside
+PAID_PICKUP          // PICKUP, PAID, shares CENTRAL's edge exactly
 EASTERN_PICKUP       // PICKUP, shares CENTRAL's east edge exactly
-STRADDLING_PICKUP    // PICKUP, crosses the north city boundary
+STRADDLING_PICKUP    // PICKUP, crosses the north city boundary — legal now, and the half
+                     //         outside the city is what drives PICKUP_OUTSIDE_CITY
 DARJEELING_HILLS     // HILL
 ```
 
@@ -331,14 +293,23 @@ Cases every implementation must pass:
 
 - point in a pickup zone → resolves city + pickup
 - point in the city but in a coverage gap → `ZONE_NO_PICKUP_COVERAGE`
-- point outside all cities → `ZONE_NO_PICKUP_COVERAGE`
-- point **exactly on a shared border** between two pickup zones → exactly one result
+- point outside all pickup zones → `ZONE_NO_PICKUP_COVERAGE`
+- point in a pickup zone but **outside the city** → `PICKUP_OUTSIDE_CITY` for incity, and a
+  perfectly normal quote for outstation
+- point **exactly on a shared border** between two pickup zones → exactly one result, and where
+  those zones are `FREE` and `PAID` it must be the `FREE` one
 - drop in the same city → variants returned
 - drop in a different city → `DROP_OUTSIDE_CITY` with a suggestion payload
 - drop 200 m outside the city boundary → `DROP_OUTSIDE_CITY` (verify no float slop)
 - lat/lng swapped → **rejected by the bounds guard**, not silently resolved to the wrong place.
   `assertPlausibleCoordinate` in `@driverzone/geo` covers India (lat 6–37.6, lng 68–97.5) and
   names the swap in the error, because that is nearly always the cause.
+- a zone saved with a **clockwise** exterior ring → stored counter-clockwise, and resolves
+  normally. Left unnormalised MongoDB reads it as the whole earth minus the shape, silently
+  (`zones.md` §Why MongoDB geo).
 - pickup zone deactivated mid-session → existing quote still honoured, new quotes fail
-- route grazing a hill zone for 500 m → `PLAIN`
-- route through 30 km of hill zone → `HILL`
+- **drop point inside a hill zone → `HILL`; drop point outside every hill zone → `PLAIN`**,
+  regardless of what the route between them crosses
+- drop point exactly on a hill-zone border → resolves, and resolves the same way twice
+- drop point inside a hill zone that also overlaps the city zone → both candidates exist and
+  incity wins on precedence (`packages.md`). Legal: Z-2 only forbids same-*type* overlap

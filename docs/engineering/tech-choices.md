@@ -1,4 +1,4 @@
-# 06 — Tech Choices
+# Tech Choices
 
 Every dependency, why it is here, what was rejected, and when to revisit. If you are about to
 add a package, add an entry here in the same format — a dependency nobody can justify is a
@@ -25,7 +25,7 @@ Format for each entry:
   even harder than pnpm's symlinks); bun (fast, but too young to bet a production install on).
 - **Note:** `.npmrc` sets `node-linker=hoisted`, which forfeits the phantom-dependency
   protection. That is the price of Metro compatibility — see
-  [08](08-mobile-in-monorepo.md). `not-to-unresolvable` covers the same ground.
+  [08](mobile-in-monorepo.md). `not-to-unresolvable` covers the same ground.
 - **Revisit when:** never, realistically.
 
 ### Turborepo
@@ -39,7 +39,7 @@ Format for each entry:
   becomes hand-written YAML); Nx (more capable, considerably more configuration than four apps
   justify); Bazel (no).
 - **Common confusion:** Turborepo does **not** replace pnpm. It installs nothing. See
-  [01](01-monorepo-layout.md#why-pnpm-and-turborepo).
+  [01](monorepo-layout.md#why-pnpm-and-turborepo).
 - **Revisit when:** builds exceed ~5 minutes locally — that is when remote caching starts
   paying for itself.
 
@@ -47,9 +47,9 @@ Format for each entry:
 
 - **Chosen for:** everything.
 - **Why this one:** the contract between four apps is types. The `.public.ts` pattern in
-  [03](03-module-anatomy.md) is only zero-cost because TypeScript erases interfaces entirely.
+  [03](module-anatomy.md) is only zero-cost because TypeScript erases interfaces entirely.
 - **Config:** strict, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` and
-  `verbatimModuleSyntax`. See [05](05-coding-standards.md#typescript) — these caught four real
+  `verbatimModuleSyntax`. See [05](coding-standards.md#typescript) — these caught four real
   bugs during scaffolding.
 
 ### dependency-cruiser
@@ -62,7 +62,7 @@ Format for each entry:
   fast editor-time echo); `eslint-plugin-boundaries` (ESLint's resolution model, same blind
   spots); manual code review (decays in a month).
 - **Load-bearing:** under MongoDB this also protects the zone invariants. See
-  [04](04-boundaries-and-enforcement.md).
+  [04](boundaries-and-enforcement.md).
 - **Revisit when:** never while the module architecture stands.
 
 ### Vitest
@@ -106,7 +106,7 @@ Format for each entry:
 - **Why this one:** team fluency, and its geospatial support covers the two operations on the
   hot path — `$geoIntersects` with a `2dsphere` index for zone resolution, `$geoNear` for
   finding drivers. Single-document atomicity makes the dispatch claim in
-  [`../06-dispatch-and-assignment.md`](../LLD/06-dispatch-and-assignment.md) clean:
+  [`../LLD/dispatch-and-assignment.md`](../LLD/dispatch-and-assignment.md) clean:
   `findOneAndUpdate({ _id, driverId: null })` either wins or returns nothing.
 - **Rejected:** PostgreSQL + PostGIS — genuinely the stronger fit for this product, and the
   original design. It loses on team familiarity, and that matters more than it looks: the
@@ -115,7 +115,7 @@ Format for each entry:
   invalid polygon could not be saved from any code path. Mongo cannot express a cross-document
   geometric constraint, so those checks moved into `@driverzone/geo` and the `zones` write
   path. That is a weaker guarantee, held up by
-  [`module-internals-are-private`](04-boundaries-and-enforcement.md) plus a nightly integrity
+  [`module-internals-are-private`](boundaries-and-enforcement.md) plus a nightly integrity
   job. It also cost the ability to compute intersection areas and route lengths in the query —
   hence Turf.
 - **Requires:** a replica set, even single-node. Multi-document transactions need one, and the
@@ -135,7 +135,7 @@ Format for each entry:
   easy, polygon boolean operations are emphatically not).
 - **Status:** a first-class dependency, not a utility. It carries invariants that used to be
   database triggers, so it lives in `packages/geo` with its own test suite — 31 tests covering
-  every case in [`../04-zone-resolution.md`](../LLD/04-zone-resolution.md).
+  every case in [`../LLD/zone-resolution.md`](../LLD/zone-resolution.md).
 - **Note:** import the individual `@turf/*` packages, never the `@turf/turf` meta-package —
   the latter is ~500KB and the admin bundle ships to browsers.
 
@@ -146,7 +146,7 @@ Format for each entry:
 - **Why this one:** BullMQ requires it, and the same instance solves the location write-volume
   problem. 2,000 on-duty drivers pinging every 10s is ~200 writes/s; sent to Mongo that bloats
   collections and starves booking queries. Redis absorbs it and Mongo gets a batched flush every
-  30s. See [`../09-architecture.md`](../LLD/09-architecture.md).
+  30s. See [`../LLD/architecture.md`](../LLD/architecture.md).
 - **Config note:** `maxRetriesPerRequest: null` is required by BullMQ, not a tuning choice — its
   blocking commands are long-lived and ioredis's default retry cap kills them mid-wait. Without
   it, dispatch workers die quietly seconds after starting.
@@ -186,7 +186,7 @@ Format for each entry:
   levels, no structure).
 - **Known limit:** path-based redaction cannot see PII interpolated into a message string. An
   ESLint rule enforces static messages to close it — see
-  [`05-coding-standards.md`](05-coding-standards.md#messages-are-static-data-goes-in-the-object).
+  [`coding-standards.md`](coding-standards.md#messages-are-static-data-goes-in-the-object).
 - **Note:** nothing writes log files. The container runtime owns collection; a process writing
   its own logs is a disk-full outage waiting for a busy day.
 - **Revisit when:** OpenTelemetry lands. `@opentelemetry/instrumentation-pino` injects
@@ -244,7 +244,7 @@ Current stable at the time of writing. React Native's New Architecture is on by 
   monorepo is worth it); native Android + iOS (four codebases, not two).
 - **Open risk:** the driver app needs an **Android foreground service** for the persistent
   socket while on duty. That is a config plugin, not an eject — but prototype it in week one
-  before committing. See [08](08-mobile-in-monorepo.md).
+  before committing. See [08](mobile-in-monorepo.md).
 - **Revisit when:** a required native capability has no config plugin and cannot be written as
   one. `expo prebuild` is the escape hatch and it is not a rewrite.
 
@@ -268,7 +268,7 @@ Current stable at the time of writing. React Native's New Architecture is on by 
 
 Two images from one repo — `driverzone-api` (which also runs the worker, different `CMD`) and
 `driverzone-web`. Compose for local development; the same images run in production behind
-nginx. See [09](09-build-and-deploy.md).
+nginx. See [09](build-and-deploy.md).
 
 ---
 
@@ -280,4 +280,4 @@ nginx. See [09](09-build-and-deploy.md).
 | A DI container (tsyringe, InversifyJS) | `<module>.container.ts` is ~30 lines of explicit wiring per module, greppable and debuggable. A decorator-driven container trades that for magic and a metadata dependency. |
 | GraphQL | Four known clients and a fixed set of screens. REST with typed contracts is less machinery for the same result. |
 | A state-management library (web) | Server state via fetch + cache. Add TanStack Query when the admin panel actually needs it, not before. |
-| Sentry / APM | Should be added before the pilot. Not scaffolded yet — tracked in [`../11-roadmap.md`](../LLD/11-roadmap.md). |
+| Sentry / APM | Should be added before the pilot. Not scaffolded yet — tracked in [`../LLD/roadmap.md`](../LLD/roadmap.md). |

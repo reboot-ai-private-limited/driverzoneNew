@@ -1,6 +1,6 @@
 # DriverZone — Engineering Handbook
 
-How this codebase is built and why. If you are new here, read `01` through `04` in order —
+How this codebase is built and why. If you are new here, read the first four in order —
 that is roughly an hour and covers every decision you need to make sense of the rest.
 
 Decisions already made are logged in [`../decision-log.md`](../decision-log.md); what moved
@@ -11,20 +11,20 @@ the zone model, pricing, dispatch. This directory is about the *code*.
 
 ## Read in this order
 
-| # | Doc | Answers |
-|---|-----|---------|
-| — | [Day one](#day-one) | Clone to running stack |
-| 01 | [Monorepo layout](01-monorepo-layout.md) | What's in `apps/` vs `packages/`, and where new code goes |
-| 02 | [Clean architecture & SOLID](02-clean-architecture-and-solid.md) | The layer rules, each SOLID principle with a real example from this codebase |
-| 03 | [Module anatomy](03-module-anatomy.md) | `.public.ts`, the container, tiers, how a request flows end to end |
-| 04 | [Boundaries & enforcement](04-boundaries-and-enforcement.md) | Every lint rule, what it catches, what breaks without it |
-| 05 | [Coding standards](05-coding-standards.md) | Naming, errors, money, comments |
-| 06 | [Tech choices](06-tech-choices.md) | Every dependency: why it's here, what was rejected, when to revisit |
-| 07 | [Shared packages](07-shared-packages.md) | What belongs in `contracts` / `geo` / `design-system` / `mobile-ui` — and what must never |
-| 08 | [Mobile in the monorepo](08-mobile-in-monorepo.md) | Expo + pnpm + Metro, and the resolution trap |
-| 09 | [Build & deploy](09-build-and-deploy.md) | Artifacts, images, CI filtering, what deploys where |
-| 10 | [Testing](10-testing.md) | What to test at which level, and with what |
-| 11 | [Adding a module](11-adding-a-module.md) | The checklist |
+| Doc | Answers |
+|-----|---------|
+| [Day one](#day-one) | Clone to running stack |
+| [Monorepo layout](monorepo-layout.md) | What's in `apps/` vs `packages/`, and where new code goes |
+| [Clean architecture & SOLID](clean-architecture-and-solid.md) | The layer rules, each SOLID principle with a real example from this codebase |
+| [Module anatomy](module-anatomy.md) | `.public.ts`, the container, tiers, how a request flows end to end |
+| [Boundaries & enforcement](boundaries-and-enforcement.md) | Every lint rule, what it catches, what breaks without it |
+| [Coding standards](coding-standards.md) | Naming, errors, money, comments |
+| [Tech choices](tech-choices.md) | Every dependency: why it's here, what was rejected, when to revisit |
+| [Shared packages](shared-packages.md) | What belongs in `contracts` / `geo` / `design-system` / `mobile-ui` — and what must never |
+| [Mobile in the monorepo](mobile-in-monorepo.md) | Expo + pnpm + Metro, and the resolution trap |
+| [Build & deploy](build-and-deploy.md) | Artifacts, images, CI filtering, what deploys where |
+| [Testing](testing.md) | What to test at which level, and with what |
+| [Adding a module](adding-a-module.md) | The checklist |
 
 ## Day one
 
@@ -58,7 +58,7 @@ imports `bookings.public.js`. This is machine-enforced — see `04`. It costs no
 runtime: the contract file is types only and leaves no trace in the shipped bundle.
 
 **2. `pnpm lint:deps` protects data integrity, not just tidiness.**
-The zone invariants in [`../02-domain-model.md`](../LLD/02-domain-model.md) were originally
+The zone invariants in [`../LLD/domain-model.md`](../LLD/domain-model.md) were originally
 PostGIS triggers, so a bad polygon was impossible to save. MongoDB cannot express a
 cross-document geometric constraint, so those checks moved into `@driverzone/geo` and run in
 the `zones` module's write path. That is a real guarantee only while nothing else can reach

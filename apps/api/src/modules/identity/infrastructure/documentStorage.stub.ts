@@ -8,7 +8,7 @@ import type { DocumentStoragePort, PresignedUpload } from '../domain/documentSto
 /**
  * INFRASTRUCTURE — a stand-in for object storage, for development only.
  *
- * There is no S3-compatible bucket in this project yet (`09-architecture.md` specifies one; no
+ * There is no S3-compatible bucket in this project yet (`architecture.md` specifies one; no
  * code or compose service provides it). This adapter mints a plausible-looking key and a URL
  * that accepts nothing, so the whole driver-onboarding flow — upload request, document row,
  * submission gate, admin review — is exercisable end to end today.

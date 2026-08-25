@@ -9,7 +9,7 @@ import type { AdminControllers } from './admin.controller.js';
  * customer or driver token is rejected with 403 even though it is perfectly valid elsewhere.
  *
  * There is no finer-grained permission model yet: v1 has a single flat admin role
- * (docs/LLD/13-auth-and-user.md). `10-admin-panel.md` sketches an `OPS_ADMIN` scope, which is
+ * (docs/LLD/user.md). `admin-panel.md` sketches an `OPS_ADMIN` scope, which is
  * its own decision and deliberately not invented here.
  */
 export function buildAdminRouter(controllers: AdminControllers): Router {

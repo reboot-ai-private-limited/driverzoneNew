@@ -47,7 +47,19 @@ export function SideNav({ pinned }: SideNavProps) {
   const pathname = usePathname();
   const { admin, signOut } = useSession();
 
-  const label = cn(LABEL, pinned && 'opacity-100');
+  /*
+   * TERNARIES, not `cn(base, pinned && override)`.
+   *
+   * `cn` is tailwind-merge, and tailwind-merge does not know this project's custom theme keys:
+   * it dedupes `w-4`/`w-8` but passes `w-rail w-nav-open` through untouched. Both classes then
+   * land on the element with equal specificity, so the stylesheet's source order decides — and
+   * Tailwind emits `.w-rail` after `.w-nav-open`, so the rail always won and the pin toggle did
+   * nothing at all. Hover and focus were unaffected only because their pseudo-classes carry
+   * extra specificity.
+   *
+   * Emitting exactly one class per slot sidesteps the question entirely.
+   */
+  const label = pinned ? 'opacity-100' : LABEL;
 
   return (
     <nav
@@ -55,9 +67,10 @@ export function SideNav({ pinned }: SideNavProps) {
       className={cn(
         'group fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden',
         'bg-surface border-r border-border',
-        'w-rail transition-[width] duration-200 ease-out',
+        'transition-[width] duration-200 ease-out',
+        pinned ? 'w-nav-open' : 'w-rail',
+        // Harmless while pinned — the width is already open — so it does not need excluding.
         EXPANDED_WIDTH,
-        pinned && 'w-nav-open',
       )}
     >
       <div className="flex items-center h-14 px-3 shrink-0">

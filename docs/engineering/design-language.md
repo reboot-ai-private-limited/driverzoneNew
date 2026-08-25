@@ -175,6 +175,11 @@ The component with the most behaviour, so it is specified rather than left to im
   selector, so putting it on the group element leaves the rule matching nothing and the rail
   stuck at 64px with no error anywhere. The nav uses plain `hover:` / `focus-within:`; the
   labels inside it use `group-hover:` / `group-focus-within:`.
+- **A toggled class is a ternary, never `cn(base, on && override)`.** `cn` is tailwind-merge,
+  and it does not know this project's custom theme keys — it dedupes `w-4`/`w-8` but passes
+  `w-rail w-nav-open` through untouched. Both then apply with equal specificity and the
+  stylesheet's source order decides, which is how the pin toggle came to do nothing at all.
+  Emit one class per slot.
 - **Only disabled items get a tooltip**, explaining why they are disabled. A tooltip repeating a
   label would be noise — you cannot hover an item without hovering the nav, so by the time one
   could appear the label beside it is already visible.

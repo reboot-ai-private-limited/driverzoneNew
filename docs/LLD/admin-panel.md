@@ -43,31 +43,40 @@ configuration faults in `zone-resolution.md` disappears.
 
 ### Layout
 
+One Coverage screen. There is no city switcher and no zone tree, because there is no hierarchy
+left to draw — the three types are flat and independent (`domain-model.md`).
+
 ```
 ┌──────────────┬────────────────────────────────────────────┐
 │ ZONES        │                                            │
 │              │                                            │
-│ ▾ Siliguri   │              MAP                           │
-│   • Central  │      (MapLibre + Mapbox Draw)              │
-│   • Outskirts│                                            │
-│   • Matigara │   ── city boundary   (blue, dashed)        │
-│ ▸ Kolkata    │   ── pickup zones    (green fill, FREE)    │
-│ ▸ Asansol    │   ── pickup zones    (amber fill, PAID)    │
-│ ▸ Patna      │   ── hill zones      (brown hatch)         │
-│ ▸ Coochbehar │   ── violation       (red, animated)       │
+│ CITY         │              MAP                           │
+│ • Siliguri   │      (MapLibre + Mapbox Draw)              │
 │              │                                            │
-│ HILL ZONES   ├────────────────────────────────────────────┤
-│ • Darjeeling │ Name  [Siliguri Outskirts        ]         │
-│ • Kalimpong  │ Type  [PICKUP ▾]  Parent [Siliguri ▾]      │
+│ PICKUP       │   ── city boundary   (blue, dashed)        │
+│ • Central    │   ── pickup zone     (green fill, FREE)    │
+│ • Paid North │   ── pickup zone     (amber fill, PAID)    │
+│              │   ── hill zones      (brown hatch)         │
+│ HILL         │   ── violation       (red, animated)       │
+│ • Darjeeling │                                            │
+│ • Kalimpong  ├────────────────────────────────────────────┤
+│              │ Name  [Siliguri Paid North       ]         │
+│ [+ New Zone] │ Type  [PICKUP ▾]                           │
 │              │ Charge[PAID  ▾]   Fee ₹[100] (blank=global)│
-│ [+ New Zone] │ Area  12.4 km²    Vertices 34              │
+│              │ Area  12.4 km²    Vertices 34              │
 │              │                                            │
-│              │ ⚠ Extends 0.42 km² outside Siliguri        │
-│              │   [Show on map] [Clip to city]             │
+│              │ ⚠ Overlaps active PICKUP zone "Central"    │
+│              │   [Show on map]                            │
 │              │                                            │
 │              │        [Cancel]  [Save]  ← disabled        │
 └──────────────┴────────────────────────────────────────────┘
 ```
+
+No Parent picker: a pickup zone is not a child of anything. A pickup zone drawn partly or wholly
+outside the city boundary is **legal** — it stays serviceable for outstation, and incity quotes
+from it return `PICKUP_OUTSIDE_CITY` (`zone-resolution.md`). The map still draws the city
+boundary, because an admin should be able to see the relationship even though nothing enforces
+it.
 
 ### Live validation
 
@@ -76,27 +85,21 @@ drawing. Never wait for Save to reveal a problem.
 
 | Rule | Severity | Message |
 |------|----------|---------|
-| `Z-1` pickup ⊄ city | ERROR | "Extends 0.42 km² outside Siliguri." → render the spill in red |
 | `Z-2` overlaps same type | ERROR | "Overlaps active PICKUP zone 'Siliguri Central'." → highlight both |
 | `Z-3` invalid geometry | ERROR | "Polygon crosses itself." → mark the crossing vertex |
-| area < 1 ha | ERROR | "Too small to be a serviceable zone." |
-| > 500 vertices | WARN | "Very detailed polygon — simplify for faster lookups." |
+| `Z-MIN-AREA` | ERROR | "Too small to be a serviceable zone." |
+| `Z-MAX-AREA` | ERROR | "Too large to be an operational zone." |
+| `Z-COMPLEXITY` > 500 vertices | WARN | "Very detailed polygon — simplify for faster lookups." |
 | pickup zone covers < 20% of city | INFO | "Only 18% of Siliguri has pickup coverage." |
 | PAID with no fee and no global default | ERROR | "Set a pickup fee or configure the global default." |
 
-**Save stays disabled while any ERROR stands.** The database trigger will reject it
-anyway — the UI's job is to make sure the admin never gets that far.
+**Save stays disabled while any ERROR stands.** The API refuses it anyway — `createZone` is the
+invariant choke point (`zones.md`) — and the UI's job is to make sure the admin never gets that
+far. The two can never disagree, because the browser runs the same `validateZone` from
+`@driverzone/geo` that the API does.
 
-### Clip to city
-
-When a pickup polygon spills outside its parent, offer a one-click fix:
-
-```
-new_geom = ST_Intersection(drawn_geom, city_geom)
-```
-
-Show the result as a preview before applying. Redrawing 34 vertices by hand because one
-corner strayed 200 m is how admins learn to work around your tool rather than with it.
+Ring winding is **normalised silently**, not reported: a clockwise polygon is not an admin's
+mistake to fix, it is a serialisation detail, and `@turf/rewind` handles it in the write path.
 
 ### Editing an existing zone
 
@@ -105,12 +108,12 @@ Geometry edits create a **new version**, they don't mutate in place:
 ```
 1. Show impact first:
      "12 active bookings have pickups in the area you're removing."
-     "3 incity packages reference this zone."
+     "This is 1 of your 2 pickup zones."
 2. On save:
      INSERT new zone row (version = old.version + 1)
      UPDATE old row SET is_active = false, superseded_by = new.id
-     re-point package links to the new zone id
      write audit_log with before/after geometry
+     (nothing to re-point: no package references a pickup zone)
 3. In-flight bookings keep their original zone reference — they resolved against
    the old geometry and their fare snapshot says so.
 ```
@@ -124,10 +127,19 @@ and a one-click restore.
 
 ```
 Deactivating "Siliguri Central" will:
-  • disable 3 incity packages (no other pickup zone)
-  • affect 2 outstation packages (they have other pickup zones — these keep working)
-  • leave 8 scheduled bookings without coverage  [view them]
   • remove pickup coverage for ~34% of Siliguri
+  • leave 8 scheduled bookings without coverage  [view them]
+  • affect no packages — packages don't reference pickup zones
+
+[Cancel]  [Deactivate anyway]
+```
+
+The case that needs its own wording is the **last** active pickup zone, because nothing else in
+the UI makes the consequence obvious:
+
+```
+"Siliguri Paid" is your last active pickup zone.
+Deactivating it stops ALL service — incity and outstation both.
 
 [Cancel]  [Deactivate anyway]
 ```
@@ -140,10 +152,11 @@ deactivation is also wrong. Show the blast radius and let a human decide.
 ### InCity
 
 ```
-Package: "Siliguri Hourly"        City: Siliguri ▾        [Active ✓]
+Package: "Siliguri Hourly"        City: Siliguri          [Active ✓]
 
-Pickup zones      ☑ Siliguri Central   ☑ Matigara   ☐ Outskirts
-                  (only zones whose parent is Siliguri are listed — invariant P-1)
+                  Sold from every pickup zone. Packages do not reference pickup
+                  zones — the zone gates serviceability and adds its fee, and
+                  that is the whole of its job (zones.md).
 
 Variants
 ┌──────────┬───────┬──────┬──────────────────────────────────────────┐
@@ -175,8 +188,6 @@ form field and obvious in a rupee figure.
 ```
 Package "PKG-1"    Terrain [HILL ▾]    Distance [70] – [100] km    [Active ✓]
 
-Pickup zones   ☑ Siliguri Central  ☑ Matigara
-
 Pricing        ┌───────────┬───────────┬────────────┐
                │           │ One-way   │ Round trip │
                ├───────────┼───────────┼────────────┤
@@ -186,13 +197,14 @@ Pricing        ┌───────────┬────────�
                └───────────┴───────────┴────────────┘
                + extra ₹/km beyond 70 km, driver allowance, commission split
 
-⚠ Band coverage for Siliguri Central · HILL:
+⚠ Band coverage for HILL:
    0–70 ✓   70–100 ✓ (this)   100–150 ✓   150+ ✗ gap
 ```
 
 That coverage strip catches the failure nobody notices until a customer hits it: a gap in
 the distance bands where no package matches and the customer gets
-`NO_PACKAGE_FOR_DISTANCE` for a trip you'd happily take.
+`NO_PACKAGE_FOR_DISTANCE` for a trip you'd happily take. It is now per terrain rather than per
+pickup zone — two strips, `PLAIN` and `HILL`, and both must tile without a gap.
 
 ## Pricing preview (FR-P6)
 

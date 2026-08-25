@@ -198,8 +198,8 @@ flagged rather than silently assumed; adjust if the real onboarding form differs
 **400 — incomplete**
 
 ```jsonc
-{ "error": { "code": "VALIDATION_FAILED", "message": "Your profile isn't complete yet.",
-    "data": { "missing": ["dob", "documents.AADHAAR"] }, "request_id": "req_01J…" } }
+{ "code": "VALIDATION_FAILED", "message": "Your profile isn't complete yet.",
+  "data": { "missing": ["dob", "documents.AADHAAR"] } }
 ```
 
 `missing` is specific enough for the app to deep-link straight to the unfinished field or

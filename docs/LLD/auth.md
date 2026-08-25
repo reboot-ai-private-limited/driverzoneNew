@@ -19,14 +19,17 @@ New codes this module introduces:
 
 ```jsonc
 {
-  "error": {
-    "code": "OTP_ATTEMPTS_EXCEEDED",
-    "message": "Too many incorrect attempts. Request a new code.",
-    "details": { "retry_after_seconds": 0 },
-    "request_id": "req_01J…"
-  }
+  "success": false,
+  "statusCode": 429,
+  "code": "OTP_ATTEMPTS_EXCEEDED",
+  "request": { "method": "POST", "url": "/v1/auth/otp/verify", "requestId": "req_01J…" },
+  "message": "Too many incorrect attempts. Request a new code.",
+  "data": { "retry_after_seconds": 0 }
 }
 ```
+
+The envelope is `HttpErrorBody` from `packages/contracts/src/http.ts` — see
+`api-contracts.md` §The envelope. Bodies below are shown without it, for brevity.
 
 | Code | Status | Meaning |
 |---|---|---|
@@ -69,8 +72,8 @@ SMS-delivered login credential. No reason to share a length.
 **429**
 
 ```jsonc
-{ "error": { "code": "OTP_COOLDOWN_ACTIVE", "message": "Please wait before requesting another code.",
-    "details": { "retry_after_seconds": 41 }, "request_id": "req_01J…" } }
+{ "code": "OTP_COOLDOWN_ACTIVE", "message": "Please wait before requesting another code.",
+  "data": { "retry_after_seconds": 41 } }
 ```
 
 Rate-limited to 5 sends/hour/phone (the existing spec, `architecture.md`) and 10 sends/hour/IP
@@ -111,8 +114,7 @@ No `refresh_token` in the body (it's set as a cookie — see §Token lifecycle) 
 **401**
 
 ```jsonc
-{ "error": { "code": "OTP_INVALID_OR_EXPIRED", "message": "That code is incorrect or has expired.",
-    "request_id": "req_01J…" } }
+{ "code": "OTP_INVALID_OR_EXPIRED", "message": "That code is incorrect or has expired." }
 ```
 
 Five wrong attempts burns the challenge (`OTP_ATTEMPTS_EXCEEDED`) — the client's next move is
@@ -161,7 +163,7 @@ Admin's response omits `refresh_token` — it's rotated into the cookie instead,
 **401 — reused or revoked**
 
 ```jsonc
-{ "error": { "code": "SESSION_REVOKED", "message": "Please sign in again.", "request_id": "req_01J…" } }
+{ "code": "SESSION_REVOKED", "message": "Please sign in again." }
 ```
 
 ### `POST /{role}/auth/logout`

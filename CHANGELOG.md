@@ -15,6 +15,28 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- `docs/LLD/zones.md` — the zones module LLD. What each zone type is actually for, the contract
+  split between resolution and admin, the write path and its choke point, versioning, the full
+  HTTP surface with success and fault codes, and an edge-case matrix covering the write path,
+  the read path and operations. The rows marked ⚠ are the ones that fail *silently* if skipped.
+- The MongoDB ring-winding trap, written down for the first time: a clockwise exterior ring is
+  read by a `2dsphere` index as the whole earth minus the shape, with no error anywhere. Fixed
+  by normalising with `@turf/rewind` in the write path.
+- `coverageRequests` and `unservedDistanceRequests` now have proper sections in
+  `docs/LLD/database-schema.md` instead of existing only inline in the resolution doc.
+
+### Changed
+
+- **Pickup zones are a serviceability gate and a fee, nothing else.** They have no parent and no
+  package references them. Invariants **Z-1** and **P-1** are retired, `pickupZoneIds` is deleted
+  from both package schemas, and **P-2** widened to a global per-terrain check. `@driverzone/geo`
+  needed no change — `validateZone` already made `parentGeom` optional. See `docs/decision-log.md`.
+- A pickup point outside the city is no longer a `ZONE_CONFIG_FAULT` 500. It is a new
+  `PICKUP_OUTSIDE_CITY` outcome at 200 that offers the customer an outstation trip instead.
+- `docs/LLD/api-contracts.md` documented a flat `{ "error": { … } }` body that
+  `packages/contracts/src/http.ts` has not produced for some time. Corrected to the real
+  `HttpSuccessBody` / `HttpErrorBody` envelope, and the admin zone routes filled in.
+
 - HTTP access logging (`pino-http`): one line per request with method, route pattern, status,
   duration and `requestId`. `/api/health` and the driver location ping are excluded — see
   `docs/decision-log.md` for why.

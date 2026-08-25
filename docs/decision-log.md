@@ -20,6 +20,83 @@ entry links to it.
 
 ---
 
+## 2026-08-25 — Pickup zones are a serviceability gate and a fee; Z-1, P-1 and the package↔zone links are retired
+
+**Decision:** a pickup zone answers one question — *may we pick up here, and does it cost extra* —
+identically for incity and outstation. It has no parent, and no package references it. `pickupZoneIds`
+is deleted from both package schemas along with its indexes; invariant **P-1** goes with it, and
+**Z-1** (pickup ⊆ city) is retired. The city zone now only defines what "incity" means: it scopes the
+incity package and answers the `to` check. See [`LLD/zones.md`](LLD/zones.md).
+
+**Why:** the two jobs were tangled. Free-vs-paid is a property of the *zone* — `pickupChargeType`,
+which `computeInCityFare` already reads — not a package dimension, and both Siliguri pickup zones sell
+the same catalogue. Once that is true the M:N link buys nothing: it costs a join, two invariants, a
+multi-select in the package editor, and a re-point step on every geometry version.
+
+Z-1 fell out of the same reasoning. Its stated purpose was making a runtime config fault unreachable —
+but the fault only existed *because* of the parent link, a `parentZoneId` that could disagree with the
+polygon it sat in. Removing the link deletes the fault rather than merely hiding it: a 500 that paged
+someone became a 200 offering the customer outstation instead. What it buys is real: a pickup zone may
+now sit outside the city, and Bagdogra airport and NJP station are the two highest-value outstation
+pickups in Siliguri.
+
+**Rejected: hard-coding the singletons** — dropping `cityZoneId`, treating "the city zone" as a
+constant, one incity package wired in. It saves about a day and costs a data migration plus a rewrite
+of zone resolution the first time a second city appears. The generic part that is expensive is the
+*admin surface*; the generic part that is cheap is the *data*. Cut the first, keep the second: no city
+switcher, no zone tree, no per-city package scoping in the UI — but the schema and `resolveAt` would
+answer correctly for five cities unchanged.
+
+**Consequences:** `@driverzone/geo` needed **no change at all** — `validateZone` already took
+`parentGeom` as optional and ran `checkWithinParent` only when supplied. Z-1 is dormant rather than
+deleted, so a future nested-zone design switches it back on instead of re-adding a field. All 31 tests
+still pass. `STRADDLING_PICKUP` changes meaning: it was a Z-1 violation fixture and is now a legal zone
+whose northern half drives the new `PICKUP_OUTSIDE_CITY` outcome.
+
+**Known limit, accepted:** a pickup zone drawn somewhere absurd is no longer caught at save time. Z-2
+still prevents the *dangerous* case — two overlapping pickup zones making resolution non-deterministic
+— and a pickup zone in the wrong district is merely useless rather than wrong. The nightly integrity
+job and the `dependents` view make it visible.
+
+**Refs:** [`LLD/zones.md`](LLD/zones.md), [`LLD/domain-model.md`](LLD/domain-model.md),
+[`LLD/zone-resolution.md`](LLD/zone-resolution.md), `packages/geo/src/zone-rules.ts`
+
+---
+
+## 2026-08-25 — MongoDB `2dsphere` for containment, Turf for predicates; no PostGIS
+
+**Decision:** containment lookups are MongoDB's job (`$geoIntersects` over a `2dsphere` index);
+geometric predicates and derived geometry are Turf's, in `@driverzone/geo`. No second datastore, no
+geo microservice, no hosted tilequery API.
+
+**Why write down what we were already doing:** because there is a trap in it that fails *silently*.
+GeoJSON RFC 7946 wants exterior rings counter-clockwise. Turf is indifferent to winding; the
+`2dsphere` index is not — it reads ring orientation to decide which side is "inside", and a clockwise
+exterior ring on a large polygon is interpreted as *the whole earth except that shape*. Nothing
+throws. The symptom is a hill zone that contains every route in India, so every outstation trip prices
+as `HILL`. Map editors and imported GeoJSON produce clockwise rings routinely. The mitigation is one
+line — `@turf/rewind` in the write path — and it is only obvious once someone has named the failure.
+
+Same family: a single-ring polygon larger than a hemisphere is read as its own complement, hence
+`Z-MAX-AREA` beside the existing `Z-MIN-AREA`.
+
+**Rejected: PostGIS.** Two datastores and a dual write for a few hundred polygons, and it costs the
+single-transaction booking→ledger write that already requires the Mongo replica set. The triggers it
+buys are already replaced by the choke-point-plus-nightly-job design.
+
+**Rejected: a geo service or hosted tilequery.** A network hop and a per-call price on the hottest path
+in the product, for data we should own. Quote requests run roughly 3× booking volume.
+
+**Consequences:** the split is load-bearing in both directions. MongoDB cannot express a
+cross-document geometric constraint (so Z-2/Z-3 live in application code), has no `$geoIntersection`
+and no length aggregation (so terrain classification narrows in the database and measures in process),
+and cannot return derived geometry (so the editor's red "offending area" is computed by Turf). None of
+those are worked around — each is why the other half of the split exists.
+
+**Refs:** [`LLD/zones.md`](LLD/zones.md) §Why MongoDB geo, `packages/geo/`
+
+---
+
 ## 2026-08-24 — A dev-only fixed OTP, scoped to seeded accounts
 
 **Decision:** `DEV_FIXED_OTP` — unset by default — makes `otp/verify` accept one fixed code, but

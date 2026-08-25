@@ -129,9 +129,12 @@ is much easier when the shapes correspond to somewhere you can picture.
 
 ```ts
 SILIGURI_CITY        // CITY,  lng 88.35–88.50, lat 26.65–26.78
-CENTRAL_PICKUP       // PICKUP, well inside
+CENTRAL_PICKUP       // PICKUP, FREE, well inside
+PAID_PICKUP          // PICKUP, PAID, shares CENTRAL's edge        → border must resolve FREE
 EASTERN_PICKUP       // PICKUP, shares CENTRAL's east edge exactly → must NOT be an overlap
-STRADDLING_PICKUP    // PICKUP, crosses the north city boundary   → Z-1 violation
+STRADDLING_PICKUP    // PICKUP, crosses the north city boundary   → legal; the outside half
+                     //                                              drives PICKUP_OUTSIDE_CITY
+CLOCKWISE_RING       // valid shape, wrong winding                 → must be stored rewound
 BOWTIE               // self-intersecting                          → Z-3 violation
 DARJEELING_HILLS     // HILL
 ROUTE_TO_HILLS       // long climb                                 → HILL

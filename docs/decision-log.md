@@ -4,11 +4,11 @@ Decisions that have been **made**, newest first, with what they replaced and wha
 
 Three files cover decisions and they do not overlap:
 
-| File | Answers |
-|---|---|
-| [`LLD/open-questions.md`](LLD/open-questions.md) | What is **not yet decided** — assumptions A1–A12 and the open items that block build |
-| [`engineering/tech-choices.md`](engineering/tech-choices.md) | **Current state**: what we use and why, written in the present tense |
-| this file | **History**: when it changed, what it replaced, what was rejected |
+| File                                                         | Answers                                                                              |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| [`LLD/open-questions.md`](LLD/open-questions.md)             | What is **not yet decided** — assumptions A1–A12 and the open items that block build |
+| [`engineering/tech-choices.md`](engineering/tech-choices.md) | **Current state**: what we use and why, written in the present tense                 |
+| this file                                                    | **History**: when it changed, what it replaced, what was rejected                    |
 
 When an open question closes: add an entry here, rewrite `tech-choices.md` (or the relevant
 LLD doc) to describe the new present, and strike the item from `open-questions.md`. This log
@@ -17,6 +17,124 @@ that references the old one.
 
 Keep entries short. If the reasoning needs more than a paragraph it belongs in a doc, and the
 entry links to it.
+
+---
+
+## 2026-08-25 — Hard delete is back, as a separate route from soft deactivate
+
+**Decision:** `DELETE /admin/zones/:id/hard` permanently removes a zone document. Blocked with
+`409 ZONE_STILL_ACTIVE` unless the zone is already inactive — deactivate it first via the
+existing `DELETE /admin/zones/:id`, which is unchanged and still blocks on nothing. This
+reverses the "Pickup zones are a serviceability gate and a fee" entry below, which retired hard
+delete entirely on the reasoning that `DELETE` should just mean soft-deactivate.
+
+**Why:** product wants a real permanent-removal path, not only "make it stop resolving." With
+Z-1 retired there is no longer a parent/child relationship between zones for a delete to check —
+that was FR-Z6's original blocking mechanism — so the only gate `zones` can still enforce on its
+own is "not currently active." `catalog`/`bookings` referencing this id is invisible to `zones`
+(tier 3, below both) and stays that way; this is the same limitation `GetZoneDependentsUseCase`
+already accepts for its own CITY warning.
+
+**Why a separate route, not `DELETE /:id?hard=true`:** one HTTP verb performing two very
+different operations — one reversible, one not — based on a query flag is easy to get wrong from
+a client. A distinct path makes the irreversible action harder to trigger by accident.
+
+**Consequences:** `ZoneRepositoryPort.deleteById` and `DeleteZoneUseCase` are back (a hard
+delete existed before the 2026-08-25 redesign, in a different shape — blocked on parent/child
+links that no longer exist, rather than on `isActive`). `ZONE_STILL_ACTIVE` added to
+`FAULT_CODES`. `zones.md`'s HTTP surface and Codes tables updated to match.
+
+**Refs:** [`LLD/zones.md`](LLD/zones.md) §HTTP surface, §Codes,
+`apps/api/src/modules/zones/application/useCases/deleteZone.usecase.ts`
+
+---
+
+## 2026-08-25 — Brand primary is `#C0FF72`, and it is a surface, not an ink
+
+**Decision:** the admin panel's primary colour is `#C0FF72`, replacing `#0b6bcb` in
+`tokens.ts`. It is used only as a **fill with dark text on it** — primary buttons, the active nav
+item, selected pills. A separate token, `interactive` (`#3F6212`), carries every coloured _ink_:
+links, focus rings, selected state, the active tab underline.
+
+**Why the split:** `#C0FF72` scores **1.18:1 against white**. As text, an icon, a border or a
+focus ring it is invisible — not "low contrast", invisible. The logo's `#1EBC00` fails too, at
+2.55:1. There is no way to have one token that is both the brand fill and a usable ink, so there
+are two, and [`engineering/design-language.md`](engineering/design-language.md) says which is
+which.
+
+**What it costs:** every use of the accent has to ask "fill or ink?", which is one more decision
+per component than a mid-tone brand colour would need.
+
+**The guard is a test, not this document.** `theme.contrast.test.ts` asserts every declared
+text-on-surface pair at 4.5:1 and every UI boundary at 3:1. A brand colour that looks like it
+should be the text colour will be tried as the text colour eventually; the test is the answer
+that does not depend on anyone having read the doc.
+
+---
+
+## 2026-08-25 — TanStack Query, and the design system gains runtime dependencies
+
+**Decision:** `@driverzone/design-system` takes its first runtime dependencies —
+`@radix-ui/react-*` for dialog, sheet, dropdown, select, tooltip, tabs and popover, plus `clsx`
+and `tailwind-merge`. Styling is Tailwind v4, themed from `tokens.ts`. Server state is TanStack
+Query v5.
+
+**Why now, for TanStack Query:** [`engineering/tech-choices.md`](engineering/tech-choices.md)
+listed a state-management library under _Deliberately absent_ with "add it when the admin panel
+actually needs it, not before". The zone editor is that moment — debounced validation on every
+geometry change, invalidation across a list and a detail view at once, and a map that must not
+blank on a background refetch. That row is now struck.
+
+**Why Radix, given the package had no dependencies at all:** focus trapping, escape and
+outside-click handling, typeahead and ARIA wiring are the parts of a component library that are
+genuinely hard, and a hand-rolled version is wrong in ways that only surface for a keyboard or
+screen-reader user. Radix is unstyled, so the design language stays ours.
+
+**Rejected:** shadcn/ui — a large head start, at the cost of roughly thirty vendored files we
+then own and a second token layer to keep in sync with `tokens.ts`; CSS Modules with custom
+properties — no dependency at all and the honest alternative, but noticeably slower for dense
+tables and forms.
+
+**The rule this sets:** the bar for the next runtime dependency in that package is the same one
+Radix cleared — a component we would otherwise get subtly wrong. Not convenience.
+
+**Unchanged and load-bearing:** `tokens.ts` still imports nothing, which is what lets
+`@driverzone/mobile-ui` consume it without pulling a web dependency into a Metro bundle.
+
+---
+
+## 2026-08-25 — The admin panel talks to the API directly; there is no BFF
+
+**Decision:** `apps/web` is a client-side application that Next serves. Every screen is a client
+component, no Server Component fetches from the API, and Next runs no route handlers of its own.
+
+**Why:** [`LLD/auth.md`](LLD/auth.md) gives an admin an access token in the response body and a
+refresh token in an httpOnly cookie **scoped to `/api/admin/auth`**. The access token therefore
+lives in the browser and a Server Component has no way to obtain one. Making RSC data fetching
+work would mean Next owning a second session — a second store, a second set of expiry rules, a
+second thing to get wrong — to server-render an internal tool used by a handful of ops staff.
+
+**Rejected:** a BFF layer of Next route handlers with a Next-owned session cookie. It has a
+genuinely better XSS posture, since the access token never reaches browser JavaScript. It loses
+on the zone editor being irreducibly client-side anyway, and on keeping one auth design across
+all four clients.
+
+**What it costs, and this is real:** no server-side data fetching and no streaming for the
+heavier admin screens, which was one of the reasons Next was chosen in the first place. What
+remains — file-based routing, layouts, per-route code splitting, `output: 'standalone'` — is
+still worth having.
+
+**Two consequences worth knowing before they surprise someone:**
+
+1. **The panel must be same-site with the API in production.** The refresh cookie is
+   `SameSite=Strict` and set on the API's origin, so `admin.driverzone.in` beside
+   `api.driverzone.in` works and a different registrable domain means the cookie is never sent
+   and login silently never completes. Local development is unaffected — ports do not affect
+   site. Recorded in [`engineering/build-and-deploy.md`](engineering/build-and-deploy.md).
+2. **A hard reload always costs one refresh round-trip**, because the access token is held in
+   memory and never in `localStorage` — storing it where an XSS could read it would give back
+   most of what the httpOnly cookie buys. Session restore _is_ a silent refresh, so the shell
+   renders a boot skeleton rather than a flash of the login screen.
 
 ---
 
@@ -41,13 +159,13 @@ now prices as `PLAIN`, and the driver is underpaid for the hardest part of the j
 original argument for route classification and it has not stopped being true.
 
 **The mitigation is operational, not technical.** A hill zone's edge is now a price boundary, so
-it must be drawn over the *approach corridor* and not just the summit towns. If a destination is
+it must be drawn over the _approach corridor_ and not just the summit towns. If a destination is
 reached through the hills, the road to it belongs inside the polygon. The admin editor says so
 when the zone type is `HILL`.
 
 **Consequences:** OSRM stays — the distance band still needs road distance, and haversine
 under-reports 30–50% in hills, worst exactly when the destination is in the hills. But the route
-*geometry* was only ever fetched for terrain, so OSRM is now called with `overview=false` and the
+_geometry_ was only ever fetched for terrain, so OSRM is now called with `overview=false` and the
 H3 cache stores no polyline.
 
 `classifyTerrain` and `hillMetresOnRoute` are **retained in `@driverzone/geo`, tested and unused**,
@@ -85,7 +203,7 @@ but it is the wrong product and nobody chose it. So incity wins only within
 `incity.max_distance_multiple` × the longest variant's `included_km`, and falls through above that.
 
 **A deliberate asymmetry, stated so it does not read as inconsistency:** the price rung resolves
-ties *downward* (never over-charge on a config error), while the terrain rung resolves *upward*
+ties _downward_ (never over-charge on a config error), while the terrain rung resolves _upward_
 (`HILL` over `PLAIN`, which costs more). The first protects the customer from our mistake; the
 second protects driver supply, because a driver underpaid on hill trips stops accepting them.
 Under destination-point terrain the second rung is unreachable anyway — a point is either in a
@@ -102,19 +220,19 @@ a caller that will eventually rank them differently.
 
 ## 2026-08-25 — Pickup zones are a serviceability gate and a fee; Z-1, P-1 and the package↔zone links are retired
 
-**Decision:** a pickup zone answers one question — *may we pick up here, and does it cost extra* —
+**Decision:** a pickup zone answers one question — _may we pick up here, and does it cost extra_ —
 identically for incity and outstation. It has no parent, and no package references it. `pickupZoneIds`
 is deleted from both package schemas along with its indexes; invariant **P-1** goes with it, and
 **Z-1** (pickup ⊆ city) is retired. The city zone now only defines what "incity" means: it scopes the
 incity package and answers the `to` check. See [`LLD/zones.md`](LLD/zones.md).
 
-**Why:** the two jobs were tangled. Free-vs-paid is a property of the *zone* — `pickupChargeType`,
+**Why:** the two jobs were tangled. Free-vs-paid is a property of the _zone_ — `pickupChargeType`,
 which `computeInCityFare` already reads — not a package dimension, and both Siliguri pickup zones sell
 the same catalogue. Once that is true the M:N link buys nothing: it costs a join, two invariants, a
 multi-select in the package editor, and a re-point step on every geometry version.
 
 Z-1 fell out of the same reasoning. Its stated purpose was making a runtime config fault unreachable —
-but the fault only existed *because* of the parent link, a `parentZoneId` that could disagree with the
+but the fault only existed _because_ of the parent link, a `parentZoneId` that could disagree with the
 polygon it sat in. Removing the link deletes the fault rather than merely hiding it: a 500 that paged
 someone became a 200 offering the customer outstation instead. What it buys is real: a pickup zone may
 now sit outside the city, and Bagdogra airport and NJP station are the two highest-value outstation
@@ -123,7 +241,7 @@ pickups in Siliguri.
 **Rejected: hard-coding the singletons** — dropping `cityZoneId`, treating "the city zone" as a
 constant, one incity package wired in. It saves about a day and costs a data migration plus a rewrite
 of zone resolution the first time a second city appears. The generic part that is expensive is the
-*admin surface*; the generic part that is cheap is the *data*. Cut the first, keep the second: no city
+_admin surface_; the generic part that is cheap is the _data_. Cut the first, keep the second: no city
 switcher, no zone tree, no per-city package scoping in the UI — but the schema and `resolveAt` would
 answer correctly for five cities unchanged.
 
@@ -134,7 +252,7 @@ still pass. `STRADDLING_PICKUP` changes meaning: it was a Z-1 violation fixture 
 whose northern half drives the new `PICKUP_OUTSIDE_CITY` outcome.
 
 **Known limit, accepted:** a pickup zone drawn somewhere absurd is no longer caught at save time. Z-2
-still prevents the *dangerous* case — two overlapping pickup zones making resolution non-deterministic
+still prevents the _dangerous_ case — two overlapping pickup zones making resolution non-deterministic
 — and a pickup zone in the wrong district is merely useless rather than wrong. The nightly integrity
 job and the `dependents` view make it visible.
 
@@ -149,10 +267,10 @@ job and the `dependents` view make it visible.
 geometric predicates and derived geometry are Turf's, in `@driverzone/geo`. No second datastore, no
 geo microservice, no hosted tilequery API.
 
-**Why write down what we were already doing:** because there is a trap in it that fails *silently*.
+**Why write down what we were already doing:** because there is a trap in it that fails _silently_.
 GeoJSON RFC 7946 wants exterior rings counter-clockwise. Turf is indifferent to winding; the
 `2dsphere` index is not — it reads ring orientation to decide which side is "inside", and a clockwise
-exterior ring on a large polygon is interpreted as *the whole earth except that shape*. Nothing
+exterior ring on a large polygon is interpreted as _the whole earth except that shape_. Nothing
 throws. The symptom is a hill zone that contains every route in India, so every outstation trip prices
 as `HILL`. Map editors and imported GeoJSON produce clockwise rings routinely. The mitigation is one
 line — `@turf/rewind` in the write path — and it is only obvious once someone has named the failure.
@@ -177,6 +295,102 @@ those are worked around — each is why the other half of the split exists.
 
 ---
 
+## 2026-08-24 — Zone geometry crosses the wire as raw GeoJSON, not `{lat,lng}`
+
+**Decision:** every zone-geometry field in the API — `CreateZoneRequest.geometry`,
+`ValidateZoneRequest.geometry`, `ZoneDto.geometry`, and so on — is a GeoJSON `Polygon`
+(`[lng, lat]` per ring point). This is the one deliberate exception to this API's `{lat,lng}`
+convention for every other coordinate (`api-contracts.md`).
+
+**Why:** a polygon drawn in the admin map editor (Mapbox Draw / MapLibre) is already GeoJSON on
+the client. `@driverzone/geo`'s `{lat,lng}` ↔ GeoJSON helpers (`toPosition`/`fromPosition`) exist
+for a single point; round-tripping an entire ring through `{lat,lng}` objects just to convert it
+straight back on arrival adds a translation layer with nothing to gain, on the one payload shape
+that's already speaking the right protocol.
+
+**Consequences:** `zones/interface/zones.validation.ts` validates GeoJSON structurally, and its
+`Position` schema is `number[]` — not a fixed 2-tuple — matching `@types/geojson` exactly.
+Narrowing it to `[number, number]` looked reasonable and broke the compile-time drift guard in
+`zones.typecheck.ts`, since GeoJSON's own `Position` deliberately allows an optional third
+(elevation) element.
+
+**Refs:** `apps/api/src/modules/zones/interface/zones.validation.ts`,
+`packages/contracts/src/zones.ts`
+
+---
+
+## 2026-08-24 — Zone deactivation is reversible-with-confirmation; delete is FR-Z6's hard block
+
+**Decision:** `POST /admin/zones/:id/deactivate` implements `admin-panel.md`'s blast-radius UX —
+blocked when the zone has active dependents unless `force: true` is passed, after which it
+proceeds. `DELETE /admin/zones/:id` implements FR-Z6's literal "blocked" behaviour with no
+override: allowed only once the zone is already inactive and nothing still references it.
+
+**Why:** `prd.md` FR-Z6 says a zone with dependents is "blocked" on delete/deactivate;
+`admin-panel.md`'s actual UX shows the blast radius and offers "[Deactivate anyway]" — two
+different behaviours under one requirement. Resolved by mapping FR-Z6's hard block onto the
+truly destructive action and `admin-panel.md`'s softer UX onto the reversible one: a deactivated
+zone's version history and audit trail are never lost (Z-5), so "confirm and proceed" is a safe
+default there in a way it is not for an actual delete.
+
+**Also decided here:** dependents are zone-native only for now — a CITY's active PICKUP
+children. `catalog`/`bookings` don't exist yet, so the "3 packages reference this zone" / "8
+bookings in the queue" parts of `admin-panel.md`'s example dependents screen can't be computed
+inside `zones` (it sits below both in the tier graph and may not depend on either). The response
+shape is designed so those sections are additive later, not a breaking change.
+
+**Refs:** `apps/api/src/modules/zones/application/useCases/deactivateZone.usecase.ts`,
+`deleteZone.usecase.ts`, `getZoneDependents.usecase.ts`
+
+---
+
+## 2026-08-24 — Hill-zone resolution drops the `settings` dependency
+
+**Decision:** `ZoneResolutionContract.findHillZonesNear(route)` returns intersecting HILL
+zones only — geometry, not a PLAIN/HILL verdict. This reverses `adding-a-module.md`'s worked
+example for `zones`, which said the module "consumes `settings` (for the hill threshold)".
+
+**Why:** the threshold-based classification (`classifyTerrain()` in `@driverzone/geo`, which
+needs the threshold) is business logic belonging to whichever module actually needs the
+verdict — `quotes`, not built yet. Making `zones` depend on a `settings` module that doesn't
+exist yet, just to run one function call it doesn't otherwise need, was the wrong shape for the
+dependency; geometry is `zones`'s job, the threshold is `quotes`'s.
+
+**Consequences:** `zones` has one fewer tier dependency than the worked example sketched.
+`quotes`, once built, calls `classifyTerrain()` itself with the zones this method returns and
+its own `settings`-sourced threshold.
+
+**Refs:** `apps/api/src/modules/zones/application/useCases/findHillZonesForRoute.usecase.ts`,
+`docs/engineering/adding-a-module.md`, `docs/LLD/zone-resolution.md`
+
+---
+
+## 2026-08-24 — The generic `auditLog` model moved to `shared/`
+
+**Decision:** `identity/infrastructure/auditLog.model.ts` moved to
+`apps/api/src/shared/db/auditLog.model.ts`. `identity/infrastructure/audit.mongo.ts` and the new
+`zones/infrastructure/audit.zones.ts` are both thin adapters over the one shared model.
+
+**Why:** the schema was already entity-agnostic (`entityType` is the discriminator) and `zones`
+needed the identical thing. `module-internals-are-private` forbids `zones` importing
+`identity/infrastructure/`, and duplicating the schema in a second file would let the two drift.
+`shared/` is importable by every module (`shared-is-below-modules`), so a schema more than one
+module genuinely needs belongs there rather than inside whichever module happened to need it
+first.
+
+**Consequences:** no behaviour change for `identity` — its existing audit tests pass unchanged
+against the moved model. Each module still declares its own `AuditPort`/`AuditEntry` in its own
+`domain/` (a port is something each bounded context owns for itself, even when the adapter
+behind it is shared) — only the Mongoose schema moved.
+
+**Refs:** `apps/api/src/shared/db/auditLog.model.ts`,
+`apps/api/src/modules/identity/infrastructure/audit.mongo.ts`,
+`apps/api/src/modules/zones/infrastructure/audit.zones.ts`
+
+---
+
+---
+
 ## 2026-08-24 — A dev-only fixed OTP, scoped to seeded accounts
 
 **Decision:** `DEV_FIXED_OTP` — unset by default — makes `otp/verify` accept one fixed code, but
@@ -184,7 +398,7 @@ only for the four accounts `pnpm seed` creates, and only outside production.
 
 **Why:** logging in locally meant calling `otp/send` and reading the code off a log line, on every
 attempt, for every role. That friction is paid dozens of times a day. The alternative designs were
-worse: accepting a fixed code for *any* number in development would mean the real generation,
+worse: accepting a fixed code for _any_ number in development would mean the real generation,
 hashing and attempt-burning paths are never exercised until staging, so a bug in them surfaces
 somewhere expensive.
 
@@ -202,7 +416,7 @@ token-issuing path is how a dev convenience quietly acquires different rules fro
 shortcuts.
 
 **Also decided here:** `src/scripts/*` is exempted from the `no-restricted-imports` module
-boundary. The seed has to create an admin, and `identity` exposes no way to do that *on purpose* —
+boundary. The seed has to create an admin, and `identity` exposes no way to do that _on purpose_ —
 `account.repository.impl.ts` throws for `create('ADMIN', …)`. There is no contract route to take,
 so an exemption is more honest than widening a public contract to accommodate a dev fixture.
 
@@ -304,7 +518,7 @@ like it worked and surface weeks later as an admin opening a licence and finding
 port stays inside the module for now; it moves to `shared/storage/` when `bookings` needs
 receipt URLs, which `architecture.md` already anticipates.
 
-**Also decided here:** the document row is written *before* the file is uploaded, holding the
+**Also decided here:** the document row is written _before_ the file is uploaded, holding the
 key the client is about to `PUT` to. A failed upload then leaves a `PENDING` document the driver
 can retry rather than no record at all. The cost — a row referencing an object that never
 arrived — resolves itself: an admin reviewing an empty document rejects it.
@@ -447,7 +661,7 @@ bcrypt/Argon2 hash.
 **Why:** A 6-digit code carries roughly 20 bits of entropy and a 5-minute TTL — a slow,
 memory-hard hash defends against offline brute-force of a secret that is already
 effectively unbrute-forceable within its lifetime by the attempt limit and cooldown alone (see
-`LLD/auth.md`). What a memory-hard hash *would* cost here is verify-time latency
+`LLD/auth.md`). What a memory-hard hash _would_ cost here is verify-time latency
 under legitimate retry, for no matching security gain. A keyed HMAC is fast, non-invertible
 without the server-held pepper, and is the right tool for a short-lived, low-entropy,
 rate-limited secret — distinct from the admin-auth-unification entry above, which removes the
@@ -493,7 +707,7 @@ string. Closed with an ESLint rule enforcing static messages rather than left to
 **Decision:** `/api/health` (while succeeding) and the driver location ping are never
 access-logged.
 
-**Why:** the reasoning behind *not* logging something is the kind that gets lost and then
+**Why:** the reasoning behind _not_ logging something is the kind that gets lost and then
 "fixed" by someone adding it back. Health is polled every 15 s by the container healthcheck —
 ~5,700 lines a day carrying no information. The location ping runs at 200 writes/s sustained,
 which is ~17M lines a day and would be the single largest item on any log bill, while telling
@@ -502,7 +716,7 @@ you nothing a metric would not tell you better.
 **Consequences:** a failing health check still logs, because that is the case you need. If
 location pings ever need investigating, the answer is a counter, not a log line.
 
-**Also decided here:** the access log records the route *pattern* (`/api/bookings/:id`), never
+**Also decided here:** the access log records the route _pattern_ (`/api/bookings/:id`), never
 the raw URL — raw paths carry identifiers, blow up cardinality, and put IDs into a retained,
 indexed field.
 

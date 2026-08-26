@@ -16,16 +16,28 @@ export {
   type LatLng,
 } from './coords.js';
 
+/**
+ * Re-exported so consumers never import the bare `geojson` package directly. It ships types
+ * only (via `@types/geojson`, no runtime module on disk), which `apps/api`'s dependency-cruiser
+ * cannot resolve the way `tsc` can — going through this already-resolvable workspace package
+ * sidesteps that entirely, the same reasoning as every other type here.
+ */
+export type { LineString, Point, Polygon } from 'geojson';
+
 export {
+  checkMaximumArea,
   checkMinimumArea,
   checkOverlap,
   checkValidity,
   checkWithinParent,
   clipToParent,
+  normalizeWinding,
   validateZone,
+  zoneStats,
   type NamedZone,
   type ViolationSeverity,
   type ZoneRule,
+  type ZoneStats,
   type ZoneValidationInput,
   type ZoneViolation,
 } from './zone-rules.js';

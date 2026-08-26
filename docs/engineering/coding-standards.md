@@ -7,7 +7,7 @@ Conventions that are not enforced by a linter, plus the reasoning for the ones t
 **Always integer paise. Never a float, never rupees.**
 
 ```ts
-const base_fare_paise = 149950;   // ₹1,499.50
+const base_fare_paise = 149950; // ₹1,499.50
 ```
 
 Floating-point arithmetic on money produces receipts whose lines do not sum to the total, and
@@ -39,7 +39,7 @@ once.
 ```ts
 import { toGeoJsonPoint, assertPlausibleCoordinate } from '@driverzone/geo';
 
-assertPlausibleCoordinate(input.pickup, 'pickup');   // at the API boundary, always
+assertPlausibleCoordinate(input.pickup, 'pickup'); // at the API boundary, always
 const point = toGeoJsonPoint(input.pickup);
 ```
 
@@ -49,30 +49,30 @@ serve it. `assertPlausibleCoordinate` is a tripwire for that and for an unpopula
 
 ## Units
 
-| Quantity | Unit | Suffix |
-|---|---|---|
-| Money | paise | `_paise` |
-| Percentage | basis points | `_bps` |
-| Distance | metres | `_m` / `Metres` |
-| Duration | minutes | `_minutes` / `Min` |
-| Timeouts | seconds | `_seconds` |
-| Timestamps | UTC `Date` | `_at` |
+| Quantity   | Unit         | Suffix             |
+| ---------- | ------------ | ------------------ |
+| Money      | paise        | `_paise`           |
+| Percentage | basis points | `_bps`             |
+| Distance   | metres       | `_m` / `Metres`    |
+| Duration   | minutes      | `_minutes` / `Min` |
+| Timeouts   | seconds      | `_seconds`         |
+| Timestamps | UTC `Date`   | `_at`              |
 
 Suffix everything. `distance` is a question; `distance_m` is an answer.
 
 ## Naming
 
-| Thing | Convention | Example |
-|---|---|---|
-| Files | `camelCase.<role>.ts` | `campaignRecipient.repository.impl.ts` |
-| Entities | `<thing>.entity.ts` | `booking.entity.ts` |
-| Ports | `<thing>.port.ts` | `zoneRepository.port.ts` |
-| Use cases | `<verb><Thing>.usecase.ts` | `createBooking.usecase.ts` |
-| Mongoose models | `<thing>.model.ts` | `zone.model.ts` |
-| Adapters | `<thing>.<tech>.ts` | `dispatchQueue.bullmq.ts` |
-| Contracts | `<Consumer><Purpose>Contract` | `ZoneResolutionContract` |
-| Classes | `PascalCase` | `GetHealthUseCase` |
-| Factories | `make…` / `build…` | `makeGetHealthController` |
+| Thing           | Convention                    | Example                                |
+| --------------- | ----------------------------- | -------------------------------------- |
+| Files           | `camelCase.<role>.ts`         | `campaignRecipient.repository.impl.ts` |
+| Entities        | `<thing>.entity.ts`           | `booking.entity.ts`                    |
+| Ports           | `<thing>.port.ts`             | `zoneRepository.port.ts`               |
+| Use cases       | `<verb><Thing>.usecase.ts`    | `createBooking.usecase.ts`             |
+| Mongoose models | `<thing>.model.ts`            | `zone.model.ts`                        |
+| Adapters        | `<thing>.<tech>.ts`           | `dispatchQueue.bullmq.ts`              |
+| Contracts       | `<Consumer><Purpose>Contract` | `ZoneResolutionContract`               |
+| Classes         | `PascalCase`                  | `GetHealthUseCase`                     |
+| Factories       | `make…` / `build…`            | `makeGetHealthController`              |
 
 `make…` returns a handler; `build…` returns a composed object (a router, a container). A small
 distinction that makes the container readable at a glance.
@@ -111,7 +111,7 @@ distance — return **HTTP 200** with `available: false`:
 {
   "available": false,
   "reason": "ZONE_NO_PICKUP_COVERAGE",
-  "message": "We don't have drivers at your pickup location yet."
+  "message": "We don't have drivers at your pickup location yet.",
 }
 ```
 
@@ -131,7 +131,7 @@ container runtime owns collection.
 ### Argument order
 
 ```ts
-logger.info({ bookingId, driverId }, 'driver assigned');   // data first, message second
+logger.info({ bookingId, driverId }, 'driver assigned'); // data first, message second
 ```
 
 The reverse of winston's. Getting it backwards does not throw: pino logs the object as the
@@ -139,14 +139,14 @@ message and drops every field.
 
 ### Levels
 
-| Level | Means | Example |
-|---|---|---|
-| `fatal` | the process is going down | invalid env, cannot reach Mongo at boot |
-| `error` | a fault; someone should look | unhandled throw, `AppError` with `isExpected: false` |
-| `warn` | degraded but handled | Redis reconnecting, health probe timed out, 4xx response |
-| `info` | a state change worth reconstructing later | booking created, driver assigned, wave escalated |
-| `debug` | developer detail, off in production | container wiring, cache hit/miss |
-| `trace` | per-iteration noise, never on in production | — |
+| Level   | Means                                       | Example                                                  |
+| ------- | ------------------------------------------- | -------------------------------------------------------- |
+| `fatal` | the process is going down                   | invalid env, cannot reach Mongo at boot                  |
+| `error` | a fault; someone should look                | unhandled throw, `AppError` with `isExpected: false`     |
+| `warn`  | degraded but handled                        | Redis reconnecting, health probe timed out, 4xx response |
+| `info`  | a state change worth reconstructing later   | booking created, driver assigned, wave escalated         |
+| `debug` | developer detail, off in production         | container wiring, cache hit/miss                         |
+| `trace` | per-iteration noise, never on in production | —                                                        |
 
 Production runs at `info`. The rule above still governs: expected errors log at `info`, not
 `error`.
@@ -154,8 +154,8 @@ Production runs at `info`. The rule above still governs: expected errors log at 
 ### Messages are static; data goes in the object
 
 ```ts
-logger.info(`otp ${otp} sent to ${phone}`);        // ✗ lint error
-logger.info({ requestedBy }, 'otp sent');          // ✓
+logger.info(`otp ${otp} sent to ${phone}`); // ✗ lint error
+logger.info({ requestedBy }, 'otp sent'); // ✓
 ```
 
 **This is a redaction rule, not a style rule.** `redact` matches object paths and cannot see
@@ -175,7 +175,7 @@ numbers (`phone`, `masked_phone`), credentials (`token`, `password`, `refresh_to
 one point in one line is a different exposure from a stored trace. The rule that protects
 location instead: never log a route or a trace whole — log the zone ID it resolved to.
 
-### What is never logged *at all*
+### What is never logged _at all_
 
 Two paths are excluded from the access log, and both would otherwise drown everything else:
 
@@ -224,11 +224,11 @@ type signature is lying.
 
 `packages/config/tsconfig.base.json` is strict, and three settings do real work:
 
-| Setting | Catches |
-|---|---|
-| `noUncheckedIndexedAccess` | `arr[i]` is `T \| undefined`. Every off-by-one and sparse lookup. |
+| Setting                      | Catches                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `noUncheckedIndexedAccess`   | `arr[i]` is `T \| undefined`. Every off-by-one and sparse lookup.                                     |
 | `exactOptionalPropertyTypes` | `{ ip: undefined }` is not the same as `{}`. Stops `undefined` serialising into a response as `null`. |
-| `verbatimModuleSyntax` | A value import of a type-only symbol is an error, not a runtime surprise. |
+| `verbatimModuleSyntax`       | A value import of a type-only symbol is an error, not a runtime surprise.                             |
 
 > These caught four real bugs during scaffolding, before any feature code existed —
 > `mongoose.readyState` is `0-3` **plus 99**, which a four-element tuple cannot index; and
@@ -242,6 +242,53 @@ Other rules:
 - **`import type`** for type-only imports (auto-fixable).
 - **ESM**: relative imports carry the `.js` extension even from `.ts` sources. This is NodeNext,
   not a mistake.
+
+## Frontend
+
+The rules above apply to `apps/web` unchanged — money is still integer paise, distance is still
+metres, `AppError`'s `message` is still the only thing a user sees. What follows is what is
+different about a React codebase. The architecture is
+[`frontend-architecture.md`](frontend-architecture.md); the visual rules are
+[`design-language.md`](design-language.md).
+
+### Naming
+
+React components are `PascalCase.tsx`. That is the one deliberate exception to the
+`camelCase.<role>.ts` table above, and it is worth making: a component's file name is what appears
+in a stack trace and in React DevTools, and `dataTable.tsx` exporting `DataTable` puts two names on
+one thing for no gain.
+
+| Thing           | Convention       | Example                |
+| --------------- | ---------------- | ---------------------- |
+| Components      | `PascalCase.tsx` | `DataTable.tsx`        |
+| Hooks           | `use<Thing>.ts`  | `useZones.ts`          |
+| Everything else | as above         | `client.ts`, `keys.ts` |
+
+### Two rules the client owes the API
+
+**Render `message`, never build copy from `code`.** Every response carries a `message` that is
+safe to display verbatim. A client that switches on `code` to pick its own wording renders a blank
+or a fallback string the moment a new reason is added server-side. `code` is for control flow —
+which state to show, whether to offer a retry, whether to redirect — and nothing else.
+
+**`available: false` is a 200, not an error.** Zone-resolution outcomes are the system working
+correctly ([`../LLD/zone-resolution.md`](../LLD/zone-resolution.md)). They come back as ordinary
+data and render as an informational state. Routing them through the error path is how a genuine
+fault ends up buried under expected traffic.
+
+### Money in a form
+
+`MoneyInput` takes rupees and emits integer paise. It is the only place that conversion happens,
+for the same reason `@driverzone/geo` is the only place `[lng, lat]` happens: the alternative is
+`parseFloat` appearing in a pricing form, which §Money bans and which produces a fare breakdown
+whose lines do not sum to its total.
+
+### Every data surface handles four states
+
+`loading`, `error`, `empty`, `ready` — through `<DataState>`. A screen handling three of them is
+unfinished, and the wrapper exists so that is visible in a diff rather than being a convention
+that decays. The full rules are in
+[`frontend-architecture.md`](frontend-architecture.md) §The loading system.
 
 ## Comments
 

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { logger } from '@/shared/logging/logger.js';
+import { AuditLogModel } from '@/shared/db/auditLog.model.js';
 import type { AuditEntry, AuditPort } from '../domain/audit.port.js';
-import { AuditLogModel } from './auditLog.model.js';
 
 /**
  * INFRASTRUCTURE — admin actions, recorded.

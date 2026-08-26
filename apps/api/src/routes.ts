@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import swaggerUi from 'swagger-ui-express';
+import { isProduction } from '@/config/env.js';
+import { generateOpenApiDocument } from '@/shared/http/swagger.util.js';
 import type { AppContainers } from './container.js';
 
 /**
@@ -10,6 +13,22 @@ import type { AppContainers } from './container.js';
 export function buildApiRouter(c: AppContainers): Router {
   const router = Router();
   router.use('/health', c.health.buildRouter());
+
+  /**
+   * Zones only, for now — no other module registers OpenAPI paths yet
+   * (`zones.container.ts` calls `registerZonesSwaggerPaths()` as a side effect of being built,
+   * which has already happened by the time this function runs — `c` is built first). The
+   * document is generated once per process start, not per request: nothing here changes without
+   * a redeploy.
+   *
+   * Off in production. This is generated straight from the same validators the API enforces
+   * requests with, which is exactly why it is not something to hand an unauthenticated internet
+   * a map of by default.
+   */
+  if (!isProduction) {
+    const openApiDocument = generateOpenApiDocument();
+    router.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
+  }
 
   /**
    * One surface per role — auth plus that role's own account routes.
@@ -25,7 +44,15 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/driver', c.identity.buildRoleRouter('DRIVER'));
   router.use('/admin', c.identity.buildRoleRouter('ADMIN'));
 
-  router.use('/packages', c.packages.buildRouter());
+  /**
+   * More specific than `/admin` above, so they must be registered after it: a request to
+   * `/admin/zones/...` first enters identity's ADMIN router, finds no matching route inside it,
+   * and falls through via `next()` to this mount — standard Express behaviour for two `.use()`
+   * calls with overlapping prefixes, not a hack. `/coverage` has no such overlap.
+   */
+  router.use('/admin/zones', c.zones.buildAdminRouter());
+  router.use('/admin/packages', c.packages.buildRouter());
+  router.use('/coverage', c.zones.buildCoverageRouter());
 
   return router;
 }

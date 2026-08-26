@@ -14,7 +14,7 @@ import { CustomerModel } from '@/modules/identity/infrastructure/customer.model.
 import { DriverModel } from '@/modules/identity/infrastructure/driver.model.js';
 import { DriverDocumentModel } from '@/modules/identity/infrastructure/driverDocument.model.js';
 import { SessionModel } from '@/modules/identity/infrastructure/session.model.js';
-import { AuditLogModel } from '@/modules/identity/infrastructure/auditLog.model.js';
+import { AuditLogModel } from '@/shared/db/auditLog.model.js';
 
 /**
  * Creates the known development accounts: an admin, an approved driver, and two customers.

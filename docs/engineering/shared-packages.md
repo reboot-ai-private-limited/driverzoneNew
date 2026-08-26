@@ -65,7 +65,7 @@ assertPlausibleCoordinate(p, 'pickup');
 toGeoJsonPoint(p);
 
 // zone-rules.ts — the invariants that used to be PostGIS triggers
-validateZone({ geom, siblings });               // → ZoneViolation[]
+validateZone({ geom, siblings }); // → ZoneViolation[]
 // parentGeom is optional and nothing supplies one: Z-1 was retired with the
 // pickup→city parent link. checkWithinParent and clipToParent stay, dormant.
 
@@ -81,7 +81,7 @@ classifyTerrain(route, hillZones, thresholdMetres);
 Because the admin map editor needs the identical code.
 
 When an admin drags a pickup-zone corner across a neighbouring zone, the editor must say so
-*immediately*, with the offending area painted red — not after a round trip on save. And the
+_immediately_, with the offending area painted red — not after a round trip on save. And the
 editor's verdict must never disagree with the API's, because "it looked fine in the editor but
 the save failed" is the kind of bug that makes people stop trusting a tool.
 
@@ -106,21 +106,52 @@ hill zone for 800m.
 
 ## `@driverzone/design-system`
 
-**Web React components and the design tokens.**
+**Web React components, the design tokens, and the theme.**
 
 **Consumed by:** `apps/web`. And `src/tokens.ts` alone by `@driverzone/mobile-ui`.
 
+```
+src/tokens.ts              plain values, zero imports
+src/theme.css              Tailwind v4 @theme — the semantic layer
+src/ui/                    the components
+src/tokens.drift.test.ts   theme.css must match tokens.ts
+src/theme.contrast.test.ts every text/surface pair >= 4.5:1
+```
+
 ```ts
 // tokens.ts — plain values, zero imports
-export const colors = { bg: '#ffffff', brand: '#0b6bcb', zonePickupPaid: '#9a6700', … };
+export const colors = { bg: '#ffffff', accent: '#C0FF72', zonePickupPaid: '#9a6700', … };
 export const space  = { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 };
 ```
 
 `tokens.ts` importing nothing is what lets React Native consume it without dragging a single
 web dependency into a Metro bundle. Keep it that way — the moment it imports a React component,
-`mobile-ui` cannot use it.
+`mobile-ui` cannot use it. Adding `theme.css` and `ui/` alongside it does not threaten this:
+Metro resolves `@driverzone/design-system/tokens`, which reaches nothing else in the package.
 
-**Must never contain:** business logic, API calls, React Native components.
+### The two files that hold the same values
+
+Tailwind v4's `@theme` is CSS and cannot import TypeScript, so the palette necessarily exists in
+both `tokens.ts` and `theme.css`. Generating one from the other would give a package that
+deliberately ships source a build step, and a stale generated file is worse than no generation at
+all — so `tokens.drift.test.ts` asserts parity instead. Same idea as the `.typecheck.ts` drift
+guards on the API, which compare Zod schemas against the contract types rather than deriving one
+from the other.
+
+`theme.contrast.test.ts` is the other half, and it exists because of one specific hazard: the
+brand accent `#C0FF72` scores 1.18:1 against white. It is a fill, never an ink, and that is the
+kind of rule someone breaks in six months by writing what looks like obviously correct code. See
+[`design-language.md`](design-language.md).
+
+### It has runtime dependencies now
+
+`@radix-ui/react-*` for dialog, sheet, dropdown, select, tooltip, tabs and popover, plus `clsx`
+and `tailwind-merge`. This package had none until 2026-08-25 and the bar for the next one is the
+one Radix cleared — a component whose focus trapping and ARIA wiring we would otherwise get
+subtly wrong. Not convenience. See [`../decision-log.md`](../decision-log.md).
+
+**Must never contain:** business logic, API calls, anything that knows what a zone or a booking
+is, React Native components.
 
 ---
 
@@ -202,5 +233,5 @@ until a second app genuinely wants it. Promoting later is a `git mv` and a manif
 package nobody else uses is awkward and rarely happens.
 
 `@driverzone/geo` looks like a violation of that rule — the API is its main consumer today. It
-is not: the admin editor is a *known, imminent* second consumer, and the whole reason it exists
+is not: the admin editor is a _known, imminent_ second consumer, and the whole reason it exists
 is that both must run identical code.

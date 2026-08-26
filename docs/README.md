@@ -9,13 +9,13 @@ customer app + driver app).
 
 ## What lives where
 
-| | |
-|---|---|
-| [`prd.md`](prd.md) | What we're building and for whom. Start here. |
-| [`setup-development.md`](setup-development.md) | Clone to running stack. |
-| [`decision-log.md`](decision-log.md) | Decisions already made, dated, with what they replaced. |
-| [`LLD/`](#read-in-this-order) | Low-level design: the domain, the algorithms, the schemas. |
-| [`engineering/`](engineering/README.md) | How the code is structured, and why. |
+|                                                |                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| [`prd.md`](prd.md)                             | What we're building and for whom. Start here.              |
+| [`setup-development.md`](setup-development.md) | Clone to running stack.                                    |
+| [`decision-log.md`](decision-log.md)           | Decisions already made, dated, with what they replaced.    |
+| [`LLD/`](#read-in-this-order)                  | Low-level design: the domain, the algorithms, the schemas. |
+| [`engineering/`](engineering/README.md)        | How the code is structured, and why.                       |
 
 ## Setting up
 
@@ -29,28 +29,30 @@ infrastructure while the apps run on your machine with hot reload, and
 [`prd.md`](prd.md) first — what we're building, for whom, and what's out of scope. Then
 the low-level design in [`LLD/`](LLD/):
 
-| Doc | What it answers |
-|-----|-----------------|
-| [Domain Model](LLD/domain-model.md) | Glossary, entities, and the invariants that must never break |
-| [Database Schema](LLD/database-schema.md) | Mongoose schemas, indexes, where the invariants live |
-| [Zones](LLD/zones.md) | The zones module: what each zone type is for, the write path, the HTTP surface, every edge case |
-| [Zone Resolution](LLD/zone-resolution.md) | The core algorithm: point → zones → packages |
-| [Packages](LLD/packages.md) | The two products, how the server picks one, and the guards against overlapping bands |
-| [Pricing & Commission](LLD/pricing-and-commission.md) | Fare computation, snapshots, the earnings ledger |
-| [Dispatch & Assignment](LLD/dispatch-and-assignment.md) | Driver offer waves, accept races, reassignment |
-| [Booking Lifecycle](LLD/booking-lifecycle.md) | State machine and the event log |
-| [API Contracts](LLD/api-contracts.md) | Endpoints, payloads, error codes |
-| [Auth](LLD/auth.md) | Phone + OTP, tokens, rotation and reuse detection |
-| [User](LLD/user.md) | Profiles, addresses, vehicles, driver onboarding, admin verification |
-| [Architecture](LLD/architecture.md) | Stack, services, realtime, deployment |
-| [Admin Panel](LLD/admin-panel.md) | Screens, the polygon editor, validation rules |
-| [Roadmap](LLD/roadmap.md) | Build phases |
-| [Open Questions](LLD/open-questions.md) | Decisions needed before/during build |
+| Doc                                                     | What it answers                                                                                 |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [Domain Model](LLD/domain-model.md)                     | Glossary, entities, and the invariants that must never break                                    |
+| [Database Schema](LLD/database-schema.md)               | Mongoose schemas, indexes, where the invariants live                                            |
+| [Zones](LLD/zones.md)                                   | The zones module: what each zone type is for, the write path, the HTTP surface, every edge case |
+| [Zone Resolution](LLD/zone-resolution.md)               | The core algorithm: point → zones → packages                                                    |
+| [Packages](LLD/packages.md)                             | The two products, how the server picks one, and the guards against overlapping bands            |
+| [Pricing & Commission](LLD/pricing-and-commission.md)   | Fare computation, snapshots, the earnings ledger                                                |
+| [Dispatch & Assignment](LLD/dispatch-and-assignment.md) | Driver offer waves, accept races, reassignment                                                  |
+| [Booking Lifecycle](LLD/booking-lifecycle.md)           | State machine and the event log                                                                 |
+| [API Contracts](LLD/api-contracts.md)                   | Endpoints, payloads, error codes                                                                |
+| [Auth](LLD/auth.md)                                     | Phone + OTP, tokens, rotation and reuse detection                                               |
+| [User](LLD/user.md)                                     | Profiles, addresses, vehicles, driver onboarding, admin verification                            |
+| [Architecture](LLD/architecture.md)                     | Stack, services, realtime, deployment                                                           |
+| [Admin Panel](LLD/admin-panel.md)                       | Screens, the polygon editor, validation rules                                                   |
+| [Roadmap](LLD/roadmap.md)                               | Build phases                                                                                    |
+| [Open Questions](LLD/open-questions.md)                 | Decisions needed before/during build                                                            |
 
 ## Engineering handbook
 
 How the code is structured, and why: [`engineering/`](engineering/README.md) — monorepo layout,
-clean architecture and SOLID, module boundaries, tech choices, build and deploy.
+clean architecture and SOLID, module boundaries, tech choices, build and deploy, and the
+admin panel's [frontend architecture](engineering/frontend-architecture.md) and
+[design language](engineering/design-language.md).
 
 ## The one-paragraph version
 

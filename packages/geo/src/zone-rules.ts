@@ -5,6 +5,7 @@ import { difference } from '@turf/difference';
 import { featureCollection, polygon as turfPolygon } from '@turf/helpers';
 import { intersect } from '@turf/intersect';
 import { kinks } from '@turf/kinks';
+import { rewind } from '@turf/rewind';
 import type { Feature, Polygon } from 'geojson';
 
 /**
@@ -24,7 +25,7 @@ import type { Feature, Polygon } from 'geojson';
  * is drawn rather than on submit (docs/LLD/admin-panel.md §Live validation).
  */
 
-export type ZoneRule = 'Z-1' | 'Z-2' | 'Z-3' | 'Z-MIN-AREA' | 'Z-COMPLEXITY';
+export type ZoneRule = 'Z-1' | 'Z-2' | 'Z-3' | 'Z-MIN-AREA' | 'Z-MAX-AREA' | 'Z-COMPLEXITY';
 export type ViolationSeverity = 'ERROR' | 'WARN' | 'INFO';
 
 export interface ZoneViolation {
@@ -37,6 +38,15 @@ export interface ZoneViolation {
 
 /** Smallest polygon we accept as a serviceable zone: 1 hectare. */
 const MIN_AREA_SQM = 10_000;
+
+/**
+ * Largest polygon we accept as an operational zone: 100,000 km². Generous — bigger than West
+ * Bengal — because a HILL zone legitimately spans several districts. The point is not to
+ * constrain a real zone; it is to reject a mistake (an accidental country-sized selection, or a
+ * ring-winding bug reading a polygon as its own complement) long before that bug's actual
+ * hemisphere-scale threshold, where the symptom would otherwise be silent.
+ */
+const MAX_AREA_SQM = 100_000_000_000;
 
 /**
  * Same-type polygons drawn by hand share a border imprecisely. A strict overlap test rejects
@@ -104,6 +114,19 @@ export function checkValidity(geom: Polygon): ZoneViolation[] {
   return violations;
 }
 
+export interface ZoneStats {
+  areaKm2: number;
+  vertexCount: number;
+}
+
+/**
+ * Informational only — not an invariant, nothing here blocks a save. Backs the `stats` field on
+ * `POST /admin/zones/validate` (docs/LLD/api-contracts.md) and the editor's live area readout.
+ */
+export function zoneStats(geom: Polygon): ZoneStats {
+  return { areaKm2: area(asFeature(geom)) / 1_000_000, vertexCount: vertexCount(geom) };
+}
+
 /** Z-MIN-AREA — a zone too small to contain a pickup is a mis-draw, not a zone. */
 export function checkMinimumArea(geom: Polygon): ZoneViolation[] {
   const sqm = area(asFeature(geom));
@@ -118,14 +141,72 @@ export function checkMinimumArea(geom: Polygon): ZoneViolation[] {
 }
 
 /**
- * Z-1 — a PICKUP zone lies entirely inside its parent CITY zone.
+ * Z-MAX-AREA — implausibly large for an operational zone.
  *
- * This is the invariant that makes the ZONE_CONFIG_FAULT branch in docs/LLD/zone-resolution.md unreachable: if a
- * pickup polygon can never be saved outside its city, resolution can never find one there.
+ * Same family of bug as ring winding (see `normalizeWinding` below): a single-ring polygon
+ * larger than a hemisphere is read by MongoDB's `2dsphere` index as its own complement, with no
+ * error anywhere. This catches the mistake at a much smaller, still-implausible size, long
+ * before geometry reaches that failure mode.
+ */
+export function checkMaximumArea(geom: Polygon): ZoneViolation[] {
+  const sqm = area(asFeature(geom));
+  if (sqm <= MAX_AREA_SQM) return [];
+  return [
+    {
+      rule: 'Z-MAX-AREA',
+      severity: 'ERROR',
+      message: `Zone covers ${(sqm / 1_000_000).toFixed(0)} km², which is implausible for an operational zone. Check for an accidental selection or an inverted ring.`,
+    },
+  ];
+}
+
+/**
+ * Ring-winding normalization — RFC 7946 wants exterior rings counter-clockwise. Turf's
+ * predicates above are indifferent to winding; MongoDB's `2dsphere` index is not, and reads a
+ * clockwise exterior ring as the whole earth except that shape. This does not throw anywhere,
+ * so the fix is to normalize before anything else runs, not to detect and reject.
  *
- * The violation carries the spilling area as geometry so the editor can paint exactly which
- * corner is wrong. "0.42 km² outside Siliguri" plus a red patch on the map is a ten-second
- * fix; "invalid zone" is a guessing game across thirty-four vertices.
+ * MUST run first, before `validateZone` and before save — every check above, and the index
+ * itself, decides inside from outside by winding. Map editors and imported GeoJSON both produce
+ * clockwise rings routinely, so this is not a defensive rarity, it is the common case.
+ */
+/**
+ * Same structural pre-checks `checkValidity` runs before it ever touches Turf — repeated here
+ * because `@turf/helpers`' `polygon()` constructor (which both `asFeature` and `rewind` go
+ * through) *throws* on a too-short or unclosed ring rather than returning a violation. Skipping
+ * the rewind and handing the geometry back unchanged for these inputs is safe: they are already
+ * going to be rejected by `checkValidity`'s own Z-3 checks, and winding is moot for a ring that
+ * isn't a valid ring yet.
+ */
+function isStructurallySound(geom: Polygon): boolean {
+  const outer = geom.coordinates[0];
+  if (!outer || outer.length < 4) return false;
+  const first = outer[0];
+  const last = outer[outer.length - 1];
+  return first !== undefined && last !== undefined && first[0] === last[0] && first[1] === last[1];
+}
+
+export function normalizeWinding(geom: Polygon): Polygon {
+  if (!isStructurallySound(geom)) return geom;
+
+  const result = rewind(asFeature(geom), { mutate: false });
+  // @turf/rewind's return type is loosely `Geometry | Feature | FeatureCollection` regardless
+  // of input — narrow it for real rather than casting past the compiler.
+  if (!('geometry' in result) || result.geometry.type !== 'Polygon') {
+    throw new Error('normalizeWinding: expected a Polygon feature back from rewind()');
+  }
+  return result.geometry;
+}
+
+/**
+ * Z-1 — a child zone lies entirely inside a parent zone. **Retired 2026-08-25 and DORMANT**:
+ * pickup zones no longer have a parent (docs/LLD/zones.md, docs/decision-log.md) — they are a
+ * serviceability gate, not a sub-area of a city. `validateZone` below only calls this when a
+ * `parentGeom` is supplied, and nothing in `zones` supplies one anymore.
+ *
+ * Kept, not deleted: a future nested-zone design switches this back on by passing `parentGeom`
+ * again, rather than rewriting it. The violation still carries the spilling area as geometry so
+ * the editor can paint exactly which corner is wrong, for whenever that happens.
  */
 export function checkWithinParent(child: Polygon, parent: Polygon): ZoneViolation[] {
   if (booleanWithin(asFeature(child), asFeature(parent))) return [];
@@ -189,7 +270,7 @@ export function checkOverlap(candidate: Polygon, existing: NamedZone[]): ZoneVio
 
 export interface ZoneValidationInput {
   geom: Polygon;
-  /** Required for PICKUP zones — the CITY polygon it must sit inside. */
+  /** DORMANT — Z-1 is retired and nothing in `zones` supplies this. See `checkWithinParent`. */
   parentGeom?: Polygon;
   /** Active zones of the SAME type, excluding the one being edited. */
   siblings?: NamedZone[];
@@ -207,6 +288,7 @@ export function validateZone(input: ZoneValidationInput): ZoneViolation[] {
   if (violations.some((v) => v.rule === 'Z-3' && v.severity === 'ERROR')) return violations;
 
   violations.push(...checkMinimumArea(input.geom));
+  violations.push(...checkMaximumArea(input.geom));
   if (input.parentGeom) violations.push(...checkWithinParent(input.geom, input.parentGeom));
   if (input.siblings?.length) violations.push(...checkOverlap(input.geom, input.siblings));
 

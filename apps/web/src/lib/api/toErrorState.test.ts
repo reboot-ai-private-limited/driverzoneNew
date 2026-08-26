@@ -41,6 +41,22 @@ describe('the error taxonomy', () => {
     expect(toErrorState(apiError(500, 'INTERNAL'), retry).onRetry).toBeDefined();
   });
 
+  it('offers no retry while rate limited — the next attempt would spend itself on another 429', () => {
+    const state = toErrorState(apiError(429, 'RATE_LIMITED', 'Try again in 30 seconds.'), retry);
+    expect(state.onRetry).toBeUndefined();
+    expect(state.message).toBe('Try again in 30 seconds.');
+  });
+
+  it('treats an OTP cooldown the same way — same server contract, same countdown', () => {
+    expect(toErrorState(apiError(429, 'OTP_COOLDOWN_ACTIVE'), retry).onRetry).toBeUndefined();
+  });
+
+  it('DOES offer a retry on CONFLICT, because there the retry means refetch', () => {
+    // The only 4xx that gets one. The data moved under us, so what is on screen is what is
+    // wrong — re-reading it is exactly the right thing to do.
+    expect(toErrorState(apiError(409, 'CONFLICT'), retry).onRetry).toBeDefined();
+  });
+
   it('says a config fault has been escalated, because it has', () => {
     const state = toErrorState(apiError(500, 'ZONE_CONFIG_FAULT', 'A zone resolved oddly.'));
     expect(state.title).toBe('Configuration fault');

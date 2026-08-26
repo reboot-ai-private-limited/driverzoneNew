@@ -44,8 +44,8 @@ const MODULE_TIERS = [
   ['identity'], //                     customers, drivers, admins, auth
   ['notifications', 'ledger'], //      push/socket fan-out; earnings entries
   ['zones'], //                        polygons, resolution, the invariant write guard
-  ['catalog'], //                      packages, variants, prices
-  ['quotes'], //                       zones + catalog + pricing
+  ['packages'], //                     packages, variants, prices
+  ['quotes'], //                       zones + packages + pricing
   ['bookings'], //                     quotes + pricing + identity + notifications + ledger
   ['dispatch'], //                     the only module permitted to set bookings.driverId
   ['admin', 'reporting'], //           top of the graph; nothing may depend on these

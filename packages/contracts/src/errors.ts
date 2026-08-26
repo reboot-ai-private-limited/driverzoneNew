@@ -43,6 +43,13 @@ export const FAULT_CODES = [
   'RATE_LIMITED',
   'INTERNAL',
 
+  // Packages (docs/LLD/packages.md §Codes). Both are admin-write faults, not customer traffic —
+  // "no package for this trip" is a 200 with `available: false` and lives in UNAVAILABLE_REASONS.
+  /** `data` carries the conflicting package id, so the editor can link straight to it. 409. */
+  'PACKAGE_BAND_OVERLAP',
+  /** P-3 — activating a package with no active price row. 422. */
+  'PACKAGE_NOT_SELLABLE',
+
   // Identity (docs/LLD/auth.md). One generic code covers wrong/expired/no-challenge
   // and an unprovisioned admin number alike — telling those apart is an enumeration oracle.
   'OTP_INVALID_OR_EXPIRED',

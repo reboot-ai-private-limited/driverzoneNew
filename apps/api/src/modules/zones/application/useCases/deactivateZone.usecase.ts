@@ -11,7 +11,7 @@ import { zoneNotFound } from '../../domain/zone.errors.js';
  * Unconditionally allowed — there is nothing left to block on. Deactivating the last active
  * PICKUP zone, or the CITY zone, is permitted; `GetZoneDependentsUseCase` is where an admin
  * checks the blast radius *before* deciding, not a gate this use case enforces. That split
- * matters because zones cannot see `catalog`/`bookings` (tier 3, below both) to know what
+ * matters because zones cannot see `packages`/`bookings` (tier 3, below both) to know what
  * actually depends on a zone — a hard block here would be a promise this module cannot keep.
  *
  * Idempotent: deactivating an already-inactive zone is a no-op success, not an error — a

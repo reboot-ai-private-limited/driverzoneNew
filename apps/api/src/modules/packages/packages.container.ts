@@ -20,6 +20,7 @@ import {
   makeGetOutstationPackageController,
 } from './interface/packages.controller.js';
 import { buildAdminRouter } from './interface/packages.routes.js';
+import { registerPackagesSwaggerPaths } from './interface/packages.swagger.js';
 
 export interface PackagesContainer {
   contract: PackagesPublicContract;
@@ -37,6 +38,8 @@ export function buildPackagesContainer(): PackagesContainer {
   const listOutstation = new ListOutstationPackagesUseCase(repo);
   const getById = new GetPackageByIdUseCase(repo);
   const resolveForTrip = new ResolveForTripUseCase(repo);
+
+  registerPackagesSwaggerPaths();
 
   return {
     contract: {

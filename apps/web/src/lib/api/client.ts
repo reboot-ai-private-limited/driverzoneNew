@@ -15,7 +15,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000/
 const COOKIE_SCOPED_PREFIX = '/admin/auth';
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** Bearer token. Supplied by the session layer, never read from storage here. */
   token?: string | undefined;

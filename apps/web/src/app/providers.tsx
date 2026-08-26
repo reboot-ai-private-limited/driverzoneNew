@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { TooltipProvider } from '@driverzone/design-system';
+import { Toaster, TooltipProvider } from '@driverzone/design-system';
 import { SessionProvider } from '@/lib/auth/SessionProvider';
 import { makeQueryClient } from '@/lib/query/client';
 
@@ -15,7 +15,12 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <SessionProvider>
-        <TooltipProvider>{children}</TooltipProvider>
+        <TooltipProvider>
+          {children}
+          {/* Outside the panel gate on purpose: a mutation's failure toast must still render
+              if the same failure signed the admin out from under it. */}
+          <Toaster />
+        </TooltipProvider>
       </SessionProvider>
     </QueryClientProvider>
   );

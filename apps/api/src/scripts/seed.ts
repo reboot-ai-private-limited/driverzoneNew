@@ -77,7 +77,7 @@ const SEEDED_IDS = DEV_ACCOUNTS.map((a) => oid(a.id));
 /**
  * `--reset`: clear what `identity` owns, then reseed.
  *
- * Collection-by-collection rather than `dropDatabase()`, deliberately. When `zones`, `catalog`
+ * Collection-by-collection rather than `dropDatabase()`, deliberately. When `zones`, `packages`
  * and `bookings` land they will own collections this script knows nothing about, and a blanket
  * drop would destroy them silently. Each module's seed should extend `IDENTITY_MODELS` with its
  * own — a list that has to be maintained is the point, not an oversight.

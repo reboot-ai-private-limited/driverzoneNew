@@ -253,8 +253,8 @@ count against the driver's acceptance rate.
 | `POST` | `/admin/zones/validate` | **Dry run** — returns violations without saving. Always `200` |
 | `GET` | `/admin/zones/:id/versions` | Version history, newest first |
 | `GET` | `/admin/zones/:id/dependents` | What breaks if this is deactivated |
-| CRUD | `/admin/incity-packages` | + nested variants and prices |
-| CRUD | `/admin/outstation-packages` | + nested prices |
+| CRUD | `/admin/packages/incity` | + nested variants and prices |
+| CRUD | `/admin/packages/outstation` | + nested prices |
 | `POST` | `/admin/pricing/preview` | The FR-P6 what-would-the-customer-see tool |
 | `GET` | `/admin/bookings` | Rich filters: status, zone, date, driver |
 | `POST` | `/admin/bookings/:id/reassign` | `{ driver_id?, reason }` — reason required |

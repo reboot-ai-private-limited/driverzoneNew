@@ -253,8 +253,8 @@ The same rule as everywhere else: **"we can't serve this" is a 200 with `availab
 
 Tier 4, above `zones`. Skeleton per [`adding-a-module.md`](../engineering/adding-a-module.md).
 
-The module is named **`packages`**. `MODULE_TIERS` in `.dependency-cruiser.cjs` still reads
-`catalog`; that rename is part of implementation. One honest cost of the name: `packages` as an
+The module is named **`packages`**, and `MODULE_TIERS` in `.dependency-cruiser.cjs` reads
+`packages` — the rename from `catalog` is done. One honest cost of the name: `packages` as an
 API module sits awkwardly beside the monorepo's own `packages/` directory, and prose has to say
 "the packages module" every time to stay unambiguous. `catalog` avoided that. Consistency with
 the code that already exists wins, but the collision is real and worth knowing about.
@@ -265,12 +265,12 @@ export interface PackageLookupContract {
   /** Exactly one package, or a typed reason why none applies. */
   resolveForTrip(input: TripContext): Promise<PackageMatch | Unavailable>;
 }
-
-export interface PackageAdminContract {
-  createIncity(...), updateIncity(...), createOutstation(...), updateOutstation(...),
-  list(...), get(...)
-}
 ```
+
+There is no `PackageAdminContract` in the code, deliberately. Admin CRUD is reachable over HTTP
+and nowhere else: the band-overlap guard (P-2) and the has-an-active-price guard (P-3) live in
+the admin use cases, and a second in-process write path would make both a convention rather than
+a guarantee. Add one when a module genuinely needs to author a package.
 
 `resolveForTrip` returns **one** match. It does not hand back a list for the caller to rank —
 the precedence ladder is this module's rule, and a caller applying it independently is a caller
@@ -282,25 +282,30 @@ that will eventually apply it differently.
 variants and prices. The editors, the live commission-split preview and the band-coverage strip
 are specified in [`admin-panel.md`](admin-panel.md).
 
-### Realignment surface
+### Realignment surface — done
 
-The `features-packages` branch already carries a working `packages` module — full admin CRUD,
-199 unit tests, a 292-line integration suite, and a correct half-open overlap query. It was
-built against the previous architecture, and these are the deltas:
+The `features-packages` branch was built against the previous architecture. As of the merge of
+`main` into that branch, every delta below is closed:
 
-| File | Change |
+| File | Change | |
+|---|---|---|
+| both entities, the port, the validator | Drop `pickupZoneIds`, and the "at least one pickup zone" clause from both `validate*Activation` | ✅ never present past the models |
+| `infrastructure/*.model.ts` | Drop `pickupZoneIds` from both Mongoose schemas — terrain is the whole scope | ✅ |
+| `infrastructure/packageRepository.impl.ts` | Drop the `pickupZoneIds` clause from `findOverlappingBands` and both lookups | ✅ already correct |
+| `packages.public.ts` | Replace the arrays keyed by `pickupZoneId` with `resolveForTrip` returning one match | ✅ |
+| `domain/package.errors.ts` | `OverlappingBandError` carries `PACKAGE_BAND_OVERLAP`, not a generic `CONFLICT` | ✅ |
+| `.dependency-cruiser.cjs` | `catalog` → `packages` | ✅ |
+| the precedence ladder | Rungs (a)–(d) | ✅ |
+| the `incity.max_distance_multiple` guard | | ⚠️ implemented, but the value is a constant `2` in `resolveForTrip.usecase.ts` — it reads from `globalSettings` once a `settings` module exists |
+
+Still open, and why:
+
+| Gap | Blocked on |
 |---|---|
-| `domain/incityPackage.entity.ts` | Drop `pickupZoneIds`; drop the "at least one pickup zone" clause from `validateIncityPackageActivation` (retired P-3) |
-| `domain/outstationPackage.entity.ts` | Same, in `validateOutstationPackageActivation` |
-| `domain/packageRepository.port.ts` | Drop `pickupZoneIds` from both `Create*Data` shapes and every filter |
-| `infrastructure/packageRepository.impl.ts` | Drop the `pickupZoneIds` clause from `findOverlappingBands` and both lookups — terrain becomes the whole scope |
-| `packages.public.ts` | `findIncityPackages`/`findOutstationPackage` return arrays keyed by `pickupZoneId`; replace with `resolveForTrip` returning one match |
-| `domain/package.errors.ts` | `OverlappingBandError` uses a generic `CONFLICT`; give it `PACKAGE_BAND_OVERLAP` |
-| `interface/packages.validation.ts` | Drop `pickup_zone_ids` from the request schemas |
-| `.dependency-cruiser.cjs` | `catalog` → `packages` (already done on that branch) |
-
-What needs adding rather than changing: the precedence ladder, the `incity.max_distance_multiple`
-guard, and the `unservedDistanceRequests` write on `NO_PACKAGE_FOR_DISTANCE`.
+| The `unservedDistanceRequests` write on `NO_PACKAGE_FOR_DISTANCE` | Nothing owns that collection yet |
+| Rung (c) comparing the **computed total for this request** rather than `baseFarePaise` | The `pricing` module |
+| `packages/contracts/src/packages.ts`, a DTO mapper, `packages.typecheck.ts` and `packages.swagger.ts` | Nothing — this is the next PR. Controllers currently put camelCase domain entities on the wire, and there is no drift guard between the Zod schemas and the shared types |
+| An audit port and adapter | Nothing. Every admin write in `zones` records one; none in `packages` do |
 
 ## Deliberately deferred
 

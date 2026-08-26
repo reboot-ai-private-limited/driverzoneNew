@@ -13,9 +13,9 @@ export interface ZoneDependents {
  *
  * PICKUP: computed for real — "is this the last active pickup zone" is a question `zones` can
  * answer on its own. CITY: the incity-packages warning is a fixed message, not a real count —
- * `catalog` doesn't exist yet, and `zones` sits below it in the tier graph and may not depend on
- * it. Once `catalog` exists, a real count is computed by whichever module composes `zones` +
- * `catalog` (likely `admin`); this message is designed to be replaced, not built around.
+ * `zones` sits below `packages` in the tier graph and may not depend on it. A real count is
+ * computed by whichever module composes `zones` + `packages` (likely `admin`); this message is
+ * designed to be replaced, not built around.
  */
 export class GetZoneDependentsUseCase {
   constructor(private readonly zones: ZoneRepositoryPort) {}

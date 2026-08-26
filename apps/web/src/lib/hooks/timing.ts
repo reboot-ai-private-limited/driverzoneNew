@@ -1,0 +1,21 @@
+/**
+ * Every debounce and throttle interval in the panel, in one file.
+ *
+ * Not because three numbers need a module, but because the alternative is `400` appearing as a
+ * literal in the zone editor and `450` in whatever is written next — two components that are
+ * supposed to feel the same and do not, with nothing in either file to say they were meant to
+ * agree.
+ */
+
+/** Free-text filters. Below ~200ms a fast typist still fires per keystroke; above ~350ms the input feels laggy. */
+export const SEARCH_DEBOUNCE_MS = 250;
+
+/** Live geometry validation. Fixed by docs/LLD/admin-panel.md §Live validation — do not re-guess it here. */
+export const VALIDATE_DEBOUNCE_MS = 400;
+
+/**
+ * Continuous pointer gestures — map pan, drag, resize. A throttle, not a debounce: the handler
+ * must run DURING the gesture, just not once per frame. A debounce would run it only after the
+ * user stopped, which for a map means nothing updates while it is moving.
+ */
+export const MAP_THROTTLE_MS = 100;

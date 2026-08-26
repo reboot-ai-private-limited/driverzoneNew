@@ -33,5 +33,6 @@ export const authApi = {
   /** Idempotent by design — a client retrying after a dropped response must not see an error. */
   logout: () => request<{ logged_out: true }>('/admin/auth/logout', { method: 'POST' }),
 
-  profile: (token: string) => request<AdminProfileDto>('/admin/profile', { token }),
+  profile: (token: string, signal?: AbortSignal) =>
+    request<AdminProfileDto>('/admin/profile', { token, signal }),
 };

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Building2 } from 'lucide-react';
 import type { ZoneDto, ZoneType } from '@driverzone/contracts';
 /**
@@ -29,6 +29,9 @@ import {
   type SortState,
 } from '@driverzone/design-system';
 import { toErrorState } from '@/lib/api/toErrorState';
+import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
+import { useFilterParams } from '@/lib/hooks/useFilterParams';
+import { SEARCH_DEBOUNCE_MS } from '@/lib/hooks/timing';
 import { useZones } from '../hooks/useZones';
 
 const PAGE_SIZE = 15;
@@ -36,11 +39,33 @@ const PAGE_SIZE = 15;
 /** The skeleton uses the SAME widths as the columns, so nothing shifts when the data lands. */
 const COLUMN_WIDTHS = ['w-64', 'w-24', 'w-24', 'w-24', 'w-20', 'w-16', 'w-20'];
 
+type FilterKey = 'q' | 'type' | 'page' | 'sort' | 'dir';
+
 export function ZonesScreen() {
-  const [search, setSearch] = useState('');
-  const [type, setType] = useState<'ALL' | ZoneType>('ALL');
-  const [sort, setSort] = useState<SortState>({ key: 'name', direction: 'asc' });
-  const [page, setPage] = useState(1);
+  const params = useFilterParams<FilterKey>();
+
+  /**
+   * The search box is the one control with two values: what the admin has typed, which must
+   * appear instantly, and what the view is filtered by, which lags by `SEARCH_DEBOUNCE_MS`.
+   * Driving the input straight off the URL would make it lag too, and a text field that echoes
+   * a quarter of a second late feels broken in a way no amount of correctness makes up for.
+   */
+  const [typed, setTyped] = useState(() => params.get('q'));
+  const search = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
+
+  useEffect(() => {
+    // The guard is what stops this looping: writing the URL re-renders, which re-runs the
+    // effect, which now finds nothing to do.
+    if (search !== params.get('q')) params.set({ q: search, page: undefined });
+  }, [search, params]);
+
+  const type = (params.get('type') || 'ALL') as 'ALL' | ZoneType;
+  const page = Math.max(1, Number(params.get('page')) || 1);
+  // Memoised, not built inline: a fresh object every render would make the sort dependency of
+  // the filtering memo below change every render, and re-sort the whole list on each one.
+  const sortKey = params.get('sort') || 'name';
+  const sortDir = params.get('dir') === 'desc' ? 'desc' : 'asc';
+  const sort = useMemo<SortState>(() => ({ key: sortKey, direction: sortDir }), [sortKey, sortDir]);
 
   const query = useZones();
 
@@ -152,21 +177,16 @@ export function ZonesScreen() {
 
       <FilterBar>
         <FilterField label="Search" className="flex-1 min-w-64">
-          <SearchInput
-            value={search}
-            onChange={(value) => {
-              setSearch(value);
-              setPage(1);
-            }}
-            placeholder="Search by name or code"
-          />
+          <SearchInput value={typed} onChange={setTyped} placeholder="Search by name or code" />
         </FilterField>
         <FilterField label="Type">
           <Select
             value={type}
             onValueChange={(value) => {
-              setType(value as 'ALL' | ZoneType);
-              setPage(1);
+              // A filter change resets the page. Page 4 of the old result set is usually past
+              // the end of the new one, and an empty table reads as "no zones" rather than
+              // "you are past the end".
+              params.set({ type: value === 'ALL' ? undefined : value, page: undefined });
             }}
             options={[
               { value: 'ALL', label: 'All types' },
@@ -202,7 +222,9 @@ export function ZonesScreen() {
             rows={visible}
             rowKey={(zone) => zone.id}
             sort={sort}
-            onSortChange={setSort}
+            onSortChange={(next) =>
+              params.set({ sort: next.key, dir: next.direction, page: undefined })
+            }
             refetching={query.isFetching && !query.isLoading}
           />
           <Pagination
@@ -210,7 +232,7 @@ export function ZonesScreen() {
             pageCount={pageCount}
             total={filtered.length}
             pageSize={PAGE_SIZE}
-            onPageChange={setPage}
+            onPageChange={(next) => params.set({ page: next === 1 ? undefined : String(next) })}
           />
         </DataState>
       </section>

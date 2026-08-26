@@ -1,7 +1,16 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { AdminProfileDto } from '@driverzone/contracts';
 import { authApi } from '../api/endpoints/auth';
 import * as session from './session';
@@ -29,6 +38,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SessionStatus>('booting');
   const [admin, setAdmin] = useState<AdminProfileDto | null>(null);
   const [bootAttempt, setBootAttempt] = useState(0);
+  const queryClient = useQueryClient();
+
+  // Read by the subscriber below, which must know the CURRENT status without re-subscribing
+  // every time it changes — resubscribing would drop a publish that lands in between.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
+  /**
+   * The session ending while the panel is open.
+   *
+   * Refresh is proactive, on a ~12 minute timer, and when that background attempt fails the
+   * session module clears the token and publishes `null`. Nothing in React used to hear it: the
+   * panel went on rendering as authenticated and every subsequent query failed, forever, with
+   * no route to `/login`. This subscription is what makes that a sign-out instead.
+   *
+   * The cache is cleared on the way out. An ops laptop is a shared machine, and rows fetched
+   * under one admin's permissions must not be sitting in memory for the next one.
+   */
+  useEffect(
+    () =>
+      session.subscribe((token) => {
+        if (token !== null || statusRef.current !== 'authenticated') return;
+        queryClient.clear();
+        setAdmin(null);
+        setStatus('anonymous');
+      }),
+    [queryClient],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -66,11 +103,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStatus('authenticated');
   }, []);
 
-  const signOut = useCallback(async () => {
-    await session.signOut();
-    setAdmin(null);
-    setStatus('anonymous');
-  }, []);
+  // No state changes here: `session.signOut` clears the token, which publishes `null`, which the
+  // subscription above turns into `anonymous` and an empty cache. Deliberately one path — an
+  // expired session and a deliberate sign-out must leave the app in the same state, and two
+  // copies of that logic is how they stop agreeing.
+  const signOut = useCallback(() => session.signOut(), []);
 
   const retryBoot = useCallback(() => {
     setStatus('booting');

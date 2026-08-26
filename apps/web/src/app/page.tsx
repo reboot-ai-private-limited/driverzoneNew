@@ -1,9 +1,11 @@
 import { redirect } from 'next/navigation';
+import { LANDING_PATH } from '@/lib/auth/next-path';
 
 /**
- * Zones is the only screen with a working API today, so it is the landing page. When the
- * dashboard in docs/LLD/admin-panel.md exists this redirect goes away.
+ * `/` is not a screen, it is a pointer at whichever one is the landing screen today — the same
+ * pointer login and the 404 page follow. See `LANDING_PATH`, which is where that decision
+ * lives; when the dashboard in docs/LLD/admin-panel.md exists, this file does not change.
  */
 export default function Home() {
-  redirect('/zones');
+  redirect(LANDING_PATH);
 }

@@ -1,16 +1,21 @@
+import mongoose from 'mongoose';
+import type { Terrain } from '@driverzone/geo';
 import type {
-  PackageRepositoryPort,
   CreateIncityPackageData,
   CreateOutstationPackageData,
-  ListPackageFilter,
+  IncityPackagePatch,
   ListOutstationFilter,
+  ListPackageFilter,
+  OutstationPackagePatch,
   OverlapQuery,
+  PackageRepositoryPort,
 } from '../domain/packageRepository.port.js';
-import type { IncityPackage, CommissionType } from '../domain/incityPackage.entity.js';
-import type { OutstationPackage, Direction } from '../domain/outstationPackage.entity.js';
-import type { Terrain } from '@driverzone/geo';
+import type { CommissionType, IncityPackage } from '../domain/incityPackage.entity.js';
+import type { Direction, OutstationPackage } from '../domain/outstationPackage.entity.js';
 import { IncityPackageModel } from './incityPackage.model.js';
 import { OutstationPackageModel } from './outstationPackage.model.js';
+
+/** INFRASTRUCTURE — the `incityPackages` and `outstationPackages` collections. */
 
 function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPackage {
   const obj = doc.toObject();
@@ -30,7 +35,8 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
         carCategoryId: String(p.carCategoryId),
         baseFarePaise: p.baseFarePaise,
         extraMinuteRatePaise: p.extraMinuteRatePaise,
-                nightChargePaise: p.nightChargePaise,
+        extraKmRatePaise: p.extraKmRatePaise,
+        nightChargePaise: p.nightChargePaise,
         driverCommissionType: p.driverCommissionType as CommissionType,
         driverCommissionValue: p.driverCommissionValue,
         companyCommissionType: p.companyCommissionType as CommissionType,
@@ -84,12 +90,20 @@ export class MongoPackageRepository implements PackageRepositoryPort {
     return toOutstationEntity(doc);
   }
 
+  /**
+   * The `isValidObjectId` guards on every id lookup are not defensive noise. Without them a
+   * `:id` that is not an ObjectId reaches Mongoose and throws a `CastError`, which surfaces as
+   * a 500 — a malformed URL reported as our fault. `null` here becomes a clean 404 in the use
+   * case instead. Same guard, same reason, as `zones/infrastructure/zone.repository.impl.ts`.
+   */
   async findIncityById(id: string): Promise<IncityPackage | null> {
+    if (!mongoose.isValidObjectId(id)) return null;
     const doc = await IncityPackageModel.findById(id);
     return doc ? toIncityEntity(doc) : null;
   }
 
   async findOutstationById(id: string): Promise<OutstationPackage | null> {
+    if (!mongoose.isValidObjectId(id)) return null;
     const doc = await OutstationPackageModel.findById(id);
     return doc ? toOutstationEntity(doc) : null;
   }
@@ -120,7 +134,7 @@ export class MongoPackageRepository implements PackageRepositoryPort {
   }
 
   async findOutstationForQuote(query: {
-    terrain: string;
+    terrain: Terrain;
     distanceKm: number;
   }): Promise<OutstationPackage[]> {
     const docs = await OutstationPackageModel.find({
@@ -133,6 +147,12 @@ export class MongoPackageRepository implements PackageRepositoryPort {
   }
 
   async findOverlappingBands(query: OverlapQuery): Promise<OutstationPackage | null> {
+    /**
+     * P-2, half-open on both sides so adjacent bands tile cleanly: 0–70 and 70–100 do not
+     * conflict, and 70 km belongs to the second. `terrain` is the WHOLE scope — there is no
+     * pickup-zone clause, and across terrains an overlap is the expected configuration, not a
+     * conflict (docs/LLD/packages.md §Invariants).
+     */
     const filter: Record<string, unknown> = {
       isActive: true,
       terrain: query.terrain,
@@ -144,18 +164,17 @@ export class MongoPackageRepository implements PackageRepositoryPort {
     return doc ? toOutstationEntity(doc) : null;
   }
 
-  async updateIncity(
-    id: string,
-    data: Partial<CreateIncityPackageData>,
-  ): Promise<IncityPackage | null> {
+  async updateIncity(id: string, data: IncityPackagePatch): Promise<IncityPackage | null> {
+    if (!mongoose.isValidObjectId(id)) return null;
     const doc = await IncityPackageModel.findByIdAndUpdate(id, data, { new: true });
     return doc ? toIncityEntity(doc) : null;
   }
 
   async updateOutstation(
     id: string,
-    data: Partial<CreateOutstationPackageData>,
+    data: OutstationPackagePatch,
   ): Promise<OutstationPackage | null> {
+    if (!mongoose.isValidObjectId(id)) return null;
     const doc = await OutstationPackageModel.findByIdAndUpdate(id, data, { new: true });
     return doc ? toOutstationEntity(doc) : null;
   }

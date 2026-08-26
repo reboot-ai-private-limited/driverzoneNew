@@ -35,8 +35,12 @@ const incityVariantSchema = new Schema(
 
 const incityPackageSchema = new Schema(
   {
+    /**
+     * The ONLY zone reference a package carries. Pickup zones gate serviceability and carry a
+     * fee, and have finished their whole job before package matching begins — `pickupZoneIds`
+     * was deleted here with invariant P-1 (docs/decision-log.md, 2026-08-25).
+     */
     cityZoneId: { type: Schema.Types.ObjectId, ref: 'Zone', required: true },
-    pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
     name: { type: String, required: true },
     description: String,
     variants: [incityVariantSchema],

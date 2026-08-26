@@ -53,7 +53,17 @@ export class ResolveForTripUseCase {
 
     if (selectedIncity) {
       const maxIncludedKm = Math.max(...selectedIncity.variants.map((v) => v.includedKm));
-      const MAX_DISTANCE_MULTIPLE = 1.5; // TODO: fetch from globalSettings
+      /**
+       * The guard on rung (a). A 60 km drop that happens to land inside the city polygon
+       * matches both an incity package and an outstation band; preferring incity blindly sells
+       * an hourly rental for what is plainly an outstation run. Beyond this multiple of the
+       * longest variant's included km, incity stops being a candidate at all.
+       *
+       * 2 is the seeded value of `incity.max_distance_multiple`
+       * (docs/LLD/database-schema.md §globalSettings). TODO: read it from `settings` once that
+       * module exists — until then ops cannot tune this without a deploy.
+       */
+      const MAX_DISTANCE_MULTIPLE = 2;
       if (input.distanceKm <= maxIncludedKm * MAX_DISTANCE_MULTIPLE) {
         return {
           available: true,
@@ -72,16 +82,18 @@ export class ResolveForTripUseCase {
     // c & d. lower total / recently created
     const selectedOutstation = this.getBestOutstation(validOutstation, input.carCategoryId, direction);
     if (selectedOutstation) {
-      return {
-        available: true,
-        match: {
-          type: 'OUTSTATION',
-          package: selectedOutstation,
-          price: selectedOutstation.prices.find(
-            (p) => p.isActive && p.carCategoryId === input.carCategoryId && p.direction === direction,
-          )!,
-        },
-      };
+      // `validOutstation` was filtered on exactly this predicate, so the row is there. Narrowed
+      // rather than asserted with `!` — coding-standards.md bans the assertion, and if the two
+      // predicates ever drift this returns "nothing to sell" instead of an undefined price.
+      const price = selectedOutstation.prices.find(
+        (p) => p.isActive && p.carCategoryId === input.carCategoryId && p.direction === direction,
+      );
+      if (price) {
+        return {
+          available: true,
+          match: { type: 'OUTSTATION', package: selectedOutstation, price },
+        };
+      }
     }
 
     if (selectedIncity) {

@@ -24,7 +24,8 @@ const outstationPackageSchema = new Schema(
     terrain: { type: String, enum: ['PLAIN', 'HILL'], required: true },
     minKm: { type: Number, required: true, min: 0 },
     maxKm: { type: Number, required: true },
-    pickupZoneIds: [{ type: Schema.Types.ObjectId, ref: 'Zone' }],
+    // An outstation package references no zone at all — it is sold against terrain and a
+    // distance band. `pickupZoneIds` went with invariant P-1 (docs/decision-log.md, 2026-08-25).
     prices: [outstationPriceSchema],
     isActive: { type: Boolean, default: true },
   },

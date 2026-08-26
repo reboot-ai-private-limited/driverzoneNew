@@ -4,8 +4,11 @@ export interface IncityPrice {
   id: string;
   carCategoryId: string;
   baseFarePaise: number;
+  /** Overage beyond the variant's included minutes. See open-questions.md Q2. */
   extraMinuteRatePaise: number;
-    nightChargePaise: number;
+  /** Overage beyond the variant's included km. Billed independently of time, never netted. */
+  extraKmRatePaise: number;
+  nightChargePaise: number;
   driverCommissionType: CommissionType;
   driverCommissionValue: number;
   companyCommissionType: CommissionType;

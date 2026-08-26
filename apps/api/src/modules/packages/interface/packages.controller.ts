@@ -44,7 +44,7 @@ export function makeUpdateIncityPackageController(
   return asyncHandler(async (req, res) => {
     const { id } = packageIdParamSchema.parse(req.params);
     const data = updateIncityPackageSchema.parse(req.body);
-    const pkg = await useCase.execute(id, data as unknown as Parameters<typeof useCase.execute>[1]);
+    const pkg = await useCase.execute(id, data);
     sendSuccess(req, res, pkg, 'Incity package updated', 200);
   });
 }
@@ -55,7 +55,7 @@ export function makeUpdateOutstationPackageController(
   return asyncHandler(async (req, res) => {
     const { id } = packageIdParamSchema.parse(req.params);
     const data = updateOutstationPackageSchema.parse(req.body);
-    const pkg = await useCase.execute(id, data as unknown as Parameters<typeof useCase.execute>[1]);
+    const pkg = await useCase.execute(id, data);
     sendSuccess(req, res, pkg, 'Outstation package updated', 200);
   });
 }

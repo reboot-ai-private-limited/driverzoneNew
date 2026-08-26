@@ -19,11 +19,11 @@ import {
   makeGetIncityPackageController,
   makeGetOutstationPackageController,
 } from './interface/packages.controller.js';
-import { buildPackagesRouter } from './interface/packages.routes.js';
+import { buildAdminRouter } from './interface/packages.routes.js';
 
 export interface PackagesContainer {
   contract: PackagesPublicContract;
-  buildRouter: () => Router;
+  buildAdminRouter: () => Router;
 }
 
 export function buildPackagesContainer(): PackagesContainer {
@@ -42,8 +42,8 @@ export function buildPackagesContainer(): PackagesContainer {
     contract: {
       resolveForTrip: (input) => resolveForTrip.execute(input),
     },
-    buildRouter: () =>
-      buildPackagesRouter({
+    buildAdminRouter: () =>
+      buildAdminRouter({
         createIncity: makeCreateIncityPackageController(createIncity),
         listIncity: makeListIncityPackagesController(listIncity),
         getIncity: makeGetIncityPackageController(getById),

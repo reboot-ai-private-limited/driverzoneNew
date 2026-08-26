@@ -9,8 +9,21 @@ import { IncityPackageModel } from '../../src/modules/packages/infrastructure/in
 describe('Packages Repository Integration', () => {
   let repo: MongoPackageRepository;
   const zone1 = new mongoose.Types.ObjectId().toHexString();
-  const zone2 = new mongoose.Types.ObjectId().toHexString();
   const car1 = new mongoose.Types.ObjectId().toHexString();
+
+  /**
+   * One active price row is the minimum a package needs to be sellable (P-3). Every test here
+   * is about band geometry, not pricing, so they all reuse this rather than restating it.
+   */
+  const ONE_WAY_PRICE = {
+    carCategoryId: car1,
+    direction: 'ONE_WAY',
+    baseFarePaise: 1000,
+    driverCommissionType: 'PERCENT',
+    driverCommissionValue: 10,
+    companyCommissionType: 'PERCENT',
+    companyCommissionValue: 10,
+  } as const;
 
   beforeAll(async () => {
     // This will fail the test suite immediately if MONGO_URI is missing.
@@ -34,7 +47,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
       });
       expect(conflict).toBeNull();
     });
@@ -46,16 +58,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 300,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // New: 150 - 250
@@ -63,7 +66,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 150,
         maxKm: 250,
-        pickupZoneIds: [zone1],
       });
 
       expect(conflict).not.toBeNull();
@@ -77,16 +79,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // New: 150 - 250
@@ -94,7 +87,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 150,
         maxKm: 250,
-        pickupZoneIds: [zone1],
       });
 
       expect(conflict).not.toBeNull();
@@ -108,16 +100,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 150,
         maxKm: 250,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // New: 100 - 300
@@ -125,7 +108,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 300,
-        pickupZoneIds: [zone1],
       });
 
       expect(conflict).not.toBeNull();
@@ -138,16 +120,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // New: 200 - 300 (starts exactly where existing ends)
@@ -155,7 +128,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 200,
         maxKm: 300,
-        pickupZoneIds: [zone1],
       });
       expect(conflictAfter).toBeNull();
 
@@ -164,7 +136,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 0,
         maxKm: 100,
-        pickupZoneIds: [zone1],
       });
       expect(conflictBefore).toBeNull();
     });
@@ -176,16 +147,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // New: 100 - 200 HILL
@@ -193,38 +155,30 @@ describe('Packages Repository Integration', () => {
         terrain: 'HILL',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
       });
       expect(conflict).toBeNull();
     });
 
-    it('does not detect conflict if pickup zones do not overlap', async () => {
-      // Existing: 100 - 200 in zone1
+    it('detects a conflict on the same terrain regardless of any zone — terrain is the whole scope', async () => {
+      // The predecessor of this test asserted the opposite: that two packages covering the same
+      // band on the same terrain did NOT conflict as long as their `pickupZoneIds` differed.
+      // That scoping was retired with invariant P-1 (docs/decision-log.md, 2026-08-25) — packages
+      // reference no pickup zone at all — so the overlap is now real and must be caught.
       await repo.createOutstation({
-        name: 'Existing 100-200 zone1',
+        name: 'Existing 100-200',
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
-      // New: 100 - 200 in zone2
       const conflict = await repo.findOverlappingBands({
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone2],
       });
-      expect(conflict).toBeNull();
+      expect(conflict).not.toBeNull();
+      expect(conflict?.name).toBe('Existing 100-200');
     });
 
     it('does not detect conflict with inactive packages', async () => {
@@ -234,17 +188,8 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
         isActive: false,
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // New: 100 - 200
@@ -252,7 +197,6 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
       });
 
       expect(conflict).toBeNull();
@@ -265,16 +209,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
-        prices: [{
-          carCategoryId: car1,
-          direction: 'ONE_WAY',
-          baseFarePaise: 1000,
-          driverCommissionType: 'PERCENT',
-          driverCommissionValue: 10,
-          companyCommissionType: 'PERCENT',
-          companyCommissionValue: 10,
-        }],
+        prices: [ONE_WAY_PRICE],
       });
 
       // Check same band but exclude the package's own ID
@@ -282,11 +217,66 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        pickupZoneIds: [zone1],
         excludeId: pkg.id,
       });
 
       expect(conflict).toBeNull();
+    });
+  });
+
+  /**
+   * `beforeEach` truncates `IncityPackageModel` too, so this exercises what that is clearing.
+   * `findIncityForQuote` is the read half of the resolution path and the only incity query that
+   * runs against real Mongo — the unit suite drives it through a fake.
+   */
+  describe('findIncityForQuote', () => {
+    const incityPackage = {
+      cityZoneId: zone1,
+      name: 'Siliguri Hourly',
+      variants: [
+        {
+          label: '3 Hours',
+          includedMinutes: 180,
+          includedKm: 30,
+          prices: [
+            {
+              carCategoryId: car1,
+              baseFarePaise: 90000,
+              driverCommissionType: 'PERCENT',
+              driverCommissionValue: 7500,
+              companyCommissionType: 'PERCENT',
+              companyCommissionValue: 2500,
+            },
+          ],
+        },
+      ],
+    } as const;
+
+    it('returns the active package for the city zone, with its variants and prices mapped', async () => {
+      await repo.createIncity(incityPackage);
+
+      const found = await repo.findIncityForQuote({ cityZoneId: zone1 });
+
+      expect(found).toHaveLength(1);
+      expect(found[0]?.name).toBe('Siliguri Hourly');
+      expect(found[0]?.variants[0]?.includedMinutes).toBe(180);
+      // Defaults come from the schema, so the mapper has to carry them back out.
+      expect(found[0]?.variants[0]?.prices[0]?.extraKmRatePaise).toBe(0);
+      expect(found[0]?.variants[0]?.prices[0]?.extraMinuteRatePaise).toBe(0);
+      expect(found[0]?.variants[0]?.isActive).toBe(true);
+    });
+
+    it('does not return a package belonging to a different city zone', async () => {
+      await repo.createIncity(incityPackage);
+
+      const otherCity = new mongoose.Types.ObjectId().toHexString();
+      expect(await repo.findIncityForQuote({ cityZoneId: otherCity })).toHaveLength(0);
+    });
+
+    it('does not return an inactive package', async () => {
+      await repo.createIncity({ ...incityPackage, isActive: false });
+
+      expect(await repo.findIncityForQuote({ cityZoneId: zone1 })).toHaveLength(0);
     });
   });
 });

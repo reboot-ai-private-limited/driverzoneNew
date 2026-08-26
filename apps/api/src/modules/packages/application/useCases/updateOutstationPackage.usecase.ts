@@ -1,4 +1,4 @@
-import type { PackageRepositoryPort, CreateOutstationPackageData } from '../../domain/packageRepository.port.js';
+import type { OutstationPackagePatch, PackageRepositoryPort } from '../../domain/packageRepository.port.js';
 import type { OutstationPackage } from '../../domain/outstationPackage.entity.js';
 import { validateOutstationBand, validateOutstationPackageActivation } from '../../domain/outstationPackage.entity.js';
 import { InvalidBandError, InvalidPackageError, OverlappingBandError, PackageNotFoundError } from '../../domain/package.errors.js';
@@ -6,7 +6,7 @@ import { InvalidBandError, InvalidPackageError, OverlappingBandError, PackageNot
 export class UpdateOutstationPackageUseCase {
   constructor(private readonly repo: PackageRepositoryPort) {}
 
-  async execute(id: string, data: Partial<CreateOutstationPackageData>): Promise<OutstationPackage> {
+  async execute(id: string, data: OutstationPackagePatch): Promise<OutstationPackage> {
     const existing = await this.repo.findOutstationById(id);
     if (!existing) throw new PackageNotFoundError(id);
 
@@ -34,6 +34,7 @@ export class UpdateOutstationPackageUseCase {
     });
     if (conflict) throw new OverlappingBandError(conflict.id);
 
+    /** TODO — same subdocument-id caveat as `updateIncityPackage.usecase.ts`. */
     const updated = await this.repo.updateOutstation(id, data);
     if (!updated) throw new PackageNotFoundError(id);
 

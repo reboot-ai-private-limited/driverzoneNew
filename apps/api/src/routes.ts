@@ -51,7 +51,7 @@ export function buildApiRouter(c: AppContainers): Router {
    * calls with overlapping prefixes, not a hack. `/coverage` has no such overlap.
    */
   router.use('/admin/zones', c.zones.buildAdminRouter());
-  router.use('/admin/packages', c.packages.buildRouter());
+  router.use('/admin/packages', c.packages.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
   return router;

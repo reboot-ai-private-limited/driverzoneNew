@@ -37,6 +37,7 @@ import { makeDriverControllers } from './interface/driver.controller.js';
 import { buildDriverRouter } from './interface/driver.routes.js';
 import { makeAdminControllers } from './interface/admin.controller.js';
 import { buildAdminRouter } from './interface/admin.routes.js';
+import { registerIdentitySwaggerPaths } from './interface/identity.swagger.js';
 import type { IdentityPublicContract } from './identity.public.js';
 
 /**
@@ -62,6 +63,8 @@ export interface IdentityContainer {
 }
 
 export function buildIdentityContainer(): IdentityContainer {
+  registerIdentitySwaggerPaths();
+
   // Redis is shared with BullMQ rather than opening a second connection: it is already
   // configured with `maxRetriesPerRequest: null` and multiplexes fine at these command volumes.
   const otpStore = new RedisOtpStore(getRedis());

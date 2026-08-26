@@ -127,6 +127,9 @@ services:
         # It is the browser that calls this URL, so it must be reachable from the browser —
         # `http://api:4000` would resolve inside the network and nowhere else.
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api}
+        # The zone editor's map. Restrict this key by HTTP referrer AND to the Maps JavaScript
+        # + Places APIs before it goes anywhere — it ships inside the client bundle.
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     depends_on:
       api: { condition: service_healthy }
     ports: ['3000:3000']

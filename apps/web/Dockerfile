@@ -44,6 +44,16 @@ COPY apps/web apps/web
 # would look like it worked and change nothing. None of these is a secret.
 ARG NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
+# The zone editor's map. Like every NEXT_PUBLIC_* value this is inlined into the client bundle
+# and therefore PUBLIC — unavoidable, because the key authenticates a script the browser loads.
+# It is protected by configuration, not secrecy, and both parts are required before deploying:
+#   • an HTTP referrer restriction limiting the key to the panel's own domain, and
+#   • an API restriction to Maps JavaScript API + Places API only.
+# Unset builds an image whose zone editor shows a setup notice instead of a map; everything
+# else on the screen still works. See docs/engineering/frontend-architecture.md §Environment.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ENV NODE_ENV=production
 RUN pnpm --filter @driverzone/web build
 
@@ -66,6 +76,7 @@ ENV NODE_ENV=production \
 #   3. public/      — same story, for the logo and favicons.
 COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /app/apps/web/.next/static     ./apps/web/.next/static
+COPY --from=build --chown=node:node /app/apps/web/public           ./apps/web/public
 
 USER node
 EXPOSE 3000

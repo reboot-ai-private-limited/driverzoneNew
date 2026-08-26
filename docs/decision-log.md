@@ -20,6 +20,42 @@ entry links to it.
 
 ---
 
+## 2026-08-26 — The zone editor runs on Google Maps, not MapLibre
+
+**Decision:** the admin zone editor uses the Google Maps JavaScript API — `google.maps.Data` for
+saved zones, `DrawingManager` plus an editable `Polygon` for the draft, `PlaceAutocompleteElement`
+for address search. MapLibre GL and Mapbox Draw are removed, with the worker copy script and CSS
+shims they required. This reverses the MapLibre entry in
+[`engineering/tech-choices.md`](engineering/tech-choices.md), which is rewritten to match.
+
+**What it replaced, and why it changed:**
+
+1. **The place-data gap was real in practice.** OSM's roads and place names in Siliguri are
+   adequate; its commercial POI coverage is thin, and *orienting yourself* — not tracing — was
+   the repeated complaint. Hybrid view (imagery **with** road labels) and Places search answer it
+   directly.
+2. **"Google is expensive" was right about the wrong screen.** It stands for the customer app and
+   for the road-distance path, where quote traffic runs ~3× bookings. It never applied to a screen
+   three ops people open a few times a month, which sits inside the free monthly allowance.
+3. **MapLibre v6 resolves its web worker from `import.meta.url`**, which webpack rewrites to a
+   hashed chunk path. The worker 404'd and surfaced as
+   `Failed to load module script: … MIME type "text/html"` — a runtime-only failure the
+   production build reported as success. Fixable, but only by a script working around the bundler.
+
+**What it costs:** a billing-backed API key that ships in the client bundle and must be referrer-
+and API-restricted ([`engineering/frontend-architecture.md`](engineering/frontend-architecture.md)
+§Environment); clunkier editing of many-vertex polygons, mitigated by GeoJSON import being the
+primary way a zone gets its shape; and one extra `Polyline` overlay, because `google.maps.Data`
+cannot dash a stroke and the city boundary must stay visibly dashed.
+
+**What made it cheap:** geometry crosses every boundary as GeoJSON and `validateZone` in
+`@driverzone/geo` does not know what drew the polygon. The swap touched `ZoneMap.tsx`, two files
+in `features/zones/lib/`, and ~30 lines of `ZonesScreen`; the rail, inspector, violation panel,
+every hook and all validation were untouched. **Keeping the map a leaf is what made this
+reversible, and it is worth preserving.**
+
+---
+
 ## 2026-08-25 — Hard delete is back, as a separate route from soft deactivate
 
 **Decision:** `DELETE /admin/zones/:id/hard` permanently removes a zone document. Blocked with

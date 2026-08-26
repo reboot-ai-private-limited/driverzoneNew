@@ -1,6 +1,9 @@
 import type {
+  CreateZoneRequest,
   ListZonesQuery,
   ListZonesResponse,
+  UpdateZoneGeometryRequest,
+  UpdateZoneMetadataRequest,
   ValidateZoneRequest,
   ValidateZoneResponse,
   ZoneDependentsResponse,
@@ -13,7 +16,7 @@ import { request } from '../client';
  *
  * Zone geometry crosses the wire as raw GeoJSON, not `{lat,lng}` (docs/decision-log.md,
  * 2026-08-24), so nothing here converts coordinates. `@driverzone/geo` is the only place that
- * happens, and the editor will call it for live validation with the same code the API uses.
+ * happens, and the editor calls it for live validation with the same code the API uses.
  *
  * READS TAKE A TRAILING `signal`; WRITES DO NOT. A read is abandoned the moment its query key
  * changes — TanStack Query supplies the signal for exactly that — whereas a write that has
@@ -64,4 +67,30 @@ export const zonesApi = {
    */
   deactivate: (token: string, id: string) =>
     request<ZoneDto>(`/admin/zones/${id}`, { method: 'DELETE', token }),
+
+  create: (token: string, body: CreateZoneRequest, idempotencyKey: string) =>
+    request<ZoneDto>('/admin/zones', { method: 'POST', token, body, idempotencyKey }),
+
+  /**
+   * Metadata only — name, code, priority, pickup charge. NEVER geometry.
+   *
+   * The split is the API's (`PATCH /:id` vs `PATCH /:id/geometry`) and it is not cosmetic: this
+   * route does not version the zone and carries no concurrency contract, so collapsing the two
+   * would make every rename inherit the `expected_version` failure mode of a boundary edit for
+   * no reason (docs/LLD/zones.md §HTTP surface).
+   */
+  updateMetadata: (token: string, id: string, body: UpdateZoneMetadataRequest) =>
+    request<ZoneDto>(`/admin/zones/${id}`, { method: 'PATCH', token, body }),
+
+  /**
+   * Creates a NEW VERSION and returns it — the old row stays, deactivated and superseded.
+   *
+   * `expected_version` is what turns two admins editing the same polygon in two tabs into one
+   * save and one 409 `ZONE_ALREADY_SUPERSEDED`, rather than a silent last-write-wins. The UI
+   * must render that 409 as "someone else saved this while you were editing", not as a generic
+   * failure — losing an hour of boundary work to an unexplained toast is how people stop
+   * trusting the editor.
+   */
+  updateGeometry: (token: string, id: string, body: UpdateZoneGeometryRequest) =>
+    request<ZoneDto>(`/admin/zones/${id}/geometry`, { method: 'PATCH', token, body }),
 };

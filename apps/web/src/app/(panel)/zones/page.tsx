@@ -27,7 +27,7 @@ function ZonesFallback() {
             <Skeleton key={index} className="h-16 rounded-md" />
           ))}
         </div>
-        <Skeleton className="flex-1 h-[36rem] rounded-none" />
+        <Skeleton className="flex-1 h-144 rounded-none" />
       </div>
     </div>
   );

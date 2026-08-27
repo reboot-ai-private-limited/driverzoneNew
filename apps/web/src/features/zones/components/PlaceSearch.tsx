@@ -36,6 +36,10 @@ export function PlaceSearch({ map }: { map: google.maps.Map | null }) {
       includedRegionCodes: ['in'],
     });
 
+    // Without one the field is a magnifier over empty space, which reads as decoration rather
+    // than a control. Set as an attribute because the element exposes no typed property for it.
+    autocomplete.setAttribute('placeholder', 'Find a place');
+
     autocomplete.addEventListener('gmp-select', (event: Event) => {
       void (async () => {
         const { placePrediction } = event as unknown as {
@@ -63,12 +67,13 @@ export function PlaceSearch({ map }: { map: google.maps.Map | null }) {
     };
   }, [map]);
 
-  // The element ships its own input styling, which does not match the panel. Scoped overrides
-  // rather than a global rule: this is the only place the element appears.
-  return (
-    <div
-      ref={host}
-      className="w-64 [&_input]:h-7 [&_input]:w-full [&_input]:rounded-md [&_input]:border [&_input]:border-border [&_input]:bg-surface [&_input]:px-2 [&_input]:text-xs [&_input]:text-text"
-    />
-  );
+  /**
+   * The styling lives in `globals.css` under `.dz-place-search`, NOT in a Tailwind variant here.
+   *
+   * The previous `[&_input]:…` chain matched nothing: this custom element exposes no light-DOM
+   * `input` to select, so every one of those utilities was dead and the element kept Google's
+   * own dark-mode default — a black box on a light panel. It is themed through `color-scheme`
+   * and its Material custom properties instead, which is the surface Google actually supports.
+   */
+  return <div ref={host} className="dz-place-search w-64" />;
 }

@@ -8,6 +8,7 @@ import type { Polygon } from '@driverzone/geo';
 import { DEFAULT_CENTER, DEFAULT_ZOOM, loadMapLibraries, type MapTypeId } from '../lib/google-maps';
 import { bboxToBounds, pathToPolygon, polygonToPath } from '../lib/google-geometry';
 import {
+  DRAFT_LINE_STYLE,
   DRAFT_STYLE,
   EMPTY_COLLECTION,
   VIOLATION_STYLE,
@@ -307,23 +308,33 @@ export function ZoneMap({
      */
     instance.setOptions({ draggableCursor: 'crosshair' });
 
+    /**
+     * Where the pointer is right now, once at least one corner is down.
+     *
+     * This is what makes the chain a RUBBER BAND rather than a record of past clicks: the
+     * segment from the last placed corner to the cursor is drawn before the next click happens,
+     * so the admin sees the edge they are about to commit to. Without it the first click puts a
+     * single point on the map — which a polyline renders as nothing at all — and the screen looks
+     * like it ignored the click until a second one lands.
+     */
+    let hover: google.maps.LatLng | null = null;
+    /** Coalesces redraws to one per frame; `mousemove` fires far faster than the map repaints. */
+    let frame = 0;
+
     const redraw = (): void => {
       if (chain.current === null) {
-        chain.current = new google.maps.Polyline({
-          map: instance,
-          strokeColor: DRAFT_STYLE.strokeColor as string,
-          strokeWeight: DRAFT_STYLE.strokeWeight as number,
-          strokeOpacity: 0.9,
-          zIndex: 4,
-        });
+        chain.current = new google.maps.Polyline({ map: instance, ...DRAFT_LINE_STYLE });
       }
-      chain.current.setPath(pending.current);
+      chain.current.setPath(hover === null ? pending.current : [...pending.current, hover]);
     };
 
     /** Close the ring and hand over to the editable polygon. Below three corners there is
      * nothing to close, so the gesture is ignored rather than producing a broken shape. */
     const finish = (): void => {
       if (pending.current.length < 3) return;
+      // The band dies with the trace — leaving it set would draw a segment to a stale cursor
+      // position on the next redraw.
+      hover = null;
 
       const shape = new google.maps.Polygon({
         paths: pending.current,
@@ -344,6 +355,7 @@ export function ZoneMap({
     };
 
     const cancel = (): void => {
+      hover = null;
       chain.current?.setMap(null);
       chain.current = null;
       pending.current = [];
@@ -354,6 +366,25 @@ export function ZoneMap({
       if (event.latLng === null) return;
       pending.current = [...pending.current, event.latLng];
       redraw();
+    });
+
+    /**
+     * The rubber band itself.
+     *
+     * Ignored until the first corner exists — before that there is nothing to draw a line FROM,
+     * and a band anchored to nowhere would just be a dot chasing the cursor.
+     */
+    const moveListener = instance.addListener('mousemove', (event: google.maps.MapMouseEvent) => {
+      if (event.latLng === null || pending.current.length === 0) return;
+      hover = event.latLng;
+
+      // rAF rather than the 100 ms throttle used for map pans: a band that updates ten times a
+      // second reads as lag on a gesture the eye is following continuously.
+      if (frame !== 0) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        redraw();
+      });
     });
 
     /**
@@ -381,7 +412,9 @@ export function ZoneMap({
 
     return () => {
       clickListener.remove();
+      moveListener.remove();
       doubleClickListener.remove();
+      if (frame !== 0) window.cancelAnimationFrame(frame);
       window.removeEventListener('keydown', onKey);
       teardown();
     };

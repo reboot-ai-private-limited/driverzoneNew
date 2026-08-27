@@ -7,8 +7,11 @@ import {
   DEV_CUSTOMER_EMPTY,
   DEV_DRIVER,
 } from '@/config/devAccounts.js';
+import { DEV_ZONES } from '@/config/devZones.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
 import { logger } from '@/shared/logging/logger.js';
+import { buildZonesContainer } from '@/modules/zones/zones.container.js';
+import type { ZonesPublicContract } from '@/modules/zones/zones.public.js';
 import { AdminUserModel } from '@/modules/identity/infrastructure/adminUser.model.js';
 import { CustomerModel } from '@/modules/identity/infrastructure/customer.model.js';
 import { DriverModel } from '@/modules/identity/infrastructure/driver.model.js';
@@ -17,7 +20,8 @@ import { SessionModel } from '@/modules/identity/infrastructure/session.model.js
 import { AuditLogModel } from '@/shared/db/auditLog.model.js';
 
 /**
- * Creates the known development accounts: an admin, an approved driver, and two customers.
+ * Creates the known development accounts — an admin, an approved driver, two customers — and the
+ * known zones: Siliguri, its three pickup areas, and the two hill districts above it.
  *
  *   pnpm --filter @driverzone/api seed
  *
@@ -26,20 +30,25 @@ import { AuditLogModel } from '@/shared/db/auditLog.model.js';
  * bug depending on the shape of the data impossible to reproduce across machines. The shape this
  * script produces was agreed in docs/setup-development.md before it was written.
  *
- * **The admin is the part that cannot be done any other way.** `account.repository.impl.ts`
- * deliberately throws for `create('ADMIN', …)` and there is no registration endpoint, so a
- * direct write is the sanctioned path rather than a shortcut around one.
+ * THE TWO HALVES GO THROUGH DIFFERENT DOORS, ON PURPOSE.
  *
- * WHY MONGOOSE MODELS AND NOT THE MODULE CONTRACT. docs/setup-development.md asks seeds to go
- * through module public APIs, and that rule is right for zones: seeding a polygon through
- * `zones.public.ts` runs the `@driverzone/geo` invariants, so the seed cannot create geometry the
- * app itself could never produce. Identity has no cross-document invariant of that kind — unique
- * phone and a required admin name are single-document rules the schema and its indexes enforce
- * on any write, including this one. And `identity.public.ts` exposes no admin-creation method by
- * design. Please do not "fix" this by routing it through the contract.
+ * Zones go through `zones.public.ts`, as docs/setup-development.md asks: that runs the
+ * `@driverzone/geo` invariants on every polygon, so the seed cannot create geometry the app
+ * itself could never produce. It costs id determinism — `create()` takes no `_id`, so zone ids
+ * differ between machines and `code` is the stable handle instead. `devZones.ts` explains why
+ * that is the right way round.
  *
- * Idempotent: keyed on the fixed `_id`s in `devAccounts.ts`, so running it twice restores the
- * intended state rather than producing a second set of accounts.
+ * Identity goes through the Mongoose models directly. It has no cross-document invariant of the
+ * kind zones have — unique phone and a required admin name are single-document rules the schema
+ * and its indexes enforce on any write, including this one — and `identity.public.ts` exposes no
+ * admin-creation method BY DESIGN: `account.repository.impl.ts` deliberately throws for
+ * `create('ADMIN', …)` and there is no registration endpoint, so a direct write is the sanctioned
+ * path rather than a shortcut around one. Please do not "fix" this by routing it through the
+ * contract; there is nothing to route it through.
+ *
+ * Idempotent, by different keys for the same reason: accounts on the fixed `_id`s in
+ * `devAccounts.ts`, zones on `code` (unique among active zones by index). Running it twice
+ * restores the intended state rather than producing a second set of either.
  */
 
 /** Coordinates in Siliguri, matching the zone examples used throughout the docs. */
@@ -77,17 +86,16 @@ const SEEDED_IDS = DEV_ACCOUNTS.map((a) => oid(a.id));
 /**
  * `--reset`: clear what `identity` owns, then reseed.
  *
- * Collection-by-collection rather than `dropDatabase()`, deliberately. When `zones`, `packages`
- * and `bookings` land they will own collections this script knows nothing about, and a blanket
- * drop would destroy them silently. Each module's seed should extend `IDENTITY_MODELS` with its
- * own — a list that has to be maintained is the point, not an oversight.
+ * Collection-by-collection rather than `dropDatabase()`, deliberately. When `packages` and
+ * `bookings` land they will own collections this script knows nothing about, and a blanket drop
+ * would destroy them silently. Each module's seed should extend `IDENTITY_MODELS` with its own,
+ * or clear itself through its own contract the way `resetZones` below does — a list that has to
+ * be maintained is the point, not an oversight.
  *
  * Sessions and audit rows go first: they reference accounts, so clearing them in this order never
  * leaves a row pointing at something that no longer exists, even if the script dies midway.
  */
 async function resetIdentityCollections(): Promise<void> {
-  console.log('\n  Clearing identity collections (--reset)\n');
-
   for (const { name, model } of IDENTITY_MODELS) {
     const { deletedCount } = await model.deleteMany({}).exec();
     console.log(`  ${name.padEnd(16)} ${deletedCount} removed`);
@@ -251,6 +259,84 @@ async function seedCustomers(): Promise<void> {
 }
 
 /**
+ * Creates the zones in `devZones.ts` that are not already there.
+ *
+ * Through the contract, so `normalizeWinding` and every `@driverzone/geo` rule run on the way in
+ * — a fixture that overlaps a sibling fails the seed instead of landing in the database as
+ * geometry the admin panel would have refused. Runs AFTER `seedAdmin()`: every zone's `createdBy`
+ * points at the seeded admin, and an approval with no approver is a state the app cannot produce.
+ *
+ * SKIP, NOT UPSERT, when the code is already active. Changing a zone's geometry is
+ * `updateGeometry` with an `expectedVersion` — a versioned edit that supersedes the old document
+ * — and doing that silently to a zone somebody is mid-way through editing is worse than leaving
+ * it alone and saying so. `--reset` is how you force the fixture back.
+ *
+ * Returns what happened per zone, for the summary.
+ */
+async function seedZones(zones: ZonesPublicContract): Promise<Map<string, 'created' | 'present'>> {
+  const actor = { adminId: DEV_ADMIN.id };
+
+  // One query, not one per zone. Active-only is the right filter: a superseded version keeps its
+  // code, and the partial unique index means only the active one can block a create.
+  const existing = new Set((await zones.list({ isActive: true })).map((z) => z.code));
+
+  const outcome = new Map<string, 'created' | 'present'>();
+
+  for (const zone of DEV_ZONES) {
+    if (existing.has(zone.code)) {
+      outcome.set(zone.code, 'present');
+      continue;
+    }
+
+    await zones.create(
+      {
+        type: zone.type,
+        name: zone.name,
+        code: zone.code,
+        geometry: zone.geometry,
+        pickupChargeType: zone.pickupChargeType,
+        pickupChargePaise: zone.pickupChargePaise,
+      },
+      actor,
+    );
+    outcome.set(zone.code, 'created');
+  }
+
+  return outcome;
+}
+
+/**
+ * `--reset` for zones — through the contract, not `ZoneModel.deleteMany`.
+ *
+ * `deactivate` then `delete` because `DeleteZoneUseCase` refuses an active zone: the two steps
+ * are the app's own path, and taking it means the reset leaves the same audit trail an admin
+ * clearing these by hand would. Superseded versions are already inactive and need only the
+ * second step.
+ *
+ * Runs BEFORE `resetIdentityCollections()`, which is load-bearing twice over: zones point at the
+ * admin through `createdBy`, and the audit rows these deletions write are then swept by the
+ * `auditlogs` clear that follows rather than surviving as orphans.
+ */
+async function resetZones(zones: ZonesPublicContract): Promise<void> {
+  const [active, inactive] = await Promise.all([
+    zones.list({ isActive: true }),
+    zones.list({ isActive: false }),
+  ]);
+
+  const actor = { adminId: DEV_ADMIN.id };
+
+  for (const zone of active) {
+    await zones.deactivate(zone.id, actor);
+    await zones.delete(zone.id, actor);
+  }
+  for (const zone of inactive) {
+    await zones.delete(zone.id, actor);
+  }
+
+  console.log(`  ${'zones'.padEnd(16)} ${active.length + inactive.length} removed`);
+}
+
+/**
  * Prints what was made.
  *
  * `console.log`, not the logger: this is a human reading a terminal, and a JSON line per row
@@ -259,6 +345,7 @@ async function seedCustomers(): Promise<void> {
 function printSummary(
   fixedOtp: string | undefined,
   foreign: { customers: number; drivers: number; admins: number },
+  zoneOutcome: Map<string, 'created' | 'present'>,
 ): void {
   const rows = [
     ['ADMIN', DEV_ADMIN.phone, '/admin/auth', 'active'],
@@ -271,6 +358,36 @@ function printSummary(
   console.log('  ROLE      PHONE           AUTH PATH        STATE');
   for (const [role, phone, path, state] of rows) {
     console.log(`  ${role?.padEnd(9)} ${phone?.padEnd(15)} ${path?.padEnd(16)} ${state}`);
+  }
+
+  /**
+   * The zones, and — for the ones already there — the fact that this run left them alone.
+   *
+   * `already present` is not noise. It is the difference between "your edits survived" and "the
+   * seed just reverted the polygon you spent ten minutes drawing", and without the word nobody
+   * can tell which happened.
+   */
+  console.log('\n  Seeded zones\n');
+  console.log('  TYPE      CODE            NAME                  PICKUP CHARGE');
+  for (const zone of DEV_ZONES) {
+    const charge =
+      zone.pickupChargeType === undefined
+        ? '—'
+        : zone.pickupChargeType === 'FREE'
+          ? 'FREE'
+          : zone.pickupChargePaise === undefined
+            ? 'PAID, global default'
+            : `PAID, ₹${zone.pickupChargePaise / 100}`;
+
+    const state = zoneOutcome.get(zone.code) === 'present' ? 'already present' : '';
+    const cells = [
+      zone.type.padEnd(9),
+      zone.code.padEnd(15),
+      zone.name.padEnd(21),
+      charge.padEnd(21),
+      state,
+    ];
+    console.log(`  ${cells.join(' ')}`.trimEnd());
   }
 
   /**
@@ -327,16 +444,30 @@ async function main(): Promise<void> {
 
   await connectMongo();
 
-  if (reset) await resetIdentityCollections();
+  // After the connection: `MongoZoneRepository` is constructed here and its first query runs
+  // moments later. Nothing in this container touches Redis, so the seed still needs only Mongo.
+  const zones = buildZonesContainer().contract;
+
+  if (reset) {
+    console.log('\n  Clearing seeded data (--reset)\n');
+    await resetZones(zones);
+    await resetIdentityCollections();
+  }
 
   await seedAdmin();
   await seedDriver();
   await seedCustomers();
 
+  // After the admin exists — every zone is `createdBy` that account.
+  const zoneOutcome = await seedZones(zones);
+
   const foreign = await countForeignAccounts();
 
-  logger.info({ accounts: 4, reset }, 'seed complete');
-  printSummary(env.DEV_FIXED_OTP, foreign);
+  logger.info(
+    { accounts: 4, zones: [...zoneOutcome.values()].filter((o) => o === 'created').length, reset },
+    'seed complete',
+  );
+  printSummary(env.DEV_FIXED_OTP, foreign, zoneOutcome);
 
   await disconnectMongo();
 }

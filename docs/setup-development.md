@@ -292,7 +292,7 @@ bugs that depend on the shape of the data impossible to reproduce across machine
 pnpm seed        # or: pnpm --filter @driverzone/api seed
 ```
 
-Creates four accounts, and prints them when it finishes:
+Creates four accounts and six zones, and prints them when it finishes:
 
 | Role | Phone | State |
 |---|---|---|
@@ -303,6 +303,29 @@ Creates four accounts, and prints them when it finishes:
 
 The two customers exist because the empty state is where progressive-profile bugs live: every
 screen has to render an account with no name, no addresses and no vehicles.
+
+| Type | Code | Name | Pickup charge |
+|---|---|---|---|
+| City | `SILIGURI` | Siliguri | — |
+| Hill | `HILL-DARJ` | Darjeeling | — |
+| Hill | `HILL-KALIM` | Kalimpong | — |
+| Pickup | `SLG-CENTRAL` | Siliguri Central | free |
+| Pickup | `SLG-NORTH` | Siliguri Paid North | ₹100 |
+| Pickup | `SLG-MATIGARA` | Matigara | paid, falls back to the global default |
+
+Without these a fresh database resolves nothing: `/coverage/check` answers "not served" for every
+point and the zone editor opens on an empty map. The two paid pickup zones differ on purpose —
+one carries an explicit amount, the other leaves it null — because both shapes have to price.
+
+The zones are positioned against the accounts rather than beside them. `+919000000003`'s two
+saved addresses resolve **differently**: Sevoke Road lands inside `SLG-CENTRAL` and pays no pickup
+charge, Matigara lands in the city with no pickup zone at all. One seeded customer therefore
+covers both branches of the pickup-charge path. The hill zones sit north of the city and never
+touch it, so an in-city trip can never resolve as hill terrain.
+
+Unlike the accounts, zone `_id`s are **not** fixed and differ between machines. The seed creates
+them through `zones.public.ts` so the `@driverzone/geo` invariants run on every polygon — and
+`create()` takes no id. Refer to a zone by `code`, which is unique among active zones by index.
 
 **Idempotent.** It is keyed on fixed IDs, so running it twice restores the intended state rather
 than producing a second set of accounts, and it leaves any other data in the database alone. The
@@ -324,14 +347,18 @@ than the four it reports:
 pnpm seed --reset
 ```
 
-Deletes every collection `identity` owns — `sessions`, `auditlogs`, `driverdocuments`, `drivers`,
-`customers`, `adminusers` — reports what it removed, then reseeds. Use it when accumulated test
-data is getting in the way, rather than `docker compose down -v`, which also throws away the
-replica-set setup and costs a minute to rebuild.
+Clears every zone, then every collection `identity` owns — `sessions`, `auditlogs`,
+`driverdocuments`, `drivers`, `customers`, `adminusers` — reports what it removed, then reseeds.
+Use it when accumulated test data is getting in the way, rather than `docker compose down -v`,
+which also throws away the replica-set setup and costs a minute to rebuild.
 
-It is **not** a `dropDatabase()`. The collection list is explicit so that when `zones`, `packages`
-and `bookings` land, a reset cannot silently destroy data this script knows nothing about — each
-module's seed extends the list. Having to maintain that list is the point.
+Zones go first, and through the module's own `deactivate` → `delete` path rather than a
+`deleteMany`: they point at the seeded admin through `createdBy`, and the audit rows those
+deletions write are then swept by the `auditlogs` clear that follows.
+
+It is **not** a `dropDatabase()`. The list is explicit so that when `packages` and `bookings` land,
+a reset cannot silently destroy data this script knows nothing about — each module's seed extends
+it. Having to maintain that list is the point.
 
 `--reset` sits behind the same production refusal as the plain form: the destructive path must not
 be the one with the shorter route past the guard.
@@ -356,15 +383,16 @@ production, the number on the seed list, and the code matching. The process addi
 
 ### Still to build
 
-The seed covers identity only. `zones`, `packages`, `quotes` and `bookings` do not exist yet, so
-there are still no polygons, no packages and therefore no quotes — a fresh database cannot
-produce a fare. When those modules land the seed should grow to cover them, and two properties
-matter more there than they do here:
+The seed covers identity and zones. `packages`, `quotes` and `bookings` are not seeded yet, so
+there are still no packages and therefore no quotes — a fresh database resolves a point to a zone
+but cannot produce a fare. When those modules land the seed should grow to cover them, and two
+properties matter there:
 
-- **Seed zones through `zones.public.ts`, not Mongoose.** That runs the `@driverzone/geo`
-  invariants, so the seed cannot create geometry the app itself could never produce. Identity
-  needs no equivalent — its rules are single-document and the schema enforces them on any write,
-  which is why `seed.ts` uses the models directly and says so in its header.
+- **Seed through the module's public contract, not Mongoose,** wherever the module has a
+  cross-document invariant to protect — the way `seedZones` calls `zones.public.ts` so the
+  `@driverzone/geo` rules run on every polygon. Identity needs no equivalent: its rules are
+  single-document and the schema enforces them on any write, which is why the account half of
+  `seed.ts` uses the models directly and says so in its header.
 - **More than one driver.** Dispatch waves need several candidates with different duty states and
   vehicle classes to be worth testing; one approved driver is enough only while there is no
   dispatch module.

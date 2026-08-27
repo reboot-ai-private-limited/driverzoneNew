@@ -18,6 +18,8 @@ out/
 !**/.env.*.example
 
 coverage/
+
+
 .expo/
 *.apk
 *.aab

@@ -34,6 +34,7 @@ export * from './ui/PageHeader';
 export * from './ui/Pagination';
 export * from './ui/Panel';
 export * from './ui/RequestId';
+export * from './ui/SegmentedControl';
 export * from './ui/Select';
 export * from './ui/Skeleton';
 export * from './ui/Toast';

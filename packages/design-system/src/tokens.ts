@@ -52,6 +52,19 @@ export const colors = {
   zonePickupPaid: '#9a6700',
   zoneHill: '#8250df',
   zoneViolation: '#cf222e',
+  /**
+   * The rubber-band line while a boundary is being traced — NOT the draft polygon itself.
+   *
+   * Magenta because it is the one hue a basemap never supplies. `interactive` (#3f6212) was
+   * doing this job and is a dark olive that all but disappears against Google's green
+   * vegetation fill, which is exactly the surface a service boundary gets drawn over. Road grey,
+   * water blue, vegetation green and terrain brown are all taken; magenta is legible over every
+   * one of them, and over satellite imagery too.
+   *
+   * Distinct from the placed shape ON PURPOSE. The band is the edge you have not committed to
+   * yet; the polygon it becomes is `interactive`. Two colours, two states.
+   */
+  zoneDraftLine: '#e8368f',
 } as const;
 
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 } as const;

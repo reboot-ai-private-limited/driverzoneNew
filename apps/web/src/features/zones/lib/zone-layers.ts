@@ -155,6 +155,28 @@ export const DRAFT_STYLE: google.maps.PolygonOptions = {
   zIndex: 4,
 };
 
+/**
+ * The open chain drawn between corners while a boundary is being TRACED, including the rubber
+ * band from the last placed corner to the cursor.
+ *
+ * Its own style rather than borrowing `DRAFT_STYLE`'s stroke, because it is not the same thing:
+ * `DRAFT_STYLE` paints a shape that exists, this paints one that does not yet. The magenta is
+ * the only hue Google's basemap never uses for anything, so the line stays readable over
+ * vegetation green, road grey, water blue and satellite imagery alike — the olive it replaced
+ * vanished against the first of those.
+ *
+ * `clickable: false` is REQUIRED, not tidy: the band always terminates under the cursor, and a
+ * clickable Polyline swallows the click that lands on it, so every corner after the first would
+ * be silently dropped.
+ */
+export const DRAFT_LINE_STYLE: google.maps.PolylineOptions = {
+  strokeColor: colors.zoneDraftLine,
+  strokeWeight: 3,
+  strokeOpacity: 1,
+  clickable: false,
+  zIndex: 6,
+};
+
 export const EMPTY_COLLECTION: FeatureCollection<Polygon> = {
   type: 'FeatureCollection',
   features: [],

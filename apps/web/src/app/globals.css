@@ -8,3 +8,42 @@
  * than a missing line of config.
  */
 @source "../../../../packages/design-system/src";
+
+/**
+ * Google's `<gmp-place-autocomplete>` (the zones map search) is a custom element whose internals
+ * are NOT reachable from Tailwind — no light-DOM `input` exists to target, so a `[&_input]:`
+ * variant silently styles nothing. It is themed the two ways Google supports instead: the
+ * `color-scheme` it honours, and its Material custom properties.
+ *
+ * `color-scheme: light` is the load-bearing line. The element ships `color-scheme: light dark`,
+ * so on a machine set to dark mode it renders itself near-black over a light admin panel — which
+ * is what it was doing. The panel is light-only (`theme.css` pins `color-scheme: light` on
+ * `body` for exactly this reason), so the element must be told the same rather than left to read
+ * the OS.
+ *
+ * Values come from the design tokens, not hex literals, so a token change carries here too.
+ */
+.dz-place-search gmp-place-autocomplete {
+  color-scheme: light;
+
+  /* Matches the SegmentedControl beside it: same height, same radius, same border. */
+  height: 30px;
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+
+  /*
+   * NO `overflow: hidden` HERE, however much the 30px height looks like it wants it.
+   *
+   * The suggestions list is rendered INSIDE this element, so clipping the box clips the
+   * dropdown — the field styles perfectly and then silently returns nothing, which looks like a
+   * dead API rather than a CSS bug. The Places requests still fire and still return 200; you
+   * just never see the answers.
+   */
+
+  --gmp-mat-color-surface: var(--color-surface);
+  --gmp-mat-color-on-surface: var(--color-text);
+  --gmp-mat-color-on-surface-variant: var(--color-text-subtle);
+  /* Transparent, because the border above is ours — Google's would sit inside it as a second. */
+  --gmp-mat-color-outline: transparent;
+}

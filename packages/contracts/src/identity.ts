@@ -219,6 +219,7 @@ export interface DriverProfileDto {
   id: string;
   mobile_number: string;
   full_name: string | null;
+  profile_picture: string | null;
   dob: string | null;
   gender: Gender | null;
   experience_years: number | null;
@@ -242,6 +243,7 @@ export interface DriverProfileDto {
 
 export interface UpdateDriverProfileRequest {
   full_name?: string | undefined;
+  profile_picture?: string | null | undefined;
   dob?: string | null | undefined;
   gender?: Gender | null | undefined;
   experience_years?: number | null | undefined;
@@ -271,6 +273,7 @@ export interface DriverDocumentDto {
   sub_type: string | null;
   issued_on: string | null;
   expires_on: string | null;
+  url: string;
 }
 
 export interface RequestDocumentUploadRequest {
@@ -289,6 +292,12 @@ export interface RequestDocumentUploadResponse {
   document_id: string;
   upload_url: string;
   expires_in_seconds: number;
+}
+
+export interface RequestProfilePictureUploadResponse {
+  upload_url: string;
+  expires_in_seconds: number;
+  storage_key: string;
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────────────────────────────
@@ -331,4 +340,19 @@ export interface ReviewDocumentRequest {
 export interface ReviewDocumentResponse {
   document_id: string;
   status: DocumentStatus;
+}
+
+export interface AdminDriverListDto {
+  drivers: DriverProfileDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+export interface AdminDriverDetailsDto {
+  profile: DriverProfileDto;
+  documents: DriverDocumentDto[];
 }

@@ -31,7 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, comingSoon: true },
   { label: 'Bookings', href: '/bookings', icon: CalendarClock, comingSoon: true },
   { label: 'Dispatch', href: '/dispatch', icon: Map, comingSoon: true },
-  { label: 'Drivers', href: '/drivers', icon: Users, comingSoon: true },
+  { label: 'Drivers', href: '/drivers', icon: Users },
   { label: 'Customers', href: '/customers', icon: UserCog, comingSoon: true },
   { label: 'Packages', href: '/packages', icon: Package, comingSoon: true },
   { label: 'Zones', href: '/zones', icon: Building2 },

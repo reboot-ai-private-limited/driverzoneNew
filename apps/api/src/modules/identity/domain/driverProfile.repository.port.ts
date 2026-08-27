@@ -6,6 +6,7 @@ export interface DriverProfile {
   id: string;
   mobileNumber: string;
   fullName: string | null;
+  profilePicture: string | null;
   dob: Date | null;
   gender: Gender | null;
   experienceYears: number | null;
@@ -23,6 +24,7 @@ export interface DriverProfile {
 
 export interface DriverProfilePatch {
   fullName?: string;
+  profilePicture?: string | null;
   dob?: Date | null;
   gender?: Gender | null;
   experienceYears?: number | null;
@@ -39,8 +41,21 @@ export interface DriverProfilePatch {
   canDriveHill?: boolean;
 }
 
+export interface DriverListFilter {
+  onboardingStatus?: OnboardingStatus;
+  isVerified?: boolean;
+  search?: string;
+}
+
+export interface PaginatedDrivers {
+  drivers: DriverProfile[];
+  totalItems: number;
+}
+
 export interface DriverProfileRepositoryPort {
   findById(driverId: string): Promise<DriverProfile | undefined>;
+
+  findPaginated(filter: DriverListFilter, page: number, limit: number): Promise<PaginatedDrivers>;
 
   updateProfile(driverId: string, patch: DriverProfilePatch): Promise<DriverProfile | undefined>;
 

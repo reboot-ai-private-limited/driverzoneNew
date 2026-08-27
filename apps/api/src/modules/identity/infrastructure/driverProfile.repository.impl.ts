@@ -3,6 +3,8 @@ import type { Gender, OnboardingStatus, VehicleTypePreference } from '@driverzon
 import type {
   DriverProfile,
   DriverProfilePatch,
+  DriverListFilter,
+  PaginatedDrivers,
   DriverProfileRepositoryPort,
 } from '../domain/driverProfile.repository.port.js';
 import { DriverModel } from './driver.model.js';
@@ -11,6 +13,7 @@ interface RawDriver {
   _id: mongoose.Types.ObjectId;
   phone: string;
   fullName?: string | null;
+  profilePicture?: string | null;
   dob?: Date | null;
   gender?: string | null;
   experienceYears?: number | null;
@@ -32,6 +35,7 @@ function toDomain(doc: RawDriver): DriverProfile {
     id: String(doc._id),
     mobileNumber: doc.phone,
     fullName: doc.fullName ?? null,
+    profilePicture: doc.profilePicture ?? null,
     dob: doc.dob ?? null,
     gender: (doc.gender as Gender | null) ?? null,
     experienceYears: doc.experienceYears ?? null,
@@ -55,6 +59,7 @@ function toDomain(doc: RawDriver): DriverProfile {
 function toSet(patch: DriverProfilePatch): Record<string, unknown> {
   const set: Record<string, unknown> = {};
   if (patch.fullName !== undefined) set['fullName'] = patch.fullName;
+  if (patch.profilePicture !== undefined) set['profilePicture'] = patch.profilePicture;
   if (patch.dob !== undefined) set['dob'] = patch.dob;
   if (patch.gender !== undefined) set['gender'] = patch.gender;
   if (patch.experienceYears !== undefined) set['experienceYears'] = patch.experienceYears;
@@ -74,6 +79,39 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
     if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;
     const doc = await DriverModel.findById(driverId).lean().exec();
     return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async findPaginated(filter: DriverListFilter, page: number, limit: number): Promise<PaginatedDrivers> {
+    const query: mongoose.FilterQuery<any> = {};
+
+    if (filter.onboardingStatus !== undefined) {
+      query.onboardingStatus = filter.onboardingStatus;
+    }
+    if (filter.isVerified !== undefined) {
+      query.isVerified = filter.isVerified;
+    }
+    if (filter.search !== undefined && filter.search.trim() !== '') {
+      const searchRegex = new RegExp(filter.search.trim().replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i');
+      query.$or = [
+        { fullName: searchRegex },
+        { phone: searchRegex }
+      ];
+    }
+
+    const totalItems = await DriverModel.countDocuments(query).exec();
+    const skip = (page - 1) * limit;
+
+    const docs = await DriverModel.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .exec();
+
+    return {
+      drivers: docs.map((doc) => toDomain(doc as unknown as RawDriver)),
+      totalItems,
+    };
   }
 
   async updateProfile(driverId: string, patch: DriverProfilePatch): Promise<DriverProfile | undefined> {

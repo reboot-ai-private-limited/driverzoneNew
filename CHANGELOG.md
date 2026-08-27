@@ -15,6 +15,20 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **`pnpm seed` now seeds zones too** — Siliguri, three pickup areas inside it, and Darjeeling
+  and Kalimpong above it, in a new `apps/api/src/config/devZones.ts` alongside `devAccounts.ts`.
+  A fresh database resolved nothing before this: `/coverage/check` said "not served" for every
+  point and the zone editor opened on an empty map, so everyone drew their own polygons —
+  the reproducibility problem the account fixtures exist to prevent, recurring one module over.
+  Created through `zones.public.ts` rather than Mongoose, so the `@driverzone/geo` invariants run
+  on every seeded polygon and the seed cannot write geometry the admin panel would have refused;
+  the price is that zone `_id`s differ between machines and `code` is the stable handle. Keyed on
+  `code`, so a second run reports "already present" instead of re-versioning a polygon you were
+  mid-way through editing. `--reset` clears zones first, through the module's own
+  `deactivate` → `delete` path.
+  The fixture is positioned against the accounts: `+919000000003`'s two saved addresses resolve
+  differently on purpose — Sevoke Road into a free pickup zone, Matigara into the city with none —
+  so one seeded customer covers both branches of the pickup-charge path.
 - `docs/engineering/frontend-architecture.md` and `docs/engineering/design-language.md` — the
   admin panel's design, settled before the zone editor gets built on top of it. How it fetches
   (client-first, TanStack Query straight to the API, no BFF), how it holds a session, the

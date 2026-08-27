@@ -32,7 +32,10 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Bookings', href: '/bookings', icon: CalendarClock, comingSoon: true },
   { label: 'Dispatch', href: '/dispatch', icon: Map, comingSoon: true },
   { label: 'Drivers', href: '/drivers', icon: Users },
-  { label: 'Customers', href: '/customers', icon: UserCog, comingSoon: true },
+  // Enabled: the screen is built. Its API (`GET/PATCH /admin/customers`) is not in `apps/api`
+  // yet, so it renders its error state until those routes exist — see
+  // `lib/api/endpoints/customers.ts`. Left disabled it would be unreachable to test against.
+  { label: 'Customers', href: '/customers', icon: UserCog },
   { label: 'Packages', href: '/packages', icon: Package, comingSoon: true },
   { label: 'Zones', href: '/zones', icon: Building2 },
   { label: 'Finance', href: '/finance', icon: Coins, comingSoon: true },

@@ -20,6 +20,12 @@ export interface CustomerProfile {
   emergencyContact: { name: string; phone: string } | null;
   savedAddresses: SavedAddress[];
   vehicles: Vehicle[];
+  /** When the account was created — the moment they first verified an OTP. Admin list only. */
+  joinedAt: Date;
+  /** Last write of any kind, from Mongoose's `timestamps`. Shown on the admin detail screen. */
+  updatedAt: Date;
+  /** Set by an admin only. Never by the customer themselves — see `CustomerProfilePatch`. */
+  isBlocked: boolean;
 }
 
 /**
@@ -35,6 +41,20 @@ export interface CustomerProfilePatch {
   languagesKnown?: string[];
   alternatePhone?: string | null;
   emergencyContact?: { name: string; phone: string } | null;
+  /** Admin-only. No customer blocks themselves, so this never arrives from the self-serve route. */
+  isBlocked?: boolean;
+}
+
+/** Mirrors `DriverListFilter` — same shape, so both admin directories filter identically. */
+export interface CustomerListFilter {
+  /** Matches name, mobile number or number plate. Substring, case-insensitive. */
+  search?: string;
+  isBlocked?: boolean;
+}
+
+export interface PaginatedCustomers {
+  customers: CustomerProfile[];
+  totalItems: number;
 }
 
 export interface CustomerProfileRepositoryPort {
@@ -53,4 +73,18 @@ export interface CustomerProfileRepositoryPort {
   replaceAddresses(customerId: string, addresses: SavedAddress[]): Promise<SavedAddress[]>;
 
   replaceVehicles(customerId: string, vehicles: Vehicle[]): Promise<Vehicle[]>;
+
+  /**
+   * The admin directory. Filtered, sorted and paged IN MONGO, exactly as `findPaginated` does
+   * for drivers.
+   *
+   * Not fetched whole and sliced in the caller: the customer collection grows with every signup
+   * and every row is PII, so loading all of it to render ten rows gets slower every week and
+   * puts thousands of unrelated phone numbers through a process with no use for them.
+   */
+  findPaginated(
+    filter: CustomerListFilter,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedCustomers>;
 }

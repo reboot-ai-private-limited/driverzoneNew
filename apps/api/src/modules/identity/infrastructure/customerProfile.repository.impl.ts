@@ -2,11 +2,13 @@ import mongoose from 'mongoose';
 import type { Gender } from '@driverzone/contracts';
 import type { SavedAddress, Vehicle } from '../domain/customerProfile.entity.js';
 import type {
+  CustomerListFilter,
   CustomerProfile,
   CustomerProfilePatch,
   CustomerProfileRepositoryPort,
+  PaginatedCustomers,
 } from '../domain/customerProfile.repository.port.js';
-import { CustomerModel } from './customer.model.js';
+import { CustomerModel, type CustomerDoc } from './customer.model.js';
 
 /**
  * INFRASTRUCTURE — customer profiles, addresses and vehicles over Mongoose.
@@ -94,6 +96,9 @@ interface RawCustomer {
   emergencyContact?: { name?: string; phone?: string } | null;
   savedAddresses?: unknown[];
   vehicles?: unknown[];
+  isBlocked?: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 function toDomain(doc: RawCustomer): CustomerProfile {
@@ -113,6 +118,12 @@ function toDomain(doc: RawCustomer): CustomerProfile {
         : null,
     savedAddresses: ((doc.savedAddresses ?? []) as StoredAddress[]).map(addressToDomain),
     vehicles: ((doc.vehicles ?? []) as StoredVehicle[]).map(vehicleToDomain),
+    // `timestamps: true` guarantees `createdAt` on anything the schema has written. The fallback
+    // is for a record imported around Mongoose, which would otherwise crash the admin list on
+    // `.toISOString()` of undefined.
+    joinedAt: doc.createdAt ?? new Date(0),
+    updatedAt: doc.updatedAt ?? doc.createdAt ?? new Date(0),
+    isBlocked: doc.isBlocked ?? false,
   };
 }
 
@@ -131,6 +142,7 @@ function toSet(patch: CustomerProfilePatch): Record<string, unknown> {
   if (patch.languagesKnown !== undefined) set['languagesKnown'] = patch.languagesKnown;
   if (patch.alternatePhone !== undefined) set['alternatePhone'] = patch.alternatePhone;
   if (patch.emergencyContact !== undefined) set['emergencyContact'] = patch.emergencyContact;
+  if (patch.isBlocked !== undefined) set['isBlocked'] = patch.isBlocked;
   return set;
 }
 
@@ -166,6 +178,50 @@ export class MongoCustomerProfileRepository implements CustomerProfileRepository
       .lean()
       .exec();
     return doc === null ? [] : toDomain(doc as unknown as RawCustomer).savedAddresses;
+  }
+
+  async findPaginated(
+    filter: CustomerListFilter,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedCustomers> {
+    const query: mongoose.FilterQuery<CustomerDoc> = {};
+
+    if (filter.isBlocked !== undefined) query.isBlocked = filter.isBlocked;
+
+    if (filter.search !== undefined && filter.search.trim() !== '') {
+      // Escaped before it becomes a regex: a `(` typed into the search box is otherwise a syntax
+      // error Mongo rejects, and `.*` is a collection scan nobody asked for.
+      const searchRegex = new RegExp(
+        filter.search.trim().replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'),
+        'i',
+      );
+      // Plate matching is on the RAW stored value, not the normalised form the domain compares
+      // with: an admin typing "WB74" is reading a fragment off a screen, not supplying a key.
+      query.$or = [
+        { fullName: searchRegex },
+        { phone: searchRegex },
+        { 'vehicles.plateNumber': searchRegex },
+      ];
+    }
+
+    const totalItems = await CustomerModel.countDocuments(query).exec();
+    const skip = (page - 1) * limit;
+
+    const docs = await CustomerModel.find(query)
+      // Newest first — the useful default for a directory whose rows arrive by signup. `_id`
+      // breaks ties: without it two accounts created in the same millisecond can swap places
+      // between page 1 and page 2, so one is shown twice and the other never.
+      .sort({ createdAt: -1, _id: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .exec();
+
+    return {
+      customers: (docs as unknown as RawCustomer[]).map(toDomain),
+      totalItems,
+    };
   }
 
   async replaceVehicles(customerId: string, vehicles: Vehicle[]): Promise<Vehicle[]> {

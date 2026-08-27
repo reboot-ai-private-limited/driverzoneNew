@@ -3,6 +3,7 @@ import type {
   DriverDocumentDto,
   DriverProfileDto,
   RequestDocumentUploadResponse,
+  RequestProfilePictureUploadResponse,
   SubmitOnboardingResponse,
 } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
@@ -12,8 +13,9 @@ import type { DriverDocument } from '../domain/driverDocument.repository.port.js
 import type { DriverProfile } from '../domain/driverProfile.repository.port.js';
 import type { GetDriverProfileUseCase } from '../application/useCases/getDriverProfile.usecase.js';
 import type { UpdateDriverProfileUseCase } from '../application/useCases/updateDriverProfile.usecase.js';
-import type { ManageDriverDocumentsUseCase } from '../application/useCases/manageDriverDocuments.usecase.js';
+import type { ManageDriverDocumentsUseCase, DriverDocumentWithUrl } from '../application/useCases/manageDriverDocuments.usecase.js';
 import type { SubmitOnboardingUseCase } from '../application/useCases/submitOnboarding.usecase.js';
+import type { RequestProfilePictureUploadUseCase } from '../application/useCases/requestProfilePictureUpload.usecase.js';
 import { requestDocumentUploadSchema, updateDriverProfileSchema } from './identity.validation.js';
 
 /** INTERFACE — the driver's own profile, documents and onboarding submission. */
@@ -37,6 +39,7 @@ function profileToDto(p: DriverProfile): DriverProfileDto {
     id: p.id,
     mobile_number: p.mobileNumber,
     full_name: p.fullName,
+    profile_picture: p.profilePicture,
     dob: toDateOnly(p.dob),
     gender: p.gender,
     experience_years: p.experienceYears,
@@ -57,13 +60,10 @@ function profileToDto(p: DriverProfile): DriverProfileDto {
 }
 
 /**
- * `fileUrl` is deliberately absent from the DTO.
- *
- * It holds an object storage KEY, which is an internal detail; a download link is minted on
- * demand and expires in minutes (docs/LLD/architecture.md). Returning the key would leak the
- * bucket layout and tempt a client to construct URLs itself.
+ * `fileUrl` holds an object storage KEY, which is an internal detail; a download link is minted on
+ * demand and expires in minutes. We resolve it to `url` before sending to the client.
  */
-function documentToDto(d: DriverDocument): DriverDocumentDto {
+function documentToDto(d: DriverDocumentWithUrl): DriverDocumentDto {
   return {
     id: d.id,
     doc_type: d.docType,
@@ -73,12 +73,14 @@ function documentToDto(d: DriverDocument): DriverDocumentDto {
     sub_type: d.subType,
     issued_on: toDateOnly(d.issuedOn),
     expires_on: toDateOnly(d.expiresOn),
+    url: d.url
   };
 }
 
 export interface DriverControllerDeps {
   getProfile: GetDriverProfileUseCase;
   updateProfile: UpdateDriverProfileUseCase;
+  requestProfilePictureUpload: RequestProfilePictureUploadUseCase;
   documents: ManageDriverDocumentsUseCase;
   submitOnboarding: SubmitOnboardingUseCase;
 }
@@ -86,6 +88,7 @@ export interface DriverControllerDeps {
 export interface DriverControllers {
   getProfile: RequestHandler;
   updateProfile: RequestHandler;
+  requestProfilePictureUpload: RequestHandler;
   listDocuments: RequestHandler;
   requestDocumentUpload: RequestHandler;
   submitOnboarding: RequestHandler;
@@ -103,6 +106,7 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
 
       const updated = await deps.updateProfile.execute(subjectId(req), {
         ...(input.full_name === undefined ? {} : { fullName: input.full_name }),
+        ...(input.profile_picture === undefined ? {} : { profilePicture: input.profile_picture }),
         ...(input.dob === undefined ? {} : { dob: input.dob === null ? null : fromDateOnly(input.dob) }),
         ...(input.gender === undefined ? {} : { gender: input.gender }),
         ...(input.experience_years === undefined ? {} : { experienceYears: input.experience_years }),
@@ -126,6 +130,16 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
       });
 
       sendSuccess(req, res, profileToDto(updated), 'Profile updated');
+    }),
+
+    requestProfilePictureUpload: asyncHandler(async (req, res) => {
+      const presigned = await deps.requestProfilePictureUpload.execute(subjectId(req));
+      const body: RequestProfilePictureUploadResponse = {
+        upload_url: presigned.uploadUrl,
+        expires_in_seconds: presigned.expiresInSeconds,
+        storage_key: presigned.storageKey,
+      };
+      sendSuccess(req, res, body, 'Upload authorised');
     }),
 
     listDocuments: asyncHandler(async (req, res) => {

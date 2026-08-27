@@ -10,6 +10,7 @@ export function buildDriverRouter(controllers: DriverControllers): Router {
 
   router.get('/profile', controllers.getProfile);
   router.patch('/profile', controllers.updateProfile);
+  router.post('/profile/picture-upload-url', controllers.requestProfilePictureUpload);
 
   router.get('/documents', controllers.listDocuments);
   router.post('/documents', controllers.requestDocumentUpload);

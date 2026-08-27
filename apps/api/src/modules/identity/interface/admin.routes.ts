@@ -20,6 +20,9 @@ export function buildAdminRouter(controllers: AdminControllers): Router {
   router.get('/profile', controllers.getProfile);
   router.patch('/profile', controllers.updateProfile);
 
+  router.get('/drivers', controllers.listDrivers);
+  router.get('/drivers/:id', controllers.getDriverDetails);
+
   router.post('/drivers/:id/approve', controllers.approveDriver);
   router.post('/drivers/:id/reject', controllers.rejectDriver);
   router.patch('/drivers/:id/documents/:docId', controllers.reviewDocument);

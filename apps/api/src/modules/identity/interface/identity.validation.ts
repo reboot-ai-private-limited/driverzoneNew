@@ -143,6 +143,7 @@ export const updateVehicleSchema = z.object({
 
 export const updateDriverProfileSchema = z.object({
   full_name: personName.optional(),
+  profile_picture: freeText.nullable().optional(),
   dob: isoDate.nullable().optional(),
   gender: gender.nullable().optional(),
   // Upper bound is a sanity check, not a policy: 70 years of driving is a typo.
@@ -178,6 +179,29 @@ export const rejectDriverSchema = z.object({
 export const reviewDocumentSchema = z.object({
   status: z.enum(['PENDING', 'VERIFIED', 'REJECTED']),
   reason: freeText.optional(),
+});
+
+export const adminDriverListQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 1))
+    .refine((n) => !isNaN(n) && n >= 1, 'Page must be >= 1'),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 10))
+    .refine((n) => !isNaN(n) && n >= 1 && n <= 100, 'Limit must be between 1 and 100'),
+  onboarding_status: z.enum(['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED']).optional(),
+  is_verified: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  search: z.string().trim().optional(),
+});
+
+export const driverIdParamSchema = z.object({
+  id: z.string().min(1),
 });
 
 export type UpdateCustomerProfileInput = z.infer<typeof updateCustomerProfileSchema>;

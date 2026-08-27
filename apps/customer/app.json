@@ -4,8 +4,23 @@
     "slug": "driverzone-customer",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
-    "android": { "package": "in.driverzone.customer" },
-    "ios": { "bundleIdentifier": "in.driverzone.customer" }
+    "userInterfaceStyle": "light",
+    "scheme": "driverzone",
+    "backgroundColor": "#F2F200",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-splash-screen",
+      "expo-status-bar"
+    ],
+    "android": {
+      "package": "in.driverzone.customer",
+      "versionCode": 1
+    },
+    "ios": {
+      "bundleIdentifier": "in.driverzone.customer",
+      "buildNumber": "1",
+      "supportsTablet": false
+    }
   }
 }

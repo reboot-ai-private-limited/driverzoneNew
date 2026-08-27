@@ -13,3 +13,12 @@ allowBuilds:
   msgpackr-extract: true
   sharp: true
   unrs-resolver: true
+
+# The setting that makes Metro work, and it MUST live here rather than in `.npmrc`.
+#
+# This pnpm reads its configuration from this file, and `node-linker=hoisted` in `.npmrc` is
+# silently ignored — which leaves the default isolated symlink layout in place and breaks the
+# React Native bundler with "Unable to resolve module react-native". The `.npmrc` comment
+# explaining WHY hoisting is required is still the one to read; only its location was wrong.
+# See docs/engineering/mobile-in-monorepo.md.
+nodeLinker: hoisted

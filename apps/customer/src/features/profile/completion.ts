@@ -1,0 +1,83 @@
+import type { Gender } from '@driverzone/contracts';
+
+/** Everything the profile form collects, including the parts the API cannot store yet. */
+export interface ProfileDraft {
+  photoUri: string | null;
+  fullName: string;
+  gender: Gender | null;
+  dob: Date | null;
+  email: string;
+  paymentMethod: string | null;
+  address: string;
+}
+
+export const EMPTY_DRAFT: ProfileDraft = {
+  photoUri: null,
+  fullName: '',
+  gender: null,
+  dob: null,
+  email: '',
+  paymentMethod: null,
+  address: '',
+};
+
+/**
+ * The dial's number, computed rather than fixed.
+ *
+ * The verified mobile number counts as one already-complete field: the account cannot exist
+ * without it, so a customer arriving here is genuinely not starting from zero and a dial reading
+ * 0% would be wrong as well as discouraging.
+ *
+ * Weighting every field equally is deliberate. A weighted score needs a rationale for each
+ * weight, and there is no evidence to set them from — an arbitrary weighting dressed up as a
+ * percentage is worse than an honest count.
+ */
+export function completionPercent(draft: ProfileDraft): number {
+  const filled = [
+    true, // mobile_number, verified at sign-in
+    draft.photoUri !== null,
+    draft.fullName.trim().length > 0,
+    draft.gender !== null,
+    draft.dob !== null,
+    draft.email.trim().length > 0,
+    draft.paymentMethod !== null,
+    draft.address.trim().length > 0,
+  ];
+  const done = filled.filter(Boolean).length;
+  return Math.round((done / filled.length) * 100);
+}
+
+/** Same grouping the API uses, so the three toggles map straight onto `Gender`. */
+export const GENDER_OPTIONS: ReadonlyArray<{ value: Gender; label: string }> = [
+  { value: 'MALE', label: 'Male' },
+  { value: 'FEMALE', label: 'Female' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+/**
+ * UPI first — it is what the Indian market uses (docs/LLD/roadmap.md phase 8).
+ *
+ * Local to this screen for now. There is no payment module on the API, so these are not ids
+ * from a server and must not be treated as though they were.
+ */
+export const PAYMENT_METHODS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: 'UPI', label: 'UPI' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CARD', label: 'Card' },
+];
+
+/** The API takes `dob` as a date-only string; `toISOString` would send a timezone with it. */
+export function toDateOnly(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function formatDob(date: Date): string {
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Deliberately permissive — the server validates, and a clever regex here only rejects real addresses. */
+export function isPlausibleEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}

@@ -21,6 +21,8 @@ import { SubmitOnboardingUseCase } from './application/useCases/submitOnboarding
 import { ManageAdminProfileUseCase } from './application/useCases/manageAdminProfile.usecase.js';
 import { VerifyDriverUseCase } from './application/useCases/verifyDriver.usecase.js';
 import { ListDriversAdminUseCase } from './application/useCases/listDriversAdmin.usecase.js';
+import { ListCustomersAdminUseCase } from './application/useCases/listCustomersAdmin.usecase.js';
+import { ManageCustomerAdminUseCase } from './application/useCases/manageCustomerAdmin.usecase.js';
 import { GetDriverDetailsAdminUseCase } from './application/useCases/getDriverDetailsAdmin.usecase.js';
 import { MongoAccountRepository } from './infrastructure/account.repository.impl.js';
 import { MongoSessionRepository } from './infrastructure/session.repository.impl.js';
@@ -131,6 +133,12 @@ export function buildIdentityContainer(): IdentityContainer {
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
   const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit);
+  // Same repository the customer's own profile routes use, a different use case in front of it.
+  // The narrow, self-only use cases stay exactly as they are — widening one of them to accept a
+  // customer id is how an admin-shaped hole appears in the customer app's surface.
+  const listCustomersAdmin = new ListCustomersAdminUseCase(customers);
+  const manageCustomerAdmin = new ManageCustomerAdminUseCase(customers, audit);
+
   const listDriversAdmin = new ListDriversAdminUseCase(drivers);
   const getDriverDetailsAdmin = new GetDriverDetailsAdminUseCase(drivers, documents, documentStorage);
 
@@ -163,7 +171,9 @@ export function buildIdentityContainer(): IdentityContainer {
       profile: adminProfile,
       verifyDriver,
       listDrivers: listDriversAdmin,
-      getDriverDetails: getDriverDetailsAdmin
+      getDriverDetails: getDriverDetailsAdmin,
+      listCustomers: listCustomersAdmin,
+      manageCustomer: manageCustomerAdmin
     }));
   };
 

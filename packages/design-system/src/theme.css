@@ -122,6 +122,25 @@
    * hover, which is the one thing the overlay design exists to prevent.
    */
   --container-content-max: 1920px;
+
+  /**
+   * ELEVATION — a deliberate, product-owner-approved exception to the rule stated below.
+   *
+   * §Principles in docs/engineering/design-language.md says "no shadows, anywhere", and the note
+   * under this block still says the same. These two tokens exist because the customer detail
+   * screen was asked for with defined card edges, and the alternative was ad-hoc `shadow-md`
+   * classes appearing screen by screen with a different value each time — which is how a system
+   * loses a rule quietly instead of changing it on purpose.
+   *
+   * Tuned to the palette, not to black: the colour is `--color-text` at very low alpha, so the
+   * shade sits on the warm grey the page is built from rather than greying it out. Two layers —
+   * a tight contact shadow for the edge, a wider ambient one for the lift.
+   *
+   * IF THIS IS ADOPTED BEYOND THE CUSTOMER SCREENS, update §Principles and the note below to
+   * match. A rule that is documented one way and practised another is worse than either.
+   */
+  --shadow-card: 0 1px 2px rgb(28 27 31 / 0.04), 0 1px 3px rgb(28 27 31 / 0.06);
+  --shadow-raised: 0 2px 4px rgb(28 27 31 / 0.04), 0 6px 16px rgb(28 27 31 / 0.08);
 }
 
 /**

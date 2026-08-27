@@ -1,6 +1,7 @@
 'use client';
 
-import { customersApi, type AdminUpdateCustomerRequest } from '@/lib/api/endpoints/customers';
+import type { AdminUpdateCustomerRequest } from '@driverzone/contracts';
+import { customersApi } from '@/lib/api/endpoints/customers';
 import { keys } from '@/lib/query/keys';
 import { useApiMutation } from '@/lib/query/mutation';
 

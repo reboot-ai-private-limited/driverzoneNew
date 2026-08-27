@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { UserCog } from 'lucide-react';
 import {
   Badge,
@@ -17,14 +18,9 @@ import {
   SkeletonTable,
   TopProgressBar,
   type Column,
-  type SortState,
 } from '@driverzone/design-system';
-import type {
-  AdminCustomerListItemDto,
-  AdminCustomerSort,
-  ListCustomersQuery,
-} from '@/lib/api/endpoints/customers';
-import { ApiError } from '@/lib/api/ApiError';
+import type { AdminCustomerListItemDto } from '@driverzone/contracts';
+import type { ListCustomersQuery } from '@/lib/api/endpoints/customers';
 import { toErrorState } from '@/lib/api/toErrorState';
 import { formatDate, formatMobile } from '@/lib/format';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
@@ -32,23 +28,17 @@ import { useFilterParams } from '@/lib/hooks/useFilterParams';
 import { SEARCH_DEBOUNCE_MS } from '@/lib/hooks/timing';
 import { useCustomers } from '../hooks/useCustomers';
 import { CustomerEditDialog } from './CustomerEditDialog';
-import { CustomerViewDialog } from './CustomerViewDialog';
 
 const PAGE_SIZE = 15;
 
 /** The skeleton uses the SAME widths as the columns, so nothing shifts when the data lands. */
 const COLUMN_WIDTHS = ['w-12', 'w-56', 'w-36', 'w-28', 'w-32', 'w-64', 'w-28', 'w-20', 'w-28'];
 
-type FilterKey = 'q' | 'status' | 'page' | 'sort' | 'dir';
-
-const SORTABLE: Record<string, AdminCustomerSort> = {
-  name: 'name',
-  mobile: 'mobile',
-  joined: 'joined',
-};
+type FilterKey = 'q' | 'status' | 'page';
 
 export function CustomersScreen() {
   const params = useFilterParams<FilterKey>();
+  const router = useRouter();
 
   /**
    * The search box holds two values: what the admin has typed, which must appear instantly, and
@@ -67,11 +57,12 @@ export function CustomersScreen() {
 
   const status = params.get('status') || 'ALL';
   const page = Math.max(1, Number(params.get('page')) || 1);
-  const sortKey = SORTABLE[params.get('sort')] ?? 'joined';
-  // Newest first is the useful default for a directory sorted by join date. An explicit `dir` in
-  // the URL always wins, so a shared link shows what the sender was looking at.
-  const sortDir = params.get('dir') === 'asc' ? 'asc' : 'desc';
-  const sort = useMemo<SortState>(() => ({ key: sortKey, direction: sortDir }), [sortKey, sortDir]);
+  /*
+   * No sort controls: `GET /admin/customers` always returns newest signup first, exactly as
+   * `GET /admin/drivers` does. That is the right default for this screen — a customer who has
+   * just signed in is at the top of page one — and sortable headers that the server cannot
+   * honour would be a lie the UI tells about itself.
+   */
 
   /**
    * Memoised because it is a QUERY KEY. A fresh object every render is a fresh key every render,
@@ -79,25 +70,24 @@ export function CustomersScreen() {
    */
   const query = useMemo<ListCustomersQuery>(
     () => ({
-      ...(search.trim() === '' ? {} : { q: search.trim() }),
+      ...(search.trim() === '' ? {} : { search: search.trim() }),
       ...(status === 'ALL' ? {} : { is_blocked: status === 'BLOCKED' }),
       page,
-      page_size: PAGE_SIZE,
-      sort: sortKey,
-      dir: sortDir,
+      limit: PAGE_SIZE,
     }),
-    [search, status, page, sortKey, sortDir],
+    [search, status, page],
   );
 
   const customers = useCustomers(query);
 
-  /** `undefined` means no dialog. Two ids, because View can hand off to Edit. */
-  const [viewing, setViewing] = useState<string | undefined>(undefined);
+  /** `undefined` means the edit dialog is closed. Viewing is a route now, not a dialog. */
   const [editing, setEditing] = useState<string | undefined>(undefined);
 
   const rows = customers.data?.customers ?? [];
-  const total = customers.data?.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Straight from the server's envelope rather than recomputed here: the API clamps `limit`, so
+  // a page count derived from the client's PAGE_SIZE can disagree with the pages that exist.
+  const total = customers.data?.pagination.total_items ?? 0;
+  const pageCount = Math.max(1, customers.data?.pagination.total_pages ?? 1);
 
   /**
    * The serial number is the row's position in THIS view, computed from the page offset.
@@ -120,7 +110,6 @@ export function CustomersScreen() {
       key: 'name',
       header: 'Customer',
       width: COLUMN_WIDTHS[1] ?? '',
-      sortable: true,
       render: (customer) => (
         <CellStack
           primary={customer.full_name ?? <span className="text-text-subtle">Unnamed</span>}
@@ -133,7 +122,6 @@ export function CustomersScreen() {
       header: 'Mobile',
       width: COLUMN_WIDTHS[2] ?? '',
       numeric: true,
-      sortable: true,
       render: (customer) => formatMobile(customer.mobile_number),
     },
     {
@@ -141,7 +129,6 @@ export function CustomersScreen() {
       header: 'Joined',
       width: COLUMN_WIDTHS[3] ?? '',
       numeric: true,
-      sortable: true,
       render: (customer) => formatDate(customer.joined_at),
     },
     {
@@ -208,7 +195,7 @@ export function CustomersScreen() {
             variant="ghost"
             onClick={(e) => {
               e.stopPropagation();
-              setViewing(customer.id);
+              router.push(`/customers/${customer.id}`);
             }}
           >
             View
@@ -229,20 +216,6 @@ export function CustomersScreen() {
   ];
 
   const filtered = search.trim() !== '' || status !== 'ALL';
-
-  /**
-   * The one failure that is not a fault: `GET /admin/customers` does not exist in `apps/api`
-   * yet, so the router falls through to the 404 handler.
-   *
-   * Routed to the empty state rather than the error state ON PURPOSE. `toErrorState` would
-   * render "Not found" over the server's `No route matches GET /api/admin/customers?...`, which
-   * is accurate and reads to anyone who is not holding the API source as a broken screen. This
-   * says which piece is missing instead.
-   *
-   * DELETE THIS BRANCH the day the endpoint lands. From then on a 404 here means a customer id
-   * that does not resolve, which IS a fault and must not be swallowed as "nothing to show".
-   */
-  const awaitingApi = customers.error instanceof ApiError && customers.error.code === 'NOT_FOUND';
 
   return (
     <>
@@ -285,23 +258,17 @@ export function CustomersScreen() {
         <DataState
           loading={customers.isLoading}
           error={
-            customers.isError && !awaitingApi
+            customers.isError
               ? toErrorState(customers.error, () => void customers.refetch())
               : undefined
           }
-          empty={awaitingApi || rows.length === 0}
+          empty={rows.length === 0}
           emptyState={{
             icon: <UserCog aria-hidden className="size-6" />,
-            title: awaitingApi
-              ? 'Customer directory is not available yet'
-              : filtered
-                ? 'No customers match those filters'
-                : 'No customers yet',
-            description: awaitingApi
-              ? 'This screen is built and waiting on its API. GET /admin/customers does not exist in apps/api yet — the customer records themselves are only reachable by the customer who owns them.'
-              : filtered
-                ? 'Try a different search, or clear the status filter.'
-                : 'A customer record is created the first time somebody signs in with their phone number.',
+            title: filtered ? 'No customers match those filters' : 'No customers yet',
+            description: filtered
+              ? 'Try a different search, or clear the status filter.'
+              : 'A customer record is created the first time somebody signs in with their phone number.',
           }}
           skeleton={<SkeletonTable rows={10} columns={COLUMN_WIDTHS} />}
         >
@@ -309,13 +276,10 @@ export function CustomersScreen() {
             columns={columns}
             rows={rows}
             rowKey={(customer) => customer.id}
-            sort={sort}
-            onSortChange={(next) =>
-              params.set({ sort: next.key, dir: next.direction, page: undefined })
-            }
-            // Opening the row opens the read-only view. Edit stays an explicit button: a click
-            // that lands on a form is how a record gets changed by someone who meant to read it.
-            onRowClick={(customer) => setViewing(customer.id)}
+            // Opening the row opens the read-only detail screen. Edit stays an explicit button:
+            // a click that lands on a form is how a record gets changed by somebody who meant
+            // only to read it.
+            onRowClick={(customer) => router.push(`/customers/${customer.id}`)}
             refetching={customers.isFetching && !customers.isLoading}
           />
           <Pagination
@@ -328,15 +292,6 @@ export function CustomersScreen() {
         </DataState>
       </section>
 
-      <CustomerViewDialog
-        customerId={viewing}
-        onClose={() => setViewing(undefined)}
-        onEdit={(id) => {
-          // One at a time — two open dialogs would trap focus in the one underneath.
-          setViewing(undefined);
-          setEditing(id);
-        }}
-      />
       <CustomerEditDialog customerId={editing} onClose={() => setEditing(undefined)} />
     </>
   );

@@ -10,11 +10,7 @@ import {
   Select,
   SkeletonFieldList,
 } from '@driverzone/design-system';
-import type {
-  AdminCustomerDetailDto,
-  AdminUpdateCustomerRequest,
-  CustomerGender,
-} from '@/lib/api/endpoints/customers';
+import type { AdminCustomerDetailsDto, AdminUpdateCustomerRequest, Gender } from '@driverzone/contracts';
 import { toErrorState } from '@/lib/api/toErrorState';
 import { formatMobile } from '@/lib/format';
 import { useCustomer } from '../hooks/useCustomer';
@@ -28,7 +24,7 @@ import { useUpdateCustomer } from '../hooks/useUpdateCustomer';
 interface FormState {
   fullName: string;
   dob: string;
-  gender: CustomerGender | 'UNSET';
+  gender: Gender | 'UNSET';
   alternateNumber: string;
   blocked: boolean;
 }
@@ -49,7 +45,7 @@ const STATUS_OPTIONS = [
 /** E.164, matching what the API accepts. The client normalises; the server refuses anything else. */
 const E164 = /^\+[1-9]\d{7,14}$/;
 
-function toForm(customer: AdminCustomerDetailDto): FormState {
+function toForm(customer: AdminCustomerDetailsDto): FormState {
   return {
     fullName: customer.full_name ?? '',
     dob: customer.dob ?? '',
@@ -67,7 +63,10 @@ function toForm(customer: AdminCustomerDetailDto): FormState {
  * to the customer's own app that this dialog does not render: the admin's blank copy of it would
  * overwrite the real value on an unrelated edit.
  */
-function buildPatch(original: AdminCustomerDetailDto, form: FormState): AdminUpdateCustomerRequest {
+function buildPatch(
+  original: AdminCustomerDetailsDto,
+  form: FormState,
+): AdminUpdateCustomerRequest {
   const patch: AdminUpdateCustomerRequest = {};
   const before = toForm(original);
 

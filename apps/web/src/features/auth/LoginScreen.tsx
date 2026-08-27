@@ -7,6 +7,7 @@ import { Button, FormField, Input, OtpInput } from '@driverzone/design-system';
 import { ApiError } from '@/lib/api/ApiError';
 import { authApi } from '@/lib/api/endpoints/auth';
 import { useSession } from '@/lib/auth/SessionProvider';
+import { destinationAfterLogin } from '@/lib/auth/next-path';
 
 type Step = 'phone' | 'otp';
 
@@ -58,7 +59,10 @@ export function LoginScreen() {
     setError(undefined);
     try {
       await signIn(mobile, code);
-      router.replace('/zones');
+      // Back to whatever the panel gate parked in `?next=`, or the landing screen. The path is
+      // validated as same-origin first — an admin login that will redirect anywhere on request
+      // is a phishing link wearing this app's hostname.
+      router.replace(destinationAfterLogin());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not sign you in.');
       // Five wrong attempts burn the challenge and there is no "one more try" — the next move

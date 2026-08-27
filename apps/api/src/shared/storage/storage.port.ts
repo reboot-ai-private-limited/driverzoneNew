@@ -14,6 +14,15 @@ export interface PresignedUpload {
    * If omitted, the client performs a raw PUT to the uploadUrl.
    */
   uploadFields?: Record<string, string>;
+
+  /**
+   * Optional constraints the client should enforce locally before uploading.
+   * (e.g. max file size, allowed formats).
+   */
+  clientConstraints?: {
+    maxSizeBytes?: number;
+    allowedFormats?: string[];
+  };
 }
 
 /**

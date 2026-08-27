@@ -57,6 +57,7 @@
   --color-zone-pickup-paid: #9a6700;
   --color-zone-hill: #8250df;
   --color-zone-violation: #cf222e;
+  --color-zone-draft-line: #e8368f;
 
   /* ── Type ─────────────────────────────────────────────────────────────────────
    * 14px base. The console default: 16px costs roughly three table rows per screen.

@@ -16,9 +16,12 @@ import { UpsertFromBookingUseCase } from './application/useCases/upsertFromBooki
 import { GetDriverProfileUseCase } from './application/useCases/getDriverProfile.usecase.js';
 import { UpdateDriverProfileUseCase } from './application/useCases/updateDriverProfile.usecase.js';
 import { ManageDriverDocumentsUseCase } from './application/useCases/manageDriverDocuments.usecase.js';
+import { RequestProfilePictureUploadUseCase } from './application/useCases/requestProfilePictureUpload.usecase.js';
 import { SubmitOnboardingUseCase } from './application/useCases/submitOnboarding.usecase.js';
 import { ManageAdminProfileUseCase } from './application/useCases/manageAdminProfile.usecase.js';
 import { VerifyDriverUseCase } from './application/useCases/verifyDriver.usecase.js';
+import { ListDriversAdminUseCase } from './application/useCases/listDriversAdmin.usecase.js';
+import { GetDriverDetailsAdminUseCase } from './application/useCases/getDriverDetailsAdmin.usecase.js';
 import { MongoAccountRepository } from './infrastructure/account.repository.impl.js';
 import { MongoSessionRepository } from './infrastructure/session.repository.impl.js';
 import { MongoCustomerProfileRepository } from './infrastructure/customerProfile.repository.impl.js';
@@ -27,7 +30,7 @@ import { MongoDriverDocumentRepository } from './infrastructure/driverDocument.r
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
-import { StubDocumentStorage } from './infrastructure/documentStorage.stub.js';
+import { CloudinaryStorage } from '@/shared/storage/cloudinary.storage.js';
 import { RedisOtpStore } from './infrastructure/otpStore.redis.js';
 import { makeAuthControllers } from './interface/auth.controller.js';
 import { buildAuthRouter } from './interface/auth.routes.js';
@@ -69,7 +72,11 @@ export function buildIdentityContainer(): IdentityContainer {
   // configured with `maxRetriesPerRequest: null` and multiplexes fine at these command volumes.
   const otpStore = new RedisOtpStore(getRedis());
   const otpSender = new LoggingOtpSender();
-  const documentStorage = new StubDocumentStorage();
+  const documentStorage = new CloudinaryStorage({
+    cloudName: env.CLOUDINARY_CLOUD_NAME,
+    apiKey: env.CLOUDINARY_API_KEY,
+    apiSecret: env.CLOUDINARY_API_SECRET,
+  });
 
   const accounts = new MongoAccountRepository();
   const sessions = new MongoSessionRepository();
@@ -109,11 +116,23 @@ export function buildIdentityContainer(): IdentityContainer {
 
   const getDriverProfile = new GetDriverProfileUseCase(drivers);
   const updateDriverProfile = new UpdateDriverProfileUseCase(drivers);
-  const manageDocuments = new ManageDriverDocumentsUseCase(documents, documentStorage);
+  const requestProfilePictureUpload = new RequestProfilePictureUploadUseCase(
+    documentStorage,
+    env.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024,
+    env.UPLOAD_ALLOWED_FORMATS
+  );
+  const manageDocuments = new ManageDriverDocumentsUseCase(
+    documents,
+    documentStorage,
+    env.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024,
+    env.UPLOAD_ALLOWED_FORMATS
+  );
   const submitOnboarding = new SubmitOnboardingUseCase(drivers, documents);
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
   const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit);
+  const listDriversAdmin = new ListDriversAdminUseCase(drivers);
+  const getDriverDetailsAdmin = new GetDriverDetailsAdminUseCase(drivers, documents, documentStorage);
 
   const authRouterFor = (role: Role): Router =>
     buildAuthRouter(role, makeAuthControllers(role, { sendOtp, verifyOtp, refreshSession, logout }));
@@ -134,12 +153,18 @@ export function buildIdentityContainer(): IdentityContainer {
         makeDriverControllers({
           getProfile: getDriverProfile,
           updateProfile: updateDriverProfile,
+          requestProfilePictureUpload,
           documents: manageDocuments,
           submitOnboarding,
         }),
       );
     }
-    return buildAdminRouter(makeAdminControllers({ profile: adminProfile, verifyDriver }));
+    return buildAdminRouter(makeAdminControllers({
+      profile: adminProfile,
+      verifyDriver,
+      listDrivers: listDriversAdmin,
+      getDriverDetails: getDriverDetailsAdmin
+    }));
   };
 
   return {

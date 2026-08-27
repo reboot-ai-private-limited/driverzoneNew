@@ -141,6 +141,15 @@ export function ZonesScreen() {
 
   const saving = create.isPending || updateGeometry.isPending || updateMetadata.isPending;
 
+  /**
+   * A new zone starts EMPTY, and the admin places the first corner.
+   *
+   * Nothing is drawn here on purpose: the map goes to crosshair and waits. A previous version
+   * of this seeded a starter polygon automatically, which is not what creating a zone means —
+   * the boundary is the admin's to place, not something to be handed a guess at and asked to
+   * correct. What makes the tracing bearable is the rubber band in `ZoneMap`: once the first
+   * corner is down, the next edge follows the cursor, so every click is aimed rather than blind.
+   */
   const startCreate = (type: 'PICKUP' | 'HILL'): void => {
     select(null);
     setSession({ zoneId: null, type });

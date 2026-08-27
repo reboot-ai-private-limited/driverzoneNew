@@ -1,4 +1,4 @@
-import type { ListZonesQuery } from '@driverzone/contracts';
+import type { ListIncityPackagesQuery, ListZonesQuery } from '@driverzone/contracts';
 
 /**
  * Query keys, as a factory. Never a string literal at a call site.
@@ -14,6 +14,17 @@ export const keys = {
     list: (query?: ListZonesQuery) => ['zones', 'list', query ?? {}] as const,
     detail: (id: string) => ['zones', 'detail', id] as const,
     dependents: (id: string) => ['zones', 'dependents', id] as const,
+    /**
+     * The live geometry check. `fingerprint` is the SERIALISED polygon, not its id: this key
+     * has to change on every vertex drag, and two shapes that hash the same would show the
+     * verdict for the wrong one — which for a save-blocking check is the worst kind of wrong.
+     */
+    validate: (fingerprint: string) => ['zones', 'validate', fingerprint] as const,
+  },
+  packages: {
+    all: () => ['packages'] as const,
+    incityList: (query?: ListIncityPackagesQuery) =>
+      ['packages', 'incity', 'list', query ?? {}] as const,
   },
   admin: {
     profile: () => ['admin', 'profile'] as const,

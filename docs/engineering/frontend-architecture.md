@@ -378,9 +378,31 @@ zone is stays in `features/`.
 
 ## Environment
 
-| Variable                   | Purpose                                                 |
-| -------------------------- | ------------------------------------------------------- |
-| `NEXT_PUBLIC_API_BASE_URL` | Where the browser calls the API. Inlined at build time. |
+| Variable                           | Purpose                                                 |
+| ---------------------------------- | ------------------------------------------------------- |
+| `NEXT_PUBLIC_API_BASE_URL`         | Where the browser calls the API. Inlined at build time. |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`  | The zone editor's map and its address search.           |
+
+### The Maps key is public, and that is not the problem
+
+Every `NEXT_PUBLIC_*` value ships to every browser. For the Maps JavaScript API that is
+unavoidable — the key authenticates a script the browser itself loads, so there is no version of
+this where it stays secret. **The key is protected by configuration, and both parts are
+required:**
+
+- an **HTTP referrer restriction** limiting it to the panel's own domain, and
+- an **API restriction** to Maps JavaScript API + Places API only.
+
+Places is a **separately billed SKU** from Maps JS; enable both on the project or the search box
+fails while the map works, which is a confusing way to find out.
+
+An unrestricted key in a public bundle is a billable liability from the moment it is served. Set
+the restrictions when the key is created, not when someone notices the bill.
+
+**Unset is a supported state.** The zone editor renders a setup notice in place of the map and
+everything else on the screen keeps working — the rail, the inspector, the List view. Only
+drawing a boundary needs the map. Because the value is inlined at build time, setting it requires
+a rebuild, not a restart.
 
 `NEXT_PUBLIC_*` is inlined into the client bundle at build time, which makes the image
 environment-specific by design. It is a build arg in `apps/web/Dockerfile`, not runtime env,

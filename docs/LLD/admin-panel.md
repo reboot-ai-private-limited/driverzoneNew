@@ -21,7 +21,7 @@ Siliguri.
 
 ```
 Dashboard          live KPIs, active trips map, alerts
-Zones              tree: City → Pickup zones; map editor; hill zones
+Zones              map editor + typed rail: city card, pickup pair, hill list
 Packages
   ├ InCity         per city → variants → per-car pricing
   └ Outstation     distance bands → per-car × direction pricing
@@ -47,30 +47,83 @@ One Coverage screen. There is no city switcher and no zone tree, because there i
 left to draw — the three types are flat and independent (`domain-model.md`).
 
 ```
-┌──────────────┬────────────────────────────────────────────┐
-│ ZONES        │                                            │
-│              │                                            │
-│ CITY         │              MAP                           │
-│ • Siliguri   │      (MapLibre + Mapbox Draw)              │
-│              │                                            │
-│ PICKUP       │   ── city boundary   (blue, dashed)        │
-│ • Central    │   ── pickup zone     (green fill, FREE)    │
-│ • Paid North │   ── pickup zone     (amber fill, PAID)    │
-│              │   ── hill zones      (brown hatch)         │
-│ HILL         │   ── violation       (red, animated)       │
-│ • Darjeeling │                                            │
-│ • Kalimpong  ├────────────────────────────────────────────┤
-│              │ Name  [Siliguri Paid North       ]         │
-│ [+ New Zone] │ Type  [PICKUP ▾]                           │
-│              │ Charge[PAID  ▾]   Fee ₹[100] (blank=global)│
-│              │ Area  12.4 km²    Vertices 34              │
-│              │                                            │
-│              │ ⚠ Overlaps active PICKUP zone "Central"    │
-│              │   [Show on map]                            │
-│              │                                            │
-│              │        [Cancel]  [Save]  ← disabled        │
-└──────────────┴────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│ Zones                                          [ Map | List ]         │
+├──────────────────────────┬────────────────────────────────────────────┤
+│ ╭──────────────────────╮ │ [Map|Satellite|Terrain]  [search…]         │
+│ │ CITY BOUNDARY        │ │                                            │
+│ │ Siliguri · SLG       │ │              MAP                           │
+│ │ 148.2 km² · v3       │ │         (Google Maps JS API)               │
+│ │ ──────────────────── │ │                                            │
+│ │ Defines incity.      │ │   ── city boundary   (blue, DASHED always) │
+│ │ Siliguri Hourly →    │ │   ── pickup zone     (green fill, FREE)    │
+│ │ [ Edit boundary ]    │ │   ── pickup zone     (amber fill, PAID)    │
+│ ╰──────────────────────╯ │   ── hill zones      (violet)              │
+│                          │   ── the draft       (interactive, dashed) │
+│ PICKUP · 2               │   ── violation       (red)                 │
+│ 34% of Siliguri covered  ├────────────────────────────────────────────┤
+│ • Central       FREE     │ Name [Siliguri Paid North]  Code [SLG-PN]  │
+│ • Paid North    PAID     │ Charge [PAID ▾]  Fee ₹[100] (blank=global) │
+│ [+ Pickup zone]          │ Area 12.4 km²  Vertices 34  [Import GeoJSON]│
+│                          │                                            │
+│ HILL · 4                 │ ⚠ Overlaps active PICKUP zone "Central"    │
+│ • Darjeeling             │   [Show]                                   │
+│ • Kalimpong              │                                            │
+│ [+ Hill zone]            │ Saving creates version 4.                  │
+│                          │        [Cancel]  [Save]  ← disabled        │
+└──────────────────────────┴────────────────────────────────────────────┘
 ```
+
+**Three types, three renderings — this is the point of the screen.** A table gives every zone
+the same row, and the three types are not the same kind of thing. The tell was already there in
+the old one: a `Pickup charge` column reading `—` on five rows out of seven. Sparse columns mean
+sparse *entities*.
+
+| | Cardinality | Renders as |
+|---|---|---|
+| CITY | exactly one, operationally | a **card**, and **no add button** — the absence is what says "setting, not collection", more plainly than any label could |
+| PICKUP | a fixed pair, FREE and PAID | two rows plus the number that matters: **% of the city covered** |
+| HILL | N and growing | a list |
+
+The city card also carries **which packages sell against it**, read from
+`GET /admin/packages/incity` and linked out to the package editor. `cityZoneId` is the only zone
+reference either product carries ([`packages.md`](packages.md)) and it is invisible on every
+other screen — so zero active packages renders as a warning, not an empty list: it means every
+hourly quote returns `NO_PACKAGE_AVAILABLE`.
+
+### Two views
+
+`[ Map | List ]`, map by default, both in the URL alongside the selected zone so a link to "the
+zone I'm asking about" is a link rather than a description.
+
+The list is the **audit** surface — superseded versions and inactive zones, which stack
+invisibly on a map — and keeps the search, sort and paging the old screen had. The map answers
+what the list cannot: whether the city actually has coverage.
+
+### Getting a shape in
+
+**Import is the primary path, drawing is the fallback.** A municipal corporation boundary, a
+subdivision — these are published and exist as OSM relations, exportable to GeoJSON in about a
+minute. Tracing one by hand is slower and less accurate on any basemap, and it puts a zone edge
+in the wrong place with nobody able to say by how much. `Import GeoJSON` accepts a Feature, a
+FeatureCollection or a bare geometry, takes the largest polygon out of a MultiPolygon and says
+so, and normalises winding on the way in so the browser's verdict matches the API's.
+
+Hand-drawing stays for the case with no published shape — a pickup zone, which is a commercial
+decision about where drivers wait rather than a line on a survey.
+
+**Map types, and the three are not interchangeable.** *Satellite* is Google's hybrid view —
+imagery **with** road labels — and it answers the question a pickup boundary actually asks: where
+the built-up area ends, and what road that is. Neither layer alone answers it. *Terrain* carries
+shaded relief, for the hill-zone question: the edge is a price boundary that must cover the
+approach corridor, and relief is what shows where the corridor runs. *Map* is the default, being
+the least visually noisy to select polygons on.
+
+**Address search moves the map and nothing else.** The gap against a commercial basemap was never
+that it fails to draw every shop — you do not trace a service boundary along a shopfront. It was
+orientation: standing on a map of Siliguri and not knowing which part you are looking at. A search
+box solves that directly. It never touches the draft geometry, so an admin mid-boundary who looks
+up a landmark does not come back to a changed polygon.
 
 **A hill zone's edge is a price boundary.** Terrain is decided by whether the customer's drop
 point lands inside the polygon, not by measuring the route (`packages.md` §Terrain), so drawing

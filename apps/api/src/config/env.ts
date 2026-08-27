@@ -61,6 +61,22 @@ const schema = z.object({
     .string()
     .regex(/^\d{6}$/, 'DEV_FIXED_OTP must be exactly 6 digits')
     .optional(),
+
+  /**
+   * Cloudinary credentials for media storage (driver documents, profile pictures).
+   */
+  CLOUDINARY_CLOUD_NAME: z.string().min(1, 'CLOUDINARY_CLOUD_NAME is required'),
+  CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),
+  CLOUDINARY_API_SECRET: z.string().min(1, 'CLOUDINARY_API_SECRET is required'),
+
+  /** Maximum allowed file size for uploads in megabytes. Default: 3MB. */
+  UPLOAD_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().default(3),
+
+  /** Comma-separated list of allowed file formats for uploads. */
+  UPLOAD_ALLOWED_FORMATS: z
+    .string()
+    .default('jpg,png,webp')
+    .transform((s) => s.split(',').map((o) => o.trim().toLowerCase()).filter(Boolean)),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -90,6 +106,9 @@ export const env: Env = parsed.success
         JWT_ACCESS_SECRET: z.string().default('test-only-access-secret-not-for-any-real-use'),
         JWT_REFRESH_SECRET: z.string().default('test-only-refresh-secret-not-for-any-real-use'),
         OTP_PEPPER: z.string().default('test-only-otp-pepper-not-for-any-real-use-x'),
+        CLOUDINARY_CLOUD_NAME: z.string().default('test-cloud'),
+        CLOUDINARY_API_KEY: z.string().default('test-key'),
+        CLOUDINARY_API_SECRET: z.string().default('test-secret'),
       })
       .parse({});
 export type { Env };

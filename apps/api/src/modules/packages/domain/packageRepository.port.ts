@@ -27,7 +27,6 @@ export interface CreateIncityPackageData {
       baseFarePaise: number;
       extraMinuteRatePaise?: number;
       extraKmRatePaise?: number;
-      nightChargePaise?: number;
       driverCommissionType: 'PERCENT' | 'FLAT';
       driverCommissionValue: number;
       companyCommissionType: 'PERCENT' | 'FLAT';

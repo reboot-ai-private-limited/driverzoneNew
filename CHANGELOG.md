@@ -15,6 +15,48 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **Global settings — the `settings` module and its APIs.** Nineteen tunable numbers behind
+  `GET`/`PATCH /api/admin/settings` and `POST /api/admin/settings/reset`, plus audience-filtered
+  reads at `GET /api/customer/settings` and `GET /api/driver/settings`. Covers the pickup default
+  charge, the two time-of-day surcharge windows and their amounts, insurance, the waiting/no-show
+  clock, the driver late fine, driver ring time, and the cancellation ladder for both sides.
+  `docs/LLD/booking-lifecycle.md` has asserted "all thresholds live in `global_settings`" against
+  a collection nobody had built; this is that collection.
+
+  The defaults live in **code**, in `settings/domain/setting.registry.ts` — a row exists only for
+  an override, so there is no seed script and no migration, ever. Each entry carries its own Zod
+  schema, unit, label, description and read-audiences, which means adding a setting is one entry
+  and touches neither the API surface, the OpenAPI document, nor the admin form that comes next.
+
+  Writes are bulk and all-or-nothing, because some rules are about a *pair* of keys and are
+  checked against the configuration the write would produce rather than against the patch: the two
+  surcharge windows must not overlap (either may wrap midnight), no-show must be later than free
+  waiting, and neither cancellation ladder may step down. A batch that fails any of them writes
+  nothing. Reads go through a 60s cache that a write in the same process clears immediately, so an
+  admin who saves and reloads sees the change rather than the old value for a minute.
+
+- **`SettingsReadContract`**, read-only by design — the invariants above are enforced on the one
+  write path, and a second one would demote them to a convention. Not threaded into any module
+  yet: the open TODOs in `resolveForTrip.usecase.ts` and `zone.entity.ts` want keys this pass
+  deliberately does not define, and a contract wired into a module that ignores it reads like a
+  dependency that exists.
+
+### Changed
+
+- **Settings money is whole rupees, not paise** — the one exception to the paise convention, for
+  ops-facing round figures that a paise input would make hostile to type. The 100× hazard this
+  creates (`baseFarePaise + settings['pricing.insurance_charge']`) is closed by making `Rupees` an
+  *opaque* type: settings money cannot be added to a number at all, and `rupeesToPaise()` is the
+  only way across. The usual `number & { __unit }` brand was tried first and does not work — an
+  intersection is still assignable to `number`, so the arithmetic compiles; `settings.typecheck.ts`
+  pins the difference.
+
+### Removed
+
+- **`nightChargePaise` from incity price rows**, and `night_charge_paise` from `IncityPriceDto`.
+  Time-of-day surcharges are global now, and the same fare line configured per-row *and* globally
+  is one place too many. Nothing read it — no data migration, no seeded package carries it.
+
 - **`pnpm seed` now seeds zones too** — Siliguri, three pickup areas inside it, and Darjeeling
   and Kalimpong above it, in a new `apps/api/src/config/devZones.ts` alongside `devAccounts.ts`.
   A fresh database resolved nothing before this: `/coverage/check` said "not served" for every

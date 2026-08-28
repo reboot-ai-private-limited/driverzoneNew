@@ -156,16 +156,24 @@ worth looking at.
 
 ## Cancellation policy
 
-| When | Customer cancels | Driver cancels |
-|------|------------------|----------------|
-| Within 5 min of confirming, before assignment | Free | — |
-| After assignment, before driver departs | Free | Counts toward the driver's cancellation rate |
-| After `DRIVER_EN_ROUTE` | Cancellation fee (default ₹50) | Penalty ledger entry + rate hit |
-| After `ARRIVED` | Higher fee (default ₹100) | Significant penalty; auto-review at a threshold |
-| After `STARTED` | Admin only, manual fare settlement | Admin only |
+| When | Customer cancels | Driver cancels | Setting |
+|------|------------------|----------------|---------|
+| Within 5 min of confirming, before assignment | Free | — | `cancellation.free_window_seconds` (300) |
+| Scheduled booking, more than 60 min before pickup | Free | — | `cancellation.scheduled_free_until_minutes_before` (60) |
+| After assignment, before driver departs | Free | Counts toward the driver's cancellation rate | — |
+| After `DRIVER_EN_ROUTE` | Cancellation fee (default ₹50) | Penalty ledger entry + rate hit | `cancellation.customer_fee_en_route`, `cancellation.driver_penalty_en_route` |
+| After `ARRIVED` | Higher fee (default ₹100) | Significant penalty; auto-review at a threshold | `cancellation.customer_fee_arrived`, `cancellation.driver_penalty_arrived` |
+| After `STARTED` | Admin only, manual fare settlement | Admin only | — |
 
-All thresholds live in `global_settings`. The fee is shown in the confirm dialog
-**before** the customer commits — never charge a fee the customer hasn't seen.
+**There is no point at which cancelling is refused.** A customer who cannot cancel no-shows
+instead, which costs a driver's time *and* a support ticket; the fee is the deterrent, and the
+ladder only ever steps up (enforced as a cross-key invariant — see
+[`database-schema`](database-schema.md#cross-key-rules)).
+
+All thresholds live in `globalSettings`, in **whole rupees**, and are readable by the customer app
+at `GET /api/customer/settings` — the fee is shown in the confirm dialog **before** the customer
+commits. Never charge a fee the customer hasn't seen; the settings registry's per-key `audiences`
+field is what makes that mechanical rather than a convention.
 
 Cancellation charges go to a separate `cancellation_charges` table. They never modify
 `fare_snapshot` (invariant **B-1**).
@@ -175,7 +183,7 @@ Cancellation charges go to a separate `cancellation_charges` table. They never m
 `is_scheduled = true` when `scheduled_at > now() + 60 minutes`.
 
 - Stays in `CONFIRMED` until `dispatch_at` (default T−90 min)
-- Customer can cancel free until T−60 min
+- Customer can cancel free until T−60 min (`cancellation.scheduled_free_until_minutes_before`)
 - A reminder push goes out at T−2 h and again at T−30 min
 - If `NO_DRIVER_FOUND` fires on a scheduled booking, escalate to ops **immediately** —
   there's still time to solve it by phone, which is the whole advantage of booking ahead

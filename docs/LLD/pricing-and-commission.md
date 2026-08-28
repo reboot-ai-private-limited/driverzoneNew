@@ -17,13 +17,18 @@ than an incity concept (`zones.md`):
 ```
 pickup_fee = pickupZone.pickup_charge_type == 'PAID'
                ? (pickupZone.pickup_charge_paise
-                  ?? settings['pickup.default_charge_paise'])
+                  ?? rupeesToPaise(settings['pickup.default_charge']))
                : 0
 ```
 
-`pickup.default_charge_paise` is the number ops actually tunes. The per-zone override exists for
+`pickup.default_charge` is the number ops actually tunes. The per-zone override exists for
 the day a second paid zone needs a different figure, and costs nothing until then. A `FREE` zone
 adds nothing at all — there is no zero-value fee line on the receipt.
+
+> **Units.** Every `settings[...]` money value below is in **whole rupees**, while every
+> `*_paise` field beside it is in paise. `rupeesToPaise()` is not decoration — the settings
+> contract hands these back as an opaque `Rupees`, so omitting the conversion is a compile error
+> rather than a silent 100× undercharge. See `database-schema.md` §Conventions.
 
 ## InCity fare
 
@@ -34,9 +39,14 @@ computeInCityFare(variant, price, pickupZone, scheduledAt) -> FareBreakdown
 
   pickup_fee  = as above — identical for both products
 
-  night_fee   = isInNightWindow(scheduledAt) ? price.night_charge_paise : 0
+  -- Time-of-day surcharge. GLOBAL, not per price row: at most ONE window can contain a given
+  -- pickup time (the two windows are kept non-overlapping by a cross-key invariant), so this is
+  -- one lookup and never a sum.
+  tod_fee     = rupeesToPaise(surchargeFor(scheduledAt))   -- 0 outside both windows
 
-  subtotal    = base + pickup_fee + night_fee
+  insurance   = rupeesToPaise(settings['pricing.insurance_charge'])
+
+  subtotal    = base + pickup_fee + tod_fee + insurance
   tax         = round(subtotal * TAX_BPS / 10000)
   total       = roundToRupee(subtotal + tax)
 ```
@@ -78,6 +88,26 @@ Decisions baked in above, all of which favour the customer at the margin:
 > Includes 3 hours and 30 km. Beyond that: ₹150 per 30 min, ₹12 per km.
 > A 15-minute grace period applies.
 
+## Time-of-day surcharge
+
+```
+surchargeFor(scheduledAt) ->
+  inWindow(scheduledAt, settings['pricing.early_morning_window'])
+    ? settings['pricing.early_morning_charge']
+    : inWindow(scheduledAt, settings['pricing.late_night_window'])
+      ? settings['pricing.late_night_charge']
+      : 0                                        -- rupees, convert before adding
+```
+
+Both windows are IST wall-clock `[start, end)` and either may wrap midnight (the late-night
+default, `22:00`–`04:00`, does). They are held non-overlapping by a cross-key invariant on the
+settings write path, which is what lets the branch above be an if/else rather than a precedence
+rule nobody can remember. Setting a charge to `0` disables that surcharge; the window stays
+meaningful.
+
+This replaces the per-price-row `night_charge_paise` field, removed 2026-08-28: the same fare
+line configured in two places is one place too many, and the row-level copy was never read.
+
 ## Outstation fare
 
 ```
@@ -88,9 +118,10 @@ computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt
   dist_charge = extra_km * price.extra_km_rate_paise
   allowance   = price.driver_allowance_paise          -- night halt / food
   pickup_fee  = as above — identical for both products
-  night_fee   = ...
+  tod_fee     = rupeesToPaise(surchargeFor(scheduledAt))   -- as above, identical for both
+  insurance   = rupeesToPaise(settings['pricing.insurance_charge'])
 
-  subtotal    = base + dist_charge + allowance + pickup_fee + night_fee
+  subtotal    = base + dist_charge + allowance + pickup_fee + tod_fee + insurance
   tax         = round(subtotal * TAX_BPS / 10000)
   total       = roundToRupee(subtotal + tax)
 ```
@@ -261,6 +292,7 @@ uncollectable:
 
 ```
 if wallet_balance_paise < -settings['driver.max_negative_balance_paise']  (default −₹5,000)
+-- NOT YET DEFINED — this key is added when the ledger code that reads it is written.
     → block going on duty
     → in-app prompt to settle via UPI
     → notify ops after 48 hours

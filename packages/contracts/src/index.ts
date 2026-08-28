@@ -10,3 +10,4 @@ export * from './errors.js';
 export * from './identity.js';
 export * from './zones.js';
 export * from './packages.js';
+export * from './settings.js';

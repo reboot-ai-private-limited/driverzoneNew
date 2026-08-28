@@ -16,12 +16,16 @@
 
 export type CommissionType = 'PERCENT' | 'FLAT';
 
+/**
+ * No night charge here — the early-morning and late-night surcharges are GLOBAL, set once in
+ * `globalSettings` rather than per price row (docs/decision-log.md, 2026-08-28). A per-row copy
+ * would be a second source of truth for the same fare line.
+ */
 export interface IncityPriceDto {
   car_category_id: string;
   base_fare_paise: number;
   extra_minute_rate_paise: number;
   extra_km_rate_paise: number;
-  night_charge_paise: number;
   driver_commission_type: CommissionType;
   driver_commission_value: number;
   company_commission_type: CommissionType;

@@ -142,7 +142,8 @@ never chose it.
 
 **The guard:** incity wins only if `distanceKm` fits within `incity.max_distance_multiple` ×
 the longest active variant's `includedKm`. Above that it falls through to outstation. The
-multiple lives in `globalSettings` so ops can tune it without a deploy.
+multiple will live in `globalSettings` so ops can tune it without a deploy; the key is not
+defined yet (see below).
 
 ### On rung (b) — defensive only
 
@@ -296,7 +297,7 @@ The `features-packages` branch was built against the previous architecture. As o
 | `domain/package.errors.ts` | `OverlappingBandError` carries `PACKAGE_BAND_OVERLAP`, not a generic `CONFLICT` | ✅ |
 | `.dependency-cruiser.cjs` | `catalog` → `packages` | ✅ |
 | the precedence ladder | Rungs (a)–(d) | ✅ |
-| the `incity.max_distance_multiple` guard | | ⚠️ implemented, but the value is a constant `2` in `resolveForTrip.usecase.ts` — it reads from `globalSettings` once a `settings` module exists |
+| the `incity.max_distance_multiple` guard | | ⚠️ implemented, but the value is a constant `2` in `resolveForTrip.usecase.ts`. The `settings` module now exists; this key is deliberately not in its registry yet — a key is added when the code reading it is written |
 
 Still open, and why:
 

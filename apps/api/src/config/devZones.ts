@@ -33,7 +33,7 @@ export interface DevZone {
   geometry: Polygon;
   /** PICKUP only. Omitted for CITY/HILL, which `CreateZoneUseCase` rejects a charge on. */
   pickupChargeType?: PickupChargeType;
-  /** Omitted means `null` — fall back to the global default once `settings` exists. */
+  /** Omitted means `null` — falls back to `pickup.default_charge` in `globalSettings`. */
   pickupChargePaise?: number;
 }
 

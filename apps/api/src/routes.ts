@@ -15,9 +15,9 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/health', c.health.buildRouter());
 
   /**
-   * Zones only, for now — no other module registers OpenAPI paths yet
-   * (`zones.container.ts` calls `registerZonesSwaggerPaths()` as a side effect of being built,
-   * which has already happened by the time this function runs — `c` is built first). The
+   * Zones and settings — the modules that register OpenAPI paths so far
+   * (each container calls its own `register*SwaggerPaths()` as a side effect of being
+   * built, which has already happened by the time this function runs — `c` is built first). The
    * document is generated once per process start, not per request: nothing here changes without
    * a redeploy.
    *
@@ -51,8 +51,18 @@ export function buildApiRouter(c: AppContainers): Router {
    * calls with overlapping prefixes, not a hack. `/coverage` has no such overlap.
    */
   router.use('/admin/zones', c.zones.buildAdminRouter());
+  router.use('/admin/settings', c.settings.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
+
+  /**
+   * Same overlapping-prefix fall-through as `/admin/zones` above, one tier down: a request to
+   * `/customer/settings` enters identity's CUSTOMER router first, matches nothing, and arrives
+   * here. Authenticated, not public — the cancellation ladder and the no-show timer are the app's
+   * business, not an anonymous caller's.
+   */
+  router.use('/customer/settings', c.settings.buildAudienceRouter('CUSTOMER'));
+  router.use('/driver/settings', c.settings.buildAudienceRouter('DRIVER'));
 
   return router;
 }

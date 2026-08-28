@@ -215,7 +215,6 @@ describe('Packages Module', () => {
             baseFarePaise,
             extraMinuteRatePaise: 0,
             extraKmRatePaise: 0,
-            nightChargePaise: 0,
             driverCommissionType: 'PERCENT' as const,
             driverCommissionValue: 7500,
             companyCommissionType: 'PERCENT' as const,

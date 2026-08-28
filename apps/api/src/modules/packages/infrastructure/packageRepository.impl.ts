@@ -36,7 +36,6 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
         baseFarePaise: p.baseFarePaise,
         extraMinuteRatePaise: p.extraMinuteRatePaise,
         extraKmRatePaise: p.extraKmRatePaise,
-        nightChargePaise: p.nightChargePaise,
         driverCommissionType: p.driverCommissionType as CommissionType,
         driverCommissionValue: p.driverCommissionValue,
         companyCommissionType: p.companyCommissionType as CommissionType,

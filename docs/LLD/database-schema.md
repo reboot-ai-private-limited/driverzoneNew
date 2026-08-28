@@ -7,6 +7,13 @@
 ## Conventions
 
 - **Money** is an integer number of paise. `₹1,499.50` is `149950`. Safe well past 2^53.
+  **One exception: `globalSettings` stores money in WHOLE RUPEES.** Those values are ops-facing
+  round figures typed into an admin form, and a paise field there is bad UX. The exception is
+  contained by an opaque `Rupees` type
+  (`apps/api/src/modules/settings/domain/money.ts`) — settings money comes out of
+  `SettingsReadContract` as a `Rupees`, which cannot be added to a `*Paise` number without going
+  through `rupeesToPaise()`, so the 100× undercharge this would otherwise invite is a compile
+  error rather than a plausible-looking receipt.
 - **Percentages** are basis points: `2500` = 25%.
 - **Geometry** is GeoJSON, so coordinates are `[lng, lat]` — the reverse of how humans write
   them. Conversion happens only in `@driverzone/geo`; see
@@ -738,34 +745,76 @@ Written in batches every 30s during `STARTED`, never per GPS ping.
 
 ```ts
 const globalSettingSchema = new Schema({
-  key:         { type: String, required: true, unique: true },
-  value:       { type: Schema.Types.Mixed, required: true },
-  description: { type: String, required: true },
-  updatedBy:   { type: Schema.Types.ObjectId, ref: 'AdminUser' },
+  key:       { type: String, required: true, unique: true },
+  value:     { type: Schema.Types.Mixed, required: true },
+  updatedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
 }, { timestamps: true });
 ```
 
-Seed values:
+**A row exists only for an OVERRIDDEN key.** Defaults, validation rules, labels, units and
+read-audiences all live in `apps/api/src/modules/settings/domain/setting.registry.ts` — in code,
+under review — so this collection is empty on a fresh install and the API still answers with a
+complete configuration. There is no seed script and there never needs to be a migration: seeding
+would turn every default into a row that a later change to that default silently fails to reach.
 
-```js
-[
-  ['pickup.default_charge_paise',        10000,  'Pickup fee for PAID zones with no override'],
-  ['dispatch.offer_ttl_seconds',         45,     'Seconds a driver has to respond'],
-  ['dispatch.wave_size',                 5,      'Drivers offered per wave'],
-  ['dispatch.max_waves',                 4,      'Waves before NO_DRIVER_FOUND'],
-  ['dispatch.wave_radius_m',             [3000, 7000, 15000, 30000], 'Search radius per wave'],
-  ['dispatch.scheduled_lead_minutes',    90,     'Start dispatching this long before pickup'],
-  ['booking.quote_ttl_seconds',          600,    'Quote validity window'],
-  ['booking.overage_grace_minutes',      15,     'Free grace before extra-time billing'],
-  ['booking.billing_block_minutes',      30,     'Overage billed in blocks of this size'],
-  ['booking.night_window',               { start: '22:00', end: '06:00' }, 'Night charge window'],
-  ['incity.max_distance_multiple',       2,      'InCity wins over outstation only within this multiple of a variant included_km'],
-  ['cancellation.free_window_seconds',   300,    'Free cancellation after confirmation'],
-  ['driver.max_negative_balance_paise',  500000, 'Block duty past ₹5,000 owed'],
-]
-```
+`description` is deliberately not stored. It is documentation; it belongs with the code that
+gives the key its meaning, and a copy in the database goes stale the first time the behaviour
+changes.
 
-Read through a cached accessor with a 60s TTL, not on every request.
+Money here is **whole rupees**, not paise — see §Conventions.
+
+### The keys
+
+| key | unit | default | read by |
+|---|---|---|---|
+| `pickup.default_charge` | rupees | `100` | admin, customer |
+| `pricing.early_morning_window` | HH:mm window | `04:00`–`06:00` | admin, customer |
+| `pricing.early_morning_charge` | rupees | `100` | admin, customer |
+| `pricing.late_night_window` | HH:mm window | `22:00`–`04:00` | admin, customer |
+| `pricing.late_night_charge` | rupees | `150` | admin, customer |
+| `pricing.insurance_charge` | rupees | `30` | admin, customer |
+| `waiting.free_minutes` | minutes | `15` | admin, customer, driver |
+| `waiting.charge_per_minute` | rupees | `2` | admin, customer |
+| `waiting.max_charge` | rupees | `300` | admin, customer |
+| `waiting.no_show_after_minutes` | minutes | `30` | admin, customer, driver |
+| `driver.late_grace_minutes` | minutes | `10` | admin, driver |
+| `driver.late_fine` | rupees | `50` | admin, driver |
+| `dispatch.offer_ttl_seconds` | seconds | `45` | admin, driver |
+| `cancellation.free_window_seconds` | seconds | `300` | admin, customer |
+| `cancellation.scheduled_free_until_minutes_before` | minutes | `60` | admin, customer |
+| `cancellation.customer_fee_en_route` | rupees | `50` | admin, customer |
+| `cancellation.customer_fee_arrived` | rupees | `100` | admin, customer |
+| `cancellation.driver_penalty_en_route` | rupees | `50` | admin, driver |
+| `cancellation.driver_penalty_arrived` | rupees | `100` | admin, driver |
+
+Each key declares which audiences may read it, which is what makes "never charge a fee the
+customer hasn't seen" ([booking-lifecycle](booking-lifecycle.md)) mechanical rather than a
+convention: `GET /api/customer/settings` and `GET /api/driver/settings` are filtered from that
+field, not from a hand-maintained allowlist.
+
+Still to come, and NOT yet defined — their consumers do not exist: `dispatch.wave_size`,
+`dispatch.max_waves`, `dispatch.wave_radius_m`, `dispatch.scheduled_lead_minutes`,
+`booking.quote_ttl_seconds`, `booking.overage_grace_minutes`, `booking.billing_block_minutes`,
+`incity.max_distance_multiple`, `driver.max_negative_balance_paise`. A key is added when the code
+that reads it is written, not before.
+
+### Cross-key rules
+
+Some constraints are about a PAIR of keys and cannot be seen from inside either one, so they are
+checked against the configuration a write would PRODUCE — the patch merged over what is stored —
+rather than against the patch. A write that fails any of them is refused whole (422,
+`SETTING_INVARIANT_VIOLATED`), and so is a reset that would produce the same state:
+
+- the early-morning and late-night windows must not overlap (either may wrap midnight);
+- `waiting.no_show_after_minutes` > `waiting.free_minutes`, or waiting is never chargeable;
+- neither cancellation ladder may step down — the arrived fee/penalty is never below the
+  en-route one.
+
+Read through a cached accessor with a 60s TTL, not on every request. The cache is per-process and
+is cleared immediately by a write in that process, so an admin who saves and reloads sees the
+change; the worker converges within the TTL. That lag is safe because a booking's fare is frozen
+at confirmation (B-1), so a settings change mid-flight cannot alter a price a customer has
+already been shown.
 
 ---
 

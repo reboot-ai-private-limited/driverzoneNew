@@ -27,6 +27,14 @@ export const keys = {
     incityList: (query?: ListIncityPackagesQuery) =>
       ['packages', 'incity', 'list', query ?? {}] as const,
   },
+  settings: {
+    /**
+     * One key for the whole page. There is no per-key query and there should not be: the screen
+     * reads every setting at once, and a save can change several of them, so a narrower key would
+     * only create the chance of invalidating the wrong one.
+     */
+    all: () => ['settings'] as const,
+  },
   customers: {
     all: () => ['customers'] as const,
     // The query is PART of the key, because the list is paged and filtered server-side: page 2

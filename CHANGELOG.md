@@ -35,6 +35,28 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   nothing. Reads go through a 60s cache that a write in the same process clears immediately, so an
   admin who saves and reloads sees the change rather than the old value for a minute.
 
+- **The Settings screen** at `/settings`, and the nav entry stops saying "coming soon". The
+  admin can now change a pickup charge, a surcharge window, the waiting clock or the cancellation
+  ladder without a deploy — which is the whole reason the module underneath it exists.
+
+  The form is not hand-built: it renders from `GET /admin/settings`, which returns each key with
+  its group, label, unit and description, so `RUPEES` gets a `₹` box, `TIME_WINDOW` gets a pair of
+  time pickers, and a setting added to the API's registry appears here correctly with no frontend
+  change. Nothing in `features/settings/` knows any setting by name.
+
+  One dirty-tracked `PATCH` for the whole page, because the API validates cross-key rules against
+  the configuration the write would produce — per-field autosave would let an incoherent pair
+  through one request at a time. Rejections map back onto the offending inputs, and a
+  `SETTING_INVARIANT_VIOLATED` lights up *every* key named in the rule, so both halves of an
+  overlapping pair are visible rather than just the one that was touched. Per-field reset calls
+  the reset endpoint rather than typing the default back in — those are different outcomes, and
+  only one of them keeps tracking the shipped default.
+
+  Fields the admin is still editing survive the refetch that a save or reset triggers. Getting
+  that from a value comparison is not possible: right after a reset the local draft still holds
+  the override that was just deleted, so it reads as edited too. The screen keeps an explicit
+  touched-key list instead.
+
 - **`SettingsReadContract`**, read-only by design — the invariants above are enforced on the one
   write path, and a second one would demote them to a convention. Not threaded into any module
   yet: the open TODOs in `resolveForTrip.usecase.ts` and `zone.entity.ts` want keys this pass

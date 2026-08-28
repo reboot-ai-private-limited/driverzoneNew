@@ -32,7 +32,7 @@ Drivers            list, documents, verification, wallet, duty history
 Live Map           on-duty drivers + in-flight trips
 Finance            earnings ledger, payout batches, negative balances
 Coverage           heatmap of failed lookups — the expansion roadmap
-Settings           global settings with inline documentation
+Settings           global settings, rendered from the API's own registry
 Audit Log          every admin action, filterable
 ```
 
@@ -321,6 +321,62 @@ DZ-8F3K2M · Siliguri Hourly 3H · Sedan · ₹945
 ```
 
 Support staff should never need an engineer to explain what happened to a booking.
+
+## Settings
+
+The tunable numbers — fare surcharges, waiting, dispatch, cancellation — at `/settings`.
+Built on `GET`/`PATCH /api/admin/settings` (see
+[`database-schema`](database-schema.md#globalsettings)).
+
+**The form is not hand-built.** Every setting arrives carrying its own `group`, `label`, `unit`
+and `description`, and the screen renders from that: `RUPEES` gets a `₹`-prefixed box, `MINUTES`
+and `SECONDS` get a suffixed one, `TIME_WINDOW` gets a pair of time pickers. Nothing in
+`features/settings/` knows any setting by name. A key added to the API's registry appears here,
+correctly rendered and documented, with no frontend change at all — which is the property that
+makes the registry worth having.
+
+```
+Settings                          3 unsaved changes  [Discard]  [Save changes]
+
+These take effect within a minute, on new quotes only. Amounts are in whole rupees.
+
+┌ Fare & surcharges ──────────────────────────────────────────────────────┐
+│ Late night charge                    [Changed]        [₹ 150      ] [↺]  │
+│ Added when the pickup time falls inside the late night window.           │
+│ pricing.late_night_charge                             Default: 150       │
+│                                                                          │
+││Late night window                    [Unsaved]  [23:00] to [03:00]       │
+││Pickups scheduled inside this window attract the late night charge.      │
+││pricing.late_night_window            The early morning and late night    │
+││                                     windows overlap.                    │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**One save for the whole page.** The API checks cross-key rules against the configuration the
+write would produce, so per-field autosave would let an incoherent pair through one request at a
+time. A rejection is mapped back onto the fields that caused it — and a `SETTING_INVARIANT_VIOLATED`
+names *every* key in the rule, so both sides of an overlapping pair light up rather than only the
+one that was touched.
+
+Three things that are easy to get subtly wrong here, and what this screen does instead:
+
+- **Reset is a server action, not a local revert.** `POST /admin/settings/reset` deletes the
+  override so the built-in default takes over. Typing the default value back in looks identical
+  on screen and stores a row saying "deliberately 150", which a later change to the shipped
+  default would then silently fail to reach.
+- **A refetch does not eat unsaved work.** Resetting one field invalidates the whole query, so
+  the screen reseeds; fields the admin is still editing are preserved through it by an explicit
+  touched-key list. Comparing drafts to server values cannot do this — right after a reset the
+  local draft still holds the override that was just deleted, so it looks edited too.
+- **`refetchOnWindowFocus` is off**, unlike zones. This is a form: pulling new values under a
+  half-finished edit either discards it or leaves the "changed from" baseline disagreeing with
+  what is on screen. Concurrent edits are handled at save time by the server refusing an
+  incoherent result, not by moving the page under someone.
+
+Client-side validation is deliberately limited to the shape of one field — is this a whole
+number, is this a real time of day — for the feedback loop. The server stays authoritative, and
+the rules it holds that the client cannot are the interesting ones, because they are about pairs
+of keys.
 
 ## Alerts
 

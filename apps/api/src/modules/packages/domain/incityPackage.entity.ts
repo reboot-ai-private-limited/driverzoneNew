@@ -8,7 +8,6 @@ export interface IncityPrice {
   extraMinuteRatePaise: number;
   /** Overage beyond the variant's included km. Billed independently of time, never netted. */
   extraKmRatePaise: number;
-  nightChargePaise: number;
   driverCommissionType: CommissionType;
   driverCommissionValue: number;
   companyCommissionType: CommissionType;

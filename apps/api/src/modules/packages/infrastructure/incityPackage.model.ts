@@ -6,7 +6,6 @@ const incityPriceSchema = new Schema(
     baseFarePaise: { type: Number, required: true, min: 0 },
     extraMinuteRatePaise: { type: Number, default: 0, min: 0 },
     extraKmRatePaise: { type: Number, default: 0, min: 0 },
-    nightChargePaise: { type: Number, default: 0, min: 0 },
 
     driverCommissionType: { type: String, enum: ['PERCENT', 'FLAT'], required: true },
     driverCommissionValue: { type: Number, required: true },

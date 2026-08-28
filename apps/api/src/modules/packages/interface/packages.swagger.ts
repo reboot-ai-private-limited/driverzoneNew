@@ -27,7 +27,6 @@ const incityPriceDtoSchema = z.object({
   base_fare_paise: z.number(),
   extra_minute_rate_paise: z.number(),
   extra_km_rate_paise: z.number(),
-  night_charge_paise: z.number(),
   driver_commission_type: commissionType,
   driver_commission_value: z.number(),
   company_commission_type: commissionType,

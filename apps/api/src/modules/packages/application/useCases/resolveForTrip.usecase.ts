@@ -59,9 +59,11 @@ export class ResolveForTripUseCase {
        * an hourly rental for what is plainly an outstation run. Beyond this multiple of the
        * longest variant's included km, incity stops being a candidate at all.
        *
-       * 2 is the seeded value of `incity.max_distance_multiple`
-       * (docs/LLD/database-schema.md §globalSettings). TODO: read it from `settings` once that
-       * module exists — until then ops cannot tune this without a deploy.
+       * TODO: read this from `settings`. The module now exists, but `incity.max_distance_multiple`
+       * is deliberately not one of its keys yet (docs/decision-log.md, 2026-08-28): a key is added
+       * when the code reading it is written, and taking a dependency on `settings` from here to
+       * fetch a single constant is not worth the wiring until the pricing work lands. Until then
+       * ops cannot tune this without a deploy.
        */
       const MAX_DISTANCE_MULTIPLE = 2;
       if (input.distanceKm <= maxIncludedKm * MAX_DISTANCE_MULTIPLE) {

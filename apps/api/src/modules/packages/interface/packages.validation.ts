@@ -56,7 +56,6 @@ const incityPriceSchema = refineCommissionBps(
     baseFarePaise: paise,
     extraMinuteRatePaise: paise.optional().default(0),
     extraKmRatePaise: paise.optional().default(0),
-    nightChargePaise: paise.optional().default(0),
     driverCommissionType: commissionType,
     driverCommissionValue: z.number().int().min(0),
     companyCommissionType: commissionType,

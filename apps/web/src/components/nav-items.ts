@@ -41,5 +41,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Finance', href: '/finance', icon: Coins, comingSoon: true },
   { label: 'Reports', href: '/reports', icon: BarChart3, comingSoon: true },
   { label: 'Audit Log', href: '/audit', icon: ScrollText, comingSoon: true },
-  { label: 'Settings', href: '/settings', icon: Settings, comingSoon: true },
+  // Enabled: the screen is built and `GET/PATCH /admin/settings` exists in `apps/api`.
+  { label: 'Settings', href: '/settings', icon: Settings },
 ];

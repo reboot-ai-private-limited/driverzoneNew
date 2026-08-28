@@ -9,20 +9,15 @@ import { IncityPackageModel } from '../../src/modules/packages/infrastructure/in
 describe('Packages Repository Integration', () => {
   let repo: MongoPackageRepository;
   const zone1 = new mongoose.Types.ObjectId().toHexString();
-  const car1 = new mongoose.Types.ObjectId().toHexString();
 
   /**
-   * One active price row is the minimum a package needs to be sellable (P-3). Every test here
-   * is about band geometry, not pricing, so they all reuse this rather than restating it.
+   * The fare a band needs to exist at all. Every test here is about band GEOMETRY, not pricing,
+   * so they all spread this rather than restating it. It is two fields now: pricing by car
+   * category was retired 2026-08-28 and the `prices[]` subdocument went with it.
    */
-  const ONE_WAY_PRICE = {
-    carCategoryId: car1,
-    direction: 'ONE_WAY',
-    baseFarePaise: 1000,
-    driverCommissionType: 'PERCENT',
-    driverCommissionValue: 10,
-    companyCommissionType: 'PERCENT',
-    companyCommissionValue: 10,
+  const FARE = {
+    oneWayFarePaise: 1000,
+    driverCommissionBps: 7500,
   } as const;
 
   beforeAll(async () => {
@@ -58,7 +53,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 300,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // New: 150 - 250
@@ -79,7 +74,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // New: 150 - 250
@@ -100,7 +95,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 150,
         maxKm: 250,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // New: 100 - 300
@@ -120,7 +115,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // New: 200 - 300 (starts exactly where existing ends)
@@ -147,7 +142,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // New: 100 - 200 HILL
@@ -169,7 +164,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       const conflict = await repo.findOverlappingBands({
@@ -189,7 +184,7 @@ describe('Packages Repository Integration', () => {
         minKm: 100,
         maxKm: 200,
         isActive: false,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // New: 100 - 200
@@ -209,7 +204,7 @@ describe('Packages Repository Integration', () => {
         terrain: 'PLAIN',
         minKm: 100,
         maxKm: 200,
-        prices: [ONE_WAY_PRICE],
+        ...FARE,
       });
 
       // Check same band but exclude the package's own ID
@@ -238,21 +233,13 @@ describe('Packages Repository Integration', () => {
           label: '3 Hours',
           includedMinutes: 180,
           includedKm: 30,
-          prices: [
-            {
-              carCategoryId: car1,
-              baseFarePaise: 90000,
-              driverCommissionType: 'PERCENT',
-              driverCommissionValue: 7500,
-              companyCommissionType: 'PERCENT',
-              companyCommissionValue: 2500,
-            },
-          ],
+          baseFarePaise: 90000,
+          driverCommissionBps: 7500,
         },
       ],
     } as const;
 
-    it('returns the active package for the city zone, with its variants and prices mapped', async () => {
+    it('returns the active package for the city zone, with its variants mapped', async () => {
       await repo.createIncity(incityPackage);
 
       const found = await repo.findIncityForQuote({ cityZoneId: zone1 });
@@ -260,9 +247,10 @@ describe('Packages Repository Integration', () => {
       expect(found).toHaveLength(1);
       expect(found[0]?.name).toBe('Siliguri Hourly');
       expect(found[0]?.variants[0]?.includedMinutes).toBe(180);
+      expect(found[0]?.variants[0]?.baseFarePaise).toBe(90000);
       // Defaults come from the schema, so the mapper has to carry them back out.
-      expect(found[0]?.variants[0]?.prices[0]?.extraKmRatePaise).toBe(0);
-      expect(found[0]?.variants[0]?.prices[0]?.extraMinuteRatePaise).toBe(0);
+      expect(found[0]?.variants[0]?.extraKmRatePaise).toBe(0);
+      expect(found[0]?.variants[0]?.extraMinuteRatePaise).toBe(0);
       expect(found[0]?.variants[0]?.isActive).toBe(true);
     });
 
@@ -277,6 +265,44 @@ describe('Packages Repository Integration', () => {
       await repo.createIncity({ ...incityPackage, isActive: false });
 
       expect(await repo.findIncityForQuote({ cityZoneId: zone1 })).toHaveLength(0);
+    });
+  });
+
+  /**
+   * The one thing only real Mongo can settle: that an omitted return fare comes back as `null`
+   * and not as `0` or `undefined`. The schema default and the mapper's `?? null` have to agree,
+   * and a fake repository would happily return whatever the test put in.
+   */
+  describe('roundTripFarePaise round-trips as null, never zero', () => {
+    it('stores an omitted return fare as null', async () => {
+      const band = await repo.createOutstation({
+        name: 'One-way only',
+        terrain: 'HILL',
+        minKm: 200,
+        maxKm: 300,
+        ...FARE,
+      });
+
+      expect(band.roundTripFarePaise).toBeNull();
+
+      const reread = await repo.findOutstationById(band.id);
+      expect(reread?.roundTripFarePaise).toBeNull();
+      expect(reread?.roundTripFarePaise).not.toBe(0);
+    });
+
+    it('keeps a real return fare, including a deliberate zero', async () => {
+      const band = await repo.createOutstation({
+        name: 'Free return',
+        terrain: 'PLAIN',
+        minKm: 200,
+        maxKm: 300,
+        ...FARE,
+        roundTripFarePaise: 0,
+      });
+
+      // A band that genuinely charges nothing for the return is distinguishable from one that
+      // does not sell it. That distinction is the reason the field is nullable.
+      expect(band.roundTripFarePaise).toBe(0);
     });
   });
 });

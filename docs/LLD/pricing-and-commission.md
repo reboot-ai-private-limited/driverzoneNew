@@ -33,9 +33,9 @@ adds nothing at all — there is no zero-value fee line on the receipt.
 ## InCity fare
 
 ```
-computeInCityFare(variant, price, pickupZone, scheduledAt) -> FareBreakdown
+computeInCityFare(variant, pickupZone, scheduledAt) -> FareBreakdown
 
-  base        = price.base_fare_paise
+  base        = variant.base_fare_paise
 
   pickup_fee  = as above — identical for both products
 
@@ -111,26 +111,28 @@ line configured in two places is one place too many, and the row-level copy was 
 ## Outstation fare
 
 ```
-computeOutstationFare(pkg, price, pickupZone, distanceKm, direction, scheduledAt)
+computeOutstationFare(pkg, direction, pickupZone, scheduledAt)
 
-  base        = price.base_fare_paise
-  extra_km    = max(0, distanceKm - pkg.min_km)       -- band price covers up to min_km
-  dist_charge = extra_km * price.extra_km_rate_paise
-  allowance   = price.driver_allowance_paise          -- night halt / food
+  -- FLAT ACROSS THE BAND. No distance term: 72 km and 98 km both pay the 70-100 fare.
+  base        = direction == 'ROUND_TRIP' ? pkg.round_trip_fare_paise : pkg.one_way_fare_paise
+  -- `null` means this band does not sell that direction. Resolution has already rejected the
+  -- request with NO_PACKAGE_AVAILABLE, so `base` is never null here.
+
   pickup_fee  = as above — identical for both products
   tod_fee     = rupeesToPaise(surchargeFor(scheduledAt))   -- as above, identical for both
   insurance   = rupeesToPaise(settings['pricing.insurance_charge'])
 
-  subtotal    = base + dist_charge + allowance + pickup_fee + tod_fee + insurance
+  subtotal    = base + pickup_fee + tod_fee + insurance
   tax         = round(subtotal * TAX_BPS / 10000)
   total       = roundToRupee(subtotal + tax)
 ```
 
-🔴 **Open question:** does the band price cover the whole band flat (70–100 km all cost
-the same) or does it cover `min_km` with per-km on top? The formula above assumes the
-latter. See `open-questions.md` Q3.
+**`open-questions.md` Q3 is closed** (2026-08-28): the band price is flat.
+`extra_km_rate_paise` and `driver_allowance_paise` were removed from the band rather than set to
+zero — a field that is always zero is a field someone eventually sets. Its cost is the one Q3
+named: flat pricing needs many narrow bands.
 
-For `ROUND_TRIP`, the price row is separate rather than a computed 2× — round trips are
+For `ROUND_TRIP`, the fare is a separate field rather than a computed 2× — round trips are
 usually less than double one-way (the driver is returning anyway) and you want that
 pricing power explicit rather than derived.
 
@@ -139,21 +141,24 @@ pricing power explicit rather than derived.
 Stored per price row; percent values are **basis points** (`2500` = 25%).
 
 ```
-splitFare(total, price) -> { driver, company }
+splitFare(commissionable, driverCommissionBps) -> { driver, company }
 
-  driverShare  = price.driver_commission_type == 'PERCENT'
-                   ? round(commissionable * price.driver_commission_value / 10000)
-                   : price.driver_commission_value
-
+  driverShare  = round(commissionable * driverCommissionBps / 10000)
   companyShare = commissionable - driverShare
 ```
 
-Where `commissionable = subtotal` — **tax and the driver allowance are excluded**. Tax is
-passed through to the government, not split. The allowance goes to the driver whole; it
-reimburses a cost, it isn't earnings.
+Where `commissionable = subtotal` — **tax is excluded**, being passed through to the government
+rather than split. There is no driver allowance to exclude any more; it went with the outstation
+price row.
+
+**The company's share is the remainder, and is never stored.** Both sides used to be stored
+independently, each with its own `PERCENT | FLAT` type, which let a form save 75% and 20% and
+quietly leave 5% of every trip in nobody's column. Deriving one from the other deletes that
+failure mode instead of validating against it, and makes the assertion below true by
+construction rather than by check.
 
 ```
-assert driverShare + companyShare + allowance + tax == total
+assert driverShare + companyShare + tax == total
 ```
 
 Make that a runtime assertion in the fare builder, and a property-based test. Fare
@@ -172,8 +177,10 @@ Written once into `bookings.fare_snapshot` at confirmation, never updated:
   "source": {
     "package_id": "…", "package_name": "Siliguri Hourly",
     "variant_id": "…", "variant_label": "3 Hours",
-    "price_row_id": "…",
-    "car_category_id": "…", "car_category": "SEDAN",
+    // The category the booking was placed for. Recorded because dispatch matches on it and a
+    // dispute needs to know which car was driven — NOT because it affected the price. It has
+    // not since 2026-08-28. There is no `price_row_id`: there are no price rows.
+    "car_category": "SEDAN",
     "pickup_zone_id": "…", "pickup_zone": "Siliguri Central",
     "city_zone_id": "…", "city": "Siliguri"
   },
@@ -200,9 +207,11 @@ Written once into `bookings.fare_snapshot` at confirmation, never updated:
 
   "split": {
     "commissionable_paise": 100000,
-    "driver_paise": 75000,  "driver_commission_type": "PERCENT",  "driver_commission_value": 7500,
-    "company_paise": 25000, "company_commission_type": "PERCENT", "company_commission_value": 2500,
-    "allowance_paise": 0
+    // The rate is one number. The company's share is the remainder, and both sides are frozen
+    // here as amounts so a later rate change cannot alter what was owed on this booking.
+    "driver_commission_bps": 7500,
+    "driver_paise": 75000,
+    "company_paise": 25000
   }
 }
 ```
@@ -214,7 +223,7 @@ lets the parser handle old snapshots after the shape changes.
 ## The quote flow
 
 ```
-POST /quotes  { service_type, pickup, drop, car_category_id, scheduled_at, direction? }
+POST /quotes  { service_type, pickup, drop, car_category, scheduled_at, direction? }
   → resolve zones (04)
   → match packages
   → compute fares

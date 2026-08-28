@@ -1,6 +1,6 @@
 import type { Terrain } from '@driverzone/geo';
 import type { IncityPackage } from './incityPackage.entity.js';
-import type { Direction, OutstationPackage } from './outstationPackage.entity.js';
+import type { OutstationPackage } from './outstationPackage.entity.js';
 
 /**
  * PORT — what the domain needs from persistence, without naming Mongo.
@@ -21,18 +21,11 @@ export interface CreateIncityPackageData {
     label: string;
     includedMinutes: number;
     includedKm: number;
+    baseFarePaise: number;
+    extraMinuteRatePaise?: number;
+    extraKmRatePaise?: number;
+    driverCommissionBps: number;
     enforceDropInCity?: boolean;
-    prices: Array<{
-      carCategoryId: string;
-      baseFarePaise: number;
-      extraMinuteRatePaise?: number;
-      extraKmRatePaise?: number;
-      driverCommissionType: 'PERCENT' | 'FLAT';
-      driverCommissionValue: number;
-      companyCommissionType: 'PERCENT' | 'FLAT';
-      companyCommissionValue: number;
-      isActive?: boolean;
-    }>;
     sortOrder?: number;
     isActive?: boolean;
   }>;
@@ -44,18 +37,9 @@ export interface CreateOutstationPackageData {
   terrain: Terrain;
   minKm: number;
   maxKm: number;
-  prices: Array<{
-    carCategoryId: string;
-    direction: Direction;
-    baseFarePaise: number;
-    extraKmRatePaise?: number;
-    driverAllowancePaise?: number;
-    driverCommissionType: 'PERCENT' | 'FLAT';
-    driverCommissionValue: number;
-    companyCommissionType: 'PERCENT' | 'FLAT';
-    companyCommissionValue: number;
-    isActive?: boolean;
-  }>;
+  oneWayFarePaise: number;
+  roundTripFarePaise?: number | null | undefined;
+  driverCommissionBps: number;
   isActive?: boolean;
 }
 
@@ -64,7 +48,7 @@ export type IncityPackagePatch = {
   [K in keyof CreateIncityPackageData]?: CreateIncityPackageData[K] | undefined;
 };
 
-/** What `updateOutstationPackage` writes. Same replace-not-merge caveat on `prices`. */
+/** What `updateOutstationPackage` writes. Flat fields only — there is no nested array left. */
 export type OutstationPackagePatch = {
   [K in keyof CreateOutstationPackageData]?: CreateOutstationPackageData[K] | undefined;
 };

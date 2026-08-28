@@ -60,7 +60,7 @@ error dashboards instead of drowning in expected outcomes.
   "service_type": "INCITY",
   "pickup": { "lat": 26.7271, "lng": 88.3953, "address": "Sevoke Road, Siliguri" },
   "drop":   { "lat": 26.7100, "lng": 88.4300, "address": "Matigara" },
-  "car_category_id": "…",
+  "car_category": "SEDAN",
   "scheduled_at": "2026-08-21T09:30:00+05:30",
   "direction": null
 }

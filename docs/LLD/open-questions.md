@@ -37,15 +37,16 @@ customer gets a "confirm trip ended" push whose timestamp wins if it comes first
 
 ---
 
-### 🔴 Q3 — Outstation band pricing: flat or base + per-km?
+### ✅ Q3 — Outstation band pricing: flat or base + per-km? — **CLOSED 2026-08-28**
 
-Does a 70–100 km package charge the same for 72 km and 98 km, or does the price cover
-70 km with a per-km rate on top?
+**Flat.** A 70–100 km band charges the same for 72 km and 98 km; `extraKmRatePaise` and
+`driverAllowancePaise` were removed from the band entirely rather than set to zero. See
+[`../decision-log.md`](../decision-log.md).
 
-`pricing-and-commission.md` assumes **base + per-km beyond `min_km`**. If you intend a
-flat band price, `extra_km_rate_paise` is simply 0 and the formula still holds — but say
-so now, because it determines how narrow your bands need to be. Flat pricing needs many
-narrow bands; base+per-km works with a few wide ones.
+The warning this question carried still stands and is now a live constraint rather than a
+hypothetical: **flat pricing needs many narrow bands.** That is why the admin panel makes an
+uncovered stretch a red row in the band list, and why splitting a band is a first-class action
+instead of an edit-then-create sequence with a 409 in the middle.
 
 ---
 

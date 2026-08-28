@@ -10,8 +10,8 @@ import type {
   OverlapQuery,
   PackageRepositoryPort,
 } from '../domain/packageRepository.port.js';
-import type { CommissionType, IncityPackage } from '../domain/incityPackage.entity.js';
-import type { Direction, OutstationPackage } from '../domain/outstationPackage.entity.js';
+import type { IncityPackage } from '../domain/incityPackage.entity.js';
+import type { OutstationPackage } from '../domain/outstationPackage.entity.js';
 import { IncityPackageModel } from './incityPackage.model.js';
 import { OutstationPackageModel } from './outstationPackage.model.js';
 
@@ -29,19 +29,11 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
       label: v.label,
       includedMinutes: v.includedMinutes,
       includedKm: v.includedKm,
+      baseFarePaise: v.baseFarePaise,
+      extraMinuteRatePaise: v.extraMinuteRatePaise,
+      extraKmRatePaise: v.extraKmRatePaise,
+      driverCommissionBps: v.driverCommissionBps,
       enforceDropInCity: v.enforceDropInCity,
-      prices: v.prices.map((p) => ({
-        id: String(p._id),
-        carCategoryId: String(p.carCategoryId),
-        baseFarePaise: p.baseFarePaise,
-        extraMinuteRatePaise: p.extraMinuteRatePaise,
-        extraKmRatePaise: p.extraKmRatePaise,
-        driverCommissionType: p.driverCommissionType as CommissionType,
-        driverCommissionValue: p.driverCommissionValue,
-        companyCommissionType: p.companyCommissionType as CommissionType,
-        companyCommissionValue: p.companyCommissionValue,
-        isActive: p.isActive,
-      })),
       sortOrder: v.sortOrder,
       isActive: v.isActive,
     })),
@@ -59,19 +51,11 @@ function toOutstationEntity(doc: InstanceType<typeof OutstationPackageModel>): O
     terrain: obj.terrain as Terrain,
     minKm: obj.minKm,
     maxKm: obj.maxKm,
-    prices: obj.prices.map((p) => ({
-      id: String(p._id),
-      carCategoryId: String(p.carCategoryId),
-      direction: p.direction as Direction,
-      baseFarePaise: p.baseFarePaise,
-      extraKmRatePaise: p.extraKmRatePaise,
-      driverAllowancePaise: p.driverAllowancePaise,
-      driverCommissionType: p.driverCommissionType as CommissionType,
-      driverCommissionValue: p.driverCommissionValue,
-      companyCommissionType: p.companyCommissionType as CommissionType,
-      companyCommissionValue: p.companyCommissionValue,
-      isActive: p.isActive,
-    })),
+    oneWayFarePaise: obj.oneWayFarePaise,
+    // `?? null` and not `?? 0`: a document written before this field existed, or one where ops
+    // cleared it, means "no same-day return offered" — never "the return trip is free".
+    roundTripFarePaise: obj.roundTripFarePaise ?? null,
+    driverCommissionBps: obj.driverCommissionBps,
     isActive: obj.isActive,
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,

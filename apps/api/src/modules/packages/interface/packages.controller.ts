@@ -8,6 +8,7 @@ import type { UpdateOutstationPackageUseCase } from '../application/useCases/upd
 import type { ListIncityPackagesUseCase } from '../application/useCases/listIncityPackages.usecase.js';
 import type { ListOutstationPackagesUseCase } from '../application/useCases/listOutstationPackages.usecase.js';
 import type { GetPackageByIdUseCase } from '../application/useCases/getPackageById.usecase.js';
+import { toIncityPackageDto, toOutstationPackageDto } from './packages.mapper.js';
 import {
   createIncityPackageSchema,
   createOutstationPackageSchema,
@@ -24,7 +25,7 @@ export function makeCreateIncityPackageController(
   return asyncHandler(async (req, res) => {
     const data = createIncityPackageSchema.parse(req.body);
     const pkg = await useCase.execute(data);
-    sendSuccess(req, res, pkg, 'Incity package created', 201);
+    sendSuccess(req, res, toIncityPackageDto(pkg), 'Incity package created', 201);
   });
 }
 
@@ -34,7 +35,7 @@ export function makeCreateOutstationPackageController(
   return asyncHandler(async (req, res) => {
     const data = createOutstationPackageSchema.parse(req.body);
     const pkg = await useCase.execute(data);
-    sendSuccess(req, res, pkg, 'Outstation package created', 201);
+    sendSuccess(req, res, toOutstationPackageDto(pkg), 'Outstation package created', 201);
   });
 }
 
@@ -45,7 +46,7 @@ export function makeUpdateIncityPackageController(
     const { id } = packageIdParamSchema.parse(req.params);
     const data = updateIncityPackageSchema.parse(req.body);
     const pkg = await useCase.execute(id, data);
-    sendSuccess(req, res, pkg, 'Incity package updated', 200);
+    sendSuccess(req, res, toIncityPackageDto(pkg), 'Incity package updated', 200);
   });
 }
 
@@ -56,7 +57,7 @@ export function makeUpdateOutstationPackageController(
     const { id } = packageIdParamSchema.parse(req.params);
     const data = updateOutstationPackageSchema.parse(req.body);
     const pkg = await useCase.execute(id, data);
-    sendSuccess(req, res, pkg, 'Outstation package updated', 200);
+    sendSuccess(req, res, toOutstationPackageDto(pkg), 'Outstation package updated', 200);
   });
 }
 
@@ -66,7 +67,7 @@ export function makeListIncityPackagesController(
   return asyncHandler(async (req, res) => {
     const filter = listPackagesQuerySchema.parse(req.query);
     const packages = await useCase.execute(filter);
-    sendSuccess(req, res, packages, 'Incity packages');
+    sendSuccess(req, res, { packages: packages.map(toIncityPackageDto) }, 'Incity packages');
   });
 }
 
@@ -76,7 +77,7 @@ export function makeListOutstationPackagesController(
   return asyncHandler(async (req, res) => {
     const filter = listOutstationQuerySchema.parse(req.query);
     const packages = await useCase.execute(filter);
-    sendSuccess(req, res, packages, 'Outstation packages');
+    sendSuccess(req, res, { packages: packages.map(toOutstationPackageDto) }, 'Outstation packages');
   });
 }
 
@@ -86,7 +87,7 @@ export function makeGetIncityPackageController(
   return asyncHandler(async (req, res) => {
     const { id } = packageIdParamSchema.parse(req.params);
     const pkg = await useCase.execute(id, 'INCITY');
-    sendSuccess(req, res, pkg, 'Incity package');
+    sendSuccess(req, res, toIncityPackageDto(pkg), 'Incity package');
   });
 }
 
@@ -96,6 +97,6 @@ export function makeGetOutstationPackageController(
   return asyncHandler(async (req, res) => {
     const { id } = packageIdParamSchema.parse(req.params);
     const pkg = await useCase.execute(id, 'OUTSTATION');
-    sendSuccess(req, res, pkg, 'Outstation package');
+    sendSuccess(req, res, toOutstationPackageDto(pkg), 'Outstation package');
   });
 }

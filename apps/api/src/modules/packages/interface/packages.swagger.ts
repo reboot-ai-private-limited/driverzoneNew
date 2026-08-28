@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TERRAINS } from '@driverzone/contracts';
 import { bearerAuth, errorResponse, registry, successResponse } from '@/shared/http/swagger.util.js';
 import {
   createIncityPackageSchema,
@@ -16,30 +17,25 @@ import {
  * matters). Response DTOs below mirror `@driverzone/contracts`'s `packages.ts` field-for-field —
  * those are hand-written TypeScript interfaces, not Zod, so this is the one place their shape is
  * re-declared.
+ *
+ * "Mirror" used to be a claim nobody checked, and the module drifted: the controllers were
+ * serialising camelCase domain entities while this file and the contracts both promised
+ * snake_case. `packages.mapper.ts` now builds the DTOs and `packages.typecheck.ts` pins the
+ * mapper to the contracts, so the only unguarded copy left is this one — hence the note.
  */
 
 // ─── Response DTOs — mirror @driverzone/contracts/src/packages.ts ─────────────────────────────
 
-const commissionType = z.enum(['PERCENT', 'FLAT']);
-
-const incityPriceDtoSchema = z.object({
-  car_category_id: z.string(),
-  base_fare_paise: z.number(),
-  extra_minute_rate_paise: z.number(),
-  extra_km_rate_paise: z.number(),
-  driver_commission_type: commissionType,
-  driver_commission_value: z.number(),
-  company_commission_type: commissionType,
-  company_commission_value: z.number(),
-  is_active: z.boolean(),
-});
-
 const incityVariantDtoSchema = z.object({
+  id: z.string(),
   label: z.string(),
   included_minutes: z.number(),
   included_km: z.number(),
+  base_fare_paise: z.number(),
+  extra_minute_rate_paise: z.number(),
+  extra_km_rate_paise: z.number(),
+  driver_commission_bps: z.number(),
   enforce_drop_in_city: z.boolean(),
-  prices: z.array(incityPriceDtoSchema),
   sort_order: z.number(),
   is_active: z.boolean(),
 });
@@ -53,26 +49,16 @@ const incityPackageDtoSchema = z.object({
   is_active: z.boolean(),
 });
 
-const outstationPriceDtoSchema = z.object({
-  car_category_id: z.string(),
-  direction: z.enum(['ONE_WAY', 'ROUND_TRIP']),
-  base_fare_paise: z.number(),
-  extra_km_rate_paise: z.number(),
-  driver_allowance_paise: z.number(),
-  driver_commission_type: commissionType,
-  driver_commission_value: z.number(),
-  company_commission_type: commissionType,
-  company_commission_value: z.number(),
-  is_active: z.boolean(),
-});
-
 const outstationPackageDtoSchema = z.object({
   id: z.string(),
   name: z.string(),
-  terrain: z.enum(['PLAIN', 'HILL']),
+  terrain: z.enum(TERRAINS),
   min_km: z.number(),
   max_km: z.number(),
-  prices: z.array(outstationPriceDtoSchema),
+  one_way_fare_paise: z.number(),
+  /** Null when the band does not offer a same-day return — not zero. */
+  round_trip_fare_paise: z.number().nullable(),
+  driver_commission_bps: z.number(),
   is_active: z.boolean(),
 });
 
@@ -135,7 +121,7 @@ export function registerPackagesSwaggerPaths(): void {
   });
 
   registry.registerPath({
-    method: 'patch',
+    method: 'put',
     path: '/admin/packages/incity/{id}',
     tags: ['Packages'],
     summary: 'Update an InCity package',
@@ -194,7 +180,7 @@ export function registerPackagesSwaggerPaths(): void {
   });
 
   registry.registerPath({
-    method: 'patch',
+    method: 'put',
     path: '/admin/packages/outstation/{id}',
     tags: ['Packages'],
     summary: 'Update an Outstation package',

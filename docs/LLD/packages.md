@@ -11,25 +11,48 @@ points. This document is that decision, the data behind it, and every way it can
 | | InCity | Outstation |
 |---|---|---|
 | Sold against | The **city zone** (`cityZoneId`) | **Terrain** and a **distance band** |
-| Priced by | Variant (duration) × car category | Car category × **direction** |
+| Priced by | The **variant** — one fare each | The **direction** — one-way or return |
 | Customer chooses | The variant — 3 hours, 10 hours | The direction — one-way or return |
 | References a pickup zone | **No** | **No** |
+| Price varies by car category | **No** | **No** |
 
 Neither product references a pickup zone. That relationship was retired along with invariant P-1
 — a pickup zone is a serviceability gate and a fee, and it has already done its whole job before
 package matching begins.
 
+**Neither product prices by car category either.** Both used to: an incity variant carried a
+price row per category, and an outstation band carried one per `(category, direction)` — ten
+rows per band. Retired 2026-08-28 ([`../decision-log.md`](../decision-log.md)). An SUV and a
+hatchback now pay the same fare for the same trip. The category is still recorded on the booking
+and still decides *who can drive* ([`dispatch-and-assignment.md`](dispatch-and-assignment.md));
+it simply no longer decides what anything costs.
+
 ### Outstation is priced per direction
 
-A price row is keyed by **`(carCategoryId, direction)`**, where `direction` is
-`ONE_WAY | ROUND_TRIP`. One-way and return are *separate rows*, each carrying its own
-`baseFarePaise`, `extraKmRatePaise`, `driverAllowancePaise`, and its own driver/company
-commission split.
+A band carries two fares — `oneWayFarePaise` and `roundTripFarePaise` — and one
+`driverCommissionBps`. That is the whole of its pricing.
+
+**The fare is flat across the band.** 72 km and 98 km both pay the `70–100` fare; there is no
+per-km rate on top. This closes `open-questions.md` Q3, which asked exactly that and warned what
+the answer costs: **flat pricing needs many narrow bands**, where base-plus-per-km works with a
+few wide ones. That is why splitting a band is a first-class action in the admin panel and why
+the band list makes an uncovered stretch impossible to miss.
+
+**`roundTripFarePaise` is nullable**, and `null` means *this band does not sell a same-day
+return* — never that the return is free. A long hill band the driver cannot get back from in a
+day is a real case, and it is the successor to the old "leave that price row out" affordance. A
+`ROUND_TRIP` request against such a band is `NO_PACKAGE_AVAILABLE`, not
+`NO_PACKAGE_FOR_DISTANCE`: the distance *is* covered, and sending ops to add a band would send
+them to create one that already exists.
 
 **A round trip is not a computed multiple of a one-way.** Ops sets both independently, because
-the driver's day is different in kind and not merely in length: they wait at the destination,
-they may not get a return fare, and the allowance covers food and a halt rather than distance.
-Deriving one from the other would bake a ratio into code that belongs in a form field.
+the driver's day is different in kind and not merely in length: they wait at the destination and
+they may not get a return fare. Deriving one from the other would bake a ratio into code that
+belongs in a form field.
+
+**The company's commission is derived, never stored:** `10000 − driverCommissionBps`. Storing
+both sides let a form save 75% and 20% and quietly leave 5% of every trip in nobody's column.
+The pair that could disagree no longer exists.
 
 > 🔴 **`open-questions.md` Q4 is still open**, and two-way pricing cannot be fully specified
 > until it closes: maximum included wait at the destination, per-day driver allowance,
@@ -39,10 +62,13 @@ Deriving one from the other would bake a ratio into code that belongs in a form 
 
 ### InCity is priced per variant
 
-A variant is a duration option — `includedMinutes`, `includedKm`, and a price row per car
-category. The customer picks the variant, so a quote returns **all** active variants of the
-winning package, not one. Overage beyond the included time or distance is billed at the
-variant's own rates (`open-questions.md` Q2).
+A variant is a duration option carrying `includedMinutes`, `includedKm`, its own
+`baseFarePaise`, and its own `driverCommissionBps`. The customer picks the variant, so a quote
+returns **all** active variants of the winning package, not one.
+
+Overage beyond the included time or distance is billed at the variant's own
+`extraMinuteRatePaise` / `extraKmRatePaise` (`open-questions.md` Q2). Unlike outstation, incity
+keeps its overage rates — "included km" would mean nothing if exceeding it were free.
 
 Schemas for both live in [`database-schema.md`](database-schema.md).
 
@@ -104,7 +130,8 @@ cache stores `{ distance_m, duration_s }` with no polyline. See
 
 ## Resolution — the server picks the product
 
-The customer supplies two points and a car category. They do not pick a tab.
+The customer supplies two points and, for outstation, a direction. They do not pick a tab, and
+they do not pick a price tier — the car category no longer reaches this module at all.
 
 ```
 1. from ∈ a PICKUP zone?
@@ -128,8 +155,8 @@ The customer supplies two points and a car category. They do not pick a tab.
      d. more recently created; then id
 
 5. return exactly ONE package
-     incity     → the package + every active variant with an active price for the car category
-     outstation → the package + its price row for (carCategoryId, direction)
+     incity     → the package + every active variant
+     outstation → the package + its fare for `direction`
 ```
 
 ### On rung (a) — and the guard it needs
@@ -157,9 +184,15 @@ alert rather than whichever document Mongo returned first.
 ### On rung (c) — which total
 
 Rung (c) only ever fires between two packages of the same type and terrain, which is a
-configuration error that P-2 should have prevented. Compare on the **computed total for this
-request** — the number the customer would actually pay — not on base fare. For incity, compare
-the cheapest active variant. Never resolve an ambiguity in the direction of charging more.
+configuration error that P-2 should have prevented — except for incity, where two active
+packages against one city zone are legal and the admin panel warns about them rather than
+forbidding them.
+
+Compare on the **fare for this request**: the band's fare for the requested direction, or for
+incity the cheapest active variant. That is now much closer to "the total the customer pays"
+than it was, because a band's fare no longer has a per-km component bolted on — what remains
+outside it is the pickup fee, the time-of-day surcharge, insurance and tax, all of which belong
+to the `pricing` module. Never resolve an ambiguity in the direction of charging more.
 
 ## No fallback across terrain
 
@@ -211,9 +244,13 @@ const conflict = await OutstationPackage.findOne({
 
 - **P-1** *Retired* with the package ↔ pickup-zone link. See [`domain-model.md`](domain-model.md).
 - **P-2** No overlapping bands within a terrain, as above.
-- **P-3** An active package has at least one active price row. For incity that means at least one
-  active variant holding at least one active price. A package that can never be sold must not be
-  marked active.
+- **P-3** *Incity only.* An active package has at least one active variant. It used to also
+  require an active price row inside that variant, because a variant could hold zero priced
+  categories and still look healthy; a variant now carries its fare structurally, so the inner
+  clause has nothing left to check. **Retired for outstation** — `oneWayFarePaise` is a required
+  field on the band, which makes "active but unsellable" unrepresentable rather than merely
+  forbidden. An invariant that cannot be violated is a comment, and it is written as one in
+  `outstationPackage.entity.ts`.
 - **P-4** `minKm < maxKm`. Bands are `[minKm, maxKm)`.
 
 ## Codes
@@ -230,7 +267,7 @@ New faults:
 | Code | HTTP | When |
 |---|---|---|
 | `PACKAGE_BAND_OVERLAP` | 409 | Save would create an overlapping band. `data` carries the conflicting package id, so the editor can link straight to it |
-| `PACKAGE_NOT_SELLABLE` | 422 | P-3 — activating a package with no active price row |
+| `PACKAGE_NOT_SELLABLE` | 422 | P-3 — activating an incity package with no active variant. Outstation cannot raise it: a band's fare is a required field |
 
 The same rule as everywhere else: **"we can't serve this" is a 200 with `available: false`**;
 4xx/5xx is for genuine faults.
@@ -247,7 +284,8 @@ The same rule as everywhere else: **"we can't serve this" is a 200 with `availab
 | A price edited inside the quote's TTL | The quote holds the old fare until it expires. Re-quoting shows the new one; `QUOTE_EXPIRED` carries the diff |
 | Active package with zero active variants | P-3 forbids creating it; the nightly job alerts if one exists |
 | Two candidates tie on total | Rung (d) — most recent, then id. Deterministic, never a coin flip |
-| `carCategoryId` has no active price in the winning package | That package is not a candidate for this request. If nothing else matches, `NO_PACKAGE_AVAILABLE` |
+| `ROUND_TRIP` asked of a band whose `roundTripFarePaise` is null | That band is not a candidate. If nothing else matches, `NO_PACKAGE_AVAILABLE` — **not** `NO_PACKAGE_FOR_DISTANCE`, because the distance is covered and the band already exists |
+| Ops wants `0–150` split into `0–70` and `70–150` | The band's **Split** action: shrink the original, then create the upper half with the fares copied. Two writes, one button. Doing it by hand in the other order hits `PACKAGE_BAND_OVERLAP` |
 | ⚠ Hill polygon drawn around the town but not the approach road | Trip prices as PLAIN and underpays the driver. The failure this model trades for its simplicity — see §What it costs |
 
 ## The module
@@ -283,30 +321,18 @@ that will eventually apply it differently.
 variants and prices. The editors, the live commission-split preview and the band-coverage strip
 are specified in [`admin-panel.md`](admin-panel.md).
 
-### Realignment surface — done
-
-The `features-packages` branch was built against the previous architecture. As of the merge of
-`main` into that branch, every delta below is closed:
-
-| File | Change | |
-|---|---|---|
-| both entities, the port, the validator | Drop `pickupZoneIds`, and the "at least one pickup zone" clause from both `validate*Activation` | ✅ never present past the models |
-| `infrastructure/*.model.ts` | Drop `pickupZoneIds` from both Mongoose schemas — terrain is the whole scope | ✅ |
-| `infrastructure/packageRepository.impl.ts` | Drop the `pickupZoneIds` clause from `findOverlappingBands` and both lookups | ✅ already correct |
-| `packages.public.ts` | Replace the arrays keyed by `pickupZoneId` with `resolveForTrip` returning one match | ✅ |
-| `domain/package.errors.ts` | `OverlappingBandError` carries `PACKAGE_BAND_OVERLAP`, not a generic `CONFLICT` | ✅ |
-| `.dependency-cruiser.cjs` | `catalog` → `packages` | ✅ |
-| the precedence ladder | Rungs (a)–(d) | ✅ |
-| the `incity.max_distance_multiple` guard | | ⚠️ implemented, but the value is a constant `2` in `resolveForTrip.usecase.ts`. The `settings` module now exists; this key is deliberately not in its registry yet — a key is added when the code reading it is written |
-
-Still open, and why:
+### What is built, and what is still open
 
 | Gap | Blocked on |
 |---|---|
 | The `unservedDistanceRequests` write on `NO_PACKAGE_FOR_DISTANCE` | Nothing owns that collection yet |
-| Rung (c) comparing the **computed total for this request** rather than `baseFarePaise` | The `pricing` module |
-| `packages/contracts/src/packages.ts`, a DTO mapper, `packages.typecheck.ts` and `packages.swagger.ts` | Nothing — this is the next PR. Controllers currently put camelCase domain entities on the wire, and there is no drift guard between the Zod schemas and the shared types |
 | An audit port and adapter | Nothing. Every admin write in `zones` records one; none in `packages` do |
+| `incity.max_distance_multiple` moving into the `settings` registry | Nothing — it is a constant `2` in `resolveForTrip.usecase.ts`. A key is added when the code reading it is written |
+| Rung (c) comparing a full computed total rather than the band fare | The `pricing` module |
+
+Closed since: the DTO mapper and `packages.typecheck.ts` (the controllers used to put camelCase
+domain entities on the wire against snake_case contracts, which silently broke the zones screen's
+package count), and the whole per-car-category price model.
 
 ## Deliberately deferred
 

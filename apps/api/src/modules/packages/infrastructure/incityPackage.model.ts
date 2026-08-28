@@ -1,31 +1,24 @@
 import { Schema, model } from 'mongoose';
 
-const incityPriceSchema = new Schema(
-  {
-    carCategoryId: { type: Schema.Types.ObjectId, ref: 'CarCategory', required: true },
-    baseFarePaise: { type: Number, required: true, min: 0 },
-    extraMinuteRatePaise: { type: Number, default: 0, min: 0 },
-    extraKmRatePaise: { type: Number, default: 0, min: 0 },
-
-    driverCommissionType: { type: String, enum: ['PERCENT', 'FLAT'], required: true },
-    driverCommissionValue: { type: Number, required: true },
-    companyCommissionType: { type: String, enum: ['PERCENT', 'FLAT'], required: true },
-    companyCommissionValue: { type: Number, required: true },
-
-    isActive: { type: Boolean, default: true },
-  },
-  { _id: true },
-);
-
+/**
+ * The variant carries its own price. There was a `prices[]` sub-schema here, one row per car
+ * category — retired 2026-08-28 (docs/decision-log.md) along with pricing by category.
+ */
 const incityVariantSchema = new Schema(
   {
     label: { type: String, required: true },
     includedMinutes: { type: Number, required: true, min: 1 },
     includedKm: { type: Number, required: true, min: 0 },
 
-    enforceDropInCity: { type: Boolean, default: true },
+    baseFarePaise: { type: Number, required: true, min: 0 },
+    extraMinuteRatePaise: { type: Number, default: 0, min: 0 },
+    extraKmRatePaise: { type: Number, default: 0, min: 0 },
 
-    prices: [incityPriceSchema],
+    // Basis points: 7500 is 75%. The company's share is `10000 - this` and is NOT stored —
+    // two independently stored shares are two numbers that can fail to add up.
+    driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
+
+    enforceDropInCity: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },

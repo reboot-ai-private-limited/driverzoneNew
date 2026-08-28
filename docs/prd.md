@@ -47,13 +47,11 @@ A **zone** is a named polygon drawn by an admin. Three types:
 - Available from one or more PICKUP zones inside that city
 - Offered as **variants**: 3 hours, 10 hours, etc., each with included km, a base fare,
   overage rates, and a commission split
-- Price also depends on the customer's car category
 
 **Outstation** — a point-to-point trip out of the city.
 - Matched by **road distance band** (e.g. 70–100 km) and **terrain** (hill / plain)
 - Available from one or more PICKUP zones
-- Priced separately for **one-way** and **round-trip**
-- Price also depends on car category
+- Priced separately for **one-way** and **round-trip**, flat across the band
 
 ### 3.3 Pickup fee
 
@@ -74,13 +72,16 @@ The amount comes from the zone if set, otherwise from global settings.
 - FR-Z7 Every zone change is versioned and audited (who, when, previous geometry)
 
 ### 4.2 Admin — package & pricing management
-- FR-P1 Create incity packages: city zone, applicable pickup zones, variants
-- FR-P2 Per variant: included hours, included km, and per car category — base fare,
-  extra-hour rate, extra-km rate, driver commission, company commission
-- FR-P3 Create outstation packages: name, terrain, distance band, applicable pickup zones,
-  and per car category × direction — base fare, extra-km rate, driver allowance, commissions
-- FR-P4 Overlapping outstation distance bands for the same pickup zone + terrain are
-  rejected on save (ambiguous match)
+- FR-P1 Create incity packages: city zone, variants
+- FR-P2 Per variant: label, included minutes, included km, base fare, extra-minute rate,
+  extra-km rate, driver commission
+- FR-P3 Create outstation packages: name, terrain, distance band, one-way fare, return fare,
+  driver commission. The fare is flat across the band; a blank return fare means the band does
+  not sell a same-day return
+- FR-P4 Overlapping outstation distance bands for the same terrain are rejected on save
+  (ambiguous match). Splitting an existing band in two is a first-class action
+- FR-P7 **Price does not vary by car category.** The category is recorded on the booking and
+  decides which drivers may be offered it, not what it costs (decision-log.md, 2026-08-28)
 - FR-P5 Price changes never alter already-confirmed bookings
 - FR-P6 Preview tool: enter a pickup/drop pair, see exactly what the customer would be
   quoted and why — including which zones matched
@@ -104,7 +105,7 @@ The amount comes from the zone if set, otherwise from global settings.
   expose the cause, and raise a high-priority admin alert
 - FR-B5 Show variants with a fully itemised fare — base, pickup fee, taxes, total — plus
   what is included and what overage costs
-- FR-B6 Select car category; the price updates
+- FR-B6 Select car category. It does not change the price (FR-P7) — it decides which drivers can be offered the booking
 - FR-B7 Book immediately or schedule for a future date/time
 - FR-B8 Live driver tracking, driver contact via masked number, share-trip link
 - FR-B9 Cancel with the applicable fee shown *before* confirming

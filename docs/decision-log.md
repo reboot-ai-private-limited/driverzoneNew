@@ -20,6 +20,42 @@ entry links to it.
 
 ---
 
+## 2026-08-28 — Price no longer varies by car category; an outstation band is a flat fare
+
+**Decision:** A package's price is not keyed by car category. An outstation band carries
+`oneWayFarePaise`, a nullable `roundTripFarePaise` and one `driverCommissionBps`; an incity
+variant carries `baseFarePaise`, its two overage rates and one `driverCommissionBps`. The
+`prices[]` subdocument is gone from both, along with `CommissionType` (`PERCENT | FLAT`) and the
+separately stored company commission.
+
+Three things follow, each deliberate:
+
+- **The band fare is flat.** `extraKmRatePaise` and `driverAllowancePaise` were removed rather
+  than defaulted to zero — a field that is always zero is a field someone eventually sets. This
+  closes [`LLD/open-questions.md`](LLD/open-questions.md) Q3.
+- **The company's commission is derived**, `10000 − driver`. Storing both let a form save 75%
+  and 20% and leave 5% of every trip in nobody's column.
+- **`roundTripFarePaise` is nullable**, meaning "this band does not sell a same-day return" —
+  never "the return is free".
+
+**Why:** the admin editor made the old model's cost concrete. A band asked for ten price rows
+(five categories × two directions) and ops filled in one; the screen was a column of `not sold`.
+That is flat pricing with more ways to get it wrong, plus a grid nobody could scan.
+
+**What it costs, and it is real:** an SUV and a hatchback now pay the same fare for the same
+trip. That is pricing power we have given up, not an inefficiency we have removed. Flat bands
+also need to be narrower to stay fair, which is why splitting a band became a first-class admin
+action and why an uncovered distance is a red row in the band list rather than a silence.
+
+**Not affected:** car category still exists and still matters. It is recorded on the booking and
+it decides which drivers may be offered it
+([`LLD/dispatch-and-assignment.md`](LLD/dispatch-and-assignment.md)). The list moved to
+`CAR_CATEGORIES` in `packages/contracts/src/identity.ts`; there is still no `carCategories`
+collection. Reversing this decision means restoring a price table keyed by category — the wire
+field is gone, the concept is not.
+
+---
+
 ## 2026-08-28 — Global settings are a key-value collection with the defaults in code
 
 **Decision:** `globalSettings` stores one document per **overridden** key and nothing else. Each

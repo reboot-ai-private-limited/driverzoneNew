@@ -1,6 +1,6 @@
-import type { UnavailableReason } from '@driverzone/contracts';
+import type { Direction, UnavailableReason } from '@driverzone/contracts';
 import type { IncityPackage, IncityVariant } from './domain/incityPackage.entity.js';
-import type { OutstationPackage, OutstationPrice } from './domain/outstationPackage.entity.js';
+import type { OutstationPackage } from './domain/outstationPackage.entity.js';
 
 /**
  * PUBLIC CONTRACT — the only surface other modules may import from `packages`.
@@ -33,18 +33,23 @@ export interface TripContext {
    * in hill terrain, which with 25–30 km bands puts trips in the wrong band constantly.
    */
   distanceKm: number;
-  /** The requested car category id. */
-  carCategoryId: string;
-  /** Outstation only. Defaults to ONE_WAY; a round trip is an independent price row, not a 2×. */
-  direction?: 'ONE_WAY' | 'ROUND_TRIP';
+  /**
+   * Outstation only. Defaults to ONE_WAY; a round trip is an independent fare, not a 2×.
+   *
+   * There is no `carCategory` here any more. It was removed with per-category pricing on
+   * 2026-08-28 (docs/decision-log.md): a package that matches this trip matches it for every
+   * car. The category still travels with the BOOKING, because dispatch matches drivers on it —
+   * it just no longer reaches this module.
+   */
+  direction?: Direction;
 }
 
 export interface IncityMatch {
   type: 'INCITY';
   package: IncityPackage;
   /**
-   * ALL active variants holding an active price for the car category, not one. The customer
-   * picks the duration, so the quote has to show them every duration on offer.
+   * ALL active variants, not one. The customer picks the duration, so the quote has to show
+   * them every duration on offer.
    */
   variants: IncityVariant[];
 }
@@ -52,8 +57,9 @@ export interface IncityMatch {
 export interface OutstationMatch {
   type: 'OUTSTATION';
   package: OutstationPackage;
-  /** Exactly one row, for `(carCategoryId, direction)`. */
-  price: OutstationPrice;
+  /** The band's fare for `direction`. Never null — a band that cannot sell it did not match. */
+  farePaise: number;
+  direction: Direction;
 }
 
 export type PackageMatch = IncityMatch | OutstationMatch;
@@ -82,10 +88,6 @@ export interface PackageLookupContract {
 
 export type PackagesPublicContract = PackageLookupContract;
 
-export type {
-  IncityPackage,
-  IncityVariant,
-  IncityPrice,
-  CommissionType,
-} from './domain/incityPackage.entity.js';
-export type { OutstationPackage, OutstationPrice, Direction } from './domain/outstationPackage.entity.js';
+export type { IncityPackage, IncityVariant } from './domain/incityPackage.entity.js';
+export type { OutstationPackage } from './domain/outstationPackage.entity.js';
+export type { Direction };

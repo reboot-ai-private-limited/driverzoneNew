@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TERRAINS } from '@driverzone/contracts';
 import type { Terrain } from '@driverzone/geo';
 
 /**
@@ -6,71 +7,45 @@ import type { Terrain } from '@driverzone/geo';
  * (docs/engineering/coding-standards.md §Validation).
  *
  * Field names here mirror the Mongoose schemas in `docs/LLD/database-schema.md` rather than the
- * snake_case the rest of the wire uses. That is a known gap, not a decision: this module has no
- * `packages/contracts/src/packages.ts` and therefore no `packages.typecheck.ts` drift guard yet.
- * Both land with the swagger work — see the follow-up in docs/LLD/packages.md.
+ * snake_case the RESPONSE DTOs use. That asymmetry is still not a decision anyone would make
+ * twice, but it is no longer unguarded: `packages.typecheck.ts` pins every schema below to the
+ * matching request type in @driverzone/contracts, so the two can no longer drift in silence.
+ * Aligning the request bodies onto snake_case is a separate change with its own caller migration.
  */
-
-const commissionType = z.enum(['PERCENT', 'FLAT']);
-
-/**
- * `@driverzone/geo` exports `Terrain` as a bare type alias with no runtime companion, so the
- * literals have to be repeated here. `satisfies` is what stops them drifting into something
- * `Terrain` does not accept.
- */
-const TERRAINS = ['PLAIN', 'HILL'] as const satisfies readonly Terrain[];
 
 /** Money is integer paise, everywhere, without exception (coding-standards.md §Money). */
 const paise = z.number().int().min(0);
 
 /**
- * Commission is basis points when the type is PERCENT — 2500 is 25%, so anything above 10000
- * is more than the whole fare. The check has to sit on the object rather than the field because
- * the cap depends on the sibling `*CommissionType`.
+ * The DRIVER's share, in basis points — 7500 is 75%, and 10000 is the whole fare.
  *
- * Shared by both price schemas: the driver/company split is one rule, and two copies of it drift.
+ * The company's share is not a field: it is `10000 - this`. The old shape stored both sides with
+ * their own PERCENT/FLAT type, which let a form save 75% and 20% and leave 5% of every trip
+ * unallocated — a cross-field `superRefine` used to guard half of that and could not guard the
+ * rest. One bounded integer removes the failure mode instead of validating it.
  */
-function refineCommissionBps<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
-  return schema.superRefine((data, ctx) => {
-    const rows = [
-      ['driver', data.driverCommissionType, data.driverCommissionValue] as const,
-      ['company', data.companyCommissionType, data.companyCommissionValue] as const,
-    ];
-    for (const [side, type, value] of rows) {
-      if (type === 'PERCENT' && typeof value === 'number' && value > 10000) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Percent commission cannot exceed 10000 BPS (100%).',
-          path: [`${side}CommissionValue`],
-        });
-      }
-    }
-  });
-}
+const commissionBps = z.number().int().min(0).max(10000);
+
+/**
+ * `@driverzone/geo` exports `Terrain` as a bare type alias with no runtime companion, so the
+ * literals live in @driverzone/contracts where the web app can reach them too. This is the pin
+ * that stops that copy drifting into something `Terrain` does not accept.
+ */
+const _terrainsMatchGeo = TERRAINS satisfies readonly Terrain[];
+void _terrainsMatchGeo;
 
 // ─── InCity ────────────────────────────────────────────────────────────────────────────────
-
-const incityPriceSchema = refineCommissionBps(
-  z.object({
-    carCategoryId: z.string().min(1),
-    baseFarePaise: paise,
-    extraMinuteRatePaise: paise.optional().default(0),
-    extraKmRatePaise: paise.optional().default(0),
-    driverCommissionType: commissionType,
-    driverCommissionValue: z.number().int().min(0),
-    companyCommissionType: commissionType,
-    companyCommissionValue: z.number().int().min(0),
-    isActive: z.boolean().optional().default(true),
-  }),
-);
 
 const incityVariantSchema = z.object({
   label: z.string().min(1),
   includedMinutes: z.number().int().min(1),
   includedKm: z.number().int().min(0),
+  baseFarePaise: paise,
+  extraMinuteRatePaise: paise.optional().default(0),
+  extraKmRatePaise: paise.optional().default(0),
+  driverCommissionBps: commissionBps,
   /** Per-variant because it defaults from duration — off above 4 hours. open-questions.md Q1. */
   enforceDropInCity: z.boolean().optional().default(true),
-  prices: z.array(incityPriceSchema).min(1),
   sortOrder: z.number().int().optional().default(0),
   isActive: z.boolean().optional().default(true),
 });
@@ -85,33 +60,20 @@ export const createIncityPackageSchema = z.object({
 
 // ─── Outstation ────────────────────────────────────────────────────────────────────────────
 
-const outstationPriceSchema = refineCommissionBps(
-  z.object({
-    carCategoryId: z.string().min(1),
-    /**
-     * A round trip is a SEPARATE row, never a computed multiple of the one-way. The driver's
-     * day differs in kind — they wait, they may get no return fare — so ops sets both
-     * independently (docs/LLD/packages.md §Outstation is priced per direction).
-     */
-    direction: z.enum(['ONE_WAY', 'ROUND_TRIP']),
-    baseFarePaise: paise,
-    extraKmRatePaise: paise.optional().default(0),
-    driverAllowancePaise: paise.optional().default(0),
-    driverCommissionType: commissionType,
-    driverCommissionValue: z.number().int().min(0),
-    companyCommissionType: commissionType,
-    companyCommissionValue: z.number().int().min(0),
-    isActive: z.boolean().optional().default(true),
-  }),
-);
-
 export const createOutstationPackageSchema = z.object({
   name: z.string().min(1).max(200),
   terrain: z.enum(TERRAINS),
   minKm: z.number().int().min(0),
   /** Bands are half-open `[minKm, maxKm)`, so `maxKm` must clear `minKm`. P-4 rechecks it. */
   maxKm: z.number().int().min(1),
-  prices: z.array(outstationPriceSchema).min(1),
+  oneWayFarePaise: paise,
+  /**
+   * `null` — or absent — means this band does not sell a same-day return. NOT zero: `.nullable()`
+   * rather than `.default(0)` is the whole point, because a free return trip and an unavailable
+   * one must not be the same value (docs/LLD/packages.md §Outstation is priced per direction).
+   */
+  roundTripFarePaise: paise.nullable().optional(),
+  driverCommissionBps: commissionBps,
   isActive: z.boolean().optional().default(true),
 });
 
@@ -142,3 +104,17 @@ export type CreateOutstationPackageInput = z.infer<typeof createOutstationPackag
 export type UpdateOutstationPackageInput = z.infer<typeof updateOutstationPackageSchema>;
 export type ListPackagesQueryInput = z.infer<typeof listPackagesQuerySchema>;
 export type ListOutstationQueryInput = z.infer<typeof listOutstationQuerySchema>;
+
+/**
+ * The BODY types — what a caller sends — as opposed to the `*Input` types above, which are what
+ * the use cases receive after Zod has applied its defaults.
+ *
+ * The distinction matters and is easy to get wrong: `z.infer` is the OUTPUT type, in which
+ * `isActive: z.boolean().optional().default(true)` is a required `boolean`. Pinning the shared
+ * request type against that would tell every client it must send a field it may omit. These are
+ * `z.input`, which is the shape on the wire, and they are what `packages.typecheck.ts` guards.
+ */
+export type CreateIncityPackageBody = z.input<typeof createIncityPackageSchema>;
+export type UpdateIncityPackageBody = z.input<typeof updateIncityPackageSchema>;
+export type CreateOutstationPackageBody = z.input<typeof createOutstationPackageSchema>;
+export type UpdateOutstationPackageBody = z.input<typeof updateOutstationPackageSchema>;

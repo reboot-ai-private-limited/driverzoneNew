@@ -15,6 +15,26 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **The admin packages screen** at `/packages` — the editor for what we sell and what it costs.
+  InCity is a table of packages; Outstation is a table of distance bands with the **gaps between
+  them interleaved as rows**, because a gap is the one package failure nothing else reports: an
+  overlap is refused at write time, caught again by the nightly job and made deterministic by
+  read-time precedence, while two adjacent bands that fail to meet is a silence until a customer
+  hits it. A gap row's action opens the create form pre-filled with the missing range.
+  Full-page editors at `/packages/{incity,outstation}/{new,[id]}`, a live commission split under
+  every fare, and a deactivate dialog that computes which distances actually go dark rather than
+  assuming the band's own range.
+
+- **Splitting a distance band** — one action instead of an edit-then-create sequence with a 409
+  in the middle. Shrinks the original, then creates the upper half with the fares copied (not
+  divided — dividing would invent the per-km rate this model does not have). Two writes with no
+  transaction available, so the half-done case is reported as what it is, and the range that was
+  not created is already a red row in the list.
+
+- **`packages.mapper.ts` and `packages.typecheck.ts`.** The mapper turns domain entities into the
+  snake_case DTOs the contracts promise; the typecheck pins the Zod schemas, the mapper output and
+  `@driverzone/contracts` to each other so the next disagreement is a build failure.
+
 - **Global settings — the `settings` module and its APIs.** Nineteen tunable numbers behind
   `GET`/`PATCH /api/admin/settings` and `POST /api/admin/settings/reset`, plus audience-filtered
   reads at `GET /api/customer/settings` and `GET /api/driver/settings`. Covers the pickup default
@@ -65,6 +85,49 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Changed
 
+- **An incity variant is a duration and a price.** `label`, `includedMinutes`, `baseFarePaise`,
+  `driverCommissionBps` — nothing else. `includedMinutes` stays because it is what the customer
+  buys and what tells the driver when they are released.
+
+- **The outstation return fare is the whole two-way journey**, not a same-day round trip. A 540 km
+  destination matches the band containing 540 — the ONE-WAY distance — and that band's return fare
+  covers all 1,080 km, however many days the driver is away.
+
+- **Incity beats outstation unconditionally.** The rung-(a) distance guard leaned on `includedKm`
+  and was dropped with it rather than re-expressed as a flat km limit, which reverses the
+  2026-08-20 `incity.max_distance_multiple` decision. Both points inside the city zone now means
+  incity at any distance — and with overage gone, a 60 km cross-city run sells as a ₹900 hourly
+  rental with nothing to collect the difference. Deliberate; see `docs/decision-log.md`.
+
+- **Three open questions closed by deletion** rather than specification: Q1 (no destination rule),
+  Q2 (no overage billing), Q4 (a round trip is however long it takes).
+
+- **Price no longer varies by car category, in either product.** An outstation band is
+  `oneWayFarePaise`, a nullable `roundTripFarePaise` and one `driverCommissionBps`; an incity
+  variant carries its own fare and overage rates. The `prices[]` subdocument, `CommissionType`
+  (`PERCENT | FLAT`) and the stored company commission are gone. The band fare is now **flat** —
+  72 km and 98 km both pay the 70–100 fare — which closes `open-questions.md` Q3 and brings its
+  warning with it: flat pricing needs many narrow bands, hence the split action. An SUV and a
+  hatchback now pay the same fare for the same trip; that is pricing power given up, not waste
+  removed. See `docs/decision-log.md`.
+
+- **The company's commission is derived, never stored** — `10000 − driver`. Two independently
+  stored shares let a form save 75% and 20% and leave 5% of every trip in nobody's column. The
+  pair that could disagree no longer exists.
+
+- **`roundTripFarePaise` is nullable**, meaning *this band does not sell a same-day return* —
+  never that the return is free. Such a request answers `NO_PACKAGE_AVAILABLE`, deliberately not
+  `NO_PACKAGE_FOR_DISTANCE`: the distance is covered, so sending ops to add a band would send them
+  to create one that already exists.
+
+- **P-3 narrowed for incity and retired for outstation.** An active incity package needs one
+  active variant; the "…holding an active price" clause had nothing left to check. A band carries
+  `oneWayFarePaise` as a required field, so "active but unsellable" stopped being representable
+  rather than merely forbidden.
+
+- **`CAR_CATEGORIES` moved to `contracts/src/identity.ts`.** It is no longer a packages concept —
+  what it still decides is who can drive, not what anything costs.
+
 - **Settings money is whole rupees, not paise** — the one exception to the paise convention, for
   ops-facing round figures that a paise input would make hostile to type. The 100× hazard this
   creates (`baseFarePaise + settings['pricing.insurance_charge']`) is closed by making `Rupees` an
@@ -74,6 +137,11 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   pins the difference.
 
 ### Removed
+
+- **`includedKm`, `extraMinuteRatePaise`, `extraKmRatePaise`, `enforceDropInCity` and `sortOrder`**
+  from the incity variant. **There is no overage**: a 3-hour booking that runs 3h 40m is an
+  operations conversation, not a fare line. `computeFinalFare` and the fare snapshot's `rates`
+  block go with them, and the fare card no longer discloses per-minute or per-km rates.
 
 - **`nightChargePaise` from incity price rows**, and `night_charge_paise` from `IncityPriceDto`.
   Time-of-day surcharges are global now, and the same fare line configured per-row *and* globally
@@ -122,6 +190,12 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   accessibility claims in the design language are checked rather than asserted.
 
 ### Fixed
+
+- **The zones screen's package count was always zero.** The packages controllers put camelCase
+  domain entities on the wire while the contracts and swagger both promised snake_case, and the
+  lists sent a bare array where `{ packages: [...] }` was declared — so `packagesForZone` filtered
+  on `city_zone_id`, matched nothing, and the city card reported no packages for a zone that had
+  them. The mapper fixes today's instance; `packages.typecheck.ts` is what stops the next one.
 
 - **Every max-width in the admin panel collapsed to a few pixels.** `theme.css` declared named
   spacing tokens `--spacing-xs/sm/md/lg/xl`, and those names belong to Tailwind v4's

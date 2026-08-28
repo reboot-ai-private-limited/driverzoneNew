@@ -207,67 +207,129 @@ deactivation is also wrong. Show the blast radius and let a human decide.
 
 ## Package editors
 
+Neither editor prices by car category. Both used to, and the incity one was a five-row grid per
+variant while the outstation one was ten rows per band, nine of which read `not sold`. Retired
+2026-08-28 ([`../decision-log.md`](../decision-log.md)).
+
 ### InCity
 
 ```
-Package: "Siliguri Hourly"        City: Siliguri          [Active ✓]
+Package "Siliguri Hourly"     City [Siliguri ▾]     [Active ✓]
 
-                  Sold from every pickup zone. Packages do not reference pickup
-                  zones — the zone gates serviceability and adds its fee, and
-                  that is the whole of its job (zones.md).
+              Sold from every pickup zone. Packages do not reference pickup
+              zones — the zone gates serviceability and adds its fee, and
+              that is the whole of its job (zones.md).
 
-Variants
-┌──────────┬───────┬──────┬──────────────────────────────────────────┐
-│ Label    │ Hours │ km   │ Pricing per car category                 │
-├──────────┼───────┼──────┼──────────────────────────────────────────┤
-│ 3 Hours  │  3    │  30  │ Hatchback ₹800 · Sedan ₹900 · SUV ₹1,100 │
-│ 10 Hours │ 10    │ 100  │ Hatchback ₹2,200 · Sedan ₹2,500 · …      │
-└──────────┴───────┴──────┴──────────────────────────────────────────┘
-
-Expanding a variant row → per-car-category editor:
-
-  Sedan
-    Base fare              ₹ [900]
-    Extra time (per 30min) ₹ [150]
-    Extra distance (per km)₹ [12]
-    Night charge           ₹ [100]      window: 22:00–06:00 (global)
-    Driver commission      [PERCENT ▾] [75] %   → ₹675
-    Company commission     [PERCENT ▾] [25] %   → ₹225
-    Enforce drop in city   [ ] (auto: off for variants over 4 hours)
-    ──────────────────────────────────────────────
-    Customer pays ₹945 incl. tax · Driver earns ₹675 · Company ₹225
+Variants                                              [+ Add variant]
+┌────────────────────────────────────────────────────────────────────┐
+│ ▸ 3 Hours    180 min · ₹900                                        │
+│ ▾ 10 Hours   600 min · ₹2,200                                      │
+│     Label [10 Hours]   Included time [600] min                     │
+│     Base fare ₹[2200]  Driver's share [75]%                        │
+│     [✓] Active                                                     │
+│     ──────────────────────────────────────────────────────────     │
+│     Base fare ₹2,200 · Driver earns ₹1,650 · Company keeps ₹550    │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-The live split preview at the bottom is essential. Commission errors are invisible in a
-form field and obvious in a rupee figure.
+A variant is a duration and a price. The included-km cap, both overage rates, the
+destination-enforcement flag and the sort order were all removed 2026-08-28
+([`../decision-log.md`](../decision-log.md)) — there is **no overage**, so `includedMinutes` tells
+the driver when they are released and has no fare consequence when it is exceeded. Variants
+display in the order they are listed here.
+
+The split line is essential and is why it is on every variant: a commission error is invisible
+in a form field and obvious in a rupee figure. It shows the split of the BASE FARE and says so —
+there is no "customer pays" total, because the pickup fee, surcharge, insurance and tax belong
+to the `pricing` module and a total assembled from half the formula is a number ops would trust
+and we could not honour.
+
+There is no unallocated-remainder warning any more. The company's share is `100% − driver's`,
+derived rather than entered, so the two can no longer fail to add up.
+
+**No city zone drawn** blocks the create form outright, with a link to `/zones`, rather than
+rendering an empty picker that only explains itself after Save.
+
+**Two active packages against one city zone** is legal — `domain-model.md` §Cardinality refuses
+to hard-code the singleton — and ambiguous, since a quote returns only one. The list warns and
+names the winner (cheapest active variant, then most recently created); it does not forbid it.
 
 ### Outstation
 
 ```
-Package "PKG-1"    Terrain [HILL ▾]    Distance [70] – [100] km    [Active ✓]
+Band "PKG-1"   Terrain [Hills ▾]   Distance [70] – [100] km   [Active ✓]
 
-Pricing        ┌───────────┬───────────┬────────────┐
-               │           │ One-way   │ Round trip │
-               ├───────────┼───────────┼────────────┤
-               │ Hatchback │ ₹1,800    │ ₹3,200     │
-               │ Sedan     │ ₹2,100    │ ₹3,700     │
-               │ SUV       │ ₹2,600    │ ₹4,500     │
-               └───────────┴───────────┴────────────┘
-               + extra ₹/km beyond 70 km, driver allowance, commission split
+  ⚠ This range overlaps "Hills mid" (70–150 km, same terrain). To break an
+    existing band in two, use its Split action instead.
 
-⚠ Band coverage for HILL:
-   0–70 ✓   70–100 ✓ (this)   100–150 ✓   150+ ✗ gap
+Pricing        One-way fare  ₹[2,100]
+               Return fare   ₹[3,700]   the whole two-way journey;
+                                        blank = this band sells no return trip
+               Driver's share  [75]%    (the company keeps the rest)
+
+               One-way ₹2,100 · Driver earns ₹1,575 · Company keeps ₹525
+               Return  ₹3,700 · Driver earns ₹2,775 · Company keeps ₹925
 ```
 
-That coverage strip catches the failure nobody notices until a customer hits it: a gap in
-the distance bands where no package matches and the customer gets
-`NO_PACKAGE_FOR_DISTANCE` for a trip you'd happily take. It is now per terrain rather than per
-pickup zone — two strips, `PLAIN` and `HILL`, and both must tile without a gap.
+The fare is **flat across the band** — 72 km and 98 km pay the same — and the band is matched on
+the ONE-WAY distance. The return fare covers the whole out-and-back journey, however many days it
+takes, and is set independently rather than as a multiple of the one-way.
 
-**The strip is the only guard against a gap.** Overlap is caught at save time and again by the
-nightly job; a gap is caught by nobody, because nothing is wrong with any individual package.
-Two adjacent bands that fail to meet is a silence, not an error — which is exactly why it needs
-to be visible on the screen where bands are edited (`packages.md` §Overlap).
+### The band list, and the gap
+
+```
+Terrain  Distance          One-way   Return   Driver
+─────────────────────────────────────────────────────────────────
+PLAINS   0–70 km           ₹1,800    ₹3,200    75%    Edit  Split
+PLAINS   70–100 km         ₹2,100    ₹3,700    75%    Edit  Split
+PLAINS   100–150 km        ₹2,600    ₹4,500    70%    Edit  Split
+PLAINS ⚠ 150 km and above    —         —        —       Add band
+─────────────────────────────────────────────────────────────────
+HILLS    0–70 km           ₹2,400    ₹4,100    75%    Edit  Split
+HILLS  ⚠ 70 km and above     —         —        —       Add band
+```
+
+This was a proportional coverage strip. It became a table when a band stopped hiding ten price
+rows behind it and started fitting in a row.
+
+**The red rows are the whole point.** A gap in the distance bands is the failure nobody notices
+until a customer hits it: an overlap is refused at write time, caught again by the nightly job
+and made deterministic by read-time precedence, while a gap is caught by nobody, because nothing
+is wrong with any individual band. Two adjacent bands that fail to meet is a silence. So it is
+rendered as a row, in the terrain it belongs to, whose `Add band` action opens the create form
+pre-filled with exactly the missing range.
+
+Hills and plains are listed separately because they are independent ladders — the same range on
+both is the expected configuration, not a conflict — and each needs to tile without a gap on its
+own.
+
+Inactive bands appear in neither ladder, matching the server's active-only overlap filter, so
+they get a collapsed table below. Without it "deactivate" would read as "delete" on a resource
+that has no DELETE.
+
+### Splitting a band
+
+Flat pricing needs many narrow bands (`open-questions.md` Q3), so "this band should really be
+two" is routine. `Split` asks for a break point, shrinks the original, and creates the upper half
+with the fares **copied**:
+
+```
+Split "Plains long" (0–150 km)
+
+  Break at [ 70 ] km
+
+  0–70 km      ₹1,800 / ₹3,200   keeps this band
+  70–150 km    ₹1,800 / ₹3,200   new
+
+  The fares are copied, not divided. Until you edit the new band, both
+  halves cost the same — dividing a fare by distance would invent a
+  per-km rate, and this product does not have one.
+```
+
+Two writes, in this order and no other: shrink first (a shrink cannot collide), then create (the
+space is free by then). No transaction is available, so the second can fail with the first
+committed — in which case the dialog says exactly that, and the range that was not created is
+already a red row in the list with its `Add band` pre-filled.
 
 ## Pricing preview (FR-P6)
 

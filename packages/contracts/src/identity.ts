@@ -181,6 +181,31 @@ export const FUEL_TYPES = ['PETROL', 'DIESEL', 'EV', 'CNG'] as const;
 export type FuelType = (typeof FUEL_TYPES)[number];
 
 /**
+ * The car categories, as a closed list rather than a `carCategories` collection. The list is the
+ * one in docs/LLD/domain-model.md §Glossary.
+ *
+ * IT IS NOT A PRICING DIMENSION. It used to be — a package carried a price row per category —
+ * and that was retired on 2026-08-28 (docs/decision-log.md): an SUV and a hatchback now pay the
+ * same fare for the same trip. What the category still decides is WHO CAN DRIVE: dispatch matches
+ * a driver's competencies against the booking's category (docs/LLD/dispatch-and-assignment.md),
+ * and a booking records the one it was placed for.
+ *
+ * It lives here rather than in `packages.ts` for exactly that reason — the consumers left are
+ * drivers and bookings.
+ */
+export const CAR_CATEGORIES = ['HATCHBACK', 'SEDAN', 'SUV', 'LUXURY', 'EV'] as const;
+export type CarCategory = (typeof CAR_CATEGORIES)[number];
+
+/** Display names. The code is what crosses the wire; this is only ever rendered. */
+export const CAR_CATEGORY_LABELS: Record<CarCategory, string> = {
+  HATCHBACK: 'Hatchback',
+  SEDAN: 'Sedan',
+  SUV: 'SUV',
+  LUXURY: 'Luxury',
+  EV: 'EV',
+};
+
+/**
  * The CUSTOMER's own car — the driver drives it rather than supplying one
  * (docs/LLD/open-questions.md Q5). `category` is a free string, not a car-category id: a
  * customer describes their car before any admin has to agree it maps to a priced category.

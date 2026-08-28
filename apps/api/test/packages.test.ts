@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { validateIncityPackageActivation } from '../src/modules/packages/domain/incityPackage.entity.js';
-import { validateOutstationBand, validateOutstationPackageActivation } from '../src/modules/packages/domain/outstationPackage.entity.js';
+import { fareFor, validateOutstationBand } from '../src/modules/packages/domain/outstationPackage.entity.js';
 import { CreateIncityPackageUseCase } from '../src/modules/packages/application/useCases/createIncityPackage.usecase.js';
 import { CreateOutstationPackageUseCase } from '../src/modules/packages/application/useCases/createOutstationPackage.usecase.js';
 import { ResolveForTripUseCase } from '../src/modules/packages/application/useCases/resolveForTrip.usecase.js';
@@ -13,23 +13,28 @@ describe('Packages Module', () => {
   describe('Domain Invariants', () => {
     describe('Incity', () => {
 
-      it('rejects an active incity package with no active variants or prices (P-3)', () => {
+      /**
+       * P-3 narrowed when pricing by car category was retired. It used to also require an active
+       * PRICE inside the active variant, because a variant could hold zero priced categories and
+       * still look healthy. A variant now carries its fare structurally, so one active variant is
+       * the whole of the invariant.
+       */
+      it('rejects an active incity package with no active variants (P-3)', () => {
         const error = validateIncityPackageActivation({
-          variants: [{ isActive: false, prices: [{ isActive: true }] }],
+          variants: [{ isActive: false }],
         });
-        expect(error).toBe('An active incity package must have at least one active variant with an active price');
+        expect(error).toBe('An active incity package must have at least one active variant');
+      });
 
-        const error2 = validateIncityPackageActivation({
-          variants: [{ isActive: true, prices: [{ isActive: false }] }],
-        });
-        expect(error2).toBe('An active incity package must have at least one active variant with an active price');
+      it('rejects an active incity package with no variants at all (P-3)', () => {
+        expect(validateIncityPackageActivation({ variants: [] })).toBe(
+          'An active incity package must have at least one active variant',
+        );
       });
 
       it('accepts a valid active incity package (P-3)', () => {
         // Defaults to true when omitted
-        const error = validateIncityPackageActivation({
-          variants: [{ prices: [{}] }],
-        });
+        const error = validateIncityPackageActivation({ variants: [{}] });
         expect(error).toBeNull();
       });
     });
@@ -54,18 +59,28 @@ describe('Packages Module', () => {
       });
 
 
-      it('rejects an active outstation package with no active prices (P-3)', () => {
-        const error = validateOutstationPackageActivation({
-          prices: [{ isActive: false }],
-        });
-        expect(error).toBe('An active outstation package must have at least one active price');
+      /**
+       * P-3 is RETIRED for outstation, so there is no activation check to test. `oneWayFarePaise`
+       * is a required field on the band, which makes "active but unsellable" unrepresentable
+       * rather than merely forbidden. What IS still worth pinning is the direction check that
+       * replaced it.
+       */
+      it('reports no fare for a direction the band does not sell', () => {
+        const band = {
+          oneWayFarePaise: 180000,
+          roundTripFarePaise: null,
+        } as OutstationPackage;
+
+        expect(fareFor(band, 'ONE_WAY')).toBe(180000);
+        expect(fareFor(band, 'ROUND_TRIP')).toBeNull();
       });
 
-      it('accepts a valid active outstation package (P-3)', () => {
-        const error = validateOutstationPackageActivation({
-          prices: [{}],
-        });
-        expect(error).toBeNull();
+      it('never reads a missing return fare as free', () => {
+        const band = { oneWayFarePaise: 180000, roundTripFarePaise: null } as OutstationPackage;
+
+        // The distinction the nullable field exists for: `null` is "not offered", `0` would be
+        // "the return trip costs nothing".
+        expect(fareFor(band, 'ROUND_TRIP')).not.toBe(0);
       });
     });
   });
@@ -80,7 +95,7 @@ describe('Packages Module', () => {
           useCase.execute({
             cityZoneId: 'city_1',
             name: 'Test Package',
-            variants: [{ label: '1hr', includedKm: 10, includedMinutes: 60, prices: [] }],
+            variants: [],
           })
         ).rejects.toThrow(InvalidPackageError);
 
@@ -96,7 +111,7 @@ describe('Packages Module', () => {
         const data: any = {
           cityZoneId: 'city_1',
           name: 'Test Package',
-          variants: [{ label: '1hr', includedKm: 10, includedMinutes: 60, prices: [{ carCategoryId: 'car_1', baseFarePaise: 1000, companyCommissionValue: 10, driverCommissionValue: 10, driverCommissionType: 'PERCENT', companyCommissionType: 'PERCENT' }] }],
+          variants: [{ label: '1hr', includedMinutes: 60, baseFarePaise: 1000, driverCommissionBps: 7500 }],
         };
 
         const result = await useCase.execute(data);
@@ -119,7 +134,8 @@ describe('Packages Module', () => {
             terrain: 'PLAIN',
               minKm: 200,
             maxKm: 100, // Invalid
-            prices: [{ carCategoryId: 'car_1', direction: 'ONE_WAY', baseFarePaise: 1000, companyCommissionValue: 10, driverCommissionValue: 10, driverCommissionType: 'PERCENT', companyCommissionType: 'PERCENT' }],
+            oneWayFarePaise: 1000,
+            driverCommissionBps: 7500,
           })
         ).rejects.toThrow(InvalidBandError);
 
@@ -140,7 +156,8 @@ describe('Packages Module', () => {
             terrain: 'PLAIN',
               minKm: 100,
             maxKm: 200,
-            prices: [{ carCategoryId: 'car_1', direction: 'ONE_WAY', baseFarePaise: 1000, companyCommissionValue: 10, driverCommissionValue: 10, driverCommissionType: 'PERCENT', companyCommissionType: 'PERCENT' }],
+            oneWayFarePaise: 1000,
+            driverCommissionBps: 7500,
           })
         ).rejects.toThrow(OverlappingBandError);
 
@@ -164,7 +181,8 @@ describe('Packages Module', () => {
           terrain: 'PLAIN',
           minKm: 100,
           maxKm: 200,
-          prices: [{ carCategoryId: 'car_1', direction: 'ONE_WAY', baseFarePaise: 1000, companyCommissionValue: 10, driverCommissionValue: 10, driverCommissionType: 'PERCENT', companyCommissionType: 'PERCENT' }],
+          oneWayFarePaise: 1000,
+          driverCommissionBps: 7500,
         };
 
         const result = await useCase.execute(data);
@@ -184,7 +202,6 @@ describe('Packages Module', () => {
    * hand-written fake repository and no zones module at all.
    */
   describe('ResolveForTripUseCase', () => {
-    const CAR = 'car_1';
     const CITY = 'city_1';
 
     function incity(overrides: Partial<IncityPackage> & { id: string }): IncityPackage {
@@ -199,29 +216,14 @@ describe('Packages Module', () => {
       };
     }
 
-    function variant(includedKm: number, baseFarePaise: number, carCategoryId = CAR) {
+    function variant(includedMinutes: number, baseFarePaise: number, isActive = true) {
       return {
-        id: `v_${includedKm}`,
-        label: `${includedKm}km`,
-        includedMinutes: 180,
-        includedKm,
-        enforceDropInCity: true,
-        sortOrder: 0,
-        isActive: true,
-        prices: [
-          {
-            id: `p_${includedKm}`,
-            carCategoryId,
-            baseFarePaise,
-            extraMinuteRatePaise: 0,
-            extraKmRatePaise: 0,
-            driverCommissionType: 'PERCENT' as const,
-            driverCommissionValue: 7500,
-            companyCommissionType: 'PERCENT' as const,
-            companyCommissionValue: 2500,
-            isActive: true,
-          },
-        ],
+        id: `v_${includedMinutes}`,
+        label: `${includedMinutes}min`,
+        includedMinutes,
+        baseFarePaise,
+        driverCommissionBps: 7500,
+        isActive,
       };
     }
 
@@ -236,21 +238,9 @@ describe('Packages Module', () => {
         isActive: true,
         createdAt: new Date('2026-01-01'),
         updatedAt: new Date('2026-01-01'),
-        prices: [
-          {
-            id: `op_${overrides.id}`,
-            carCategoryId: CAR,
-            direction: 'ONE_WAY',
-            baseFarePaise: 500000,
-            extraKmRatePaise: 0,
-            driverAllowancePaise: 0,
-            driverCommissionType: 'PERCENT',
-            driverCommissionValue: 7500,
-            companyCommissionType: 'PERCENT',
-            companyCommissionValue: 2500,
-            isActive: true,
-          },
-        ],
+        oneWayFarePaise: 500000,
+        roundTripFarePaise: null,
+        driverCommissionBps: 7500,
         ...overrides,
       };
     }
@@ -282,13 +272,12 @@ describe('Packages Module', () => {
       fromCityZoneId: CITY,
       toSameCityZone: true,
       toHillZone: false,
-      carCategoryId: CAR,
     };
 
     it('prefers INCITY over OUTSTATION when both match — rung (a)', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({
-          incity: [incity({ id: 'i1', variants: [variant(30, 90000)] })],
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
           outstation: [outstation({ id: 'o1' })],
         }),
       );
@@ -299,22 +288,31 @@ describe('Packages Module', () => {
       expect(result.available === true && result.match.type).toBe('INCITY');
     });
 
-    it('falls through to OUTSTATION past incity.max_distance_multiple — the rung (a) guard', async () => {
-      // Longest variant includes 30 km, multiple is 2, so incity covers up to 60 km. A 61 km
-      // drop inside the city polygon is plainly an outstation run and must price as one.
+    /**
+     * The INVERSE of the test that used to live here.
+     *
+     * There was a guard on rung (a): incity won only within `incity.max_distance_multiple` × the
+     * longest variant's `includedKm`, so a 61 km drop inside the city polygon fell through to
+     * OUTSTATION. `includedKm` was removed 2026-08-28 and the guard went with it rather than
+     * being re-expressed as a flat km limit.
+     *
+     * This asserts the accepted consequence rather than deleting the coverage: a long trip that
+     * stays inside the city zone now sells as an hourly rental, and with no overage there is
+     * nothing to collect the difference. If someone re-adds a guard, this test tells them what
+     * they are changing.
+     */
+    it('keeps a LONG in-city trip on the incity package — the rung (a) guard is gone', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({
-          incity: [incity({ id: 'i1', variants: [variant(30, 90000)] })],
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
           outstation: [outstation({ id: 'o1' })],
         }),
       );
 
-      expect((await useCase.execute({ ...inCityTrip, distanceKm: 60 })).available).toBe(true);
-      const atBoundary = await useCase.execute({ ...inCityTrip, distanceKm: 60 });
-      expect(atBoundary.available === true && atBoundary.match.type).toBe('INCITY');
-
-      const past = await useCase.execute({ ...inCityTrip, distanceKm: 61 });
-      expect(past.available === true && past.match.type).toBe('OUTSTATION');
+      for (const distanceKm of [20, 61, 200]) {
+        const result = await useCase.execute({ ...inCityTrip, distanceKm });
+        expect(result.available === true && result.match.type).toBe('INCITY');
+      }
     });
 
     it('selects the HILL band when the drop point is in a hill zone, never the PLAIN one', async () => {
@@ -330,7 +328,6 @@ describe('Packages Module', () => {
       const hill = await useCase.execute({
         toSameCityZone: false,
         toHillZone: true,
-        carCategoryId: CAR,
         distanceKm: 120,
       });
       expect(hill.available === true && hill.match.package.name).toBe('hill');
@@ -338,7 +335,6 @@ describe('Packages Module', () => {
       const plain = await useCase.execute({
         toSameCityZone: false,
         toHillZone: false,
-        carCategoryId: CAR,
         distanceKm: 120,
       });
       expect(plain.available === true && plain.match.package.name).toBe('plain');
@@ -351,10 +347,11 @@ describe('Packages Module', () => {
             incity({
               id: 'i1',
               variants: [
-                variant(30, 90000),
-                variant(60, 150000),
-                // No price for this car category — not sellable, must not be offered.
-                variant(90, 200000, 'car_other'),
+                variant(180, 90000),
+                variant(600, 150000),
+                // Switched off. Price no longer varies by car category, so an inactive variant
+                // is the only way one can be unsellable — and it must not be offered.
+                variant(240, 200000, false),
               ],
             }),
           ],
@@ -375,7 +372,6 @@ describe('Packages Module', () => {
       const result = await useCase.execute({
         toSameCityZone: false,
         toHillZone: false,
-        carCategoryId: CAR,
         distanceKm: 400,
       });
 
@@ -386,60 +382,60 @@ describe('Packages Module', () => {
       });
     });
 
-    it('is NO_PACKAGE_AVAILABLE when the band exists but has no price for the car category', async () => {
+    /**
+     * NOT `NO_PACKAGE_FOR_DISTANCE`. The distance IS covered — the band matched it — so telling
+     * ops to add a band would send them to create one that already exists. The gap is the
+     * direction, not the distance.
+     */
+    it('is NO_PACKAGE_AVAILABLE when the band does not sell the requested direction', async () => {
       const useCase = new ResolveForTripUseCase(
-        fakeRepo({
-          outstation: [
-            outstation({
-              id: 'o1',
-              prices: [
-                {
-                  id: 'p1',
-                  carCategoryId: 'car_other',
-                  direction: 'ONE_WAY',
-                  baseFarePaise: 500000,
-                  extraKmRatePaise: 0,
-                  driverAllowancePaise: 0,
-                  driverCommissionType: 'PERCENT',
-                  driverCommissionValue: 7500,
-                  companyCommissionType: 'PERCENT',
-                  companyCommissionValue: 2500,
-                  isActive: true,
-                },
-              ],
-            }),
-          ],
-        }),
+        fakeRepo({ outstation: [outstation({ id: 'o1', roundTripFarePaise: null })] }),
       );
 
       const result = await useCase.execute({
         toSameCityZone: false,
         toHillZone: false,
-        carCategoryId: CAR,
         distanceKm: 120,
+        direction: 'ROUND_TRIP',
       });
 
       expect(result.available).toBe(false);
       expect(result.available === false && result.code).toBe('NO_PACKAGE_AVAILABLE');
     });
 
-    it('picks ONE_WAY unless a direction is given, and the two are independent rows', async () => {
-      const pkg = outstation({ id: 'o1' });
-      pkg.prices.push({ ...pkg.prices[0]!, id: 'p_rt', direction: 'ROUND_TRIP', baseFarePaise: 900000 });
+    it('still sells the one-way direction on a band with no return fare', async () => {
+      const useCase = new ResolveForTripUseCase(
+        fakeRepo({ outstation: [outstation({ id: 'o1', roundTripFarePaise: null })] }),
+      );
+
+      const result = await useCase.execute({
+        toSameCityZone: false,
+        toHillZone: false,
+        distanceKm: 120,
+      });
+
+      expect(result.available === true && result.match.type === 'OUTSTATION' && result.match.farePaise)
+        .toBe(500000);
+    });
+
+    it('picks ONE_WAY unless a direction is given, and the two fares are independent', async () => {
+      const pkg = outstation({ id: 'o1', roundTripFarePaise: 900000 });
       const useCase = new ResolveForTripUseCase(fakeRepo({ outstation: [pkg] }));
 
-      const base = { toSameCityZone: false, toHillZone: false, carCategoryId: CAR, distanceKm: 120 };
+      const base = { toSameCityZone: false, toHillZone: false, distanceKm: 120 };
 
       const oneWay = await useCase.execute(base);
-      expect(oneWay.available === true && oneWay.match.type === 'OUTSTATION' && oneWay.match.price.baseFarePaise)
+      expect(oneWay.available === true && oneWay.match.type === 'OUTSTATION' && oneWay.match.farePaise)
         .toBe(500000);
 
       const roundTrip = await useCase.execute({ ...base, direction: 'ROUND_TRIP' });
       expect(
         roundTrip.available === true &&
           roundTrip.match.type === 'OUTSTATION' &&
-          roundTrip.match.price.baseFarePaise,
+          roundTrip.match.farePaise,
       ).toBe(900000);
+      // Not 2× the one-way, and never derived from it.
+      expect(900000).not.toBe(500000 * 2);
     });
 
     it('breaks a tie on the more recently created package — rung (d), never a coin flip', async () => {
@@ -450,7 +446,6 @@ describe('Packages Module', () => {
       const result = await useCase.execute({
         toSameCityZone: false,
         toHillZone: false,
-        carCategoryId: CAR,
         distanceKm: 120,
       });
 
@@ -460,7 +455,7 @@ describe('Packages Module', () => {
     it('offers no incity package when the pickup point is outside the city zone', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({
-          incity: [incity({ id: 'i1', variants: [variant(30, 90000)] })],
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
           outstation: [outstation({ id: 'o1' })],
         }),
       );
@@ -469,7 +464,6 @@ describe('Packages Module', () => {
         // Drop is in the city, pickup is not — incity requires both.
         toSameCityZone: true,
         toHillZone: false,
-        carCategoryId: CAR,
         distanceKm: 20,
       });
 

@@ -36,7 +36,9 @@ export const NAV_ITEMS: NavItem[] = [
   // yet, so it renders its error state until those routes exist — see
   // `lib/api/endpoints/customers.ts`. Left disabled it would be unreachable to test against.
   { label: 'Customers', href: '/customers', icon: UserCog },
-  { label: 'Packages', href: '/packages', icon: Package, comingSoon: true },
+  // Enabled: the screen is built and `GET/POST/PUT /admin/packages/{incity,outstation}` all
+  // exist in `apps/api`. It is the editor the zones screen's city card links out to.
+  { label: 'Packages', href: '/packages', icon: Package },
   { label: 'Zones', href: '/zones', icon: Building2 },
   { label: 'Finance', href: '/finance', icon: Coins, comingSoon: true },
   { label: 'Reports', href: '/reports', icon: BarChart3, comingSoon: true },

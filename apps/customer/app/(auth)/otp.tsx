@@ -19,7 +19,7 @@ import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { ApiError } from '@/lib/api/ApiError';
 import { sendOtp, verifyOtp } from '@/lib/api/endpoints/auth';
 import * as session from '@/lib/auth/session';
-import { colors, radius, shadow, space, text } from '@/theme/theme';
+import { colors, space, text } from '@/theme/theme';
 
 const OTP_LENGTH = 6;
 
@@ -37,7 +37,9 @@ export default function OtpScreen(): ReactElement {
 
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>('OTP Sent Successfully');
+  // Only a RESEND raises this. Announcing the first code on arrival tells the customer something
+  // the navigation itself already did.
+  const [notice, setNotice] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(() => Number(params.retryAfter ?? 30));
 
   // Guards the auto-submit below. Without it, a failed verify that leaves six digits on screen
@@ -78,7 +80,7 @@ export default function OtpScreen(): ReactElement {
     },
     onSuccess: (result) => {
       setSecondsLeft(result.retry_after_seconds);
-      setNotice('OTP Sent Successfully');
+      setNotice('New code sent');
     },
     onError: (cause) => {
       // A cooldown rejection still carries the server's own countdown; adopting it keeps the
@@ -131,36 +133,17 @@ export default function OtpScreen(): ReactElement {
             </View>
 
             <View style={styles.headerLogo}>
-              <Logo width={210} />
+              <Logo width={180} />
             </View>
           </View>
 
           <WaveHeaderEdge height={54} />
 
-          {/* Pulled up over the wave so the circle straddles the yellow/white boundary. */}
-          <View style={styles.badgeWrap}>
-            <View style={styles.badge}>
-              <Feather name="message-square" size={30} color={colors.fg} />
-            </View>
-          </View>
-
           <View style={styles.body}>
             <Text style={styles.title}>Enter the {OTP_LENGTH}-digit code</Text>
-            <Text style={styles.sub}>We have sent an OTP to</Text>
-            <Text style={styles.number}>{formatForDisplay(mobile)}</Text>
-
-            {notice !== null ? (
-              <View style={styles.noticeRow} accessibilityLiveRegion="polite">
-                <Feather name="check" size={16} color={colors.success} />
-                <Text style={styles.noticeText}>{notice}</Text>
-              </View>
-            ) : null}
-
-            {error !== null ? (
-              <Text style={styles.errorText} accessibilityLiveRegion="polite">
-                {error}
-              </Text>
-            ) : null}
+            <Text style={styles.sub}>
+              Sent to <Text style={styles.number}>{formatForDisplay(mobile)}</Text>
+            </Text>
 
             <View style={styles.otpBlock}>
               <OtpInput
@@ -176,23 +159,25 @@ export default function OtpScreen(): ReactElement {
               />
             </View>
 
-            <View style={styles.statusRow}>
+            {/* ONE reserved line for every transient message — verifying, resent, rejected — so
+                none of them shifts the layout as it appears and clears. */}
+            <View style={styles.statusRow} accessibilityLiveRegion="polite">
               {busy ? (
                 <>
                   <ActivityIndicator size="small" color={colors.focus} />
                   <Text style={styles.statusText}>Verifying…</Text>
                 </>
-              ) : (
-                <Text style={styles.statusHint}>
-                  The code fills in automatically from your SMS
-                </Text>
-              )}
+              ) : error !== null ? (
+                <Text style={styles.errorText}>{error}</Text>
+              ) : notice !== null ? (
+                <Text style={styles.noticeText}>{notice}</Text>
+              ) : null}
             </View>
 
             <View style={styles.resendRow}>
               {canResend ? (
                 <Pressable onPress={() => resend.mutate()} accessibilityRole="button" hitSlop={8}>
-                  <Text style={styles.resendAction}>Resend OTP</Text>
+                  <Text style={styles.linkStrong}>Resend OTP</Text>
                 </Pressable>
               ) : (
                 <Text style={styles.resendWaiting}>
@@ -202,40 +187,17 @@ export default function OtpScreen(): ReactElement {
               )}
             </View>
 
-            <View style={styles.helpCard}>
-              <View style={styles.helpIcon}>
-                <Feather name="shield" size={18} color={colors.fg} />
-              </View>
-              <View style={styles.flex}>
-                <Text style={styles.helpTitle}>Didn&apos;t receive the code?</Text>
-                <Text style={styles.helpBody}>
-                  Make sure your number is correct and check your SMS inbox.
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.orRow}>
-              <View style={styles.orLine} />
-              <Text style={styles.orText}>OR</Text>
-              <View style={styles.orLine} />
-            </View>
+            {/* Holds the change-number link at the foot of a tall screen; collapses on a short one. */}
+            <View style={styles.spacer} />
 
             <Pressable
               onPress={() => router.back()}
               accessibilityRole="button"
-              style={({ pressed }) => [styles.changeButton, pressed && styles.changePressed]}
+              hitSlop={8}
+              style={styles.changeButton}
             >
-              <Feather name="edit-2" size={17} color={colors.fg} />
-              <Text style={styles.changeLabel}>Change Mobile Number</Text>
+              <Text style={styles.link}>Change mobile number</Text>
             </Pressable>
-          </View>
-
-          <View style={styles.assuranceBar}>
-            <Feather name="lock" size={20} color={colors.fg} />
-            <View style={styles.assuranceCopy}>
-              <Text style={styles.assuranceTitle}>Your information is 100% secure</Text>
-              <Text style={styles.assuranceBody}>We never share your data with anyone.</Text>
-            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -253,8 +215,8 @@ function formatCountdown(totalSeconds: number): string {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  // `flexGrow`, not `flex`: on a tall screen this pushes the assurance bar to the bottom, and on
-  // a short one the content still scrolls instead of being squashed.
+  // `flexGrow`, not `flex`: on a tall screen the body stretches to fill, and on a short one the
+  // content still scrolls instead of being squashed.
   scrollContent: { flexGrow: 1 },
 
   header: { backgroundColor: colors.brand, paddingHorizontal: space.lg },
@@ -263,91 +225,31 @@ const styles = StyleSheet.create({
   headerTitle: { ...text.heading, color: colors.fg },
   headerLogo: { alignItems: 'center', marginTop: space.md, marginBottom: space.sm },
 
-  badgeWrap: { alignItems: 'center', marginTop: -46 },
-  badge: {
-    width: 92,
-    height: 92,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadow.soft,
-  },
-
-  // Grows to fill whatever the header and assurance bar leave, so the pale band sits at the
-  // bottom of a tall screen rather than floating mid-page.
-  body: { flexGrow: 1, paddingHorizontal: space.lg, paddingTop: space.md },
+  body: { flexGrow: 1, paddingHorizontal: space.lg, paddingTop: space.lg },
   title: { ...text.title, color: colors.fg, textAlign: 'center' },
   sub: { ...text.body, color: colors.muted, textAlign: 'center', marginTop: space.sm },
-  number: { ...text.body, fontWeight: '700', color: colors.fg, textAlign: 'center', marginTop: 2 },
+  number: { fontWeight: '700', color: colors.fg },
 
-  noticeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: space.sm },
-  noticeText: { ...text.body, color: colors.success, marginLeft: 6 },
-  errorText: { ...text.body, color: colors.danger, textAlign: 'center', marginTop: space.sm },
-
-  otpBlock: { marginTop: space.lg },
+  otpBlock: { marginTop: space.xl },
 
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: space.lg,
+    marginTop: space.md,
     minHeight: 22,
   },
   statusText: { ...text.body, color: colors.muted, marginLeft: space.sm },
-  statusHint: { ...text.caption, color: colors.faint },
+  noticeText: { ...text.body, color: colors.success },
+  errorText: { ...text.body, color: colors.danger, textAlign: 'center' },
 
   resendRow: { alignItems: 'center', marginTop: space.md },
   resendWaiting: { ...text.body, color: colors.muted },
-  resendCountdown: { color: colors.focus, fontWeight: '700' },
-  resendAction: { ...text.body, fontWeight: '700', color: colors.link },
+  resendCountdown: { color: colors.fg, fontWeight: '700' },
 
-  helpCard: {
-    flexDirection: 'row',
-    backgroundColor: colors.bg,
-    borderRadius: radius.md,
-    padding: space.md,
-    marginTop: space.lg,
-    ...shadow.soft,
-  },
-  helpIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.sm,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: space.md,
-  },
-  helpTitle: { ...text.label, fontSize: 15, color: colors.fg },
-  helpBody: { ...text.body, color: colors.muted, marginTop: 2 },
+  link: { ...text.body, color: colors.link },
+  linkStrong: { ...text.body, fontWeight: '700', color: colors.link },
 
-  orRow: { flexDirection: 'row', alignItems: 'center', marginTop: space.lg },
-  orLine: { flex: 1, height: 1, backgroundColor: colors.border },
-  orText: { ...text.caption, color: colors.muted, paddingHorizontal: space.md },
-
-  changeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 56,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginTop: space.md,
-    marginBottom: space.xl,
-  },
-  changePressed: { backgroundColor: colors.bgSunken },
-  changeLabel: { ...text.body, fontWeight: '600', color: colors.fg, marginLeft: space.sm },
-
-  assuranceBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.brandSoft,
-    paddingHorizontal: space.lg,
-    paddingTop: space.md,
-  },
-  assuranceCopy: { marginLeft: space.md },
-  assuranceTitle: { ...text.label, fontSize: 14, color: colors.fg },
-  assuranceBody: { ...text.caption, color: colors.muted, marginTop: 1 },
+  spacer: { flex: 1, minHeight: space.xl },
+  changeButton: { alignItems: 'center', paddingVertical: space.md, marginBottom: space.lg },
 });

@@ -17,18 +17,19 @@ import { Skyline } from '@/components/Skyline';
 import { WaveBottom } from '@/components/Wave';
 import { isValidIndianMobile, normaliseInput, toE164 } from '@/features/auth/phoneNumber';
 import { sendOtp } from '@/lib/api/endpoints/auth';
-import { colors, radius, shadow, space, text } from '@/theme/theme';
+import { colors, radius, space, text } from '@/theme/theme';
 
 /**
  * Step one of two. Collects a mobile number and asks the server to send a code.
  *
  * There is no "is this number registered" branch, and there cannot be: `otp/send` answers
  * identically for a known and an unknown number, because a reply that differed would let anyone
- * enumerate which numbers have accounts (docs/LLD/auth.md). Sign-in and sign-up are the same
- * screen, which is also why the heading says "Login or sign up".
+ * enumerate which numbers have accounts (docs/LLD/auth.md). Sign-in and sign-up are therefore
+ * the same screen — which is also why nothing here is worded as either.
  */
 export default function PhoneScreen(): ReactElement {
   const [national, setNational] = useState('');
+  const [focused, setFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const valid = isValidIndianMobile(national);
@@ -62,7 +63,7 @@ export default function PhoneScreen(): ReactElement {
   return (
     <View style={styles.root}>
       <Skyline height={280} />
-      <WaveBottom height={130} />
+      <WaveBottom height={116} />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -74,66 +75,75 @@ export default function PhoneScreen(): ReactElement {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.logoBlock}>
-            <Logo width={230} />
+            <Logo width={168} />
           </View>
 
-          <Text style={styles.welcome}>Welcome to</Text>
-          <Text style={styles.brandName}>Driver Zone</Text>
-          <Text style={styles.tagline}>Login or sign up to book{'\n'}professional drivers</Text>
+          <Text style={styles.title}>Enter your mobile number</Text>
+          <Text style={styles.subtitle}>
+            We will send a 6-digit verification code to confirm it is you.
+          </Text>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Enter your mobile number</Text>
-            <Text style={styles.cardSub}>We will send you a verification code</Text>
-
-            <View style={[styles.field, error !== null && styles.fieldError]}>
-              {/* Fixed at +91 for now. A `View` rather than a disabled picker, because a control
-                  that opens nothing is worse than no control — the second country arrives with
-                  the market that needs it. */}
-              <View style={styles.dialCode}>
-                <Text style={styles.flag}>{'\u{1F1EE}\u{1F1F3}'}</Text>
-                <Text style={styles.dialCodeText}>+91</Text>
-                <Feather name="chevron-down" size={16} color={colors.muted} />
-              </View>
-              <View style={styles.fieldDivider} />
-              <TextInput
-                value={national}
-                onChangeText={(raw) => {
-                  setNational(normaliseInput(raw));
-                  if (error !== null) setError(null);
-                }}
-                placeholder="Enter mobile number"
-                placeholderTextColor={colors.faint}
-                keyboardType="phone-pad"
-                autoComplete="tel"
-                textContentType="telephoneNumber"
-                maxLength={10}
-                style={styles.input}
-                returnKeyType="go"
-                onSubmitEditing={handleContinue}
-                accessibilityLabel="Mobile number"
-              />
+          <Text style={styles.fieldLabel}>Mobile number</Text>
+          <View
+            style={[
+              styles.field,
+              focused && styles.fieldFocused,
+              error !== null && styles.fieldError,
+            ]}
+          >
+            {/* Fixed at +91 for now. A `View` rather than a disabled picker, because a control
+                that opens nothing is worse than no control — the second country arrives with
+                the market that needs it. */}
+            <View style={styles.dialCode}>
+              <Text style={styles.flag}>{'\u{1F1EE}\u{1F1F3}'}</Text>
+              <Text style={styles.dialCodeText}>+91</Text>
+              <Feather name="chevron-down" size={16} color={colors.faint} />
             </View>
-
-            {error !== null ? (
-              <Text style={styles.errorText} accessibilityLiveRegion="polite">
-                {error}
-              </Text>
-            ) : null}
-
-            <View style={styles.buttonBlock}>
-              <PrimaryButton
-                label="Continue"
-                onPress={handleContinue}
-                loading={mutation.isPending}
-                disabled={!valid}
-              />
-            </View>
+            <View style={styles.fieldDivider} />
+            <TextInput
+              value={national}
+              onChangeText={(raw) => {
+                setNational(normaliseInput(raw));
+                if (error !== null) setError(null);
+              }}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder="00000 00000"
+              placeholderTextColor={colors.faint}
+              keyboardType="phone-pad"
+              autoComplete="tel"
+              textContentType="telephoneNumber"
+              maxLength={10}
+              style={styles.input}
+              returnKeyType="go"
+              onSubmitEditing={handleContinue}
+              accessibilityLabel="Mobile number"
+            />
           </View>
+
+          {error !== null ? (
+            <Text style={styles.errorText} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
+          ) : null}
+
+          <View style={styles.buttonBlock}>
+            <PrimaryButton
+              label="Continue"
+              onPress={handleContinue}
+              loading={mutation.isPending}
+              disabled={!valid}
+            />
+          </View>
+
+          {/* Pushes the assurances and the legal line to the foot of the screen on a tall
+              device and collapses on a short one, so they never float mid-screen. */}
+          <View style={styles.spacer} />
 
           <View style={styles.assurances}>
-            <Assurance icon="shield" title={'Safe & Secure'} body={'Your data is\nprotected'} />
-            <Assurance icon="thumbs-up" title="Easy Booking" body={'Book in just a few\ntaps'} />
-            <Assurance icon="clock" title="24/7 Support" body={'We are always\nhere'} />
+            <Assurance icon="shield" title={'Safe & Secure'} />
+            <Assurance icon="thumbs-up" title="Easy Booking" />
+            <Assurance icon="clock" title="24/7 Support" />
           </View>
 
           <Text style={styles.legal}>
@@ -150,11 +160,9 @@ export default function PhoneScreen(): ReactElement {
 function Assurance({
   icon,
   title,
-  body,
 }: {
   icon: 'shield' | 'thumbs-up' | 'clock';
   title: string;
-  body: string;
 }): ReactElement {
   return (
     <View style={styles.assurance}>
@@ -162,7 +170,6 @@ function Assurance({
         <Feather name={icon} size={20} color={colors.fg} />
       </View>
       <Text style={styles.assuranceTitle}>{title}</Text>
-      <Text style={styles.assuranceBody}>{body}</Text>
     </View>
   );
 }
@@ -172,39 +179,43 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { paddingHorizontal: space.lg, flexGrow: 1 },
 
-  logoBlock: { alignItems: 'center', marginBottom: space.xl },
-  welcome: { ...text.title, fontWeight: '400', color: colors.fg },
-  brandName: { ...text.display, color: colors.fg, marginBottom: space.sm },
-  tagline: { ...text.body, color: colors.muted, marginBottom: space.lg },
+  logoBlock: { alignItems: 'center', marginTop: space.xl, marginBottom: space.xl },
 
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    ...shadow.card,
-  },
-  cardTitle: { ...text.heading, color: colors.fg },
-  cardSub: { ...text.body, color: colors.muted, marginTop: 2, marginBottom: space.md },
+  title: { ...text.title, color: colors.fg },
+  subtitle: { ...text.body, color: colors.muted, marginTop: space.sm, marginBottom: space.xl },
 
+  fieldLabel: { ...text.label, color: colors.muted, marginBottom: space.sm },
   field: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.bgSunken,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
     height: 56,
   },
-  fieldError: { borderColor: colors.danger },
+  // A visible focus ring, not just a caret: on a single-field screen the border is the only cue
+  // that the keyboard is aimed here.
+  fieldFocused: { borderColor: colors.fg, backgroundColor: colors.card },
+  fieldError: { borderColor: colors.danger, backgroundColor: colors.card },
   dialCode: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.md },
   flag: { fontSize: 18, marginRight: 6 },
   dialCodeText: { ...text.body, fontWeight: '600', color: colors.fg, marginRight: 4 },
   fieldDivider: { width: 1, height: '60%', backgroundColor: colors.border },
-  input: { flex: 1, paddingHorizontal: space.md, fontSize: 16, color: colors.fg, height: '100%' },
+  input: {
+    flex: 1,
+    paddingHorizontal: space.md,
+    fontSize: 17,
+    letterSpacing: 1,
+    color: colors.fg,
+    height: '100%',
+  },
 
   errorText: { ...text.caption, color: colors.danger, marginTop: space.sm },
-  buttonBlock: { marginTop: space.md },
+  buttonBlock: { marginTop: space.lg },
 
-  assurances: { flexDirection: 'row', marginTop: space.xl },
+  spacer: { flex: 1, minHeight: space.xl },
+  assurances: { flexDirection: 'row', marginBottom: space.lg },
   assurance: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
   assuranceIcon: {
     width: 46,
@@ -216,14 +227,15 @@ const styles = StyleSheet.create({
     marginBottom: space.sm,
   },
   assuranceTitle: { ...text.label, color: colors.fg, textAlign: 'center' },
-  assuranceBody: { ...text.caption, color: colors.muted, textAlign: 'center', marginTop: 2 },
+
 
   legal: {
-    ...text.body,
-    color: colors.muted,
+    ...text.caption,
+    // Ink rather than `muted`: the bottom of the screen is the yellow wave, and grey on yellow
+    // falls under 4.5:1 at this size.
+    color: colors.fg,
     textAlign: 'center',
-    marginTop: space.xl,
-    marginBottom: space.xl,
+    marginBottom: space.lg,
   },
   legalLink: { color: colors.link },
 });

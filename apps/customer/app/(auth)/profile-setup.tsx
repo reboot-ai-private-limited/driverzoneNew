@@ -34,7 +34,10 @@ import {
   toDateOnly,
 } from '@/features/profile/completion';
 import { updateProfile } from '@/lib/api/endpoints/customer';
-import { colors, radius, shadow, space, text } from '@/theme/theme';
+import { colors, radius, space, text } from '@/theme/theme';
+
+/** Which field owns the focus ring. One at a time, so the screen holds a single value. */
+type FocusTarget = 'name' | 'email' | 'address' | null;
 
 /**
  * Where a brand-new account lands, straight after `otp/verify` returned `is_new_user: true`.
@@ -52,6 +55,7 @@ import { colors, radius, shadow, space, text } from '@/theme/theme';
 export default function ProfileSetupScreen(): ReactElement {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
+  const [focus, setFocus] = useState<FocusTarget>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showPaymentSheet, setShowPaymentSheet] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -143,7 +147,7 @@ export default function ProfileSetupScreen(): ReactElement {
               <Feather name="arrow-left" size={22} color={colors.fg} />
             </Pressable>
             <View style={styles.headerLogo}>
-              <Logo width={170} />
+              <Logo width={150} />
             </View>
             {/* Balances the back button so the logo stays optically centred. */}
             <View style={styles.back} />
@@ -153,44 +157,52 @@ export default function ProfileSetupScreen(): ReactElement {
 
           <View style={styles.titleRow}>
             <View style={styles.flex}>
-              <Text style={styles.title}>Complete Your Profile</Text>
-              <Text style={styles.subtitle}>Help us serve you better</Text>
+              <Text style={styles.title}>Complete your profile</Text>
+              <Text style={styles.subtitle}>All of this is optional — skip anything you like.</Text>
             </View>
-            <ProgressRing percent={percent} />
+            <ProgressRing percent={percent} size={72} strokeWidth={6} />
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>
-              Profile Photo <Text style={styles.sectionHint}>(Optional)</Text>
-            </Text>
-
+          <View style={styles.form}>
             <View style={styles.avatarBlock}>
               <Pressable
                 onPress={() => void pickPhoto()}
                 accessibilityRole="button"
-                accessibilityLabel={draft.photoUri === null ? 'Add a profile photo' : 'Change your profile photo'}
-                style={styles.avatarPress}
+                accessibilityLabel={
+                  draft.photoUri === null ? 'Add a profile photo' : 'Change your profile photo'
+                }
+                style={({ pressed }) => [styles.avatarPress, pressed && styles.pressedDim]}
               >
                 {draft.photoUri === null ? (
                   <View style={styles.avatarPlaceholder}>
-                    <Feather name="user" size={44} color={colors.faint} />
+                    <Feather name="user" size={38} color={colors.faint} />
                   </View>
                 ) : (
                   <Image source={{ uri: draft.photoUri }} style={styles.avatar} />
                 )}
                 <View style={styles.cameraBadge}>
-                  <Feather name="camera" size={15} color={colors.fg} />
+                  <Feather name="camera" size={14} color={colors.fg} />
                 </View>
               </Pressable>
+              <Text style={styles.avatarCaption}>
+                {draft.photoUri === null ? 'Add a photo' : 'Change photo'}
+              </Text>
             </View>
 
-            <FieldRow icon="user" label="Full Name" required error={nameError}>
+            <FieldRow
+              icon="user"
+              label="Full name"
+              focused={focus === 'name'}
+              error={nameError}
+            >
               <TextInput
                 value={draft.fullName}
                 onChangeText={(value) => {
                   patch({ fullName: value });
                   if (nameError !== null) setNameError(null);
                 }}
+                onFocus={() => setFocus('name')}
+                onBlur={() => setFocus(null)}
                 placeholder="Enter your full name"
                 placeholderTextColor={colors.faint}
                 autoCapitalize="words"
@@ -200,7 +212,7 @@ export default function ProfileSetupScreen(): ReactElement {
               />
             </FieldRow>
 
-            <FieldRow icon="users" label="Gender">
+            <FieldRow label="Gender" boxed={false}>
               <View style={styles.genderRow}>
                 {GENDER_OPTIONS.map((option) => {
                   const selected = draft.gender === option.value;
@@ -210,7 +222,11 @@ export default function ProfileSetupScreen(): ReactElement {
                       onPress={() => patch({ gender: selected ? null : option.value })}
                       accessibilityRole="radio"
                       accessibilityState={{ selected }}
-                      style={[styles.genderChip, selected && styles.genderChipSelected]}
+                      style={({ pressed }) => [
+                        styles.genderChip,
+                        selected && styles.genderChipSelected,
+                        pressed && !selected && styles.genderChipPressed,
+                      ]}
                     >
                       <Text style={[styles.genderLabel, selected && styles.genderLabelSelected]}>
                         {option.label}
@@ -221,7 +237,7 @@ export default function ProfileSetupScreen(): ReactElement {
               </View>
             </FieldRow>
 
-            <FieldRow icon="calendar" label="Date of Birth" hint="(Optional)">
+            <FieldRow icon="calendar" label="Date of birth">
               <Pressable
                 onPress={() => setShowDatePicker(true)}
                 accessibilityRole="button"
@@ -229,20 +245,22 @@ export default function ProfileSetupScreen(): ReactElement {
                 style={styles.triggerRow}
               >
                 <Text style={draft.dob === null ? styles.placeholder : styles.value}>
-                  {draft.dob === null ? 'Select your date of birth' : formatDob(draft.dob)}
+                  {draft.dob === null ? 'Select date' : formatDob(draft.dob)}
                 </Text>
-                <Feather name="calendar" size={18} color={colors.muted} />
+                <Feather name="chevron-right" size={18} color={colors.faint} />
               </Pressable>
             </FieldRow>
 
-            <FieldRow icon="mail" label="Email" hint="(Optional)" error={emailError}>
+            <FieldRow icon="mail" label="Email" focused={focus === 'email'} error={emailError}>
               <TextInput
                 value={draft.email}
                 onChangeText={(value) => {
                   patch({ email: value });
                   if (emailError !== null) setEmailError(null);
                 }}
-                placeholder="Enter your email address"
+                onFocus={() => setFocus('email')}
+                onBlur={() => setFocus(null)}
+                placeholder="you@example.com"
                 placeholderTextColor={colors.faint}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -252,7 +270,7 @@ export default function ProfileSetupScreen(): ReactElement {
               />
             </FieldRow>
 
-            <FieldRow icon="credit-card" label="Preferred Payment Method">
+            <FieldRow icon="credit-card" label="Preferred payment method">
               <Pressable
                 onPress={() => setShowPaymentSheet(true)}
                 accessibilityRole="button"
@@ -260,38 +278,24 @@ export default function ProfileSetupScreen(): ReactElement {
                 style={styles.triggerRow}
               >
                 <Text style={selectedPayment === undefined ? styles.placeholder : styles.value}>
-                  {selectedPayment?.label ?? 'Select your preferred payment method'}
+                  {selectedPayment?.label ?? 'Select method'}
                 </Text>
-                <Feather name="chevron-down" size={18} color={colors.muted} />
+                <Feather name="chevron-down" size={18} color={colors.faint} />
               </Pressable>
             </FieldRow>
 
-            <FieldRow icon="map-pin" label="Current Address" hint="(Optional)">
-              <View style={styles.triggerRow}>
-                <TextInput
-                  value={draft.address}
-                  onChangeText={(value) => patch({ address: value })}
-                  placeholder="Enter your current address"
-                  placeholderTextColor={colors.faint}
-                  style={[styles.input, styles.flex]}
-                  accessibilityLabel="Current address"
-                />
-              </View>
+            <FieldRow icon="map-pin" label="Current address" focused={focus === 'address'}>
+              <TextInput
+                value={draft.address}
+                onChangeText={(value) => patch({ address: value })}
+                onFocus={() => setFocus('address')}
+                onBlur={() => setFocus(null)}
+                placeholder="House, street, area"
+                placeholderTextColor={colors.faint}
+                style={styles.input}
+                accessibilityLabel="Current address"
+              />
             </FieldRow>
-
-            <View style={styles.notice}>
-              <View style={styles.noticeIcon}>
-                <Feather name="info" size={14} color={colors.fg} />
-              </View>
-              <View style={styles.flex}>
-                <Text style={styles.noticeTitle}>
-                  You can edit your profile anytime from Profile Settings.
-                </Text>
-                <Text style={styles.noticeBody}>
-                  Completing your profile helps us personalize your experience.
-                </Text>
-              </View>
-            </View>
 
             {saveError !== null ? (
               <Text style={styles.saveError} accessibilityLiveRegion="polite">
@@ -300,25 +304,17 @@ export default function ProfileSetupScreen(): ReactElement {
             ) : null}
 
             <View style={styles.actions}>
-              <PrimaryButton
-                label="Save & Continue"
-                onPress={handleSave}
-                loading={save.isPending}
-              />
+              <PrimaryButton label="Save & Continue" onPress={handleSave} loading={save.isPending} />
 
               <Pressable
                 onPress={() => router.replace('/home')}
                 accessibilityRole="button"
                 disabled={save.isPending}
-                style={({ pressed }) => [styles.skipButton, pressed && styles.skipPressed]}
+                hitSlop={8}
+                style={styles.skipButton}
               >
-                <Text style={styles.skipLabel}>Skip for Now</Text>
+                <Text style={styles.skipLabel}>Skip for now</Text>
               </Pressable>
-            </View>
-
-            <View style={styles.assurance}>
-              <Feather name="lock" size={14} color={colors.muted} />
-              <Text style={styles.assuranceText}>Your information is safe and secure with us.</Text>
             </View>
           </View>
         </ScrollView>
@@ -343,11 +339,14 @@ export default function ProfileSetupScreen(): ReactElement {
       <Modal
         visible={showPaymentSheet}
         transparent
-        animationType="fade"
+        // `slide`, not `fade`: a panel that rises from the edge it is anchored to reads as one
+        // movement, where a fading panel appears to arrive from nowhere.
+        animationType="slide"
         onRequestClose={() => setShowPaymentSheet(false)}
       >
         <Pressable style={styles.sheetBackdrop} onPress={() => setShowPaymentSheet(false)}>
           <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + space.md }]}>
+            <View style={styles.sheetGrabber} />
             <Text style={styles.sheetTitle}>Preferred payment method</Text>
             {PAYMENT_METHODS.map((method) => {
               const selected = draft.paymentMethod === method.value;
@@ -360,9 +359,11 @@ export default function ProfileSetupScreen(): ReactElement {
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  style={styles.sheetOption}
+                  style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
                 >
-                  <Text style={styles.sheetOptionLabel}>{method.label}</Text>
+                  <Text style={[styles.sheetOptionLabel, selected && styles.sheetOptionSelected]}>
+                    {method.label}
+                  </Text>
                   {selected ? <Feather name="check" size={18} color={colors.fg} /> : null}
                 </Pressable>
               );
@@ -383,7 +384,7 @@ function defaultDobAnchor(): Date {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  scrollContent: { paddingBottom: space.xl },
+  scrollContent: { paddingBottom: space.lg },
 
   header: {
     backgroundColor: colors.brand,
@@ -399,39 +400,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: space.lg,
-    paddingTop: space.md,
+    paddingTop: space.sm,
     paddingBottom: space.lg,
   },
-  title: { ...text.display, color: colors.fg },
-  subtitle: { ...text.body, color: colors.muted, marginTop: 2 },
+  title: { ...text.title, color: colors.fg },
+  subtitle: { ...text.body, color: colors.muted, marginTop: space.xs, paddingRight: space.md },
 
-  card: {
-    marginHorizontal: space.md,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: space.md,
-    ...shadow.card,
-  },
-  sectionLabel: { ...text.label, fontSize: 14, color: colors.fg },
-  sectionHint: { color: colors.faint, fontWeight: '400' },
+  // A plain page section, not a raised card: a white card on a white page is a shadow with
+  // nothing behind it, and it cost 16pt of inset on both edges.
+  form: { paddingHorizontal: space.lg },
 
-  avatarBlock: { alignItems: 'center', marginTop: space.sm, marginBottom: space.md },
-  avatarPress: { width: 104, height: 104 },
-  avatar: { width: 104, height: 104, borderRadius: radius.pill },
+  avatarBlock: { alignItems: 'center', marginBottom: space.lg },
+  avatarPress: { width: 92, height: 92 },
+  pressedDim: { opacity: 0.85 },
+  avatar: { width: 92, height: 92, borderRadius: radius.pill },
   avatarPlaceholder: {
-    width: 104,
-    height: 104,
+    width: 92,
+    height: 92,
     borderRadius: radius.pill,
     backgroundColor: colors.bgSunken,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cameraBadge: {
     position: 'absolute',
     right: 0,
-    bottom: 6,
-    width: 34,
-    height: 34,
+    bottom: 2,
+    width: 30,
+    height: 30,
     borderRadius: radius.pill,
     backgroundColor: colors.brand,
     alignItems: 'center',
@@ -439,68 +437,41 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.bg,
   },
+  avatarCaption: { ...text.caption, color: colors.muted, marginTop: space.sm },
 
-  input: { fontSize: 15, color: colors.fg, paddingVertical: 4, paddingHorizontal: 0 },
+  input: { fontSize: 15, color: colors.fg, paddingVertical: 0, paddingHorizontal: 0, height: 52 },
   placeholder: { fontSize: 15, color: colors.faint },
   value: { fontSize: 15, color: colors.fg },
-  triggerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  triggerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 52,
+  },
 
-  genderRow: { flexDirection: 'row', marginTop: 4 },
+  // `gap` rather than a margin on each chip: a trailing margin leaves the row 8pt short of the
+  // right edge and out of line with every field above it.
+  genderRow: { flexDirection: 'row', gap: space.sm },
   genderChip: {
     flex: 1,
-    marginRight: 6,
-    height: 38,
-    borderRadius: radius.sm,
+    height: 46,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
+    backgroundColor: colors.bgSunken,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  genderChipSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
+  genderChipSelected: { backgroundColor: colors.brand, borderColor: colors.fg },
+  genderChipPressed: { backgroundColor: colors.border },
   genderLabel: { ...text.body, color: colors.fg },
   genderLabelSelected: { fontWeight: '700' },
 
-  notice: {
-    flexDirection: 'row',
-    backgroundColor: colors.brandSoft,
-    borderRadius: radius.md,
-    padding: space.md,
-    marginTop: space.sm,
-  },
-  noticeIcon: {
-    width: 26,
-    height: 26,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: space.sm,
-  },
-  noticeTitle: { ...text.label, fontSize: 13.5, color: colors.fg },
-  noticeBody: { ...text.caption, color: colors.muted, marginTop: 2 },
+  saveError: { ...text.body, color: colors.danger, marginTop: space.sm, textAlign: 'center' },
 
-  saveError: { ...text.body, color: colors.danger, marginTop: space.md, textAlign: 'center' },
-
-  actions: { marginTop: space.lg },
-  skipButton: {
-    height: 56,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: space.sm,
-  },
-  skipPressed: { backgroundColor: colors.bgSunken },
-  skipLabel: { ...text.body, fontWeight: '600', color: colors.fg },
-
-  assurance: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: space.md,
-  },
-  assuranceText: { ...text.caption, color: colors.muted, marginLeft: 6 },
+  actions: { marginTop: space.md },
+  skipButton: { alignItems: 'center', paddingVertical: space.md, marginTop: space.xs },
+  skipLabel: { ...text.body, color: colors.link },
 
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
   sheet: {
@@ -508,7 +479,15 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     paddingHorizontal: space.lg,
-    paddingTop: space.lg,
+    paddingTop: space.sm,
+  },
+  sheetGrabber: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.border,
+    marginBottom: space.md,
   },
   sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.sm },
   sheetOption: {
@@ -519,5 +498,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  sheetOptionPressed: { backgroundColor: colors.bgSunken },
   sheetOptionLabel: { ...text.body, color: colors.fg },
+  sheetOptionSelected: { fontWeight: '700' },
 });

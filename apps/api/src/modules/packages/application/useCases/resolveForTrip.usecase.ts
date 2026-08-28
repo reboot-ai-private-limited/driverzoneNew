@@ -11,7 +11,7 @@ import { fareFor, type OutstationPackage } from '../../domain/outstationPackage.
  * The per-car-category filtering that used to run at every rung is gone: price no longer varies
  * by category (docs/decision-log.md, 2026-08-28), so a package that matches the trip matches it
  * for everyone. What replaced it, on the outstation side, is a DIRECTION check — a band may
- * decline to sell a same-day return.
+ * decline to sell a return trip.
  */
 export class ResolveForTripUseCase {
   constructor(private readonly repo: PackageRepositoryPort) {}
@@ -58,28 +58,22 @@ export class ResolveForTripUseCase {
       };
     }
 
-    // 4. precedence
-    // a. INCITY beats OUTSTATION (with guard)
+    /**
+     * 4a. INCITY BEATS OUTSTATION, UNCONDITIONALLY.
+     *
+     * There used to be a distance guard here: incity won only if the trip fitted within
+     * `incity.max_distance_multiple` × the longest variant's `includedKm`, so a 60 km drop that
+     * happened to land inside the city polygon fell through and priced as the outstation run it
+     * plainly was. `includedKm` was removed 2026-08-28 and the guard was dropped with it rather
+     * than re-expressed as a flat km limit (docs/decision-log.md).
+     *
+     * The accepted cost: both points inside the city zone now means incity at ANY distance, and
+     * with no overage there is nothing to collect the difference on a long cross-city run. That
+     * is a deliberate call, recorded in the log, and not something to re-add here quietly.
+     */
     const selectedIncity = this.getBestIncity(validIncity);
-
     if (selectedIncity) {
-      const maxIncludedKm = Math.max(...selectedIncity.variants.map((v) => v.includedKm));
-      /**
-       * The guard on rung (a). A 60 km drop that happens to land inside the city polygon
-       * matches both an incity package and an outstation band; preferring incity blindly sells
-       * an hourly rental for what is plainly an outstation run. Beyond this multiple of the
-       * longest variant's included km, incity stops being a candidate at all.
-       *
-       * TODO: read this from `settings`. The module now exists, but `incity.max_distance_multiple`
-       * is deliberately not one of its keys yet (docs/decision-log.md, 2026-08-28): a key is added
-       * when the code reading it is written, and taking a dependency on `settings` from here to
-       * fetch a single constant is not worth the wiring until the pricing work lands. Until then
-       * ops cannot tune this without a deploy.
-       */
-      const MAX_DISTANCE_MULTIPLE = 2;
-      if (input.distanceKm <= maxIncludedKm * MAX_DISTANCE_MULTIPLE) {
-        return { available: true, match: this.incityMatch(selectedIncity) };
-      }
+      return { available: true, match: this.incityMatch(selectedIncity) };
     }
 
     // b. HILL beats PLAIN (handled by terrain logic)
@@ -96,10 +90,6 @@ export class ResolveForTripUseCase {
           match: { type: 'OUTSTATION', package: selectedOutstation, farePaise, direction },
         };
       }
-    }
-
-    if (selectedIncity) {
-      return { available: true, match: this.incityMatch(selectedIncity) };
     }
 
     return {

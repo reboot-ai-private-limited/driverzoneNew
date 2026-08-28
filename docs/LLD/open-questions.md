@@ -7,33 +7,30 @@ default that turns out wrong is expensive to unwind.
 
 ---
 
-### 🔴 Q1 — Destination enforcement on long incity variants
+### ✅ Q1 — Destination enforcement on long incity variants — **CLOSED 2026-08-28**
 
-Your spec hard-blocks a booking when the drop point falls outside the pickup point's city
-zone. For a **10-hour** rental that will reject bookings you want: the customer is doing
-errands and multiple stops, and the destination they typed is mostly a formality.
+**There is no destination rule.** `enforce_drop_in_city` is deleted, and with it the 4-hour
+threshold it was defaulted from. A trip whose pickup and drop are both inside the city zone is
+incity, at any distance; one whose drop is outside is outstation. See
+[`../decision-log.md`](../decision-log.md).
 
-**Recommendation:** enforce only for variants ≤ 4 hours. Above that, warn and let it
-through — the included-km cap plus the extra-km rate already price the risk.
-Implemented as a per-variant `enforce_drop_in_city` flag, defaulted from duration.
-
-*Why it's 🔴:* it changes the resolution algorithm, the variant schema, and the customer
-copy. Cheap now, three code paths later.
+The recommendation this answered relied on "the included-km cap plus the extra-km rate already
+price the risk" — and both of those are gone too (Q2). So the risk is now unpriced rather than
+priced differently, which is the honest reading and is recorded in the log.
 
 ---
 
-### 🔴 Q2 — Overage billing
+### ✅ Q2 — Overage billing — **CLOSED 2026-08-28**
 
-Not in your spec at all, and it's the most common real-world event in an hourly product.
-A 3-hour booking that runs 3h 40m needs a defined answer.
+**There is none.** A 3-hour booking that runs 3h 40m is an operations conversation, not a fare
+line. `extraMinuteRatePaise`, `extraKmRatePaise` and the `includedKm` cap they billed against were
+removed from the variant; `includedMinutes` stays because it is what the customer buys and what
+tells the driver when they are released. See [`../decision-log.md`](../decision-log.md).
 
-**Recommendation:** 15-minute grace, then bill in 30-minute blocks at a per-variant rate.
-Extra time and extra km billed independently, never netted off. All values in
-`global_settings` so ops can tune without a deploy.
-
-**Also needs deciding:** who decides when a trip ended? The driver taps Complete — what
-stops them tapping it 20 minutes late? Suggested: server clock is authoritative, and the
-customer gets a "confirm trip ended" push whose timestamp wins if it comes first.
+This closes the question by deleting the feature rather than specifying it, and the cost is the
+one the question named: the most common real-world event in an hourly product now has no fare
+consequence. Re-opening it means restoring two rate fields and a grace/block policy — the
+"who decides when a trip ended" half was never answered and would have to be answered then.
 
 ---
 
@@ -50,17 +47,18 @@ instead of an edit-then-create sequence with a 409 in the middle.
 
 ---
 
-### 🔴 Q4 — Round trip: what is actually included?
+### ✅ Q4 — Round trip: what is actually included? — **CLOSED 2026-08-28**
 
-A round-trip price implies the driver waits at the destination. For how long? Is a
-multi-day trip (driver stays overnight) the same product?
+**The whole two-way journey, however long it takes.** A 540 km destination matches the band
+containing 540 — the ONE-WAY distance — and that band's `roundTripFarePaise` covers all 1,080 km
+of driving. There is no same-day cap, no maximum included wait and no per-day allowance: one
+number covers the driver's whole trip, including nights away. See
+[`../decision-log.md`](../decision-log.md).
 
-**Needs defining:** maximum included wait, per-day driver allowance, night-halt charge,
-and what happens when the customer extends on the day. Without this, round-trip outstation
-is your highest-dispute product.
-
-**Recommendation for v1:** cap round trips at same-day return, defer multi-day entirely.
-Multi-day is a genuinely different product with different driver economics.
+The recommendation on file was the opposite — cap v1 at same-day and defer multi-day — and it was
+not taken. The cost of the decision that was: **a 2-day and a 5-day trip to the same town pay the
+same fare**, because distance is the only thing that selects a band. The question's warning that
+this is the highest-dispute product still stands.
 
 ---
 

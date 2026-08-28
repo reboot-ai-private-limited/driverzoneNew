@@ -35,6 +35,8 @@ adds nothing at all — there is no zero-value fee line on the receipt.
 ```
 computeInCityFare(variant, pickupZone, scheduledAt) -> FareBreakdown
 
+  -- The whole fare. There is no overage term and no completion-time recompute: the quoted
+  -- total IS the total (open-questions.md Q2, closed 2026-08-28).
   base        = variant.base_fare_paise
 
   pickup_fee  = as above — identical for both products
@@ -51,42 +53,23 @@ computeInCityFare(variant, pickupZone, scheduledAt) -> FareBreakdown
   total       = roundToRupee(subtotal + tax)
 ```
 
-The quoted total covers the **included** hours and km only. Overage is billed at
-completion and is disclosed at quote time.
+### Completion — there is no final-fare recompute
 
-### Overage — the part that gets disputed
+`computeFinalFare` used to live here and billed overage: a 15-minute grace, then 30-minute blocks,
+extra time and extra km never netted off. It is gone with the rates it read
+(`open-questions.md` Q2, closed 2026-08-28). A booking's fare is the fare it was quoted, and a
+3-hour rental that runs 3h 40m costs what the customer was told.
 
-This is the most common real-world event in an hourly-rental product and the most common
-source of complaints. Specify it precisely and show it before booking.
+`includedMinutes` still means something — it is what the customer bought and what tells the driver
+when they are released — it just has no fare consequence when it is exceeded.
 
-```
-computeFinalFare(booking, actualMinutes, actualDistanceM) -> FinalFare
+The question that closed alongside it and was never answered: *who decides when a trip ended?* It
+stopped mattering for the fare. It still matters for the driver's day, and if overage ever comes
+back it has to be answered then. The fare card line that used to disclose the rates goes with
+them:
 
-  snap        = booking.fare_snapshot
-  grace       = settings['booking.overage_grace_minutes']         -- default 15
-
-  extraMin    = max(0, actualMinutes - snap.included_minutes - grace)
-  extraMin    = roundUpTo(extraMin, 30)          -- billed in 30-min blocks
-  extraKm     = max(0, ceil(actualDistanceM/1000) - snap.included_km)
-
-  time_charge = extraMin * snap.extra_minute_rate_paise
-  dist_charge = extraKm  * snap.extra_km_rate_paise
-
-  final = roundToRupee(snap.subtotal + time_charge + dist_charge + tax_on_extras)
-```
-
-Decisions baked in above, all of which favour the customer at the margin:
-
-- **15-minute grace**, so a driver being slightly slow in traffic doesn't trigger a charge
-- **30-minute billing blocks** — easy to explain, avoids per-minute nickel-and-diming
-- Both grace and block size are settings, not constants
-- Extra time and extra distance are billed **independently**. A 10-hour booking that used
-  9 hours but 140 km against a 100 km cap pays km overage only. Do not "net off."
-
-**The customer must see this before confirming.** A line in the fare card:
-
-> Includes 3 hours and 30 km. Beyond that: ₹150 per 30 min, ₹12 per km.
-> A 15-minute grace period applies.
+> ~~Includes 3 hours and 30 km. Beyond that: ₹150 per 30 min, ₹12 per km.~~
+> Includes 3 hours.
 
 ## Time-of-day surcharge
 
@@ -185,17 +168,12 @@ Written once into `bookings.fare_snapshot` at confirmation, never updated:
     "city_zone_id": "…", "city": "Siliguri"
   },
 
-  "included": { "minutes": 180, "km": 30 },
-
-  "rates": {
-    "extra_minute_rate_paise": 500,
-    "extra_km_rate_paise": 1200,
-    "grace_minutes": 15,
-    "billing_block_minutes": 30
-  },
+  // What the customer bought. No `rates` block: there is no overage, so there is nothing the
+  // snapshot needs to freeze a rate for.
+  "included": { "minutes": 180 },
 
   "lines": [
-    { "code": "BASE",       "label": "3 Hours / 30 km", "amount_paise": 90000 },
+    { "code": "BASE",       "label": "3 Hours",        "amount_paise": 90000 },
     { "code": "PICKUP_FEE", "label": "Pickup charge (Siliguri Outskirts)", "amount_paise": 10000 },
     { "code": "NIGHT",      "label": "Night charge",    "amount_paise": 0 }
   ],

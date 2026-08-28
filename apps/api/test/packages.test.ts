@@ -111,9 +111,7 @@ describe('Packages Module', () => {
         const data: any = {
           cityZoneId: 'city_1',
           name: 'Test Package',
-          variants: [
-            { label: '1hr', includedKm: 10, includedMinutes: 60, baseFarePaise: 1000, driverCommissionBps: 7500 },
-          ],
+          variants: [{ label: '1hr', includedMinutes: 60, baseFarePaise: 1000, driverCommissionBps: 7500 }],
         };
 
         const result = await useCase.execute(data);
@@ -218,18 +216,13 @@ describe('Packages Module', () => {
       };
     }
 
-    function variant(includedKm: number, baseFarePaise: number, isActive = true) {
+    function variant(includedMinutes: number, baseFarePaise: number, isActive = true) {
       return {
-        id: `v_${includedKm}`,
-        label: `${includedKm}km`,
-        includedMinutes: 180,
-        includedKm,
+        id: `v_${includedMinutes}`,
+        label: `${includedMinutes}min`,
+        includedMinutes,
         baseFarePaise,
-        extraMinuteRatePaise: 0,
-        extraKmRatePaise: 0,
         driverCommissionBps: 7500,
-        enforceDropInCity: true,
-        sortOrder: 0,
         isActive,
       };
     }
@@ -284,7 +277,7 @@ describe('Packages Module', () => {
     it('prefers INCITY over OUTSTATION when both match — rung (a)', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({
-          incity: [incity({ id: 'i1', variants: [variant(30, 90000)] })],
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
           outstation: [outstation({ id: 'o1' })],
         }),
       );
@@ -295,22 +288,31 @@ describe('Packages Module', () => {
       expect(result.available === true && result.match.type).toBe('INCITY');
     });
 
-    it('falls through to OUTSTATION past incity.max_distance_multiple — the rung (a) guard', async () => {
-      // Longest variant includes 30 km, multiple is 2, so incity covers up to 60 km. A 61 km
-      // drop inside the city polygon is plainly an outstation run and must price as one.
+    /**
+     * The INVERSE of the test that used to live here.
+     *
+     * There was a guard on rung (a): incity won only within `incity.max_distance_multiple` × the
+     * longest variant's `includedKm`, so a 61 km drop inside the city polygon fell through to
+     * OUTSTATION. `includedKm` was removed 2026-08-28 and the guard went with it rather than
+     * being re-expressed as a flat km limit.
+     *
+     * This asserts the accepted consequence rather than deleting the coverage: a long trip that
+     * stays inside the city zone now sells as an hourly rental, and with no overage there is
+     * nothing to collect the difference. If someone re-adds a guard, this test tells them what
+     * they are changing.
+     */
+    it('keeps a LONG in-city trip on the incity package — the rung (a) guard is gone', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({
-          incity: [incity({ id: 'i1', variants: [variant(30, 90000)] })],
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
           outstation: [outstation({ id: 'o1' })],
         }),
       );
 
-      expect((await useCase.execute({ ...inCityTrip, distanceKm: 60 })).available).toBe(true);
-      const atBoundary = await useCase.execute({ ...inCityTrip, distanceKm: 60 });
-      expect(atBoundary.available === true && atBoundary.match.type).toBe('INCITY');
-
-      const past = await useCase.execute({ ...inCityTrip, distanceKm: 61 });
-      expect(past.available === true && past.match.type).toBe('OUTSTATION');
+      for (const distanceKm of [20, 61, 200]) {
+        const result = await useCase.execute({ ...inCityTrip, distanceKm });
+        expect(result.available === true && result.match.type).toBe('INCITY');
+      }
     });
 
     it('selects the HILL band when the drop point is in a hill zone, never the PLAIN one', async () => {
@@ -345,11 +347,11 @@ describe('Packages Module', () => {
             incity({
               id: 'i1',
               variants: [
-                variant(30, 90000),
-                variant(60, 150000),
+                variant(180, 90000),
+                variant(600, 150000),
                 // Switched off. Price no longer varies by car category, so an inactive variant
                 // is the only way one can be unsellable — and it must not be offered.
-                variant(90, 200000, false),
+                variant(240, 200000, false),
               ],
             }),
           ],
@@ -453,7 +455,7 @@ describe('Packages Module', () => {
     it('offers no incity package when the pickup point is outside the city zone', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({
-          incity: [incity({ id: 'i1', variants: [variant(30, 90000)] })],
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
           outstation: [outstation({ id: 'o1' })],
         }),
       );

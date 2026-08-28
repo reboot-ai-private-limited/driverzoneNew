@@ -33,8 +33,10 @@ export interface OutstationDraft {
   maxKm: string;
   oneWayFare: string;
   /**
-   * Empty means the band does not sell a same-day return — it maps to `null` on the wire, never
-   * to `0`. This is exactly the distinction the string draft exists to preserve: `'0'` is a free
+   * The whole two-way journey, not capped to same-day.
+   *
+   * Empty means the band does not sell a return trip — it maps to `null` on the wire, never to
+   * `0`. This is exactly the distinction the string draft exists to preserve: `'0'` is a free
    * return trip, `''` is no return trip on offer.
    */
   roundTripFare: string;
@@ -153,18 +155,18 @@ export function buildOutstationBody(
 
 // ─── InCity ──────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A duration and a price. The included-km cap, both overage rates, the destination-enforcement
+ * flag and the sort order were removed 2026-08-28 (docs/decision-log.md) — there is no overage
+ * to bill, and variants display in the order the editor lists them.
+ */
 export interface VariantDraft {
   /** Stable across re-renders and reorders. Not the server's subdocument id — see below. */
   key: string;
   label: string;
   includedMinutes: string;
-  includedKm: string;
   baseFare: string;
-  extraMinuteRate: string;
-  extraKmRate: string;
   driverCommission: string;
-  enforceDropInCity: boolean;
-  sortOrder: string;
   isActive: boolean;
 }
 
@@ -194,15 +196,8 @@ export function emptyVariantDraft(): VariantDraft {
     key: newVariantKey(),
     label: '',
     includedMinutes: '',
-    includedKm: '',
     baseFare: '',
-    extraMinuteRate: '',
-    extraKmRate: '',
     driverCommission: '',
-    // Q1: the default is on, and ops turns it off for the long variants where insisting the drop
-    // is inside the city stops making sense.
-    enforceDropInCity: true,
-    sortOrder: '0',
     isActive: true,
   };
 }
@@ -227,13 +222,8 @@ export function toIncityDraft(dto: IncityPackageDto): IncityDraft {
       key: newVariantKey(),
       label: variant.label,
       includedMinutes: String(variant.included_minutes),
-      includedKm: String(variant.included_km),
       baseFare: paiseToRupees(variant.base_fare_paise),
-      extraMinuteRate: paiseToRupees(variant.extra_minute_rate_paise),
-      extraKmRate: paiseToRupees(variant.extra_km_rate_paise),
       driverCommission: bpsToPercent(variant.driver_commission_bps),
-      enforceDropInCity: variant.enforce_drop_in_city,
-      sortOrder: String(variant.sort_order),
       isActive: variant.is_active,
     })),
   };
@@ -251,23 +241,12 @@ export function buildIncityBody(draft: IncityDraft): BuildResult<CreateIncityPac
     if (variant.label.trim() === '') errors[`${scope}.label`] = 'Name the variant.';
 
     const includedMinutes = wholeNumber(variant.includedMinutes);
-    const includedKm = wholeNumber(variant.includedKm);
     if (includedMinutes === null || includedMinutes < 1) {
       errors[`${scope}.includedMinutes`] = 'Enter the included minutes.';
     }
-    if (includedKm === null) errors[`${scope}.includedKm`] = 'Enter the included km.';
 
     const baseFarePaise = rupeesToPaise(variant.baseFare);
     if (baseFarePaise === null) errors[`${scope}.baseFare`] = 'Enter the base fare in rupees.';
-
-    const extraMinuteRatePaise = optionalPaise(variant.extraMinuteRate);
-    if (extraMinuteRatePaise === null) {
-      errors[`${scope}.extraMinuteRate`] = 'Enter an amount in rupees, or leave it blank.';
-    }
-    const extraKmRatePaise = optionalPaise(variant.extraKmRate);
-    if (extraKmRatePaise === null) {
-      errors[`${scope}.extraKmRate`] = 'Enter an amount in rupees, or leave it blank.';
-    }
 
     const driverCommissionBps = percentToBps(variant.driverCommission);
     if (driverCommissionBps === null) {
@@ -278,13 +257,8 @@ export function buildIncityBody(draft: IncityDraft): BuildResult<CreateIncityPac
     return {
       label: variant.label.trim(),
       includedMinutes: includedMinutes ?? 0,
-      includedKm: includedKm ?? 0,
       baseFarePaise: baseFarePaise ?? 0,
-      extraMinuteRatePaise: extraMinuteRatePaise ?? 0,
-      extraKmRatePaise: extraKmRatePaise ?? 0,
       driverCommissionBps: driverCommissionBps ?? 0,
-      enforceDropInCity: variant.enforceDropInCity,
-      sortOrder: wholeNumber(variant.sortOrder) ?? 0,
       isActive: variant.isActive,
     };
   });
@@ -318,9 +292,4 @@ function wholeNumber(text: string): number | null {
   const trimmed = text.trim();
   if (!/^\d+$/.test(trimmed)) return null;
   return Number(trimmed);
-}
-
-/** Blank means zero here — unlike the return fare, where blank means "not offered". */
-function optionalPaise(text: string): number | null {
-  return text.trim() === '' ? 0 : rupeesToPaise(text);
 }

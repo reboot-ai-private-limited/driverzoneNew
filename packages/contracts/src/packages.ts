@@ -7,8 +7,8 @@
  * PRICE DOES NOT VARY BY CAR CATEGORY. It used to: every package carried a `prices[]`
  * subdocument keyed by category, and for outstation by `(category, direction)` — ten rows per
  * distance band. Retired 2026-08-28 (docs/decision-log.md). A band is now two fares and a
- * commission split; a variant is one fare and its overage rates. `CAR_CATEGORIES` still exists,
- * in `identity.ts`, because dispatch and bookings still need it — it just no longer decides what
+ * commission split; a variant is a duration and a fare. `CAR_CATEGORIES` still exists, in
+ * `identity.ts`, because dispatch and bookings still need it — it just no longer decides what
  * anything costs.
  *
  * `apps/api` compiles with `exactOptionalPropertyTypes`, under which `?: string` and
@@ -19,10 +19,12 @@
  */
 
 /**
- * A round trip is a SEPARATE fare, never a computed multiple of the one-way — the driver waits
- * at the destination and may get no return fare (docs/LLD/packages.md §Outstation is priced per
- * direction). Direction is still what the customer picks; it is now which FIELD the server
- * reads rather than which row it matches.
+ * `ROUND_TRIP` is the whole two-way journey — out to the destination and back — and it is a
+ * SEPARATE fare, never a computed multiple of the one-way. The driver's day differs in kind: they
+ * wait at the destination, they may get no return fare, and they may be away overnight.
+ *
+ * The band is matched on the ONE-WAY distance. A 540 km destination matches the band containing
+ * 540, and that band's return fare covers all 1,080 km of driving.
  */
 export const DIRECTIONS = ['ONE_WAY', 'ROUND_TRIP'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
@@ -50,26 +52,24 @@ export function companyCommissionBps(driverCommissionBps: number): number {
 // ─── InCity ──────────────────────────────────────────────────────────────────────────────────
 
 /**
- * A duration option — 3 hours, 10 hours. The customer picks one, so a quote returns every active
- * variant rather than the cheapest.
+ * A duration and a price. The customer picks one, so a quote returns every active variant rather
+ * than the cheapest.
  *
- * No night charge here: the early-morning and late-night surcharges are GLOBAL, set once in
- * `globalSettings` rather than per package (docs/decision-log.md, 2026-08-28).
+ * THERE IS NO OVERAGE. `included_minutes` is what the customer buys and what tells the driver
+ * when they are released; running past it is an operations conversation, not a fare line. The
+ * `extra_minute_rate_paise` / `extra_km_rate_paise` pair and the `included_km` cap they billed
+ * against were removed 2026-08-28, closing open-questions.md Q2 by deciding there is nothing to
+ * bill.
+ *
+ * No night charge either: the early-morning and late-night surcharges are GLOBAL, set once in
+ * `globalSettings` rather than per package.
  */
 export interface IncityVariantDto {
   id: string;
   label: string;
   included_minutes: number;
-  included_km: number;
   base_fare_paise: number;
-  /** Charged past `included_minutes`. See open-questions.md Q2. */
-  extra_minute_rate_paise: number;
-  /** Charged past `included_km`, independently of time — never netted against it. */
-  extra_km_rate_paise: number;
   driver_commission_bps: number;
-  /** Per-variant because it defaults from duration — off above 4 hours. open-questions.md Q1. */
-  enforce_drop_in_city: boolean;
-  sort_order: number;
   is_active: boolean;
 }
 
@@ -121,7 +121,12 @@ export interface OutstationPackageDto {
   min_km: number;
   max_km: number;
   one_way_fare_paise: number;
-  /** `null` means a same-day return is not offered on this band, not that it is free. */
+  /**
+   * The fare for the whole TWO-WAY journey — out and back — for a destination in this band. It
+   * is not capped to same-day: however many days the driver is away, this one number covers it.
+   *
+   * `null` means the band does not sell a return trip at all. Never that the return is free.
+   */
   round_trip_fare_paise: number | null;
   driver_commission_bps: number;
   is_active: boolean;
@@ -149,13 +154,8 @@ export interface ListOutstationPackagesQuery {
 export interface IncityVariantInput {
   label: string;
   includedMinutes: number;
-  includedKm: number;
   baseFarePaise: number;
-  extraMinuteRatePaise?: number | undefined;
-  extraKmRatePaise?: number | undefined;
   driverCommissionBps: number;
-  enforceDropInCity?: boolean | undefined;
-  sortOrder?: number | undefined;
   isActive?: boolean | undefined;
 }
 
@@ -190,7 +190,7 @@ export interface CreateOutstationPackageRequest {
   minKm: number;
   maxKm: number;
   oneWayFarePaise: number;
-  /** Omit or send `null` for a band that does not offer a same-day return. */
+  /** Omit or send `null` for a band that does not sell a return trip. */
   roundTripFarePaise?: number | null | undefined;
   driverCommissionBps: number;
   isActive?: boolean | undefined;

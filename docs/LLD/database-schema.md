@@ -158,12 +158,13 @@ variant itself.
 ```ts
 const incityVariantSchema = new Schema({
   label:           { type: String, required: true },    // '3 Hours'
+  // What the customer buys, and what tells the driver when they are released. There is NO
+  // overage: extraMinuteRatePaise, extraKmRatePaise and the includedKm cap they billed against
+  // were removed 2026-08-28 (open-questions.md Q2), along with enforceDropInCity (Q1) and
+  // sortOrder. Variants display in stored order.
   includedMinutes: { type: Number, required: true, min: 1 },
-  includedKm:      { type: Number, required: true, min: 0 },
 
-  baseFarePaise:        { type: Number, required: true, min: 0 },
-  extraMinuteRatePaise: { type: Number, default: 0, min: 0 },
-  extraKmRatePaise:     { type: Number, default: 0, min: 0 },
+  baseFarePaise:   { type: Number, required: true, min: 0 },
 
   // Basis points: 7500 is 75%. The COMPANY's share is `10000 - this` and is not stored —
   // two independently stored shares are two numbers that can fail to add up.
@@ -172,12 +173,7 @@ const incityVariantSchema = new Schema({
   // No nightChargePaise: the early-morning and late-night surcharges are GLOBAL, set once in
   // globalSettings rather than per package (decision-log.md, 2026-08-28).
 
-  // See open-questions.md Q1. Defaults from duration: a 10-hour rental's destination is
-  // advisory, a 3-hour one's is not.
-  enforceDropInCity: { type: Boolean, default: true },
-
-  sortOrder: { type: Number, default: 0 },
-  isActive:  { type: Boolean, default: true },
+  isActive: { type: Boolean, default: true },
 }, { _id: true });
 
 const incityPackageSchema = new Schema({
@@ -216,8 +212,9 @@ const outstationPackageSchema = new Schema({
   maxKm:   { type: Number, required: true },       // band is [minKm, maxKm)
 
   oneWayFarePaise: { type: Number, required: true, min: 0 },
-  // `null` means this band does not sell a same-day return. `default: null`, never `default: 0`
-  // — a missing fare and a free trip must not look the same.
+  // The whole two-way journey, however many days it takes. `null` means this band does not sell
+  // a return trip. `default: null`, never `default: 0` — a missing fare and a free trip must not
+  // look the same.
   roundTripFarePaise: { type: Number, default: null, min: 0 },
 
   driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },

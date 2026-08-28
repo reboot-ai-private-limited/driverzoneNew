@@ -28,13 +28,8 @@ function toIncityVariantDto(variant: IncityVariant): IncityVariantDto {
     id: variant.id,
     label: variant.label,
     included_minutes: variant.includedMinutes,
-    included_km: variant.includedKm,
     base_fare_paise: variant.baseFarePaise,
-    extra_minute_rate_paise: variant.extraMinuteRatePaise,
-    extra_km_rate_paise: variant.extraKmRatePaise,
     driver_commission_bps: variant.driverCommissionBps,
-    enforce_drop_in_city: variant.enforceDropInCity,
-    sort_order: variant.sortOrder,
     is_active: variant.isActive,
   };
 }
@@ -61,7 +56,7 @@ export function toOutstationPackageDto(pkg: OutstationPackage): OutstationPackag
     max_km: pkg.maxKm,
     one_way_fare_paise: pkg.oneWayFarePaise,
     // Passed through as `null`, never coerced to 0. The DTO's own comment carries the reason:
-    // a band that does not sell a same-day return is not a band that sells it for nothing.
+    // a band that does not sell a return trip is not a band that sells it for nothing.
     round_trip_fare_paise: pkg.roundTripFarePaise,
     driver_commission_bps: pkg.driverCommissionBps,
     is_active: pkg.isActive,

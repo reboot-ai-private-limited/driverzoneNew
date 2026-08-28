@@ -45,8 +45,8 @@ A **zone** is a named polygon drawn by an admin. Three types:
 **InCity** — an hourly driver rental within one city.
 - Belongs to exactly one CITY zone
 - Available from one or more PICKUP zones inside that city
-- Offered as **variants**: 3 hours, 10 hours, etc., each with included km, a base fare,
-  overage rates, and a commission split
+- Offered as **variants**: 3 hours, 10 hours, etc., each a duration, a flat fare, and a
+  commission split. There is no overage charge past the included time
 
 **Outstation** — a point-to-point trip out of the city.
 - Matched by **road distance band** (e.g. 70–100 km) and **terrain** (hill / plain)
@@ -73,11 +73,10 @@ The amount comes from the zone if set, otherwise from global settings.
 
 ### 4.2 Admin — package & pricing management
 - FR-P1 Create incity packages: city zone, variants
-- FR-P2 Per variant: label, included minutes, included km, base fare, extra-minute rate,
-  extra-km rate, driver commission
+- FR-P2 Per variant: label, included minutes, base fare, driver commission
 - FR-P3 Create outstation packages: name, terrain, distance band, one-way fare, return fare,
-  driver commission. The fare is flat across the band; a blank return fare means the band does
-  not sell a same-day return
+  driver commission. The fare is flat across the band; the return fare covers the whole two-way
+  journey however long it takes; a blank return fare means the band does not sell one
 - FR-P4 Overlapping outstation distance bands for the same terrain are rejected on save
   (ambiguous match). Splitting an existing band in two is a first-class action
 - FR-P7 **Price does not vary by car category.** The category is recorded on the booking and
@@ -104,7 +103,7 @@ The amount comes from the zone if set, otherwise from global settings.
   fault that should be impossible — see FR-Z3) → show a generic retry message, never
   expose the cause, and raise a high-priority admin alert
 - FR-B5 Show variants with a fully itemised fare — base, pickup fee, taxes, total — plus
-  what is included and what overage costs
+  what is included
 - FR-B6 Select car category. It does not change the price (FR-P7) — it decides which drivers can be offered the booking
 - FR-B7 Book immediately or schedule for a future date/time
 - FR-B8 Live driver tracking, driver contact via masked number, share-trip link
@@ -158,7 +157,7 @@ The amount comes from the zone if set, otherwise from global settings.
 | Risk | Mitigation |
 |------|-----------|
 | No drivers in a zone → dead-end for the customer | Waitlist capture + coverage heatmap drives expansion |
-| Hourly overage disputes ("I was only 20 min late") | OTP-gated start, server-authoritative clock, itemised receipt, grace period |
+| Hourly overage disputes ("I was only 20 min late") | There is no overage charge — the quoted fare is the fare (decision-log.md, 2026-08-28). The exposure moved: a customer who keeps the driver two extra hours pays nothing for them |
 | Drivers cherry-picking long trips | Acceptance-rate scoring feeds wave-1 ranking |
 | Cash-collected commission leakage | Wallet balance goes negative; blocked from duty past a threshold |
 | Admin misdraws a polygon and kills a city | Write-time validation + preview + versioned rollback |

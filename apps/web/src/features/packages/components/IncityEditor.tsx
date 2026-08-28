@@ -32,7 +32,7 @@ import { FareField } from './FareField';
 
 /**
  * The InCity package editor — a full page, because the form is two levels deep: a package holds
- * variants, and each variant carries its own fare and overage rates.
+ * variants, and each variant carries its own duration and fare.
  *
  * `PUT` REPLACES THE WHOLE `variants` ARRAY. The form therefore submits every variant every
  * time, not a diff of the ones that changed — the changed-fields-only idiom from
@@ -261,7 +261,8 @@ export function IncityEditor() {
                 <p className="text-xs text-text-subtle mb-4 max-w-3xl">
                   A variant is a duration option — 3 hours, 10 hours. The customer picks one, so a
                   quote returns every active variant, not just the cheapest. The fare does not
-                  depend on the car.
+                  depend on the car, and there is no overage: running past the included time is an
+                  operations conversation, not a fare line.
                 </p>
 
                 <div className="flex flex-col gap-3">
@@ -315,9 +316,9 @@ interface VariantCardProps {
 /**
  * One variant, collapsed to a summary line and expandable to its fields.
  *
- * The summary is what a variant IS — a duration, an included distance and a price. All three fit
- * on the collapsed row now that there is one fare rather than a grid of them, which is most of
- * why this screen got simpler.
+ * The summary is what a variant IS — a duration and a price. Both fit on the collapsed row, which
+ * is what a variant has been reduced to: the included-km cap, the two overage rates, the
+ * destination flag and the sort order all went on 2026-08-28.
  */
 function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: VariantCardProps) {
   // New rows open, saved rows closed: an empty variant exists only to be filled in.
@@ -345,7 +346,6 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
 
         <span className="text-xs text-text-subtle truncate">
           {variant.includedMinutes === '' ? '—' : `${variant.includedMinutes} min`} ·{' '}
-          {variant.includedKm === '' ? '—' : `${variant.includedKm} km`} ·{' '}
           {variant.baseFare === '' ? 'unpriced' : `₹${variant.baseFare}`}
         </span>
 
@@ -392,7 +392,7 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
 
             <FormField
               label="Included time"
-              hint="Minutes."
+              hint="Minutes. There is no overage charge past it."
               required
               {...(errors[`${scope}.includedMinutes`] === undefined
                 ? {}
@@ -411,41 +411,6 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
               )}
             </FormField>
 
-            <FormField
-              label="Included distance"
-              hint="Km."
-              required
-              {...(errors[`${scope}.includedKm`] === undefined
-                ? {}
-                : { error: errors[`${scope}.includedKm`] })}
-            >
-              {({ id, invalid, describedBy }) => (
-                <Input
-                  id={id}
-                  inputMode="numeric"
-                  value={variant.includedKm}
-                  onChange={(event) => set('includedKm', event.target.value)}
-                  invalid={invalid}
-                  aria-describedby={describedBy}
-                  disabled={disabled}
-                />
-              )}
-            </FormField>
-
-            <FormField label="Sort order" hint="Lowest first, in the customer's list.">
-              {({ id }) => (
-                <Input
-                  id={id}
-                  inputMode="numeric"
-                  value={variant.sortOrder}
-                  onChange={(event) => set('sortOrder', event.target.value)}
-                  disabled={disabled}
-                />
-              )}
-            </FormField>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <FareField
               label="Base fare"
               value={variant.baseFare}
@@ -454,22 +419,7 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
               disabled={disabled}
               required
             />
-            <FareField
-              label="Extra time"
-              hint="Per minute past the included time."
-              value={variant.extraMinuteRate}
-              onChange={(value) => set('extraMinuteRate', value)}
-              error={errors[`${scope}.extraMinuteRate`]}
-              disabled={disabled}
-            />
-            <FareField
-              label="Extra distance"
-              hint="Per km past the included distance."
-              value={variant.extraKmRate}
-              onChange={(value) => set('extraKmRate', value)}
-              error={errors[`${scope}.extraKmRate`]}
-              disabled={disabled}
-            />
+
             <FormField
               label="Driver's share"
               hint="The company keeps the rest."
@@ -498,28 +448,16 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
             </FormField>
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <label className="flex items-center gap-2 text-xs text-text">
-              <input
-                type="checkbox"
-                checked={variant.isActive}
-                onChange={(event) => set('isActive', event.target.checked)}
-                disabled={disabled}
-                className="size-4 accent-interactive"
-              />
-              Active
-            </label>
-            <label className="flex items-center gap-2 text-xs text-text">
-              <input
-                type="checkbox"
-                checked={variant.enforceDropInCity}
-                onChange={(event) => set('enforceDropInCity', event.target.checked)}
-                disabled={disabled}
-                className="size-4 accent-interactive"
-              />
-              Drop must be in the city
-            </label>
-          </div>
+          <label className="flex items-center gap-2 text-xs text-text">
+            <input
+              type="checkbox"
+              checked={variant.isActive}
+              onChange={(event) => set('isActive', event.target.checked)}
+              disabled={disabled}
+              className="size-4 accent-interactive"
+            />
+            Active
+          </label>
 
           <div className="border-t border-border pt-3">
             <CommissionSplitLine

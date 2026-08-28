@@ -20,6 +20,46 @@ entry links to it.
 
 ---
 
+## 2026-08-28 — An incity variant is a duration and a price; a return fare is the whole two-way trip
+
+**Decision:** two changes, both narrowing what a package can express.
+
+- **The incity variant loses `includedKm`, `extraMinuteRatePaise`, `extraKmRatePaise`,
+  `enforceDropInCity` and `sortOrder`.** What is left is `label`, `includedMinutes`,
+  `baseFarePaise` and `driverCommissionBps`. `includedMinutes` stays because it is what the
+  customer buys and what tells the driver when they are released.
+- **`roundTripFarePaise` is the whole two-way journey**, not a same-day round trip. A 540 km
+  destination matches the band containing 540 — the ONE-WAY distance — and that band's return
+  fare covers all 1,080 km of driving, however many days the driver is away.
+
+This closes three open questions, all by deletion rather than by specification:
+[`LLD/open-questions.md`](LLD/open-questions.md) **Q1** (no destination rule), **Q2** (no overage
+billing at all), and **Q4** (a round trip is however long it takes).
+
+**It also removes the rung-(a) guard in `resolveForTrip`.** Incity used to win only within
+`incity.max_distance_multiple` × the longest variant's `includedKm`; that field is gone and the
+guard was dropped rather than re-expressed as a flat km limit. This reverses the 2026-08-20 entry
+below that introduced the multiple, and the `incity.max_distance_multiple` settings key that entry
+promised is no longer coming.
+
+**What it costs, and none of it is hypothetical:**
+
+- **A 3-hour booking that runs 3h 40m is free.** The most common real-world event in an hourly
+  product now has no fare consequence — it is an operations conversation.
+- **A long cross-city trip sells as an hourly rental.** Both points inside the city zone means
+  incity at any distance, and with overage gone there is nothing to collect the difference. A
+  60 km run at ₹900 is now a legal outcome.
+- **A 2-day and a 5-day outstation trip to the same town pay the same**, because distance is the
+  only thing that selects a band and there is no per-day allowance.
+
+**Why anyway:** the fields were carrying a pricing model nobody was going to operate. An unused
+overage rate is not free — it is a number in a form that has to be right, a field in a snapshot
+that has to be frozen, and a dispute path that has to be defended. Removing them makes the
+product smaller and the admin screen honest about what it actually charges. Each cost above is
+recoverable by restoring the field it came from; none of them is recoverable by accident.
+
+---
+
 ## 2026-08-28 — Price no longer varies by car category; an outstation band is a flat fare
 
 **Decision:** A package's price is not keyed by car category. An outstation band carries

@@ -38,10 +38,9 @@ the answer costs: **flat pricing needs many narrow bands**, where base-plus-per-
 few wide ones. That is why splitting a band is a first-class action in the admin panel and why
 the band list makes an uncovered stretch impossible to miss.
 
-**`roundTripFarePaise` is nullable**, and `null` means *this band does not sell a same-day
-return* — never that the return is free. A long hill band the driver cannot get back from in a
-day is a real case, and it is the successor to the old "leave that price row out" affordance. A
-`ROUND_TRIP` request against such a band is `NO_PACKAGE_AVAILABLE`, not
+**`roundTripFarePaise` is nullable**, and `null` means *this band does not sell a return trip* —
+never that the return is free. It is the successor to the old "leave that price row out"
+affordance. A `ROUND_TRIP` request against such a band is `NO_PACKAGE_AVAILABLE`, not
 `NO_PACKAGE_FOR_DISTANCE`: the distance *is* covered, and sending ops to add a band would send
 them to create one that already exists.
 
@@ -54,21 +53,26 @@ belongs in a form field.
 both sides let a form save 75% and 20% and quietly leave 5% of every trip in nobody's column.
 The pair that could disagree no longer exists.
 
-> 🔴 **`open-questions.md` Q4 is still open**, and two-way pricing cannot be fully specified
-> until it closes: maximum included wait at the destination, per-day driver allowance,
-> night-halt charge, and whether a multi-day trip is the same product at all. The recommendation
-> on file is to cap v1 at same-day return and defer multi-day entirely — it has different driver
-> economics and is a different product. Until that is decided, `ROUND_TRIP` means same-day.
+**`ROUND_TRIP` is the whole two-way journey**, and `open-questions.md` Q4 closed on that:
+however many days the driver is away, `roundTripFarePaise` covers it. There is no same-day cap,
+no maximum included wait and no per-day allowance.
+
+The band is matched on the **one-way** distance. A 540 km destination matches the band containing
+540, and that band's return fare covers all 1,080 km of driving. Its cost, recorded rather than
+hidden: a 2-day and a 5-day trip to the same town pay the same, because distance is the only
+thing that selects a band.
 
 ### InCity is priced per variant
 
-A variant is a duration option carrying `includedMinutes`, `includedKm`, its own
-`baseFarePaise`, and its own `driverCommissionBps`. The customer picks the variant, so a quote
-returns **all** active variants of the winning package, not one.
+A variant is a duration and a price: `includedMinutes`, `baseFarePaise`, `driverCommissionBps`.
+The customer picks the variant, so a quote returns **all** active variants of the winning package,
+not one.
 
-Overage beyond the included time or distance is billed at the variant's own
-`extraMinuteRatePaise` / `extraKmRatePaise` (`open-questions.md` Q2). Unlike outstation, incity
-keeps its overage rates — "included km" would mean nothing if exceeding it were free.
+**There is no overage.** A 3-hour booking that runs 3h 40m is an operations conversation, not a
+fare line — `open-questions.md` Q2 closed that way, by deleting the rates rather than specifying a
+grace-and-blocks policy. `includedMinutes` stays because it is what the customer buys and what
+tells the driver when they are released; the `includedKm` cap and both overage rates are gone,
+along with `enforceDropInCity` (Q1) and `sortOrder`.
 
 Schemas for both live in [`database-schema.md`](database-schema.md).
 
@@ -159,18 +163,19 @@ they do not pick a price tier — the car category no longer reaches this module
      outstation → the package + its fare for `direction`
 ```
 
-### On rung (a) — and the guard it needs
+### On rung (a) — unconditional, and what that costs
 
-This rung is reachable and it has teeth. A 60 km drop that happens to land inside the city
-polygon matches both an incity package (city zone) and an outstation band (distance). Preferring
-incity blindly sells an hourly rental for a trip that is plainly an outstation run: the
-extra-km rate collects roughly the right money, but it is the wrong product, and the customer
-never chose it.
+**If an incity package matches, it wins, at any distance.**
 
-**The guard:** incity wins only if `distanceKm` fits within `incity.max_distance_multiple` ×
-the longest active variant's `includedKm`. Above that it falls through to outstation. The
-multiple will live in `globalSettings` so ops can tune it without a deploy; the key is not
-defined yet (see below).
+There used to be a guard: incity won only if `distanceKm` fitted within
+`incity.max_distance_multiple` × the longest variant's `includedKm`, so a 60 km drop that landed
+inside the city polygon fell through and priced as the outstation run it plainly was. That guard
+leaned on `includedKm`, which was removed 2026-08-28, and the decision was to drop it rather than
+re-express it as a flat km limit ([`../decision-log.md`](../decision-log.md)).
+
+The cost is not hypothetical: a long cross-city trip now sells as an hourly rental, and with
+overage gone there is nothing to collect the difference. It was chosen deliberately, and the
+`incity.max_distance_multiple` settings key it would have needed is no longer coming.
 
 ### On rung (b) — defensive only
 
@@ -279,7 +284,7 @@ The same rule as everywhere else: **"we can't serve this" is a 200 with `availab
 | `to` in a hill zone that overlaps the city zone | Both candidates exist; rung (a) picks incity. Legal — Z-2 only forbids same-*type* overlap |
 | `distanceKm` exactly on a band boundary | Half-open: 70 km belongs to `70–100`, never to `0–70` |
 | `distanceKm` below every band's `minKm` | `NO_PACKAGE_FOR_DISTANCE`. Ops needs a 0–N band |
-| A 60 km drop inside the city polygon | Falls through to outstation via the `incity.max_distance_multiple` guard |
+| A 60 km drop inside the city polygon | Sells as **incity**. The guard that used to catch this is gone, and with no overage there is nothing to collect the difference — see §On rung (a) |
 | Package deactivated between quote and booking | The quote is honoured — its fare snapshot is frozen and immutable (B-1) |
 | A price edited inside the quote's TTL | The quote holds the old fare until it expires. Re-quoting shows the new one; `QUOTE_EXPIRED` carries the diff |
 | Active package with zero active variants | P-3 forbids creating it; the nightly job alerts if one exists |
@@ -327,7 +332,6 @@ are specified in [`admin-panel.md`](admin-panel.md).
 |---|---|
 | The `unservedDistanceRequests` write on `NO_PACKAGE_FOR_DISTANCE` | Nothing owns that collection yet |
 | An audit port and adapter | Nothing. Every admin write in `zones` records one; none in `packages` do |
-| `incity.max_distance_multiple` moving into the `settings` registry | Nothing — it is a constant `2` in `resolveForTrip.usecase.ts`. A key is added when the code reading it is written |
 | Rung (c) comparing a full computed total rather than the band fare | The `pricing` module |
 
 Closed since: the DTO mapper and `packages.typecheck.ts` (the controllers used to put camelCase

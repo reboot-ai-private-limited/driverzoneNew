@@ -46,7 +46,7 @@ describe('buildOutstationBody', () => {
    * The distinction the string draft exists to preserve, and the reason the wire field is
    * nullable rather than defaulted to zero.
    */
-  it('sends a BLANK return fare as null — the band does not sell one', () => {
+  it('sends a BLANK return fare as null — the band does not sell a return trip', () => {
     const result = buildOutstationBody(sellableBand({ roundTripFare: '' }));
 
     expect(result.ok && result.body.roundTripFarePaise).toBeNull();
@@ -173,10 +173,7 @@ describe('buildIncityBody', () => {
     const variant = draft.variants[0]!;
     variant.label = '3 Hours';
     variant.includedMinutes = '180';
-    variant.includedKm = '30';
     variant.baseFare = '900';
-    variant.extraMinuteRate = '5';
-    variant.extraKmRate = '12';
     variant.driverCommission = '75';
     return draft;
   }
@@ -190,24 +187,21 @@ describe('buildIncityBody', () => {
     expect(result.body.variants[0]).toEqual({
       label: '3 Hours',
       includedMinutes: 180,
-      includedKm: 30,
       baseFarePaise: 90000,
-      extraMinuteRatePaise: 500,
-      extraKmRatePaise: 1200,
       driverCommissionBps: 7500,
-      enforceDropInCity: true,
-      sortOrder: 0,
       isActive: true,
     });
   });
 
-  it('treats a blank overage rate as zero, unlike a blank return fare', () => {
+  it('requires the included time — it is what the customer buys', () => {
     const draft = sellablePackage();
-    draft.variants[0]!.extraKmRate = '';
+    draft.variants[0]!.includedMinutes = '';
 
     const result = buildIncityBody(draft);
 
-    expect(result.ok && result.body.variants[0]!.extraKmRatePaise).toBe(0);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[`variants.${draft.variants[0]!.key}.includedMinutes`]).toBeDefined();
   });
 
   it('omits an empty description rather than sending undefined', () => {
@@ -270,13 +264,8 @@ describe('buildIncityBody', () => {
           id: 'v1',
           label: '10 Hours',
           included_minutes: 600,
-          included_km: 100,
           base_fare_paise: 220000,
-          extra_minute_rate_paise: 400,
-          extra_km_rate_paise: 1000,
           driver_commission_bps: 7500,
-          enforce_drop_in_city: false,
-          sort_order: 2,
           is_active: true,
         },
       ],
@@ -294,13 +283,8 @@ describe('buildIncityBody', () => {
     expect(result.body.variants[0]).toEqual({
       label: '10 Hours',
       includedMinutes: 600,
-      includedKm: 100,
       baseFarePaise: 220000,
-      extraMinuteRatePaise: 400,
-      extraKmRatePaise: 1000,
       driverCommissionBps: 7500,
-      enforceDropInCity: false,
-      sortOrder: 2,
       isActive: true,
     });
   });

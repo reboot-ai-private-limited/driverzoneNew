@@ -110,7 +110,7 @@ skins, verified on real devices.
 - Auth, saved addresses, coverage pre-check on the home screen
 - Pickup/drop entry with map pins and search
 - Incity/outstation switching that carries points across (FR-B3)
-- Variant + car category selection with the full fare card and overage notice
+- Variant selection with the full fare card. No overage notice — there is no overage, and the car category does not change the price
 - Booking, live tracking, masked calling, share-trip
 - Cancellation with the fee shown before confirming
 - Receipt, rating, history
@@ -130,7 +130,8 @@ Ledger writes ship in Phase 4/5; this phase is the finance surface on top.
 
 Siliguri only. Two pickup zones — one free, one paid. Ten drivers. Staff-and-friends bookings.
 
-Watch: assignment rate, time to assignment, offer delivery rate, overage disputes,
+Watch: assignment rate, time to assignment, offer delivery rate, hourly bookings running
+significantly past their included time (unbilled since 2026-08-28),
 `ZONE_CONFIG_FAULT` count (must be zero).
 
 Fix what breaks. **Do not add features during the pilot** — the pilot's job is to tell you

@@ -111,18 +111,14 @@ sell hourly rentals in. Neither is a fault — both hand the customer outstation
 mostly a formality: the customer is doing errands, multiple stops, possibly a nearby town
 and back. Hard-blocking on `to ∉ city` will reject bookings you want to take.
 
-Recommended refinement:
+**Resolved 2026-08-28, and not the way this section recommended.** There is no destination rule
+at all: `enforce_drop_in_city` was deleted along with the 4-hour threshold it was defaulted from
+(`open-questions.md` Q1, [`../decision-log.md`](../decision-log.md)).
 
-| Variant length | Destination handling |
-|----------------|----------------------|
-| ≤ 4 hours | Hard block if outside city — a 200 km drop genuinely is the wrong product |
-| > 4 hours | **Advisory only.** Show *"Your drop-off is outside <City>. Extra distance beyond <N> km will be charged at ₹<r>/km."* Let the booking through. |
-
-The included-km cap plus the extra-km rate already price the risk correctly. The hard
-block adds nothing for long variants except lost bookings.
-
-Implement as a per-variant boolean `enforce_drop_in_city`, defaulted from
-`included_minutes <= 240`, so operations can tune it per package without a deploy.
+The drop point still decides the PRODUCT — inside the city zone is incity, outside is outstation —
+it just no longer blocks or warns. The refinement above leaned on "the included-km cap plus the
+extra-km rate already price the risk"; both were removed the same day, so the risk is now unpriced
+rather than priced differently.
 
 ## Outstation resolution
 

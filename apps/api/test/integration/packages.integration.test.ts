@@ -229,13 +229,7 @@ describe('Packages Repository Integration', () => {
       cityZoneId: zone1,
       name: 'Siliguri Hourly',
       variants: [
-        {
-          label: '3 Hours',
-          includedMinutes: 180,
-          includedKm: 30,
-          baseFarePaise: 90000,
-          driverCommissionBps: 7500,
-        },
+        { label: '3 Hours', includedMinutes: 180, baseFarePaise: 90000, driverCommissionBps: 7500 },
       ],
     } as const;
 
@@ -248,9 +242,8 @@ describe('Packages Repository Integration', () => {
       expect(found[0]?.name).toBe('Siliguri Hourly');
       expect(found[0]?.variants[0]?.includedMinutes).toBe(180);
       expect(found[0]?.variants[0]?.baseFarePaise).toBe(90000);
-      // Defaults come from the schema, so the mapper has to carry them back out.
-      expect(found[0]?.variants[0]?.extraKmRatePaise).toBe(0);
-      expect(found[0]?.variants[0]?.extraMinuteRatePaise).toBe(0);
+      expect(found[0]?.variants[0]?.driverCommissionBps).toBe(7500);
+      // `isActive` defaults in the schema, so the mapper has to carry it back out.
       expect(found[0]?.variants[0]?.isActive).toBe(true);
     });
 

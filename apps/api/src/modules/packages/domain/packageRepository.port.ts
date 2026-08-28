@@ -20,13 +20,8 @@ export interface CreateIncityPackageData {
   variants: Array<{
     label: string;
     includedMinutes: number;
-    includedKm: number;
     baseFarePaise: number;
-    extraMinuteRatePaise?: number;
-    extraKmRatePaise?: number;
     driverCommissionBps: number;
-    enforceDropInCity?: boolean;
-    sortOrder?: number;
     isActive?: boolean;
   }>;
   isActive?: boolean;

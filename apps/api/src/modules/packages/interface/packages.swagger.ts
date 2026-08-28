@@ -30,13 +30,8 @@ const incityVariantDtoSchema = z.object({
   id: z.string(),
   label: z.string(),
   included_minutes: z.number(),
-  included_km: z.number(),
   base_fare_paise: z.number(),
-  extra_minute_rate_paise: z.number(),
-  extra_km_rate_paise: z.number(),
   driver_commission_bps: z.number(),
-  enforce_drop_in_city: z.boolean(),
-  sort_order: z.number(),
   is_active: z.boolean(),
 });
 
@@ -56,7 +51,7 @@ const outstationPackageDtoSchema = z.object({
   min_km: z.number(),
   max_km: z.number(),
   one_way_fare_paise: z.number(),
-  /** Null when the band does not offer a same-day return — not zero. */
+  /** The whole two-way journey. Null when the band does not sell a return trip — not zero. */
   round_trip_fare_paise: z.number().nullable(),
   driver_commission_bps: z.number(),
   is_active: z.boolean(),

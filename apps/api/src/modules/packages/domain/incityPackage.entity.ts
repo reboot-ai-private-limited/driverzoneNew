@@ -3,22 +3,29 @@
  *
  * A variant carries its own price. There is no `prices[]` keyed by car category any more — an
  * SUV and a hatchback pay the same fare, retired 2026-08-28 (docs/decision-log.md).
+ *
+ * It used to also carry an included-km cap, two overage rates, a destination-enforcement flag and
+ * a sort order. All four went the same day; see `IncityVariant` below.
  */
 
+/**
+ * A duration and a price, and nothing else.
+ *
+ * THERE IS NO OVERAGE. `includedMinutes` is what the customer buys and what tells the driver when
+ * they are released; a booking that runs past it is an operations conversation, not a fare line.
+ * `extraMinuteRatePaise`, `extraKmRatePaise` and the `includedKm` cap they billed against were
+ * removed 2026-08-28, closing open-questions.md Q2 by deciding there is nothing to bill.
+ *
+ * `enforceDropInCity` went with them (Q1): there is no per-variant destination rule any more.
+ * `sortOrder` too — variants display in stored order, which is the order the editor lists them in.
+ */
 export interface IncityVariant {
   id: string;
   label: string;
   includedMinutes: number;
-  includedKm: number;
   baseFarePaise: number;
-  /** Overage beyond the variant's included minutes. See open-questions.md Q2. */
-  extraMinuteRatePaise: number;
-  /** Overage beyond the variant's included km. Billed independently of time, never netted. */
-  extraKmRatePaise: number;
   /** The driver's share in basis points. The company's is `10000 - this`, never stored. */
   driverCommissionBps: number;
-  enforceDropInCity: boolean;
-  sortOrder: number;
   isActive: boolean;
 }
 

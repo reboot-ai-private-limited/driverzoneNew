@@ -298,9 +298,10 @@ export function OutstationEditor() {
               <p className="text-xs text-text-subtle mb-4 max-w-3xl">
                 The fare is <strong className="font-medium text-text">flat across the band</strong>
                 : every trip that lands in this range pays the same, whichever car it is. A round
-                trip is priced <strong className="font-medium text-text">independently</strong>,
-                never as a multiple of the one-way — the driver waits at the destination and may
-                get no return fare.
+                return fare covers the whole{' '}
+                <strong className="font-medium text-text">two-way journey</strong> — out and back,
+                however many days that takes — and is set independently, never as a multiple of
+                the one-way.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -314,7 +315,7 @@ export function OutstationEditor() {
                 />
                 <FareField
                   label="Return fare"
-                  hint="Leave blank if this band does not offer a same-day return."
+                  hint="The whole two-way journey. Blank if this band does not sell one."
                   value={draft.roundTripFare}
                   onChange={(value) => edit({ ...draft, roundTripFare: value })}
                   error={errors['roundTripFare']}

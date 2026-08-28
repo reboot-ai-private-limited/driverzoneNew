@@ -222,16 +222,21 @@ Package "Siliguri Hourly"     City [Siliguri ▾]     [Active ✓]
 
 Variants                                              [+ Add variant]
 ┌────────────────────────────────────────────────────────────────────┐
-│ ▸ 3 Hours    180 min · 30 km · ₹900                                │
-│ ▾ 10 Hours   600 min · 100 km · ₹2,200                             │
-│     Label [10 Hours]  Time [600] min  Distance [100] km  Sort [2]  │
-│     Base fare ₹[2200]  Extra time ₹[5]/min  Extra km ₹[12]         │
-│     Driver's share [75]%          (the company keeps the rest)     │
-│     [✓] Active   [ ] Drop must be in the city                      │
+│ ▸ 3 Hours    180 min · ₹900                                        │
+│ ▾ 10 Hours   600 min · ₹2,200                                      │
+│     Label [10 Hours]   Included time [600] min                     │
+│     Base fare ₹[2200]  Driver's share [75]%                        │
+│     [✓] Active                                                     │
 │     ──────────────────────────────────────────────────────────     │
 │     Base fare ₹2,200 · Driver earns ₹1,650 · Company keeps ₹550    │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+A variant is a duration and a price. The included-km cap, both overage rates, the
+destination-enforcement flag and the sort order were all removed 2026-08-28
+([`../decision-log.md`](../decision-log.md)) — there is **no overage**, so `includedMinutes` tells
+the driver when they are released and has no fare consequence when it is exceeded. Variants
+display in the order they are listed here.
 
 The split line is essential and is why it is on every variant: a commission error is invisible
 in a form field and obvious in a rupee figure. It shows the split of the BASE FARE and says so —
@@ -258,15 +263,17 @@ Band "PKG-1"   Terrain [Hills ▾]   Distance [70] – [100] km   [Active ✓]
     existing band in two, use its Split action instead.
 
 Pricing        One-way fare  ₹[2,100]
-               Return fare   ₹[3,700]   blank = no same-day return offered
+               Return fare   ₹[3,700]   the whole two-way journey;
+                                        blank = this band sells no return trip
                Driver's share  [75]%    (the company keeps the rest)
 
                One-way ₹2,100 · Driver earns ₹1,575 · Company keeps ₹525
                Return  ₹3,700 · Driver earns ₹2,775 · Company keeps ₹925
 ```
 
-The fare is **flat across the band** — 72 km and 98 km pay the same — and the return fare is set
-independently, never as a multiple of the one-way.
+The fare is **flat across the band** — 72 km and 98 km pay the same — and the band is matched on
+the ONE-WAY distance. The return fare covers the whole out-and-back journey, however many days it
+takes, and is set independently rather than as a multiple of the one-way.
 
 ### The band list, and the gap
 

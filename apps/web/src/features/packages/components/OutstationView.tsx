@@ -129,7 +129,7 @@ export function OutstationView({ packages, refetching }: OutstationViewProps) {
         if (row.kind !== 'band') return <Dash />;
         // Null is "not offered", never "free" — so it renders as a dash with a reason, not ₹0.
         return row.band.round_trip_fare_paise === null ? (
-          <span className="text-text-subtle" title="Same-day return not offered on this band">
+          <span className="text-text-subtle" title="This band does not sell a return trip">
             —
           </span>
         ) : (

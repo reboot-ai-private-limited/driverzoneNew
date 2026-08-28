@@ -85,6 +85,23 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Changed
 
+- **An incity variant is a duration and a price.** `label`, `includedMinutes`, `baseFarePaise`,
+  `driverCommissionBps` — nothing else. `includedMinutes` stays because it is what the customer
+  buys and what tells the driver when they are released.
+
+- **The outstation return fare is the whole two-way journey**, not a same-day round trip. A 540 km
+  destination matches the band containing 540 — the ONE-WAY distance — and that band's return fare
+  covers all 1,080 km, however many days the driver is away.
+
+- **Incity beats outstation unconditionally.** The rung-(a) distance guard leaned on `includedKm`
+  and was dropped with it rather than re-expressed as a flat km limit, which reverses the
+  2026-08-20 `incity.max_distance_multiple` decision. Both points inside the city zone now means
+  incity at any distance — and with overage gone, a 60 km cross-city run sells as a ₹900 hourly
+  rental with nothing to collect the difference. Deliberate; see `docs/decision-log.md`.
+
+- **Three open questions closed by deletion** rather than specification: Q1 (no destination rule),
+  Q2 (no overage billing), Q4 (a round trip is however long it takes).
+
 - **Price no longer varies by car category, in either product.** An outstation band is
   `oneWayFarePaise`, a nullable `roundTripFarePaise` and one `driverCommissionBps`; an incity
   variant carries its own fare and overage rates. The `prices[]` subdocument, `CommissionType`
@@ -120,6 +137,11 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   pins the difference.
 
 ### Removed
+
+- **`includedKm`, `extraMinuteRatePaise`, `extraKmRatePaise`, `enforceDropInCity` and `sortOrder`**
+  from the incity variant. **There is no overage**: a 3-hour booking that runs 3h 40m is an
+  operations conversation, not a fare line. `computeFinalFare` and the fare snapshot's `rates`
+  block go with them, and the fare card no longer discloses per-minute or per-km rates.
 
 - **`nightChargePaise` from incity price rows**, and `night_charge_paise` from `IncityPriceDto`.
   Time-of-day surcharges are global now, and the same fare line configured per-row *and* globally

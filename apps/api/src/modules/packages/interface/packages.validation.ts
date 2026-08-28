@@ -36,17 +36,16 @@ void _terrainsMatchGeo;
 
 // ─── InCity ────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A duration and a price. Zod strips unknown keys by default, so a caller still sending
+ * `includedKm` or `extraKmRatePaise` gets them dropped rather than honoured — which is the right
+ * failure for a field that no longer means anything.
+ */
 const incityVariantSchema = z.object({
   label: z.string().min(1),
   includedMinutes: z.number().int().min(1),
-  includedKm: z.number().int().min(0),
   baseFarePaise: paise,
-  extraMinuteRatePaise: paise.optional().default(0),
-  extraKmRatePaise: paise.optional().default(0),
   driverCommissionBps: commissionBps,
-  /** Per-variant because it defaults from duration — off above 4 hours. open-questions.md Q1. */
-  enforceDropInCity: z.boolean().optional().default(true),
-  sortOrder: z.number().int().optional().default(0),
   isActive: z.boolean().optional().default(true),
 });
 
@@ -68,7 +67,9 @@ export const createOutstationPackageSchema = z.object({
   maxKm: z.number().int().min(1),
   oneWayFarePaise: paise,
   /**
-   * `null` — or absent — means this band does not sell a same-day return. NOT zero: `.nullable()`
+   * The fare for the whole two-way journey, not capped to same-day.
+   *
+   * `null` — or absent — means this band does not sell a return trip. NOT zero: `.nullable()`
    * rather than `.default(0)` is the whole point, because a free return trip and an unavailable
    * one must not be the same value (docs/LLD/packages.md §Outstation is priced per direction).
    */

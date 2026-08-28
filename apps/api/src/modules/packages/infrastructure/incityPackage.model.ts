@@ -7,19 +7,17 @@ import { Schema, model } from 'mongoose';
 const incityVariantSchema = new Schema(
   {
     label: { type: String, required: true },
+    // What the customer buys. There is no overage: `extraMinuteRatePaise`, `extraKmRatePaise`
+    // and the `includedKm` cap were removed 2026-08-28, along with `enforceDropInCity` and
+    // `sortOrder` (docs/decision-log.md).
     includedMinutes: { type: Number, required: true, min: 1 },
-    includedKm: { type: Number, required: true, min: 0 },
 
     baseFarePaise: { type: Number, required: true, min: 0 },
-    extraMinuteRatePaise: { type: Number, default: 0, min: 0 },
-    extraKmRatePaise: { type: Number, default: 0, min: 0 },
 
     // Basis points: 7500 is 75%. The company's share is `10000 - this` and is NOT stored —
     // two independently stored shares are two numbers that can fail to add up.
     driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
 
-    enforceDropInCity: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },
   { _id: true },

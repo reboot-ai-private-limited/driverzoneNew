@@ -21,7 +21,7 @@ Siliguri.
 
 ```
 Dashboard          live KPIs, active trips map, alerts
-Zones              tree: City → Pickup zones; map editor; hill zones
+Zones              map editor + typed rail: city card, pickup pair, hill list
 Packages
   ├ InCity         per city → variants → per-car pricing
   └ Outstation     distance bands → per-car × direction pricing
@@ -32,7 +32,7 @@ Drivers            list, documents, verification, wallet, duty history
 Live Map           on-duty drivers + in-flight trips
 Finance            earnings ledger, payout batches, negative balances
 Coverage           heatmap of failed lookups — the expansion roadmap
-Settings           global settings with inline documentation
+Settings           global settings, rendered from the API's own registry
 Audit Log          every admin action, filterable
 ```
 
@@ -47,30 +47,83 @@ One Coverage screen. There is no city switcher and no zone tree, because there i
 left to draw — the three types are flat and independent (`domain-model.md`).
 
 ```
-┌──────────────┬────────────────────────────────────────────┐
-│ ZONES        │                                            │
-│              │                                            │
-│ CITY         │              MAP                           │
-│ • Siliguri   │      (MapLibre + Mapbox Draw)              │
-│              │                                            │
-│ PICKUP       │   ── city boundary   (blue, dashed)        │
-│ • Central    │   ── pickup zone     (green fill, FREE)    │
-│ • Paid North │   ── pickup zone     (amber fill, PAID)    │
-│              │   ── hill zones      (brown hatch)         │
-│ HILL         │   ── violation       (red, animated)       │
-│ • Darjeeling │                                            │
-│ • Kalimpong  ├────────────────────────────────────────────┤
-│              │ Name  [Siliguri Paid North       ]         │
-│ [+ New Zone] │ Type  [PICKUP ▾]                           │
-│              │ Charge[PAID  ▾]   Fee ₹[100] (blank=global)│
-│              │ Area  12.4 km²    Vertices 34              │
-│              │                                            │
-│              │ ⚠ Overlaps active PICKUP zone "Central"    │
-│              │   [Show on map]                            │
-│              │                                            │
-│              │        [Cancel]  [Save]  ← disabled        │
-└──────────────┴────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│ Zones                                          [ Map | List ]         │
+├──────────────────────────┬────────────────────────────────────────────┤
+│ ╭──────────────────────╮ │ [Map|Satellite|Terrain]  [search…]         │
+│ │ CITY BOUNDARY        │ │                                            │
+│ │ Siliguri · SLG       │ │              MAP                           │
+│ │ 148.2 km² · v3       │ │         (Google Maps JS API)               │
+│ │ ──────────────────── │ │                                            │
+│ │ Defines incity.      │ │   ── city boundary   (blue, DASHED always) │
+│ │ Siliguri Hourly →    │ │   ── pickup zone     (green fill, FREE)    │
+│ │ [ Edit boundary ]    │ │   ── pickup zone     (amber fill, PAID)    │
+│ ╰──────────────────────╯ │   ── hill zones      (violet)              │
+│                          │   ── the draft       (interactive, dashed) │
+│ PICKUP · 2               │   ── violation       (red)                 │
+│ 34% of Siliguri covered  ├────────────────────────────────────────────┤
+│ • Central       FREE     │ Name [Siliguri Paid North]  Code [SLG-PN]  │
+│ • Paid North    PAID     │ Charge [PAID ▾]  Fee ₹[100] (blank=global) │
+│ [+ Pickup zone]          │ Area 12.4 km²  Vertices 34  [Import GeoJSON]│
+│                          │                                            │
+│ HILL · 4                 │ ⚠ Overlaps active PICKUP zone "Central"    │
+│ • Darjeeling             │   [Show]                                   │
+│ • Kalimpong              │                                            │
+│ [+ Hill zone]            │ Saving creates version 4.                  │
+│                          │        [Cancel]  [Save]  ← disabled        │
+└──────────────────────────┴────────────────────────────────────────────┘
 ```
+
+**Three types, three renderings — this is the point of the screen.** A table gives every zone
+the same row, and the three types are not the same kind of thing. The tell was already there in
+the old one: a `Pickup charge` column reading `—` on five rows out of seven. Sparse columns mean
+sparse *entities*.
+
+| | Cardinality | Renders as |
+|---|---|---|
+| CITY | exactly one, operationally | a **card**, and **no add button** — the absence is what says "setting, not collection", more plainly than any label could |
+| PICKUP | a fixed pair, FREE and PAID | two rows plus the number that matters: **% of the city covered** |
+| HILL | N and growing | a list |
+
+The city card also carries **which packages sell against it**, read from
+`GET /admin/packages/incity` and linked out to the package editor. `cityZoneId` is the only zone
+reference either product carries ([`packages.md`](packages.md)) and it is invisible on every
+other screen — so zero active packages renders as a warning, not an empty list: it means every
+hourly quote returns `NO_PACKAGE_AVAILABLE`.
+
+### Two views
+
+`[ Map | List ]`, map by default, both in the URL alongside the selected zone so a link to "the
+zone I'm asking about" is a link rather than a description.
+
+The list is the **audit** surface — superseded versions and inactive zones, which stack
+invisibly on a map — and keeps the search, sort and paging the old screen had. The map answers
+what the list cannot: whether the city actually has coverage.
+
+### Getting a shape in
+
+**Import is the primary path, drawing is the fallback.** A municipal corporation boundary, a
+subdivision — these are published and exist as OSM relations, exportable to GeoJSON in about a
+minute. Tracing one by hand is slower and less accurate on any basemap, and it puts a zone edge
+in the wrong place with nobody able to say by how much. `Import GeoJSON` accepts a Feature, a
+FeatureCollection or a bare geometry, takes the largest polygon out of a MultiPolygon and says
+so, and normalises winding on the way in so the browser's verdict matches the API's.
+
+Hand-drawing stays for the case with no published shape — a pickup zone, which is a commercial
+decision about where drivers wait rather than a line on a survey.
+
+**Map types, and the three are not interchangeable.** *Satellite* is Google's hybrid view —
+imagery **with** road labels — and it answers the question a pickup boundary actually asks: where
+the built-up area ends, and what road that is. Neither layer alone answers it. *Terrain* carries
+shaded relief, for the hill-zone question: the edge is a price boundary that must cover the
+approach corridor, and relief is what shows where the corridor runs. *Map* is the default, being
+the least visually noisy to select polygons on.
+
+**Address search moves the map and nothing else.** The gap against a commercial basemap was never
+that it fails to draw every shop — you do not trace a service boundary along a shopfront. It was
+orientation: standing on a map of Siliguri and not knowing which part you are looking at. A search
+box solves that directly. It never touches the draft geometry, so an admin mid-boundary who looks
+up a landmark does not come back to a changed polygon.
 
 **A hill zone's edge is a price boundary.** Terrain is decided by whether the customer's drop
 point lands inside the polygon, not by measuring the route (`packages.md` §Terrain), so drawing
@@ -268,6 +321,62 @@ DZ-8F3K2M · Siliguri Hourly 3H · Sedan · ₹945
 ```
 
 Support staff should never need an engineer to explain what happened to a booking.
+
+## Settings
+
+The tunable numbers — fare surcharges, waiting, dispatch, cancellation — at `/settings`.
+Built on `GET`/`PATCH /api/admin/settings` (see
+[`database-schema`](database-schema.md#globalsettings)).
+
+**The form is not hand-built.** Every setting arrives carrying its own `group`, `label`, `unit`
+and `description`, and the screen renders from that: `RUPEES` gets a `₹`-prefixed box, `MINUTES`
+and `SECONDS` get a suffixed one, `TIME_WINDOW` gets a pair of time pickers. Nothing in
+`features/settings/` knows any setting by name. A key added to the API's registry appears here,
+correctly rendered and documented, with no frontend change at all — which is the property that
+makes the registry worth having.
+
+```
+Settings                          3 unsaved changes  [Discard]  [Save changes]
+
+These take effect within a minute, on new quotes only. Amounts are in whole rupees.
+
+┌ Fare & surcharges ──────────────────────────────────────────────────────┐
+│ Late night charge                    [Changed]        [₹ 150      ] [↺]  │
+│ Added when the pickup time falls inside the late night window.           │
+│ pricing.late_night_charge                             Default: 150       │
+│                                                                          │
+││Late night window                    [Unsaved]  [23:00] to [03:00]       │
+││Pickups scheduled inside this window attract the late night charge.      │
+││pricing.late_night_window            The early morning and late night    │
+││                                     windows overlap.                    │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**One save for the whole page.** The API checks cross-key rules against the configuration the
+write would produce, so per-field autosave would let an incoherent pair through one request at a
+time. A rejection is mapped back onto the fields that caused it — and a `SETTING_INVARIANT_VIOLATED`
+names *every* key in the rule, so both sides of an overlapping pair light up rather than only the
+one that was touched.
+
+Three things that are easy to get subtly wrong here, and what this screen does instead:
+
+- **Reset is a server action, not a local revert.** `POST /admin/settings/reset` deletes the
+  override so the built-in default takes over. Typing the default value back in looks identical
+  on screen and stores a row saying "deliberately 150", which a later change to the shipped
+  default would then silently fail to reach.
+- **A refetch does not eat unsaved work.** Resetting one field invalidates the whole query, so
+  the screen reseeds; fields the admin is still editing are preserved through it by an explicit
+  touched-key list. Comparing drafts to server values cannot do this — right after a reset the
+  local draft still holds the override that was just deleted, so it looks edited too.
+- **`refetchOnWindowFocus` is off**, unlike zones. This is a form: pulling new values under a
+  half-finished edit either discards it or leaves the "changed from" baseline disagreeing with
+  what is on screen. Concurrent edits are handled at save time by the server refusing an
+  incoherent result, not by moving the page under someone.
+
+Client-side validation is deliberately limited to the shape of one field — is this a whole
+number, is this a real time of day — for the feedback loop. The server stays authoritative, and
+the rules it holds that the client cannot are the interesting ones, because they are about pairs
+of keys.
 
 ## Alerts
 

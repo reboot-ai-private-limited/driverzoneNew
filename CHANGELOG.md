@@ -15,6 +15,84 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **Global settings — the `settings` module and its APIs.** Nineteen tunable numbers behind
+  `GET`/`PATCH /api/admin/settings` and `POST /api/admin/settings/reset`, plus audience-filtered
+  reads at `GET /api/customer/settings` and `GET /api/driver/settings`. Covers the pickup default
+  charge, the two time-of-day surcharge windows and their amounts, insurance, the waiting/no-show
+  clock, the driver late fine, driver ring time, and the cancellation ladder for both sides.
+  `docs/LLD/booking-lifecycle.md` has asserted "all thresholds live in `global_settings`" against
+  a collection nobody had built; this is that collection.
+
+  The defaults live in **code**, in `settings/domain/setting.registry.ts` — a row exists only for
+  an override, so there is no seed script and no migration, ever. Each entry carries its own Zod
+  schema, unit, label, description and read-audiences, which means adding a setting is one entry
+  and touches neither the API surface, the OpenAPI document, nor the admin form that comes next.
+
+  Writes are bulk and all-or-nothing, because some rules are about a *pair* of keys and are
+  checked against the configuration the write would produce rather than against the patch: the two
+  surcharge windows must not overlap (either may wrap midnight), no-show must be later than free
+  waiting, and neither cancellation ladder may step down. A batch that fails any of them writes
+  nothing. Reads go through a 60s cache that a write in the same process clears immediately, so an
+  admin who saves and reloads sees the change rather than the old value for a minute.
+
+- **The Settings screen** at `/settings`, and the nav entry stops saying "coming soon". The
+  admin can now change a pickup charge, a surcharge window, the waiting clock or the cancellation
+  ladder without a deploy — which is the whole reason the module underneath it exists.
+
+  The form is not hand-built: it renders from `GET /admin/settings`, which returns each key with
+  its group, label, unit and description, so `RUPEES` gets a `₹` box, `TIME_WINDOW` gets a pair of
+  time pickers, and a setting added to the API's registry appears here correctly with no frontend
+  change. Nothing in `features/settings/` knows any setting by name.
+
+  One dirty-tracked `PATCH` for the whole page, because the API validates cross-key rules against
+  the configuration the write would produce — per-field autosave would let an incoherent pair
+  through one request at a time. Rejections map back onto the offending inputs, and a
+  `SETTING_INVARIANT_VIOLATED` lights up *every* key named in the rule, so both halves of an
+  overlapping pair are visible rather than just the one that was touched. Per-field reset calls
+  the reset endpoint rather than typing the default back in — those are different outcomes, and
+  only one of them keeps tracking the shipped default.
+
+  Fields the admin is still editing survive the refetch that a save or reset triggers. Getting
+  that from a value comparison is not possible: right after a reset the local draft still holds
+  the override that was just deleted, so it reads as edited too. The screen keeps an explicit
+  touched-key list instead.
+
+- **`SettingsReadContract`**, read-only by design — the invariants above are enforced on the one
+  write path, and a second one would demote them to a convention. Not threaded into any module
+  yet: the open TODOs in `resolveForTrip.usecase.ts` and `zone.entity.ts` want keys this pass
+  deliberately does not define, and a contract wired into a module that ignores it reads like a
+  dependency that exists.
+
+### Changed
+
+- **Settings money is whole rupees, not paise** — the one exception to the paise convention, for
+  ops-facing round figures that a paise input would make hostile to type. The 100× hazard this
+  creates (`baseFarePaise + settings['pricing.insurance_charge']`) is closed by making `Rupees` an
+  *opaque* type: settings money cannot be added to a number at all, and `rupeesToPaise()` is the
+  only way across. The usual `number & { __unit }` brand was tried first and does not work — an
+  intersection is still assignable to `number`, so the arithmetic compiles; `settings.typecheck.ts`
+  pins the difference.
+
+### Removed
+
+- **`nightChargePaise` from incity price rows**, and `night_charge_paise` from `IncityPriceDto`.
+  Time-of-day surcharges are global now, and the same fare line configured per-row *and* globally
+  is one place too many. Nothing read it — no data migration, no seeded package carries it.
+
+- **`pnpm seed` now seeds zones too** — Siliguri, three pickup areas inside it, and Darjeeling
+  and Kalimpong above it, in a new `apps/api/src/config/devZones.ts` alongside `devAccounts.ts`.
+  A fresh database resolved nothing before this: `/coverage/check` said "not served" for every
+  point and the zone editor opened on an empty map, so everyone drew their own polygons —
+  the reproducibility problem the account fixtures exist to prevent, recurring one module over.
+  Created through `zones.public.ts` rather than Mongoose, so the `@driverzone/geo` invariants run
+  on every seeded polygon and the seed cannot write geometry the admin panel would have refused;
+  the price is that zone `_id`s differ between machines and `code` is the stable handle. Keyed on
+  `code`, so a second run reports "already present" instead of re-versioning a polygon you were
+  mid-way through editing. `--reset` clears zones first, through the module's own
+  `deactivate` → `delete` path.
+  The fixture is positioned against the accounts: `+919000000003`'s two saved addresses resolve
+  differently on purpose — Sevoke Road into a free pickup zone, Matigara into the city with none —
+  so one seeded customer covers both branches of the pickup-charge path.
 - `docs/engineering/frontend-architecture.md` and `docs/engineering/design-language.md` — the
   admin panel's design, settled before the zone editor gets built on top of it. How it fetches
   (client-first, TanStack Query straight to the API, no BFF), how it holds a session, the

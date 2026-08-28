@@ -20,6 +20,15 @@ export function buildAdminRouter(controllers: AdminControllers): Router {
   router.get('/profile', controllers.getProfile);
   router.patch('/profile', controllers.updateProfile);
 
+  // Customers are read and edited here, never created: an account comes into existence only when
+  // somebody verifies an OTP with their own phone. There is deliberately no POST.
+  router.get('/customers', controllers.listCustomers);
+  router.get('/customers/:id', controllers.getCustomerDetails);
+  router.patch('/customers/:id', controllers.updateCustomer);
+
+  router.get('/drivers', controllers.listDrivers);
+  router.get('/drivers/:id', controllers.getDriverDetails);
+
   router.post('/drivers/:id/approve', controllers.approveDriver);
   router.post('/drivers/:id/reject', controllers.rejectDriver);
   router.patch('/drivers/:id/documents/:docId', controllers.reviewDocument);

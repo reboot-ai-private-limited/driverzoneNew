@@ -16,9 +16,14 @@ import { UpsertFromBookingUseCase } from './application/useCases/upsertFromBooki
 import { GetDriverProfileUseCase } from './application/useCases/getDriverProfile.usecase.js';
 import { UpdateDriverProfileUseCase } from './application/useCases/updateDriverProfile.usecase.js';
 import { ManageDriverDocumentsUseCase } from './application/useCases/manageDriverDocuments.usecase.js';
+import { RequestProfilePictureUploadUseCase } from './application/useCases/requestProfilePictureUpload.usecase.js';
 import { SubmitOnboardingUseCase } from './application/useCases/submitOnboarding.usecase.js';
 import { ManageAdminProfileUseCase } from './application/useCases/manageAdminProfile.usecase.js';
 import { VerifyDriverUseCase } from './application/useCases/verifyDriver.usecase.js';
+import { ListDriversAdminUseCase } from './application/useCases/listDriversAdmin.usecase.js';
+import { ListCustomersAdminUseCase } from './application/useCases/listCustomersAdmin.usecase.js';
+import { ManageCustomerAdminUseCase } from './application/useCases/manageCustomerAdmin.usecase.js';
+import { GetDriverDetailsAdminUseCase } from './application/useCases/getDriverDetailsAdmin.usecase.js';
 import { MongoAccountRepository } from './infrastructure/account.repository.impl.js';
 import { MongoSessionRepository } from './infrastructure/session.repository.impl.js';
 import { MongoCustomerProfileRepository } from './infrastructure/customerProfile.repository.impl.js';
@@ -27,7 +32,7 @@ import { MongoDriverDocumentRepository } from './infrastructure/driverDocument.r
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
-import { StubDocumentStorage } from './infrastructure/documentStorage.stub.js';
+import { CloudinaryStorage } from '@/shared/storage/cloudinary.storage.js';
 import { RedisOtpStore } from './infrastructure/otpStore.redis.js';
 import { makeAuthControllers } from './interface/auth.controller.js';
 import { buildAuthRouter } from './interface/auth.routes.js';
@@ -37,6 +42,7 @@ import { makeDriverControllers } from './interface/driver.controller.js';
 import { buildDriverRouter } from './interface/driver.routes.js';
 import { makeAdminControllers } from './interface/admin.controller.js';
 import { buildAdminRouter } from './interface/admin.routes.js';
+import { registerIdentitySwaggerPaths } from './interface/identity.swagger.js';
 import type { IdentityPublicContract } from './identity.public.js';
 
 /**
@@ -62,11 +68,17 @@ export interface IdentityContainer {
 }
 
 export function buildIdentityContainer(): IdentityContainer {
+  registerIdentitySwaggerPaths();
+
   // Redis is shared with BullMQ rather than opening a second connection: it is already
   // configured with `maxRetriesPerRequest: null` and multiplexes fine at these command volumes.
   const otpStore = new RedisOtpStore(getRedis());
   const otpSender = new LoggingOtpSender();
-  const documentStorage = new StubDocumentStorage();
+  const documentStorage = new CloudinaryStorage({
+    cloudName: env.CLOUDINARY_CLOUD_NAME,
+    apiKey: env.CLOUDINARY_API_KEY,
+    apiSecret: env.CLOUDINARY_API_SECRET,
+  });
 
   const accounts = new MongoAccountRepository();
   const sessions = new MongoSessionRepository();
@@ -106,11 +118,29 @@ export function buildIdentityContainer(): IdentityContainer {
 
   const getDriverProfile = new GetDriverProfileUseCase(drivers);
   const updateDriverProfile = new UpdateDriverProfileUseCase(drivers);
-  const manageDocuments = new ManageDriverDocumentsUseCase(documents, documentStorage);
+  const requestProfilePictureUpload = new RequestProfilePictureUploadUseCase(
+    documentStorage,
+    env.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024,
+    env.UPLOAD_ALLOWED_FORMATS
+  );
+  const manageDocuments = new ManageDriverDocumentsUseCase(
+    documents,
+    documentStorage,
+    env.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024,
+    env.UPLOAD_ALLOWED_FORMATS
+  );
   const submitOnboarding = new SubmitOnboardingUseCase(drivers, documents);
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
   const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit);
+  // Same repository the customer's own profile routes use, a different use case in front of it.
+  // The narrow, self-only use cases stay exactly as they are — widening one of them to accept a
+  // customer id is how an admin-shaped hole appears in the customer app's surface.
+  const listCustomersAdmin = new ListCustomersAdminUseCase(customers);
+  const manageCustomerAdmin = new ManageCustomerAdminUseCase(customers, audit);
+
+  const listDriversAdmin = new ListDriversAdminUseCase(drivers);
+  const getDriverDetailsAdmin = new GetDriverDetailsAdminUseCase(drivers, documents, documentStorage);
 
   const authRouterFor = (role: Role): Router =>
     buildAuthRouter(role, makeAuthControllers(role, { sendOtp, verifyOtp, refreshSession, logout }));
@@ -131,12 +161,20 @@ export function buildIdentityContainer(): IdentityContainer {
         makeDriverControllers({
           getProfile: getDriverProfile,
           updateProfile: updateDriverProfile,
+          requestProfilePictureUpload,
           documents: manageDocuments,
           submitOnboarding,
         }),
       );
     }
-    return buildAdminRouter(makeAdminControllers({ profile: adminProfile, verifyDriver }));
+    return buildAdminRouter(makeAdminControllers({
+      profile: adminProfile,
+      verifyDriver,
+      listDrivers: listDriversAdmin,
+      getDriverDetails: getDriverDetailsAdmin,
+      listCustomers: listCustomersAdmin,
+      manageCustomer: manageCustomerAdmin
+    }));
   };
 
   return {

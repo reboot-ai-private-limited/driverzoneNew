@@ -143,6 +143,7 @@ export const updateVehicleSchema = z.object({
 
 export const updateDriverProfileSchema = z.object({
   full_name: personName.optional(),
+  profile_picture: freeText.nullable().optional(),
   dob: isoDate.nullable().optional(),
   gender: gender.nullable().optional(),
   // Upper bound is a sanity check, not a policy: 70 years of driving is a typo.
@@ -178,6 +179,75 @@ export const rejectDriverSchema = z.object({
 export const reviewDocumentSchema = z.object({
   status: z.enum(['PENDING', 'VERIFIED', 'REJECTED']),
   reason: freeText.optional(),
+});
+
+export const adminDriverListQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 1))
+    .refine((n) => !isNaN(n) && n >= 1, 'Page must be >= 1'),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 10))
+    .refine((n) => !isNaN(n) && n >= 1 && n <= 100, 'Limit must be between 1 and 100'),
+  onboarding_status: z.enum(['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED']).optional(),
+  is_verified: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  search: z.string().trim().optional(),
+});
+
+export const driverIdParamSchema = z.object({
+  id: z.string().min(1),
+});
+
+/**
+ * Mirrors `adminDriverListQuerySchema` — same paging contract for both admin directories.
+ *
+ * A query string carries strings only, so `page` and `limit` are parsed rather than coerced with
+ * `z.coerce`. `is_blocked` is an enum of the two literals for the same reason
+ * `is_verified` is: `z.coerce.boolean()` reads the string 'false' as true, since every non-empty
+ * string is truthy.
+ */
+export const adminCustomerListQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 1))
+    .refine((n) => !isNaN(n) && n >= 1, 'Page must be >= 1'),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 10))
+    .refine((n) => !isNaN(n) && n >= 1 && n <= 100, 'Limit must be between 1 and 100'),
+  is_blocked: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  search: z.string().trim().max(120).optional(),
+});
+
+export const customerIdParamSchema = z.object({
+  id: z.string().min(1),
+});
+
+/**
+ * What an ADMIN may change on someone else's account.
+ *
+ * Deliberately NOT `updateCustomerProfileSchema`: `languages_known` and `emergency_contact` are
+ * the customer's own to state, and `is_blocked` exists only here. Reusing the customer schema
+ * with a field bolted on would mean every field added to the self-serve profile silently became
+ * admin-editable too.
+ */
+export const adminUpdateCustomerSchema = z.object({
+  full_name: personName.optional(),
+  dob: isoDate.nullable().optional(),
+  gender: gender.nullable().optional(),
+  alternate_number: mobileNumber.nullable().optional(),
+  is_blocked: z.boolean().optional(),
 });
 
 export type UpdateCustomerProfileInput = z.infer<typeof updateCustomerProfileSchema>;

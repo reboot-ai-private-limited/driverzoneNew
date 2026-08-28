@@ -26,10 +26,6 @@ export interface PresignedUpload {
 export interface DocumentStoragePort {
   /**
    * Mints an upload URL for one driver document.
-   *
-   * The file never passes through this API — the client uploads directly. That keeps large
-   * multipart bodies off the request path entirely, which matters on a driver's mobile
-   * connection and keeps document bytes out of the API's memory and logs.
    */
   presignDriverDocumentUpload(driverId: string, docType: DocumentType): Promise<PresignedUpload>;
 }

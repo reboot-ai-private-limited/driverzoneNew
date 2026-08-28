@@ -17,6 +17,7 @@ export interface DriverDoc {
   _id: mongoose.Types.ObjectId;
   phone: string;
   fullName?: string | null;
+  profilePicture?: string | null;
   homeZoneId?: mongoose.Types.ObjectId | null;
   carCategoryIds?: mongoose.Types.ObjectId[];
 
@@ -58,6 +59,7 @@ const driverSchema = new Schema<DriverDoc>(
     // `unique: true` already declares the index; see customer.model.ts.
     phone: { type: String, required: true, unique: true },
     fullName: { type: String, default: null },
+    profilePicture: { type: String, default: null },
 
     homeZoneId: { type: Schema.Types.ObjectId, ref: 'Zone', default: null },
     carCategoryIds: [{ type: Schema.Types.ObjectId, ref: 'CarCategory' }],

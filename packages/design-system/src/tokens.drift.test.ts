@@ -58,6 +58,7 @@ const COLOR_MAP: Record<keyof typeof colors, string> = {
   zonePickupPaid: '--color-zone-pickup-paid',
   zoneHill: '--color-zone-hill',
   zoneViolation: '--color-zone-violation',
+  zoneDraftLine: '--color-zone-draft-line',
 };
 
 describe('theme.css mirrors tokens.ts', () => {

@@ -20,6 +20,126 @@ entry links to it.
 
 ---
 
+## 2026-08-28 — Global settings are a key-value collection with the defaults in code
+
+**Decision:** `globalSettings` stores one document per **overridden** key and nothing else. Each
+key's default, Zod schema, unit, label, description and read-audiences live in
+`apps/api/src/modules/settings/domain/setting.registry.ts`. An absent row means "at its default".
+
+**Why:** The alternative — a seeded row per key — makes every default a database value, so
+changing one requires a migration and a fresh install requires a seed script that must be kept in
+step with the code that reads it. Defaults in code are reviewed, typed and diffable, and a key
+added tomorrow ships working on every environment at once. It also makes `SettingKey` a union of
+literals, so a typo'd key is a compile error rather than an `undefined` quietly entering a fare.
+
+**Consequences:** No seed, no migration, ever. A row hand-written in a Mongo shell for an unknown
+key is ignored, and one whose value no longer parses falls back to the default with a warning
+rather than throwing under a fare calculation. The registry is the file that must be edited to add
+a setting — and the only one: the admin API, both audience APIs, the OpenAPI document and the
+phase-2 form all derive from it.
+
+**Rejected:** a typed document with one field per setting. Renaming or adding a field then needs a
+migration, and the shape stops being something the UI can render generically.
+
+---
+
+## 2026-08-28 — Money in `globalSettings` is whole rupees, not paise
+
+**Decision:** Settings money is an integer number of **rupees** in Mongo, on the wire and in the
+UI. Keys carry no unit suffix (`pricing.insurance_charge`, not `..._paise`). Fractions are
+rejected. This is the one exception to "money is an integer number of paise"
+(`LLD/database-schema.md` §Conventions), which still holds everywhere else.
+
+**Why:** These are ops-facing round figures typed into an admin form. A field that wants `10000`
+to mean ₹100 is a data-entry error waiting to happen, and no settings amount has ever needed
+sub-rupee precision — the places that genuinely do (tax and commission, both basis points) are
+computed from paise fields and round once at the end, which is unaffected.
+
+**Consequences:** Two units now coexist in the same expression, and `baseFarePaise +
+settings['pricing.insurance_charge']` is a 100× undercharge that looks plausible on a receipt.
+Contained by making `Rupees` an **opaque** type in `settings/domain/money.ts`: settings money
+leaves `SettingsReadContract` as a `Rupees`, which cannot be added to a number at all, so
+`rupeesToPaise()` is the only way across and omitting it fails `tsc`.
+
+Worth recording that the obvious form of this — `type Rupees = number & { __unit: 'RUPEES' }`,
+the standard branded-number recipe — **does not work** and was caught only by testing it: an
+intersection is still assignable to `number`, so the arithmetic compiles and only assignment in
+the harmless direction is caught. `settings.typecheck.ts` pins the distinction so nobody
+"simplifies" it back.
+
+---
+
+## 2026-08-28 — Time-of-day surcharges are global, not per price row
+
+**Decision:** Early-morning and late-night surcharges are two global windows plus two global
+amounts in `globalSettings`. The dormant `nightChargePaise` field on incity price rows is
+removed, along with `night_charge_paise` from `IncityPriceDto`.
+
+**Why:** The same fare line configured in two places is one place too many, and per-row night
+charges mean a surcharge change is an edit to every price row rather than one number. Nothing read
+the field — the `pricing` module does not exist yet — so this is free now and expensive later.
+
+**Consequences:** No data migration: the field is absent from every seeded package and Mongoose
+simply stops projecting it. The two windows are held non-overlapping by a cross-key invariant, so
+at most one surcharge can apply to a booking and the fare engine's branch is an if/else rather
+than a precedence rule. Setting a charge to `0` disables it; the window stays meaningful.
+
+---
+
+## 2026-08-28 — Cancellation is a fee ladder with no hard cutoff
+
+**Decision:** There is no time after which a customer is refused a cancellation. The cost rises
+by lifecycle stage (`cancellation.customer_fee_en_route`, `..._arrived`), with a free window after
+confirmation and a separate free window for scheduled bookings.
+
+**Why:** A hard block does not prevent the cancellation, it converts it into a no-show — which
+costs a driver's full waiting time *and* a support ticket, instead of a fee that at least
+compensates someone. The deterrent is the price, not the door.
+
+**Consequences:** Both ladders are validated to never step down, as a cross-key invariant: a
+cheaper cancellation at the door than en route would reward waiting until the driver arrives. Every
+fee a customer can incur is readable at `GET /api/customer/settings` before they commit, which is
+the disclosure rule in `LLD/booking-lifecycle.md` made mechanical — the registry's per-key
+`audiences` field decides it, not whoever writes the next endpoint.
+
+---
+
+## 2026-08-26 — The zone editor runs on Google Maps, not MapLibre
+
+**Decision:** the admin zone editor uses the Google Maps JavaScript API — `google.maps.Data` for
+saved zones, `DrawingManager` plus an editable `Polygon` for the draft, `PlaceAutocompleteElement`
+for address search. MapLibre GL and Mapbox Draw are removed, with the worker copy script and CSS
+shims they required. This reverses the MapLibre entry in
+[`engineering/tech-choices.md`](engineering/tech-choices.md), which is rewritten to match.
+
+**What it replaced, and why it changed:**
+
+1. **The place-data gap was real in practice.** OSM's roads and place names in Siliguri are
+   adequate; its commercial POI coverage is thin, and *orienting yourself* — not tracing — was
+   the repeated complaint. Hybrid view (imagery **with** road labels) and Places search answer it
+   directly.
+2. **"Google is expensive" was right about the wrong screen.** It stands for the customer app and
+   for the road-distance path, where quote traffic runs ~3× bookings. It never applied to a screen
+   three ops people open a few times a month, which sits inside the free monthly allowance.
+3. **MapLibre v6 resolves its web worker from `import.meta.url`**, which webpack rewrites to a
+   hashed chunk path. The worker 404'd and surfaced as
+   `Failed to load module script: … MIME type "text/html"` — a runtime-only failure the
+   production build reported as success. Fixable, but only by a script working around the bundler.
+
+**What it costs:** a billing-backed API key that ships in the client bundle and must be referrer-
+and API-restricted ([`engineering/frontend-architecture.md`](engineering/frontend-architecture.md)
+§Environment); clunkier editing of many-vertex polygons, mitigated by GeoJSON import being the
+primary way a zone gets its shape; and one extra `Polyline` overlay, because `google.maps.Data`
+cannot dash a stroke and the city boundary must stay visibly dashed.
+
+**What made it cheap:** geometry crosses every boundary as GeoJSON and `validateZone` in
+`@driverzone/geo` does not know what drew the polygon. The swap touched `ZoneMap.tsx`, two files
+in `features/zones/lib/`, and ~30 lines of `ZonesScreen`; the rail, inspector, violation panel,
+every hook and all validation were untouched. **Keeping the map a leaf is what made this
+reversible, and it is worth preserving.**
+
+---
+
 ## 2026-08-25 — Hard delete is back, as a separate route from soft deactivate
 
 **Decision:** `DELETE /admin/zones/:id/hard` permanently removes a zone document. Blocked with

@@ -1,6 +1,6 @@
 import type { DocumentType } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
-import type { DocumentStoragePort } from '../../domain/documentStorage.port.js';
+import type { StoragePort } from '@/shared/storage/storage.port.js';
 import type {
   DriverDocument,
   DriverDocumentRepositoryPort,
@@ -23,19 +23,20 @@ export interface RequestUploadResult {
 /**
  * APPLICATION — a driver's documents.
  *
- * The row is created BEFORE the file exists, holding the storage key the client is about to
- * upload to. That ordering is what makes the flow recoverable: if the upload fails or the app
- * is killed mid-transfer, the driver sees a `PENDING` document they can re-upload, rather than
- * a silent nothing with no record that they ever tried.
- *
- * The consequence to be honest about: a row can reference an object that was never uploaded.
- * An admin reviewing a document with no file rejects it, which is the correct outcome and needs
- * no extra machinery.
+ * This doesn't actually receive the file — it mints a short-lived URL for the client to PUT the
+ * file into object storage directly, bypassing our bandwidth entirely. It records the document as
+ * PENDING with the key it expects the file to land at.
  */
+export interface DriverDocumentWithUrl extends DriverDocument {
+  url: string;
+}
+
 export class ManageDriverDocumentsUseCase {
   constructor(
     private readonly documents: DriverDocumentRepositoryPort,
-    private readonly storage: DocumentStoragePort,
+    private readonly storage: StoragePort,
+    private readonly maxSizeBytes: number,
+    private readonly allowedFormats: string[]
   ) {}
 
   async requestUpload(driverId: string, input: RequestUploadInput): Promise<RequestUploadResult> {
@@ -47,7 +48,11 @@ export class ManageDriverDocumentsUseCase {
       });
     }
 
-    const presigned = await this.storage.presignDriverDocumentUpload(driverId, input.docType);
+    const storageKey = `driver-documents/${driverId}/${input.docType}-${Date.now()}`;
+    const presigned = await this.storage.presignUpload(storageKey, true, {
+      maxSizeBytes: this.maxSizeBytes,
+      allowedFormats: this.allowedFormats,
+    });
 
     // Upsert: one document per type per driver. Re-uploading replaces, and the replacement is
     // PENDING again — inheriting a previous VERIFIED would let a driver swap an approved
@@ -69,7 +74,16 @@ export class ManageDriverDocumentsUseCase {
     };
   }
 
-  list(driverId: string): Promise<DriverDocument[]> {
-    return this.documents.listByDriver(driverId);
+  async list(driverId: string): Promise<DriverDocumentWithUrl[]> {
+    const docs = await this.documents.listByDriver(driverId);
+    return Promise.all(
+      docs.map(async (doc) => {
+        const url = await this.storage.presignDownload(doc.fileUrl);
+        return {
+          ...doc,
+          url,
+        };
+      })
+    );
   }
 }

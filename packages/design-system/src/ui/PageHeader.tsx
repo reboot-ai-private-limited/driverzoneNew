@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, type ReactNode } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ArrowLeft } from 'lucide-react';
 
 export interface Crumb {
   label: string;
@@ -36,14 +36,27 @@ export interface PageHeaderProps {
   breadcrumbs?: Crumb[];
   /** The page's primary action, on the breadcrumb line. */
   actions?: ReactNode;
+  /** Optional back button callback */
+  onBack?: () => void;
 }
 
-export function PageHeader({ title, breadcrumbs, actions }: PageHeaderProps) {
+export function PageHeader({ title, breadcrumbs, actions, onBack }: PageHeaderProps) {
   return (
     <div className="flex items-start justify-between gap-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold text-text">{title}</h1>
-        {breadcrumbs !== undefined && <Breadcrumbs items={breadcrumbs} />}
+      <div className="flex items-start gap-2">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="p-1 -ml-1 text-text-subtle hover:text-interactive hover:bg-surface-sunken rounded transition-colors flex-shrink-0"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+        )}
+        <div className="flex flex-col gap-1">
+          <h1 className="text-lg font-semibold text-text leading-7">{title}</h1>
+          {breadcrumbs !== undefined && <Breadcrumbs items={breadcrumbs} />}
+        </div>
       </div>
       {actions !== undefined && <div className="flex items-center gap-2">{actions}</div>}
     </div>

@@ -57,9 +57,15 @@ apps/web/src/
     api/client.ts           fetch → envelope → typed data or ApiError
     api/endpoints/auth.ts   one file per API module
     api/endpoints/zones.ts
+    api/idempotency.ts      Idempotency-Key values
     auth/session.ts         the access token, refresh, boot restore
     query/client.ts         QueryClient defaults
     query/keys.ts           the key factory
+    query/factory.ts        authedQueryOptions — how every read is built
+    query/mutation.ts       useApiMutation — how every write is built
+    hooks/scheduling.ts     debounce and throttle, with no React in them
+    hooks/timing.ts         every debounce interval in the panel
+    hooks/useFilterParams.ts  filter state, kept in the URL
     format.ts               money, distance, Asia/Kolkata timestamps
   features/<module>/        hooks/ and components/ for one API module
   components/               app-level shared: AppShell, SideNav, TopBar, DataState
@@ -111,9 +117,12 @@ const zones = await api.get<ListZonesResponse>('/admin/zones'); // already unwra
   credential, and the cookie is path-scoped away from those routes on purpose — a token that
   rides along on hundreds of unrelated requests has hundreds of chances to leak. Sending
   credentials everywhere would quietly undo that.
-- **`Idempotency-Key`** has a helper, unused today. It is required on every POST that creates or
-  moves money, and having the helper in place means the first such endpoint does not invent its
-  own convention.
+- **`Idempotency-Key`** comes from `lib/api/idempotency.ts` and is applied by `useApiMutation`,
+  not by hand at a call site. It is required on every POST that creates or moves money. See
+  §Every read and every write goes through a factory for the one rule about its lifetime.
+- **`signal`** is threaded through every READ (`zonesApi.list(token, query, signal)`). Writes do
+  not take one: a request that has already reached the server cannot be un-sent, and aborting it
+  only loses us the answer to something that happened anyway.
 
 ### `available: false` is not an error
 
@@ -167,6 +176,14 @@ expired token at the moment they submit.
 Refresh failure clears the token and routes to `/login`. Not a toast, not a retry, not an error
 screen.
 
+**That routing is a subscription, not a return value.** The proactive refresh runs on a timer with
+nothing awaiting it, so when it fails there is no call stack to throw into: `session.subscribe`
+is how `SessionProvider` hears the token go to `null` and turns it into `anonymous`, which the
+panel gate already redirects from. It also clears the query cache on the way out — an ops laptop
+is a shared machine, and rows fetched under one admin's permissions should not be sitting in
+memory for the next one. A deliberate sign-out takes the same path, deliberately: two copies of
+"what happens when the session ends" is how they stop agreeing.
+
 ---
 
 ## Server state
@@ -177,6 +194,75 @@ map that must not blank on refetch — is that point.
 
 There is **no client state library**. What little cross-screen state exists (nav pinned, active
 filters) lives in URL search params or a context, and both are better places for it.
+
+### Every read and every write goes through a factory
+
+A feature hook supplies a key and a call. Everything else — the token, the abort signal,
+`keepPreviousData`, retry, invalidation, the failure toast — is decided once:
+
+```ts
+// lib/query/factory.ts
+useQuery(authedQueryOptions({ queryKey: keys.zones.list(query), fetch: (token, signal) => … }));
+
+// lib/query/mutation.ts
+useApiMutation({ call, invalidates: [keys.zones.all()], successMessage: 'Zone deactivated.' });
+```
+
+This exists because a hand-written `useQuery` gets three things wrong, and only the third is
+visible when it happens:
+
+1. **It forgets `withAuth`.** The 401 then lands in the retry logic, which correctly refuses to
+   retry a 4xx — so the screen says "unauthenticated" for an admin whose session is valid and one
+   refresh away.
+2. **It drops the `signal`.** TanStack hands one to every `queryFn`. Ignoring it leaves superseded
+   requests running, and their answers racing — for the zone editor's live validation, the verdict
+   shown ends up being whichever reply arrived last rather than the one for the shape on screen.
+3. **It omits `keepPreviousData`**, and the table empties on every keystroke.
+
+`liveQueryOptions` is the same thing for operational data: `staleTime: 0` plus a `refetchInterval`.
+It leaves `refetchIntervalInBackground` at its default of `false`, so a hidden tab stops polling
+entirely — an ops laptop left open overnight is otherwise thousands of requests nobody reads.
+
+**Writes are not optimistic by default.** §5 below allows optimism only where a rollback is
+honest, which is a per-call judgement; building it into the factory would make the dishonest case
+the easy one. What the factory does own is the idempotency key, and one rule about it:
+
+> **One click, one key — however many attempts it takes.** `withAuth` refreshes and replays once
+> on an expired token, and that replay re-runs the same closure. A key generated per _attempt_
+> makes that replay look to the server like a second, unrelated request, which is the exact
+> double-write `Idempotency-Key` exists to prevent. `buildMutationFn` generates it outside the
+> closure, and `lib/query/mutation.test.ts` is there to keep it that way.
+
+### Debouncing and throttling
+
+`lib/hooks/` — `useDebouncedValue`, `useDebouncedCallback`, `useThrottledCallback`, over plain
+`debounce`/`throttle` in `scheduling.ts` that have no React in them (which is what makes them
+testable in this app's DOM-free Vitest setup).
+
+**Every interval lives in `lib/hooks/timing.ts`**, never as a literal at a call site:
+`SEARCH_DEBOUNCE_MS` 250, `VALIDATE_DEBOUNCE_MS` 400 (fixed by
+[`../LLD/admin-panel.md`](../LLD/admin-panel.md) §Live validation), `MAP_THROTTLE_MS` 100.
+
+Debounce for input the user is still producing; throttle for a continuous gesture that must keep
+updating _while_ it happens — a map pan debounced is a map that does nothing until you let go.
+
+> Debouncing here is about **not creating the query key**. TanStack already de-duplicates
+> identical in-flight keys, so debouncing to "avoid duplicate requests" would be cargo cult. What
+> it prevents is eight _different_ keys for eight keystrokes, each a real request.
+
+### Filters live in the URL
+
+`lib/hooks/useFilterParams.ts` puts search, type, sort and page in the query string. A filtered
+table then survives a reload, and an ops person can paste the exact view they are asking about
+instead of describing it.
+
+`router.replace`, never `push` — every keystroke is a state change, and pushing them turns the
+back button into an undo history of typing. An empty filter is an **absent** parameter, not `?q=`.
+The search input keeps its own immediate value and writes the debounced one to the URL: a text
+field that echoes a quarter-second late feels broken no matter how correct it is.
+
+Reading `useSearchParams` opts a route out of static prerendering unless it sits inside a Suspense
+boundary — which is why `(panel)/zones/page.tsx` has one. Without it the build fails.
 
 ### Query keys
 
@@ -255,15 +341,15 @@ looking at.
 
 ### What each error code renders
 
-| Code                                 | Surface                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| `UNAUTHENTICATED`, `SESSION_REVOKED` | silent refresh, then `/login`. Never visible as an error.                |
-| `FORBIDDEN`                          | a "not permitted" state, **with no retry button** — retrying cannot help |
-| `VALIDATION_FAILED`                  | field-level, from `data`, beside the offending input                     |
-| `RATE_LIMITED`, `OTP_*`              | a countdown driven by `data.retry_after_seconds`                         |
-| `NOT_FOUND`                          | an empty state naming what was not found, with a way back                |
-| `CONFLICT`                           | the server's `message`, and a refetch — the data moved under us          |
-| `INTERNAL`, 5xx                      | retryable, request id prominent                                          |
+| Code                                 | Surface                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------ |
+| `UNAUTHENTICATED`, `SESSION_REVOKED` | silent refresh, then `/login`. Never visible as an error.                            |
+| `FORBIDDEN`                          | a "not permitted" state, **with no retry button** — retrying cannot help             |
+| `VALIDATION_FAILED`                  | field-level, from `data`, beside the offending input                                 |
+| `RATE_LIMITED`, `OTP_*`              | **no retry button** — a countdown from `ApiError.retryAfterSeconds`                  |
+| `NOT_FOUND`                          | an empty state naming what was not found, with a way back                            |
+| `CONFLICT`                           | the server's `message`, and a retry that means **refetch** — the data moved under us |
+| `INTERNAL`, 5xx                      | retryable, request id prominent                                                      |
 
 `ZONE_CONFIG_FAULT` and `AMBIGUOUS_ZONE_MATCH` are faults that page someone
 ([`../LLD/admin-panel.md`](../LLD/admin-panel.md) §Alerts). They render as errors like any other,
@@ -292,9 +378,31 @@ zone is stays in `features/`.
 
 ## Environment
 
-| Variable                   | Purpose                                                 |
-| -------------------------- | ------------------------------------------------------- |
-| `NEXT_PUBLIC_API_BASE_URL` | Where the browser calls the API. Inlined at build time. |
+| Variable                           | Purpose                                                 |
+| ---------------------------------- | ------------------------------------------------------- |
+| `NEXT_PUBLIC_API_BASE_URL`         | Where the browser calls the API. Inlined at build time. |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`  | The zone editor's map and its address search.           |
+
+### The Maps key is public, and that is not the problem
+
+Every `NEXT_PUBLIC_*` value ships to every browser. For the Maps JavaScript API that is
+unavoidable — the key authenticates a script the browser itself loads, so there is no version of
+this where it stays secret. **The key is protected by configuration, and both parts are
+required:**
+
+- an **HTTP referrer restriction** limiting it to the panel's own domain, and
+- an **API restriction** to Maps JavaScript API + Places API only.
+
+Places is a **separately billed SKU** from Maps JS; enable both on the project or the search box
+fails while the map works, which is a confusing way to find out.
+
+An unrestricted key in a public bundle is a billable liability from the moment it is served. Set
+the restrictions when the key is created, not when someone notices the bill.
+
+**Unset is a supported state.** The zone editor renders a setup notice in place of the map and
+everything else on the screen keeps working — the rail, the inspector, the List view. Only
+drawing a boundary needs the map. Because the value is inlined at build time, setting it requires
+a rebuild, not a restart.
 
 `NEXT_PUBLIC_*` is inlined into the client bundle at build time, which makes the image
 environment-specific by design. It is a build arg in `apps/web/Dockerfile`, not runtime env,

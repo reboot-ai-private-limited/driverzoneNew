@@ -219,6 +219,7 @@ export interface DriverProfileDto {
   id: string;
   mobile_number: string;
   full_name: string | null;
+  profile_picture: string | null;
   dob: string | null;
   gender: Gender | null;
   experience_years: number | null;
@@ -242,6 +243,7 @@ export interface DriverProfileDto {
 
 export interface UpdateDriverProfileRequest {
   full_name?: string | undefined;
+  profile_picture?: string | null | undefined;
   dob?: string | null | undefined;
   gender?: Gender | null | undefined;
   experience_years?: number | null | undefined;
@@ -271,6 +273,7 @@ export interface DriverDocumentDto {
   sub_type: string | null;
   issued_on: string | null;
   expires_on: string | null;
+  url: string;
 }
 
 export interface RequestDocumentUploadRequest {
@@ -289,6 +292,12 @@ export interface RequestDocumentUploadResponse {
   document_id: string;
   upload_url: string;
   expires_in_seconds: number;
+}
+
+export interface RequestProfilePictureUploadResponse {
+  upload_url: string;
+  expires_in_seconds: number;
+  storage_key: string;
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────────────────────────────
@@ -331,4 +340,97 @@ export interface ReviewDocumentRequest {
 export interface ReviewDocumentResponse {
   document_id: string;
   status: DocumentStatus;
+}
+
+export interface AdminDriverListDto {
+  drivers: DriverProfileDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+export interface AdminDriverDetailsDto {
+  profile: DriverProfileDto;
+  documents: DriverDocumentDto[];
+}
+
+// ─── Admin: customers ───────────────────────────────────────────────────────────────────────
+
+/**
+ * One row of `GET /admin/customers`.
+ *
+ * A FLATTENED view, not a `CustomerProfileDto`. The list shows one car and one place per
+ * customer, so shipping every saved address and vehicle to render two cells would put kilobytes
+ * of PII per row on the wire that the screen never draws. The full profile is one click away at
+ * `GET /admin/customers/:id`.
+ *
+ * There is no serial number here. "Sl" is a row's position in the admin's current view — it
+ * changes with the sort and the page — so it is computed in the browser, where that view exists.
+ */
+export interface AdminCustomerListItemDto {
+  id: string;
+  /** Null until they fill it in: an account is created by `otp/verify` holding only a phone. */
+  full_name: string | null;
+  mobile_number: string;
+  /** ISO timestamp of account creation — the moment they first signed in. */
+  joined_at: string;
+  /** The default vehicle's plate, or the first if none is marked default. */
+  car_number: string | null;
+  /** Vehicles beyond `car_number`, so the cell can say "+2". */
+  other_vehicle_count: number;
+  /** Preferred-pickup address, falling back to the default. Free text, as the customer saved it. */
+  location: string | null;
+  /**
+   * ALWAYS NULL until the bookings module exists (tier 6, docs/LLD/roadmap.md). The field ships
+   * now so the column, the DTO and the renderer are written once; when bookings land this is the
+   * only line that changes and no client is touched.
+   */
+  last_ride_at: string | null;
+  /** Average out of 5. Null until ratings exist — same reasoning as `last_ride_at`. */
+  rating: number | null;
+  is_blocked: boolean;
+}
+
+/** Mirrors `AdminDriverListDto` — same envelope, so both admin lists paginate identically. */
+export interface AdminCustomerListDto {
+  customers: AdminCustomerListItemDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+/** The full record behind the View action: their own profile plus what only an admin sees. */
+export interface AdminCustomerDetailsDto extends CustomerProfileDto {
+  joined_at: string;
+  /** Last write of any kind — the detail screen's "Last updated" line. */
+  updated_at: string;
+  is_blocked: boolean;
+  last_ride_at: string | null;
+  rating: number | null;
+}
+
+/**
+ * What an ADMIN may change on someone else's account — deliberately narrower than the profile
+ * the customer edits in their own app.
+ *
+ * Saved addresses and vehicles are absent: those are the customer's own records, and an admin
+ * quietly rewriting where somebody lives is a change neither side can see happening.
+ * `is_blocked` is the reverse — it belongs only here, since nobody blocks themselves. The mobile
+ * number is absent because it IS the account: changing it is a migration, not a form field.
+ *
+ * Same PATCH semantics as everywhere: an omitted key leaves the field alone, an explicit `null`
+ * clears it.
+ */
+export interface AdminUpdateCustomerRequest {
+  full_name?: string | undefined;
+  dob?: string | null | undefined;
+  gender?: Gender | null | undefined;
+  alternate_number?: string | null | undefined;
+  is_blocked?: boolean | undefined;
 }

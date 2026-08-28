@@ -2,9 +2,11 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ErrorState, Skeleton } from '@driverzone/design-system';
+import { Skeleton } from '@driverzone/design-system';
 import { AppShell } from '@/components/AppShell';
+import { UnreachableScreen } from '@/components/UnreachableScreen';
 import { useSession } from '@/lib/auth/SessionProvider';
+import { loginPathFromHere } from '@/lib/auth/next-path';
 
 /**
  * The gate. Every panel route is behind this.
@@ -13,28 +15,21 @@ import { useSession } from '@/lib/auth/SessionProvider';
  * the app lie about what is happening.
  */
 export default function PanelLayout({ children }: { children: ReactNode }) {
-  const { status, retryBoot } = useSession();
+  const { status } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'anonymous') router.replace('/login');
+    // Carrying the requested URL, so a bookmark of /zones?status=active survives the detour
+    // through the login form. `loginPathFromHere` reads `window.location` rather than
+    // `useSearchParams`, which would opt every panel route out of static prerendering.
+    if (status === 'anonymous') router.replace(loginPathFromHere());
   }, [status, router]);
 
   // Boot restore is a network round-trip, always — the access token is never persisted. This
   // is the skeleton that stops it being a flash of the login screen followed by the real page.
   if (status === 'booting' || status === 'anonymous') return <BootSkeleton />;
 
-  if (status === 'unreachable') {
-    return (
-      <div className="min-h-screen grid place-items-center bg-surface-sunken p-4">
-        <ErrorState
-          title="Cannot reach the server"
-          message="The API did not respond. It may still be starting up."
-          onRetry={retryBoot}
-        />
-      </div>
-    );
-  }
+  if (status === 'unreachable') return <UnreachableScreen />;
 
   return <AppShell>{children}</AppShell>;
 }

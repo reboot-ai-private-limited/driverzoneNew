@@ -43,6 +43,22 @@ export const FAULT_CODES = [
   'RATE_LIMITED',
   'INTERNAL',
 
+  // Packages (docs/LLD/packages.md §Codes). Both are admin-write faults, not customer traffic —
+  // "no package for this trip" is a 200 with `available: false` and lives in UNAVAILABLE_REASONS.
+  /** `data` carries the conflicting package id, so the editor can link straight to it. 409. */
+  'PACKAGE_BAND_OVERLAP',
+  /** P-3 — activating a package with no active price row. 422. */
+  'PACKAGE_NOT_SELLABLE',
+
+  // Global settings (docs/LLD/database-schema.md §globalSettings). All three are admin-write
+  // faults — the read paths cannot fail this way, since an absent row simply means "default".
+  /** A key that is not in `SETTING_REGISTRY`. 400 — never stored as an orphan row. */
+  'SETTING_UNKNOWN_KEY',
+  /** The value failed its own registry schema (a fraction of a rupee, a negative fee). 400. */
+  'SETTING_VALUE_INVALID',
+  /** Individually valid, jointly incoherent — overlapping windows, a ladder that steps down. 422. */
+  'SETTING_INVARIANT_VIOLATED',
+
   // Identity (docs/LLD/auth.md). One generic code covers wrong/expired/no-challenge
   // and an unprovisioned admin number alike — telling those apart is an enumeration oracle.
   'OTP_INVALID_OR_EXPIRED',

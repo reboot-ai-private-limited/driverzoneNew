@@ -1,5 +1,7 @@
 import { buildHealthContainer } from '@/modules/health/health.container.js';
 import { buildIdentityContainer } from '@/modules/identity/identity.container.js';
+import { buildPackagesContainer } from '@/modules/packages/packages.container.js';
+import { buildSettingsContainer } from '@/modules/settings/settings.container.js';
 import { buildZonesContainer } from '@/modules/zones/zones.container.js';
 
 /**
@@ -18,13 +20,22 @@ import { buildZonesContainer } from '@/modules/zones/zones.container.js';
  */
 export interface AppContainers {
   health: ReturnType<typeof buildHealthContainer>;
+  settings: ReturnType<typeof buildSettingsContainer>;
   identity: ReturnType<typeof buildIdentityContainer>;
   zones: ReturnType<typeof buildZonesContainer>;
+  packages: ReturnType<typeof buildPackagesContainer>;
 }
 
 export function buildContainers(): AppContainers {
   // tier 0 — depends on no other module
   const health = buildHealthContainer();
+  /**
+   * Also tier 0. Its contract is not threaded anywhere yet, deliberately: the TODOs that will
+   * consume it (`packages/application/useCases/resolveForTrip.usecase.ts`,
+   * `zones/domain/zone.entity.ts`) reference keys this pass does not define, and a contract wired
+   * into a module that ignores it reads like a dependency that exists.
+   */
+  const settings = buildSettingsContainer();
 
   // tier 1 — customers, drivers, admins, auth
   const identity = buildIdentityContainer();
@@ -32,5 +43,8 @@ export function buildContainers(): AppContainers {
   // tier 3 — polygons, resolution, the invariant write guard
   const zones = buildZonesContainer();
 
-  return { health, identity, zones };
+  // tier 4 — incity + outstation package definitions
+  const packages = buildPackagesContainer();
+
+  return { health, settings, identity, zones, packages };
 }

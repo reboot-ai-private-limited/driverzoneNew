@@ -20,7 +20,7 @@ export interface Zone {
   /** Defensive tiebreak only — see `resolveZonesAtPoint.usecase.ts`. Should never actually decide anything. */
   priority: number;
   pickupChargeType: PickupChargeType | null;
-  /** Null falls back to the global default once `settings` exists. */
+  /** Null falls back to `pickup.default_charge` in `globalSettings` — which is in RUPEES. */
   pickupChargePaise: number | null;
   version: number;
   supersededBy: string | null;

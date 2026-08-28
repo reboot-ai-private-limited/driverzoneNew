@@ -9,7 +9,7 @@ import { zoneNotFound, zoneStillActive } from '../../domain/zone.errors.js';
  *
  * Blocked unless the zone is already inactive — deactivate it first. That is the only gate left
  * to enforce: Z-1 is retired, so no zone can be another zone's parent any more, and there is
- * nothing else inside `zones` itself that could reference this row. Whether `catalog` (incity
+ * nothing else inside `zones` itself that could reference this row. Whether `packages` (incity
  * packages, by `cityZoneId`) or `bookings` still hold history pointing at this id is not
  * something `zones` can see — it sits below both in the tier graph — so this cannot promise the
  * same completeness FR-Z6 originally described. It promises what this module can actually keep:

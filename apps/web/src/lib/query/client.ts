@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryCache, QueryClient } from '@tanstack/react-query';
 import { ApiError, NetworkError } from '../api/ApiError';
 import { staleTime } from './keys';
 
@@ -18,6 +18,17 @@ function shouldRetry(failureCount: number, error: unknown): boolean {
 
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
+    // One place every failed READ passes through. It stays silent by design: §7 of
+    // docs/engineering/frontend-architecture.md — a read renders an error state where the data
+    // would have been, and toasting it as well notifies the user about something they are
+    // already looking at. What this is for is the request id, which is otherwise only visible
+    // to whoever happened to be looking at that panel.
+    queryCache: new QueryCache({
+      onError: (error, query) => {
+        if (!(error instanceof ApiError)) return;
+        console.error('[query]', query.queryHash, error.code, error.requestId, error.message);
+      },
+    }),
     defaultOptions: {
       queries: {
         staleTime: staleTime.configuration,

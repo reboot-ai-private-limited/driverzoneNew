@@ -266,15 +266,45 @@ Standard hardening. `trust proxy: 1` is set because the API runs behind nginx �
   Deliberate, and the bar for the next one is the same: a component we would otherwise get
   subtly wrong. See [`../decision-log.md`](../decision-log.md).
 
-### MapLibre GL + Mapbox Draw
+### Google Maps JavaScript API
 
 - **Chosen for:** the zone polygon editor — the most important screen in the admin panel.
-- **Why this one:** MapLibre is the open fork of Mapbox GL JS with no per-seat licence and no
-  token requirement. Mapbox Draw gives polygon drawing and vertex editing out of the box.
-- **Rejected:** Mapbox GL JS (per-seat pricing for an internal tool used by a handful of ops
-  staff); Leaflet + Leaflet.draw (fine, but raster-first and noticeably worse at the
-  vector-editing interactions the zone editor needs); Google Maps (expensive, awkward polygon
-  editing).
+- **Why this one:** **hybrid view — satellite imagery WITH road labels.** The question a pickup
+  boundary answers is "where does the built-up area end, and what road is that", and no single
+  open layer answers both halves. Places autocomplete solves orientation, which is the part OSM's
+  thin commercial-POI coverage actually cost us. Terrain view carries shaded relief for hill
+  zones, whose edges are price boundaries drawn over an approach corridor.
+- **Rejected:** MapLibre GL + Mapbox Draw — see the reversal below; Leaflet + Leaflet.draw
+  (raster-first and noticeably worse at vector editing).
+
+> **This reverses an earlier decision, and the reasoning is worth keeping.** MapLibre was chosen
+> for having no per-seat licence, and it was built and shipped. Three things changed the answer:
+>
+> 1. **The place-data gap was real in practice.** OSM's roads and place names in Siliguri are
+>    fine; its commercial POI coverage is thin, and orienting yourself on the map was the
+>    repeated complaint. GeoJSON import removes most of the *drawing* need, but not the *finding*
+>    need.
+> 2. **"Google is expensive" was right for the wrong screen.** Quote traffic runs ~3× bookings and
+>    a per-call price there is still unacceptable — that rejection stands for the customer app and
+>    for `zone-resolution.md`'s road-distance path. It never applied here: three ops people
+>    drawing a polygon a few times a month is hundreds of map loads a month.
+> 3. **The open stack cost a runtime failure the build could not catch.** MapLibre v6 resolves its
+>    web worker from `import.meta.url`, which webpack rewrites to a hashed chunk path — the worker
+>    404'd and surfaced as `Failed to load module script: … MIME type "text/html"`. It was fixable,
+>    but only with a copy script that existed to work around the bundler. Google's API loads by
+>    script tag at runtime and has no bundler interaction at all.
+>
+> **What the reversal costs, honestly.** An API key with a billing account behind it, which must
+> be referrer- and API-restricted because it ships in the client bundle (§Environment in
+> `frontend-architecture.md`). Clunkier editing for many-vertex polygons — mitigated, not solved,
+> by GeoJSON import being the primary way a zone gets its shape. And `google.maps.Data` has no
+> dashed stroke, so the always-visible city boundary costs one extra `Polyline` overlay.
+>
+> **What made the reversal cheap, and should be preserved.** Geometry crosses every boundary as
+> GeoJSON, and `validateZone` in `@driverzone/geo` does not know what drew the polygon. The map
+> is a LEAF: swapping it touched `ZoneMap.tsx`, two files in `features/zones/lib/`, and about
+> thirty lines of `ZonesScreen`. The rail, the inspector, the violation panel, every hook and all
+> the validation were untouched. Keep it that way.
 
 ### React 19 / React Native 0.76
 

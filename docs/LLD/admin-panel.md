@@ -277,35 +277,65 @@ takes, and is set independently rather than as a multiple of the one-way.
 
 ### The band list, and the gap
 
+**One panel per terrain**, each a drawn coverage strip above that terrain's bands.
+
 ```
-Terrain  Distance          One-way   Return   Driver
-─────────────────────────────────────────────────────────────────
-PLAINS   0–70 km           ₹1,800    ₹3,200    75%    Edit  Split
-PLAINS   70–100 km         ₹2,100    ₹3,700    75%    Edit  Split
-PLAINS   100–150 km        ₹2,600    ₹4,500    70%    Edit  Split
-PLAINS ⚠ 150 km and above    —         —        —       Add band
-─────────────────────────────────────────────────────────────────
-HILLS    0–70 km           ₹2,400    ₹4,100    75%    Edit  Split
-HILLS  ⚠ 70 km and above     —         —        —       Add band
+Plains                                                    [ + Add band ]
+┌──────────────┬//////////┬──────────┬/////┬──────────────────────────┐
+│ Plains short │/70–100 //│Plains long│/////│//// 150 km and above ///│
+└──────────────┴//////////┴──────────┴/////┴──────────────────────────┘
+0             70        100        150
+
+Distance             One-way   Return   Driver
+0–70 km              ₹1,800    ₹3,200    75%        Edit   Split
+  Plains short
+⚠ 70–100 km            —         —        —              Add band
+100–150 km           ₹2,600    ₹4,500    70%        Edit   Split
+  Plains long
+⚠ 150 km and above     —         —        —              Add band
+─────────────────────────────────────────────────────────────────────
+
+Hills                                                     [ + Add band ]
+┌──────────────────────┬//////////////////////////////////////////////┐
+│ Hills short          │////////// 70 km and above ///////////////////│
+└──────────────────────┴//////////////////////////////////////////////┘
+0                     70
+
+Distance             One-way   Return   Driver
+0–70 km              ₹2,400    ₹4,100    75%        Edit   Split
+  Hills short
+⚠ 70 km and above      —         —        —               Add band
 ```
 
-This was a proportional coverage strip. It became a table when a band stopped hiding ten price
-rows behind it and started fitting in a row.
+Hills and plains are **separate panels** because they are independent ladders — the same range on
+both is the expected configuration, not a conflict — and each has to tile without a gap on its
+own. Inside a per-terrain panel the Terrain column is the same value on every row, so it goes.
 
-**The red rows are the whole point.** A gap in the distance bands is the failure nobody notices
-until a customer hits it: an overlap is refused at write time, caught again by the nightly job
-and made deterministic by read-time precedence, while a gap is caught by nobody, because nothing
-is wrong with any individual band. Two adjacent bands that fail to meet is a silence. So it is
-rendered as a row, in the terrain it belongs to, whose `Add band` action opens the create form
-pre-filled with exactly the missing range.
+**The red stretches are the whole point.** A gap in the distance bands is the failure nobody
+notices until a customer hits it: an overlap is refused at write time, caught again by the
+nightly job and made deterministic by read-time precedence, while a gap is caught by nobody,
+because nothing is wrong with any individual band. Two adjacent bands that fail to meet is a
+silence. So it is said **twice** — hatched in the strip and rendered as a red row — and both open
+the create form pre-filled with exactly the missing range.
 
-Hills and plains are listed separately because they are independent ladders — the same range on
-both is the expected configuration, not a conflict — and each needs to tile without a gap on its
-own.
+The strip was once the outstation list on its own, and was replaced by a table when a band
+stopped hiding ten price rows behind it. That was right: a bar cannot hold a one-way fare, a
+return fare and a commission split, so reading it meant hovering every segment. It comes back
+**above** the table, which is the job it was always suited to — the table has every number, and
+the strip has the one thing a column of ranges makes you reconstruct in your head. That a band is
+twice as wide as its neighbour, and that the hole between two of them is wider than either, are
+spatial facts.
+
+Segment widths are proportional to km, with two departures, both in `stripCells`
+(`apps/web/src/features/packages/lib/band.ts`): the open tail gets a fixed share, having no upper
+bound to be proportional to, and a bounded segment floors at 6% of the priced distance, because a
+2 km band beside a 300 km one would otherwise round away to nothing and a band you cannot see is
+worse than one drawn slightly too wide.
 
 Inactive bands appear in neither ladder, matching the server's active-only overlap filter, so
-they get a collapsed table below. Without it "deactivate" would read as "delete" on a resource
-that has no DELETE.
+they get one shared collapsed table below both panels — shared because it spans terrains, and
+so it keeps the Terrain column the ladders no longer need. Without it "deactivate" would read as
+"delete" on a resource that has no DELETE.
 
 ### Splitting a band
 

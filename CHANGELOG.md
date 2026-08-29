@@ -85,6 +85,13 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Changed
 
+- **Outstation bands are one panel per terrain, with the coverage strip back on top.** Plains and
+  Hills get their own table — they are independent ladders, and a shared table with a Terrain
+  column implied one sequence you could read straight down — and each is headed by a strip drawn
+  proportional to km. A gap is now shown twice, hatched in the strip and red in the table, both
+  opening the create form pre-filled with the missing range: an overlap is caught three times
+  over, a gap is caught by nobody.
+
 - **An incity variant is a duration and a price.** `label`, `includedMinutes`, `baseFarePaise`,
   `driverCommissionBps` — nothing else. `includedMinutes` stays because it is what the customer
   buys and what tells the driver when they are released.

@@ -179,3 +179,50 @@ export function splitAt(band: Band, splitKm: number): [Band, Band] {
     { minKm: splitKm, maxKm: band.maxKm },
   ];
 }
+
+/**
+ * One cell of the drawn strip: a coverage segment and how wide it should render.
+ *
+ * A `flex-grow` weight rather than a percentage, so the CSS does the arithmetic and no rounding
+ * error can leave a hairline of background showing at the end of the bar.
+ */
+export interface StripCell {
+  segment: CoverageSegment;
+  weight: number;
+}
+
+/**
+ * How much of the bar the tail takes. It has no upper bound to be proportional to, so it gets a
+ * fixed share of the priced distance rather than a computed one.
+ */
+const TAIL_SHARE = 0.25;
+
+/**
+ * The narrowest a bounded cell may draw, as a share of the priced distance. A 2 km band beside a
+ * 300 km one would otherwise round to nothing, and a band you cannot see is worse than a band
+ * drawn slightly too wide.
+ */
+const MIN_SHARE = 0.06;
+
+/**
+ * Turn a ladder into drawable widths.
+ *
+ * PROPORTION IS THE ONLY THING THE STRIP KNOWS THAT THE TABLE DOES NOT. The table beside it
+ * already lists every range and every fare; what it cannot show is that one band is twice
+ * another, or that the hole between two of them is wider than either. So bounded cells are sized
+ * by their actual km, and the two exceptions above are the price of keeping that readable.
+ *
+ * With no bands at all `span` is 0, every bounded rule is moot, and the single tail cell becomes
+ * the whole bar — which is the most important thing an empty ladder can say.
+ */
+export function stripCells(segments: readonly CoverageSegment[]): StripCell[] {
+  // The tail's `from` is the furthest priced distance, and `buildCoverage` guarantees a tail.
+  const span = segments.reduce((furthest, segment) => Math.max(furthest, segment.to ?? 0), 0);
+  const floor = span * MIN_SHARE;
+
+  return segments.map((segment) => ({
+    segment,
+    weight:
+      segment.to === null ? span * TAIL_SHARE || 1 : Math.max(segment.to - segment.from, floor),
+  }));
+}

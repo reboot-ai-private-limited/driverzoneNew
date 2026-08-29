@@ -7,6 +7,7 @@ import {
   formatBand,
   ladderFor,
   splitAt,
+  stripCells,
   validateBand,
   validateSplit,
   type LadderBand,
@@ -69,7 +70,9 @@ describe('buildCoverage', () => {
     const segments = buildCoverage([band('a', 0, 70), band('b', 50, 100)]);
 
     expect(segments[1]).toMatchObject({ packageId: 'b', overlapsPrevious: true });
-    expect(segments.filter((s) => s.kind === 'gap')).toEqual([{ from: 100, to: null, kind: 'gap' }]);
+    expect(segments.filter((s) => s.kind === 'gap')).toEqual([
+      { from: 100, to: null, kind: 'gap' },
+    ]);
   });
 
   it('is computed per terrain — HILL and PLAIN ladders never see each other', () => {
@@ -78,7 +81,9 @@ describe('buildCoverage', () => {
       pkg({ id: 'hill', terrain: 'HILL', min_km: 0, max_km: 70 }),
     ];
 
-    expect(ladderFor(packages, 'HILL')).toEqual([{ id: 'hill', name: 'hill', minKm: 0, maxKm: 70 }]);
+    expect(ladderFor(packages, 'HILL')).toEqual([
+      { id: 'hill', name: 'hill', minKm: 0, maxKm: 70 },
+    ]);
     expect(ladderFor(packages, 'PLAIN')).toHaveLength(1);
   });
 
@@ -183,7 +188,9 @@ describe('splitAt', () => {
       { id: 'l', name: 'l', ...left },
       { id: 'r', name: 'r', ...right },
     ]);
-    expect(segments.filter((s) => s.kind === 'gap')).toEqual([{ from: 150, to: null, kind: 'gap' }]);
+    expect(segments.filter((s) => s.kind === 'gap')).toEqual([
+      { from: 150, to: null, kind: 'gap' },
+    ]);
   });
 
   it('covers exactly what the original band covered', () => {
@@ -213,5 +220,47 @@ describe('validateSplit', () => {
 
   it('refuses a fractional point, because the API takes whole km', () => {
     expect(validateSplit(band, 70.5)).toMatch(/whole number/);
+  });
+});
+
+describe('stripCells', () => {
+  it('sizes bounded cells by their actual km, which is all the strip knows that the table does not', () => {
+    const cells = stripCells(buildCoverage([band('a', 0, 70), band('b', 70, 105)]));
+
+    expect(cells.at(0)?.weight).toBe(70);
+    expect(cells.at(1)?.weight).toBe(35);
+  });
+
+  it('floors a sliver rather than letting it round away to nothing', () => {
+    // 2 km beside 298 km is 0.67% of the bar — sub-pixel at any realistic width.
+    const cells = stripCells(buildCoverage([band('a', 0, 2), band('b', 2, 300)]));
+
+    expect(cells.at(0)?.weight).toBeGreaterThan(2);
+    expect(cells.at(0)?.weight).toBe(300 * 0.06);
+  });
+
+  it('gives the open tail a fixed share, having no upper bound to be proportional to', () => {
+    const cells = stripCells(buildCoverage([band('a', 0, 200)]));
+    const tail = cells.at(-1);
+
+    expect(tail?.segment).toEqual({ from: 200, to: null, kind: 'gap' });
+    expect(tail?.weight).toBe(50);
+  });
+
+  it('makes the tail the whole bar when nothing is priced at all', () => {
+    const cells = stripCells(buildCoverage([]));
+
+    expect(cells).toEqual([{ segment: { from: 0, to: null, kind: 'gap' }, weight: 1 }]);
+  });
+
+  it('keeps a hole between two bands as its own cell, at its own width', () => {
+    const cells = stripCells(buildCoverage([band('a', 0, 70), band('b', 100, 150)]));
+
+    expect(cells.map((cell) => [cell.segment.kind, cell.weight])).toEqual([
+      ['covered', 70],
+      ['gap', 30],
+      ['covered', 50],
+      ['gap', 150 * 0.25],
+    ]);
   });
 });

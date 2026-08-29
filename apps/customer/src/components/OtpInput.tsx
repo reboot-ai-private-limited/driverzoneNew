@@ -1,6 +1,6 @@
 import { type ReactElement, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colors, radius } from '@/theme/theme';
+import { colors, fontFamily, radius } from '@/theme/theme';
 
 interface OtpInputProps {
   value: string;
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   cellFilled: { borderColor: colors.borderStrong },
   cellActive: { borderColor: colors.focus, borderWidth: 2 },
   cellInvalid: { borderColor: colors.danger },
-  digit: { fontSize: 22, fontWeight: '700', color: colors.fg },
+  digit: { fontSize: 22, fontWeight: '700', fontFamily: fontFamily.bold, color: colors.fg },
   hiddenInput: {
     position: 'absolute',
     top: 0,

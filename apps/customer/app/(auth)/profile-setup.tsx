@@ -7,7 +7,6 @@ import { type ReactElement, useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -16,8 +15,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { UpdateCustomerProfileRequest } from '@driverzone/contracts';
+import { BottomSheet } from '@/components/BottomSheet';
 import { FieldRow } from '@/components/FieldRow';
 import { Logo } from '@/components/Logo';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -34,7 +33,7 @@ import {
   toDateOnly,
 } from '@/features/profile/completion';
 import { updateProfile } from '@/lib/api/endpoints/customer';
-import { colors, radius, space, text } from '@/theme/theme';
+import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /** Which field owns the focus ring. One at a time, so the screen holds a single value. */
 type FocusTarget = 'name' | 'email' | 'address' | null;
@@ -53,7 +52,6 @@ type FocusTarget = 'name' | 'email' | 'address' | null;
  * profiles complete progressively, so a wall here would be a wall we invented.
  */
 export default function ProfileSetupScreen(): ReactElement {
-  const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
   const [focus, setFocus] = useState<FocusTarget>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -189,12 +187,7 @@ export default function ProfileSetupScreen(): ReactElement {
               </Text>
             </View>
 
-            <FieldRow
-              icon="user"
-              label="Full name"
-              focused={focus === 'name'}
-              error={nameError}
-            >
+            <FieldRow icon="user" label="Full name" focused={focus === 'name'} error={nameError}>
               <TextInput
                 value={draft.fullName}
                 onChangeText={(value) => {
@@ -304,7 +297,11 @@ export default function ProfileSetupScreen(): ReactElement {
             ) : null}
 
             <View style={styles.actions}>
-              <PrimaryButton label="Save & Continue" onPress={handleSave} loading={save.isPending} />
+              <PrimaryButton
+                label="Save & Continue"
+                onPress={handleSave}
+                loading={save.isPending}
+              />
 
               <Pressable
                 onPress={() => router.replace('/home')}
@@ -336,41 +333,34 @@ export default function ProfileSetupScreen(): ReactElement {
         />
       ) : null}
 
-      <Modal
-        visible={showPaymentSheet}
-        transparent
-        // `slide`, not `fade`: a panel that rises from the edge it is anchored to reads as one
-        // movement, where a fading panel appears to arrive from nowhere.
-        animationType="slide"
-        onRequestClose={() => setShowPaymentSheet(false)}
-      >
-        <Pressable style={styles.sheetBackdrop} onPress={() => setShowPaymentSheet(false)}>
-          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + space.md }]}>
-            <View style={styles.sheetGrabber} />
-            <Text style={styles.sheetTitle}>Preferred payment method</Text>
-            {PAYMENT_METHODS.map((method) => {
-              const selected = draft.paymentMethod === method.value;
-              return (
-                <Pressable
-                  key={method.value}
-                  onPress={() => {
-                    patch({ paymentMethod: method.value });
-                    setShowPaymentSheet(false);
-                  }}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
-                >
-                  <Text style={[styles.sheetOptionLabel, selected && styles.sheetOptionSelected]}>
-                    {method.label}
-                  </Text>
-                  {selected ? <Feather name="check" size={18} color={colors.fg} /> : null}
-                </Pressable>
-              );
-            })}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/*
+        `BottomSheet`, not a `Modal` with `animationType="slide"`. That prop animates the whole
+        modal window, backdrop included, so the dark scrim flew up from the bottom edge with the
+        panel. The backdrop has to fade in place while only the panel travels — see the component.
+      */}
+      <BottomSheet visible={showPaymentSheet} onClose={() => setShowPaymentSheet(false)}>
+        <Text style={styles.sheetTitle}>Preferred payment method</Text>
+        {PAYMENT_METHODS.map((method) => {
+          const selected = draft.paymentMethod === method.value;
+          return (
+            <Pressable
+              key={method.value}
+              onPress={() => {
+                patch({ paymentMethod: method.value });
+                setShowPaymentSheet(false);
+              }}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+            >
+              <Text style={[styles.sheetOptionLabel, selected && styles.sheetOptionSelected]}>
+                {method.label}
+              </Text>
+              {selected ? <Feather name="check" size={18} color={colors.fg} /> : null}
+            </Pressable>
+          );
+        })}
+      </BottomSheet>
     </View>
   );
 }
@@ -465,7 +455,7 @@ const styles = StyleSheet.create({
   genderChipSelected: { backgroundColor: colors.brand, borderColor: colors.fg },
   genderChipPressed: { backgroundColor: colors.border },
   genderLabel: { ...text.body, color: colors.fg },
-  genderLabelSelected: { fontWeight: '700' },
+  genderLabelSelected: { fontWeight: '700', fontFamily: fontFamily.bold },
 
   saveError: { ...text.body, color: colors.danger, marginTop: space.sm, textAlign: 'center' },
 
@@ -473,22 +463,6 @@ const styles = StyleSheet.create({
   skipButton: { alignItems: 'center', paddingVertical: space.md, marginTop: space.xs },
   skipLabel: { ...text.body, color: colors.link },
 
-  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    paddingHorizontal: space.lg,
-    paddingTop: space.sm,
-  },
-  sheetGrabber: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: radius.pill,
-    backgroundColor: colors.border,
-    marginBottom: space.md,
-  },
   sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.sm },
   sheetOption: {
     flexDirection: 'row',
@@ -500,5 +474,5 @@ const styles = StyleSheet.create({
   },
   sheetOptionPressed: { backgroundColor: colors.bgSunken },
   sheetOptionLabel: { ...text.body, color: colors.fg },
-  sheetOptionSelected: { fontWeight: '700' },
+  sheetOptionSelected: { fontWeight: '700', fontFamily: fontFamily.bold },
 });

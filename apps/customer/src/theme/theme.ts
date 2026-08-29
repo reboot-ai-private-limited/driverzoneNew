@@ -11,8 +11,9 @@
  * keeping identical across apps; hues are the part that legitimately differ.
  */
 import { fontSize, radius, space } from '@driverzone/mobile-ui';
+import { fontFamily } from './fonts';
 
-export { fontSize, radius, space };
+export { fontSize, radius, space, fontFamily };
 
 export const colors = {
   // Brand. Yellow is a SURFACE — its contrast against white is ~1.1:1, so nothing readable is
@@ -69,12 +70,21 @@ export const shadow = {
   },
 } as const;
 
-/** Line heights are absolute, not multipliers — RN does not accept a unitless value. */
+/**
+ * Line heights are absolute, not multipliers — RN does not accept a unitless value.
+ *
+ * Every entry carries BOTH `fontWeight` and the matching `fontFamily` from `./fonts`. The two
+ * are not redundant: `fontFamily` is what actually selects Plus Jakarta Sans's bold/semibold/
+ * regular face — see the note in `fonts.ts` for why Android needs the exact family, not the
+ * weight number — while `fontWeight` stays for iOS's synthesis and so a screen overriding just
+ * the weight (without knowing to touch `fontFamily` too) fails loudly as mismatched text rather
+ * than silently rendering the wrong face.
+ */
 export const text = {
-  display: { fontSize: 30, lineHeight: 38, fontWeight: '700' },
-  title: { fontSize: 24, lineHeight: 32, fontWeight: '700' },
-  heading: { fontSize: 19, lineHeight: 26, fontWeight: '700' },
-  body: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
-  label: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
-  caption: { fontSize: 12, lineHeight: 17, fontWeight: '400' },
+  display: { fontSize: 30, lineHeight: 38, fontWeight: '700', fontFamily: fontFamily.bold },
+  title: { fontSize: 24, lineHeight: 32, fontWeight: '700', fontFamily: fontFamily.bold },
+  heading: { fontSize: 19, lineHeight: 26, fontWeight: '700', fontFamily: fontFamily.bold },
+  body: { fontSize: 15, lineHeight: 22, fontWeight: '400', fontFamily: fontFamily.regular },
+  label: { fontSize: 13, lineHeight: 18, fontWeight: '600', fontFamily: fontFamily.semibold },
+  caption: { fontSize: 12, lineHeight: 17, fontWeight: '400', fontFamily: fontFamily.regular },
 } as const;

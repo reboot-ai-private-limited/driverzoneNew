@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
-import { colors, text } from '@/theme/theme';
+import { colors, fontFamily, text } from '@/theme/theme';
 
 interface ProgressRingProps {
   /** 0–100. Clamped, so a caller's arithmetic slip cannot draw a broken arc. */
@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
   },
   // `baseline` so the smaller % sits on the number's baseline rather than its centre.
   valueRow: { flexDirection: 'row', alignItems: 'baseline' },
-  value: { fontSize: 22, fontWeight: '800', color: colors.fg },
-  unit: { fontSize: 13, fontWeight: '700', color: colors.fg },
+  value: { fontSize: 22, fontWeight: '800', fontFamily: fontFamily.extrabold, color: colors.fg },
+  unit: { fontSize: 13, fontWeight: '700', fontFamily: fontFamily.bold, color: colors.fg },
   caption: { ...text.caption, color: colors.muted, marginTop: -1 },
 });

@@ -19,7 +19,7 @@ import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { ApiError } from '@/lib/api/ApiError';
 import { sendOtp, verifyOtp } from '@/lib/api/endpoints/auth';
 import * as session from '@/lib/auth/session';
-import { colors, space, text } from '@/theme/theme';
+import { colors, fontFamily, space, text } from '@/theme/theme';
 
 const OTP_LENGTH = 6;
 
@@ -67,7 +67,9 @@ export default function OtpScreen(): ReactElement {
     onError: (cause) => {
       setCode('');
       submittedFor.current = null;
-      setError(cause instanceof Error ? cause.message : 'That code did not work. Please try again.');
+      setError(
+        cause instanceof Error ? cause.message : 'That code did not work. Please try again.',
+      );
     },
   });
 
@@ -228,7 +230,7 @@ const styles = StyleSheet.create({
   body: { flexGrow: 1, paddingHorizontal: space.lg, paddingTop: space.lg },
   title: { ...text.title, color: colors.fg, textAlign: 'center' },
   sub: { ...text.body, color: colors.muted, textAlign: 'center', marginTop: space.sm },
-  number: { fontWeight: '700', color: colors.fg },
+  number: { fontWeight: '700', fontFamily: fontFamily.bold, color: colors.fg },
 
   otpBlock: { marginTop: space.xl },
 
@@ -245,10 +247,10 @@ const styles = StyleSheet.create({
 
   resendRow: { alignItems: 'center', marginTop: space.md },
   resendWaiting: { ...text.body, color: colors.muted },
-  resendCountdown: { color: colors.fg, fontWeight: '700' },
+  resendCountdown: { color: colors.fg, fontWeight: '700', fontFamily: fontFamily.bold },
 
   link: { ...text.body, color: colors.link },
-  linkStrong: { ...text.body, fontWeight: '700', color: colors.link },
+  linkStrong: { ...text.body, fontWeight: '700', fontFamily: fontFamily.bold, color: colors.link },
 
   spacer: { flex: 1, minHeight: space.xl },
   changeButton: { alignItems: 'center', paddingVertical: space.md, marginBottom: space.lg },

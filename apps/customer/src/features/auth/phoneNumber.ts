@@ -27,5 +27,8 @@ export function formatForDisplay(e164: string): string {
 
 /** Keeps digits only, capped at 10 — so a pasted "+91 98765 43210" lands correctly in the field. */
 export function normaliseInput(raw: string): string {
-  return raw.replace(/[^0-9]/g, '').replace(/^91(?=\d{10}$)/, '').slice(0, 10);
+  return raw
+    .replace(/[^0-9]/g, '')
+    .replace(/^91(?=\d{10}$)/, '')
+    .slice(0, 10);
 }

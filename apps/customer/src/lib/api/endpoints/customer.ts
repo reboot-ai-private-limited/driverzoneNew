@@ -41,3 +41,17 @@ export function addAddress(body: CreateAddressRequest): Promise<SavedAddressDto>
     token: getAccessToken() ?? undefined,
   });
 }
+
+/**
+ * `DELETE /customer/addresses/:id`.
+ *
+ * The server re-homes the flags rather than leaving them dangling: removing the address that was
+ * `is_default` or `is_preferred_pickup` promotes another one (`manageAddresses.usecase.ts`). So
+ * the caller's job is only to invalidate the profile afterwards and re-read the list.
+ */
+export function removeAddress(id: string): Promise<void> {
+  return request<void>(`${ROLE_PREFIX}/addresses/${id}`, {
+    method: 'DELETE',
+    token: getAccessToken() ?? undefined,
+  });
+}

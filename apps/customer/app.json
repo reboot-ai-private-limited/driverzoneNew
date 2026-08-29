@@ -11,11 +11,19 @@
       "expo-router",
       "expo-secure-store",
       "expo-splash-screen",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area.",
+          "locationWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area."
+        }
+      ]
     ],
     "android": {
       "package": "in.driverzone.customer",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
     "ios": {
       "bundleIdentifier": "in.driverzone.customer",

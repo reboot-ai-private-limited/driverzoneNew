@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import type { ComponentProps, ReactElement, ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, radius, space, text } from '@/theme/theme';
+import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 type FeatherName = ComponentProps<typeof Feather>['name'];
 
@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
   wrap: { marginBottom: space.md },
   label: { ...text.label, color: colors.muted, marginBottom: space.sm },
   required: { color: colors.danger },
-  hint: { color: colors.faint, fontWeight: '400' },
+  hint: { color: colors.faint, fontWeight: '400', fontFamily: fontFamily.regular },
 
   box: {
     flexDirection: 'row',

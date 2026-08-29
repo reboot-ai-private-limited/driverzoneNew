@@ -17,7 +17,7 @@ import { Skyline } from '@/components/Skyline';
 import { WaveBottom } from '@/components/Wave';
 import { isValidIndianMobile, normaliseInput, toE164 } from '@/features/auth/phoneNumber';
 import { sendOtp } from '@/lib/api/endpoints/auth';
-import { colors, radius, space, text } from '@/theme/theme';
+import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /**
  * Step one of two. Collects a mobile number and asks the server to send a code.
@@ -200,7 +200,13 @@ const styles = StyleSheet.create({
   fieldError: { borderColor: colors.danger, backgroundColor: colors.card },
   dialCode: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.md },
   flag: { fontSize: 18, marginRight: 6 },
-  dialCodeText: { ...text.body, fontWeight: '600', color: colors.fg, marginRight: 4 },
+  dialCodeText: {
+    ...text.body,
+    fontWeight: '600',
+    fontFamily: fontFamily.semibold,
+    color: colors.fg,
+    marginRight: 4,
+  },
   fieldDivider: { width: 1, height: '60%', backgroundColor: colors.border },
   input: {
     flex: 1,
@@ -227,7 +233,6 @@ const styles = StyleSheet.create({
     marginBottom: space.sm,
   },
   assuranceTitle: { ...text.label, color: colors.fg, textAlign: 'center' },
-
 
   legal: {
     ...text.caption,

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radius, space } from '@/theme/theme';
+import { colors, fontFamily, radius, space } from '@/theme/theme';
 
 interface PrimaryButtonProps {
   label: string;
@@ -70,6 +70,6 @@ const styles = StyleSheet.create({
   inert: { opacity: 0.45 },
   pressed: { opacity: 0.88, transform: [{ scale: 0.995 }] },
   row: { flexDirection: 'row', alignItems: 'center' },
-  label: { color: colors.brandOnFg, fontSize: 17, fontWeight: '700' },
+  label: { color: colors.brandOnFg, fontSize: 17, fontWeight: '700', fontFamily: fontFamily.bold },
   arrow: { marginLeft: space.sm },
 });

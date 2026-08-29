@@ -1,14 +1,20 @@
 import { StyleSheet } from 'react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { type ReactElement, useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  initialWindowMetrics,
+} from 'react-native-safe-area-context';
 import { SessionProvider } from '@/lib/auth/SessionProvider';
 import { createQueryClient } from '@/lib/query/client';
 import { colors } from '@/theme/theme';
+import { FONTS_TO_LOAD } from '@/theme/fonts';
 
 /**
  * The NATIVE splash — the OS-drawn frame before React has mounted — is held here and dismissed
@@ -18,14 +24,27 @@ import { colors } from '@/theme/theme';
  */
 void SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout(): ReactElement {
+export default function RootLayout(): ReactElement | null {
   // Created once, in state, not at module scope: a QueryClient built during a Fast Refresh at
   // module scope is a new cache on every save, and every screen refetches while you are editing.
   const [queryClient] = useState(createQueryClient);
 
+  /**
+   * `fontsError` is checked, not ignored: a font that fails to load (a corrupt asset, a platform
+   * that refuses the format) must not wedge the splash screen open forever. Falling through to
+   * render lets the OS default show for that one unlucky launch instead of a boot the customer
+   * cannot get past — a stray glyph is a much smaller failure than an app that will not open.
+   */
+  const [fontsLoaded, fontsError] = useFonts(FONTS_TO_LOAD);
+  const fontsReady = fontsLoaded || fontsError !== null;
+
   useEffect(() => {
-    void SplashScreen.hideAsync();
-  }, []);
+    if (fontsReady) void SplashScreen.hideAsync();
+  }, [fontsReady]);
+
+  // Nothing paints until the typeface is in — the native splash is still covering the screen at
+  // this point, so this is invisible, not a flash of blank white.
+  if (!fontsReady) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

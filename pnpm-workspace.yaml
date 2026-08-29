@@ -14,6 +14,9 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
 
+minimumReleaseAgeExclude:
+  - expo-font@57.0.2
+
 # The setting that makes Metro work, and it MUST live here rather than in `.npmrc`.
 #
 # This pnpm reads its configuration from this file, and `node-linker=hoisted` in `.npmrc` is

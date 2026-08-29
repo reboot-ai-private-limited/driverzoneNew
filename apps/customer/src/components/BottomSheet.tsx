@@ -32,8 +32,13 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
    */
   const [mounted, setMounted] = useState(visible);
 
-  /** 0 = closed, 1 = open. One value drives both surfaces so they can never disagree. */
+  /**
+   * Two values, not one: the sheet rides a SPRING (a little life as it settles), the backdrop
+   * rides a TIMING (a flat fade — a scrim that springs looks like a flicker). Sharing one value
+   * would force both onto the same curve.
+   */
   const progress = useRef(new Animated.Value(0)).current;
+  const fade = useRef(new Animated.Value(0)).current;
 
   /**
    * Measured, not assumed: translating by a guessed distance either leaves a strip of the sheet
@@ -59,41 +64,70 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
        * otherwise begin from wherever the previous animation stopped.
        */
       progress.setValue(0);
+      fade.setValue(0);
       const frame = requestAnimationFrame(() => {
-        Animated.timing(progress, {
-          toValue: 1,
-          duration: 260,
-          // Decelerating: fast off the mark, settling at the end — the standard for something
-          // arriving on screen.
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }).start();
+        Animated.parallel([
+          // A firm, barely-overshooting spring: quick to arrive, one soft settle, no bounce
+          // that would show the screen edge past the sheet.
+          Animated.spring(progress, {
+            toValue: 1,
+            stiffness: 210,
+            damping: 24,
+            mass: 1,
+            restDisplacementThreshold: 0.2,
+            restSpeedThreshold: 0.2,
+            useNativeDriver: true,
+          }),
+          Animated.timing(fade, {
+            toValue: 1,
+            duration: 220,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]).start();
       });
 
       return () => cancelAnimationFrame(frame);
     }
 
-    Animated.timing(progress, {
-      toValue: 0,
-      // Leaving is quicker than arriving. A dismissal that takes as long as an entrance feels
-      // like the app is arguing with the tap.
-      duration: 180,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
+    // Leaving is quicker than arriving, and it is a plain glide — no spring on the way out, a
+    // dismissal that takes as long as an entrance feels like the app is arguing with the tap.
+    Animated.parallel([
+      Animated.timing(progress, {
+        toValue: 0,
+        duration: 190,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(fade, {
+        toValue: 0,
+        duration: 170,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
       // Only unmount on a COMPLETED exit: an animation interrupted by a re-open would otherwise
       // tear down the sheet that is in the middle of coming back.
       if (finished) setMounted(false);
     });
 
     return undefined;
-  }, [visible, progress]);
+  }, [visible, progress, fade]);
 
   if (!mounted) return null;
 
   const translateY = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [height, 0],
+    extrapolate: 'clamp',
+  });
+
+  // A few points of rise as it lands — the difference between a panel that slides in and one
+  // that is simply pasted at the bottom. Clamped so a spring overshoot never scales it past 1.
+  const scale = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.98, 1],
+    extrapolate: 'clamp',
   });
 
   return (
@@ -108,7 +142,7 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
       onRequestClose={onClose}
     >
       <View style={styles.root}>
-        <Animated.View style={[styles.backdrop, { opacity: progress }]} pointerEvents="none" />
+        <Animated.View style={[styles.backdrop, { opacity: fade }]} pointerEvents="none" />
 
         {/* Tapping off the sheet closes it. Separate from the backdrop view so the fade can run
             with `pointerEvents="none"` and never swallow a tap mid-animation. */}
@@ -117,7 +151,10 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
         <Animated.View
           style={[
             styles.sheet,
-            { paddingBottom: insets.bottom + space.lg, transform: [{ translateY }] },
+            {
+              paddingBottom: insets.bottom + space.lg,
+              transform: [{ translateY }, { scale }],
+            },
           ]}
           onLayout={(event) => {
             const measured = event.nativeEvent.layout.height;

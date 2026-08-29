@@ -70,7 +70,7 @@ export function coverageCopy(state: CoverageState): CoverageCopy | null {
       return {
         tone: 'neutral',
         title: 'Could not check this area',
-        body: 'We will try again when you continue.',
+        body: 'Check your connection and try again.',
       };
     case 'servedFree':
       return {

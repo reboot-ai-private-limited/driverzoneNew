@@ -290,6 +290,14 @@ export default function ProfileSetupScreen(): ReactElement {
               />
             </FieldRow>
 
+            {/* Honest about the gap: `PATCH /customer/profile` only persists name, gender and
+                dob today. The other fields are collected to match the approved design, but a
+                customer should not walk away believing a photo or an address was stored. */}
+            <Text style={styles.storageNote}>
+              Saved now: name, gender and date of birth. Photo, email, payment method and address
+              are coming soon.
+            </Text>
+
             {saveError !== null ? (
               <Text style={styles.saveError} accessibilityLiveRegion="polite">
                 {saveError}
@@ -457,6 +465,12 @@ const styles = StyleSheet.create({
   genderLabel: { ...text.body, color: colors.fg },
   genderLabelSelected: { fontWeight: '700', fontFamily: fontFamily.bold },
 
+  storageNote: {
+    ...text.caption,
+    color: colors.muted,
+    marginTop: space.md,
+    textAlign: 'center',
+  },
   saveError: { ...text.body, color: colors.danger, marginTop: space.sm, textAlign: 'center' },
 
   actions: { marginTop: space.md },

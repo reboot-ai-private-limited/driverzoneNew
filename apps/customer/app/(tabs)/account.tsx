@@ -1,8 +1,9 @@
 import { Feather } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import type { ReactElement } from 'react';
+import { type ReactElement, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { BottomSheet } from '@/components/BottomSheet';
 import { SavedPlaceRow } from '@/components/SavedPlaceRow';
 import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { getProfile } from '@/lib/api/endpoints/customer';
@@ -31,7 +32,13 @@ export default function AccountScreen(): ReactElement {
   const name = profile.data?.full_name ?? null;
   const savedAddresses = profile.data?.saved_addresses ?? [];
 
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
   async function handleSignOut(): Promise<void> {
+    // No re-entry while the request is in flight, and the sheet stays up until it resolves so a
+    // slow network reads as "working", not as a tap that did nothing.
+    setSigningOut(true);
     await session.signOut();
     router.replace('/phone');
   }
@@ -61,7 +68,7 @@ export default function AccountScreen(): ReactElement {
       </View>
 
       <Pressable
-        onPress={() => router.push('/profile-setup')}
+        onPress={() => router.push('/edit-profile')}
         accessibilityRole="button"
         style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
       >
@@ -89,13 +96,49 @@ export default function AccountScreen(): ReactElement {
       )}
 
       <Pressable
-        onPress={() => void handleSignOut()}
+        onPress={() => setConfirmSignOut(true)}
         accessibilityRole="button"
         style={({ pressed }) => [styles.action, styles.signOut, pressed && styles.actionPressed]}
       >
         <Feather name="log-out" size={18} color={colors.danger} />
         <Text style={[styles.actionLabel, styles.danger]}>Sign out</Text>
       </Pressable>
+
+      {/* A confirm step: signing out revokes the refresh family server-side and the way back in
+          is a fresh OTP. Not something to fire from one stray tap on a list row. */}
+      <BottomSheet
+        visible={confirmSignOut}
+        onClose={() => {
+          if (!signingOut) setConfirmSignOut(false);
+        }}
+      >
+        <Text style={styles.sheetTitle}>Sign out?</Text>
+        <Text style={styles.sheetBody}>
+          You will need your phone number and a one-time code to sign back in.
+        </Text>
+
+        <Pressable
+          onPress={() => void handleSignOut()}
+          accessibilityRole="button"
+          disabled={signingOut}
+          style={({ pressed }) => [styles.confirmSignOut, pressed && styles.confirmSignOutPressed]}
+        >
+          {signingOut ? (
+            <ActivityIndicator size="small" color={colors.onFg} />
+          ) : (
+            <Text style={styles.confirmSignOutLabel}>Sign out</Text>
+          )}
+        </Pressable>
+
+        <Pressable
+          onPress={() => setConfirmSignOut(false)}
+          accessibilityRole="button"
+          disabled={signingOut}
+          style={({ pressed }) => [styles.cancel, pressed && styles.actionPressed]}
+        >
+          <Text style={styles.cancelLabel}>Stay signed in</Text>
+        </Pressable>
+      </BottomSheet>
     </ScrollView>
   );
 }
@@ -141,4 +184,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   signOut: { marginTop: space.lg },
+
+  sheetTitle: { ...text.heading, color: colors.fg },
+  sheetBody: { ...text.body, color: colors.muted, marginTop: space.xs, marginBottom: space.lg },
+  confirmSignOut: {
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmSignOutPressed: { opacity: 0.88 },
+  confirmSignOutLabel: {
+    ...text.body,
+    color: colors.onFg,
+    fontWeight: '700',
+    fontFamily: fontFamily.bold,
+  },
+  cancel: { height: 48, alignItems: 'center', justifyContent: 'center', marginTop: space.xs },
+  cancelLabel: {
+    ...text.body,
+    color: colors.link,
+    fontWeight: '600',
+    fontFamily: fontFamily.semibold,
+  },
 });

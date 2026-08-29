@@ -35,6 +35,7 @@ export function TripSummaryCard({
     <View style={styles.card}>
       <View style={styles.rows}>
         <Row
+          icon="crosshair"
           value={pickup?.address ?? 'Set your pickup point'}
           muted={pickup === null}
           onPress={onEditPickup}
@@ -43,7 +44,7 @@ export function TripSummaryCard({
             two rows already read as one connected trip, and a rail running their full height was
             doing the same job the proximity already does. */}
         <View style={styles.joint} />
-        <Row value={drop.address} onPress={onEditDrop} last />
+        <Row icon="map-pin" value={drop.address} onPress={onEditDrop} />
       </View>
 
       {/* Its own tap target, not folded into the destination row: clearing is a different action
@@ -62,15 +63,15 @@ export function TripSummaryCard({
 }
 
 function Row({
+  icon,
   value,
   muted = false,
   onPress,
-  last = false,
 }: {
+  icon: keyof typeof Feather.glyphMap;
   value: string;
   muted?: boolean;
   onPress: () => void;
-  last?: boolean;
 }): ReactElement {
   return (
     <Pressable
@@ -79,7 +80,12 @@ function Row({
       accessibilityLabel={`${value}. Tap to change.`}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
     >
-      <View style={last ? styles.markSquare : styles.markDot} />
+      {/* Two map glyphs, not a coloured dot and a square: `crosshair` for "where you are"
+          and `map-pin` for "where you're headed" — the same pair the picker and the pinned
+          address already use, so the marks mean the same thing everywhere in the flow. */}
+      <View style={styles.mark}>
+        <Feather name={icon} size={15} color={muted ? colors.faint : colors.fg} />
+      </View>
       <Text style={[styles.value, muted && styles.valueMuted]} numberOfLines={1}>
         {value}
       </Text>
@@ -105,8 +111,7 @@ const styles = StyleSheet.create({
   rows: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6 },
   rowPressed: { opacity: 0.55 },
-  markDot: { width: 10, height: 10, borderRadius: radius.pill, backgroundColor: colors.success },
-  markSquare: { width: 10, height: 10, borderRadius: 2, backgroundColor: colors.fg },
+  mark: { width: 16, alignItems: 'center', justifyContent: 'center' },
   value: {
     ...text.body,
     color: colors.fg,
@@ -119,7 +124,7 @@ const styles = StyleSheet.create({
   joint: {
     width: 1,
     height: 10,
-    marginLeft: 4.5,
+    marginLeft: 7.5,
     backgroundColor: colors.border,
   },
 

@@ -14,6 +14,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeInUp,
+  FadeOut,
+  LinearTransition,
+} from 'react-native-reanimated';
 import type { AddressLabel, SavedAddressDto } from '@driverzone/contracts';
 import { Logo } from '@/components/Logo';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -72,6 +79,13 @@ const GEOCODE_DEBOUNCE_MS = 450;
  * collapse it — without leaving so much sheet that the map is still hidden.
  */
 const PICK_PEEK = 230;
+
+/**
+ * The home sheet's SMALL detent — its lower rest position. Enough for the grabber, the pickup
+ * row and the destination box; the saved list and Continue slide under. LARGE (all of it) is
+ * the default — see `DraggableSheet`.
+ */
+const HOME_PEEK = 264;
 
 const SAVE_LABELS: ReadonlyArray<{ value: AddressLabel; title: string }> = [
   { value: 'HOME', title: 'Home' },
@@ -373,7 +387,12 @@ export default function HomeScreen(): ReactElement {
 
       <View style={styles.topBar} pointerEvents="box-none">
         {picking ? (
-          <View style={styles.searchRow}>
+          <Animated.View
+            key="search"
+            style={styles.searchRow}
+            entering={FadeInUp.duration(220)}
+            exiting={FadeOut.duration(140)}
+          >
             {/* The back control is its own circle rather than an icon crammed inside the field.
                 Two different actions — leave, and type — should not share one surface. */}
             <GlassPanel rounded="pill">
@@ -388,49 +407,59 @@ export default function HomeScreen(): ReactElement {
               </Pressable>
             </GlassPanel>
 
-            <View style={styles.searchBar}>
-              <View style={styles.searchGlyph}>
-                <Feather name="search" size={16} color={colors.onFg} />
-              </View>
+            {/* Liquid glass: the field is a lit pane of glass over the map, not a white card
+                dropped on top of it. The frost, the diagonal sheen and the bright rim all
+                come from `GlassPanel liquid`; this only lays out what sits on the pane. */}
+            <GlassPanel rounded="pill" liquid style={styles.searchGlass}>
+              <View style={styles.searchInner}>
+                <View style={styles.searchGlyph}>
+                  <Feather name="search" size={16} color={colors.onFg} />
+                </View>
 
-              <TextInput
-                value={search}
-                onChangeText={(value) => {
-                  setSearch(value);
-                  if (searchMissed) setSearchMissed(false);
-                }}
-                placeholder={
-                  mode === 'pick-pickup' ? 'Search a pickup point' : 'Search a destination'
-                }
-                placeholderTextColor={colors.faint}
-                style={styles.searchInput}
-                returnKeyType="search"
-                onSubmitEditing={() => void runSearch()}
-                accessibilityLabel="Search for a place"
-              />
-
-              {searching ? (
-                <ActivityIndicator size="small" color={colors.muted} />
-              ) : search.length > 0 ? (
-                // Clearing a typed query is a one-tap job on every search field a customer has
-                // ever used; making them hold backspace is a small, avoidable annoyance.
-                <Pressable
-                  onPress={() => {
-                    setSearch('');
-                    setSearchMissed(false);
+                <TextInput
+                  value={search}
+                  onChangeText={(value) => {
+                    setSearch(value);
+                    if (searchMissed) setSearchMissed(false);
                   }}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear search"
-                  style={({ pressed }) => [styles.searchClear, pressed && styles.pressedDim]}
-                >
-                  <Feather name="x" size={14} color={colors.muted} />
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
+                  placeholder={
+                    mode === 'pick-pickup' ? 'Search a pickup point' : 'Search a destination'
+                  }
+                  placeholderTextColor={colors.muted}
+                  style={styles.searchInput}
+                  returnKeyType="search"
+                  onSubmitEditing={() => void runSearch()}
+                  accessibilityLabel="Search for a place"
+                />
+
+                {searching ? (
+                  <ActivityIndicator size="small" color={colors.muted} />
+                ) : search.length > 0 ? (
+                  // Clearing a typed query is a one-tap job on every search field a customer has
+                  // ever used; making them hold backspace is a small, avoidable annoyance.
+                  <Pressable
+                    onPress={() => {
+                      setSearch('');
+                      setSearchMissed(false);
+                    }}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search"
+                    style={({ pressed }) => [styles.searchClear, pressed && styles.pressedDim]}
+                  >
+                    <Feather name="x" size={14} color={colors.muted} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </GlassPanel>
+          </Animated.View>
         ) : (
-          <View style={styles.headerRow}>
+          <Animated.View
+            key="header"
+            style={styles.headerRow}
+            entering={FadeIn.duration(240)}
+            exiting={FadeOut.duration(140)}
+          >
             {/* The logo keeps its solid brand fill — it is the one thing on screen that must
                 never take its colour from whatever tile happens to be behind it. */}
             <View style={styles.logoChip}>
@@ -446,14 +475,29 @@ export default function HomeScreen(): ReactElement {
                 <Feather name="user" size={20} color={colors.fg} />
               </Pressable>
             </GlassPanel>
-          </View>
+          </Animated.View>
         )}
 
-        {searchMissed ? <Text style={styles.pill}>No match for that search.</Text> : null}
+        {searchMissed ? (
+          <Animated.Text
+            style={styles.pill}
+            entering={FadeIn.duration(160)}
+            exiting={FadeOut.duration(120)}
+            layout={LinearTransition.duration(200)}
+          >
+            No match for that search.
+          </Animated.Text>
+        ) : null}
         {savedNotice !== null ? (
-          <Text style={styles.pill} accessibilityLiveRegion="polite">
+          <Animated.Text
+            style={styles.pill}
+            accessibilityLiveRegion="polite"
+            entering={FadeIn.duration(160)}
+            exiting={FadeOut.duration(120)}
+            layout={LinearTransition.duration(200)}
+          >
             {savedNotice}
-          </Text>
+          </Animated.Text>
         ) : null}
       </View>
 
@@ -492,8 +536,11 @@ export default function HomeScreen(): ReactElement {
 
               Short and fixed rather than draggable: there is nothing under the fold to reach.
             */
-            <View
+            <Animated.View
+              key="pickbar"
               style={styles.pickBar}
+              entering={FadeInDown.duration(240)}
+              exiting={FadeOut.duration(140)}
               onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}
             >
               <View style={styles.draftRow}>
@@ -529,7 +576,7 @@ export default function HomeScreen(): ReactElement {
                 disabled={draft === null}
                 showArrow={false}
               />
-            </View>
+            </Animated.View>
           ) : (
             /*
               LIST MODE: the ways to answer without touching the map — a saved place, or the
@@ -537,7 +584,7 @@ export default function HomeScreen(): ReactElement {
               yet; offering to confirm would be asking the customer to commit to a place the
               screen has not shown them.
             */
-            <DraggableSheet peekHeight={PICK_PEEK} onHeightChange={setSheetHeight}>
+            <DraggableSheet key="pick-list" peekHeight={PICK_PEEK} onHeightChange={setSheetHeight}>
               <Text style={styles.sheetTitle}>
                 {mode === 'pick-pickup' ? 'Set your pickup point' : 'Set your destination'}
               </Text>
@@ -577,7 +624,9 @@ export default function HomeScreen(): ReactElement {
             </DraggableSheet>
           )
         ) : (
-          <DraggableSheet onHeightChange={setSheetHeight}>
+          // Two detents — LARGE (all of it, the default) and SMALL (`HOME_PEEK`, more map
+          // showing). Opens fully so the whole trip is in reach; drag down for more map.
+          <DraggableSheet key="home" peekHeight={HOME_PEEK} onHeightChange={setSheetHeight}>
             {/*
               THE FIELD SWAPS, THE LIST STAYS. Before a destination exists the sheet asks a
               question with a search field; once one is set, that field gives way to the trip
@@ -642,7 +691,11 @@ export default function HomeScreen(): ReactElement {
               </View>
             ) : null}
 
-            <CoverageNotice state={coverageState} />
+            <CoverageNotice
+              state={coverageState}
+              retrying={coverage.isFetching}
+              onRetry={() => void coverage.refetch()}
+            />
 
             <PrimaryButton
               label="Continue"
@@ -651,8 +704,8 @@ export default function HomeScreen(): ReactElement {
               // fare screen that does not exist.
               disabled
             />
-            <Text style={styles.pendingNote}>
-              Fares and booking open once the quotes service goes live.
+            <Text style={styles.pendingNote} numberOfLines={1} adjustsFontSizeToFit>
+              Fares and booking open once quotes go live.
             </Text>
           </DraggableSheet>
         )}
@@ -690,9 +743,52 @@ export default function HomeScreen(): ReactElement {
   );
 }
 
-function CoverageNotice({ state }: { state: CoverageState }): ReactElement | null {
+function CoverageNotice({
+  state,
+  onRetry,
+  retrying = false,
+}: {
+  state: CoverageState;
+  onRetry: () => void;
+  retrying?: boolean;
+}): ReactElement | null {
   const copy = coverageCopy(state);
   if (copy === null) return null;
+
+  /**
+   * FAILED IS NOT SILENT. The check errored and Continue is permanently disabled, so with no
+   * visible retry the screen is a dead end — the customer cannot tell coverage failed from
+   * coverage being fine. This is the one neutral-tone state that has to render, and it renders
+   * with its own affordance rather than a line telling them to "continue".
+   */
+  if (state.kind === 'failed') {
+    return (
+      <View style={[styles.notice, styles.tone_warn]} accessibilityLiveRegion="polite">
+        <Feather name="wifi-off" size={16} color={colors.fg} style={styles.noticeIcon} />
+        <View style={styles.flex}>
+          <Text style={styles.noticeTitle}>{copy.title}</Text>
+          {copy.body !== null ? <Text style={styles.noticeBody}>{copy.body}</Text> : null}
+        </View>
+        <Pressable
+          onPress={onRetry}
+          disabled={retrying}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Retry coverage check"
+          style={({ pressed }) => [styles.retryButton, pressed && styles.pressedDim]}
+        >
+          {retrying ? (
+            <ActivityIndicator size="small" color={colors.fg} />
+          ) : (
+            <>
+              <Feather name="refresh-cw" size={13} color={colors.fg} />
+              <Text style={styles.retryLabel}>Retry</Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+    );
+  }
 
   /**
    * SILENCE IS THE CONFIRMATION. Drivers being available is the expected case, not news — the
@@ -758,8 +854,8 @@ const styles = StyleSheet.create({
 
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   searchGlyph: {
-    width: 34,
-    height: 34,
+    width: 30,
+    height: 30,
     borderRadius: radius.pill,
     backgroundColor: colors.fg,
     alignItems: 'center',
@@ -769,23 +865,23 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: radius.pill,
-    backgroundColor: colors.bgSunken,
+    backgroundColor: 'rgba(255,255,255,0.65)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchBar: {
+  // The pane itself: fills the row beside the back button and carries the drop shadow that
+  // lifts the glass off the map. Frost, sheen and rim are the GlassPanel's `liquid` mode.
+  searchGlass: {
+    flex: 1,
+    ...shadow.card,
+  },
+  searchInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
     gap: space.sm,
-    height: 56,
+    height: 48,
     paddingLeft: space.sm,
     paddingRight: space.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
   },
   searchIcon: { paddingRight: space.sm },
   searchInput: {
@@ -837,8 +933,8 @@ const styles = StyleSheet.create({
   },
   sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.md },
 
-  heroBlock: { marginTop: space.sm, marginBottom: space.md },
-  summaryBlock: { marginTop: space.sm, marginBottom: space.md },
+  heroBlock: { marginTop: space.md, marginBottom: space.lg },
+  summaryBlock: { marginTop: space.md, marginBottom: space.lg },
 
   // Capped rather than free-growing: four saved places must not push Continue off the screen.
   savedBlock: { marginBottom: space.sm },
@@ -906,6 +1002,27 @@ const styles = StyleSheet.create({
   noticeIcon: { marginRight: space.sm, marginTop: 1 },
   noticeTitle: { ...text.label, color: colors.fg },
   noticeBody: { ...text.caption, color: colors.muted, marginTop: 2 },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'center',
+    marginLeft: space.sm,
+    minWidth: 64,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.bg,
+  },
+  retryLabel: {
+    ...text.caption,
+    color: colors.fg,
+    fontWeight: '600',
+    fontFamily: fontFamily.semibold,
+  },
   // Tone is carried by a tinted surface with an ink label, never by coloured text: the brand
   // yellow is a surface at 1.1:1 against white and nothing readable is ever painted in it.
   tone_warn: { backgroundColor: colors.brandSoft, borderColor: '#E8E8A8' },

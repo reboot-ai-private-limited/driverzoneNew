@@ -1,7 +1,9 @@
-import { type ReactElement, type ReactNode, useEffect, useState } from 'react';
+import { type ReactElement, type ReactNode, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  FadeInDown,
+  FadeOut,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -9,32 +11,37 @@ import Animated, {
 } from 'react-native-reanimated';
 import { colors, radius, shadow, space } from '@/theme/theme';
 
+/** The two rest positions. */
+export type SheetDetent = 'small' | 'large';
+
 interface DraggableSheetProps {
   children: ReactNode;
   /**
-   * How much of the sheet stays on screen when collapsed. Enough for the grabber, the pickup
-   * line and the destination field — collapsing past the primary control would be hiding the
-   * thing the screen is for.
+   * SMALL: how much of the sheet stays on screen at its lower rest position. Enough for the
+   * grabber, the pickup line and the destination field — a rest position that hid the primary
+   * control would be hiding the thing the screen is for.
    */
   peekHeight?: number;
+  /** Which detent the sheet settles at on first layout. Defaults to `large`. */
+  initialDetent?: SheetDetent;
   /**
-   * The desired state, for callers that need to collapse it themselves — "Select on map" has to
-   * get the sheet out of the way to mean anything.
+   * The desired detent, for callers that need to move the sheet themselves — "Select on map"
+   * has to get it out of the way to mean anything.
    *
    * CONTROLLED-ISH on purpose: the gesture still moves the sheet directly and reports back via
-   * `onCollapsedChange`, so a parent that mirrors the value stays in step. Routing the drag
-   * itself through parent state would put a React render between the finger and the sheet,
-   * which is the lag this component exists to avoid.
+   * `onDetentChange`, so a parent that mirrors the value stays in step. Routing the drag itself
+   * through parent state would put a React render between the finger and the sheet, which is the
+   * lag this component exists to avoid.
    */
-  collapsed?: boolean;
-  onCollapsedChange?: (collapsed: boolean) => void;
+  detent?: SheetDetent;
+  onDetentChange?: (detent: SheetDetent) => void;
   /** The measured full height, so a caller can tell the map how much of it is covered. */
   onHeightChange?: (height: number) => void;
 }
 
 /**
- * The home sheet: draggable between EXPANDED (all of it) and COLLAPSED (a peek, with more map
- * showing).
+ * The home sheet: draggable between two rest positions — LARGE (all of it) and SMALL (a peek,
+ * with more map showing).
  *
  * Reanimated and `react-native-gesture-handler` rather than `PanResponder` and `Animated`,
  * because a sheet that follows a finger has to update per frame: the JS-driven pair does that
@@ -49,22 +56,31 @@ interface DraggableSheetProps {
 export function DraggableSheet({
   children,
   peekHeight = 210,
-  collapsed,
-  onCollapsedChange,
+  initialDetent = 'large',
+  detent,
+  onDetentChange,
   onHeightChange,
 }: DraggableSheetProps): ReactElement {
   const [height, setHeight] = useState(0);
 
-  /** Current offset in points: 0 is fully expanded, `maxOffset` is collapsed to the peek. */
+  /** Current offset in points: 0 is fully expanded (LARGE), `maxOffset` is the peek (SMALL). */
   const offset = useSharedValue(0);
   /** Where the drag started, so movement is relative rather than absolute. */
   const start = useSharedValue(0);
   const maxOffset = useSharedValue(0);
 
+  /** The default detent is applied once, on the first real measurement — not on every relayout. */
+  const settled = useRef(false);
+
+  /** Offset for a named detent. Called only from the JS thread (effect + layout). */
+  function offsetFor(which: SheetDetent): number {
+    return which === 'small' ? maxOffset.value : 0;
+  }
+
   useEffect(() => {
-    if (collapsed === undefined) return;
-    offset.value = withSpring(collapsed ? maxOffset.value : 0, SPRING);
-  }, [collapsed, offset, maxOffset]);
+    if (detent === undefined) return;
+    offset.value = withSpring(offsetFor(detent), SPRING);
+  }, [detent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pan = Gesture.Pan()
     // Vertical only, and only past a few points: a horizontal swipe or a tap on a row inside
@@ -81,7 +97,7 @@ export function DraggableSheet({
     .onEnd((event) => {
       // Velocity wins over position: a deliberate flick should finish the gesture even from
       // barely past the start, which is how every sheet on the platform behaves.
-      const next =
+      const toSmall =
         event.velocityY > 500
           ? true
           : event.velocityY < -500
@@ -89,9 +105,9 @@ export function DraggableSheet({
             : offset.value > maxOffset.value / 2;
 
       // No overshoot in SPRING: a sheet that bounces past its own edge shows the screen behind it.
-      offset.value = withSpring(next ? maxOffset.value : 0, SPRING);
+      offset.value = withSpring(toSmall ? maxOffset.value : 0, SPRING);
 
-      if (onCollapsedChange !== undefined) runOnJS(onCollapsedChange)(next);
+      if (onDetentChange !== undefined) runOnJS(onDetentChange)(toSmall ? 'small' : 'large');
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -100,15 +116,30 @@ export function DraggableSheet({
 
   return (
     <Animated.View
+      // When one sheet swaps for another (idle ⇄ picking) the incoming one rises into place
+      // instead of the content blinking over. The outgoing one only fades — an opacity-only
+      // exit keeps its layout box from shoving the controls above it around while it leaves.
+      entering={FadeInDown.springify().damping(22).stiffness(170).mass(0.9)}
+      exiting={FadeOut.duration(140)}
       style={[styles.sheet, animatedStyle]}
       onLayout={(event) => {
         const measured = event.nativeEvent.layout.height;
         if (measured <= 0) return;
         setHeight(measured);
         onHeightChange?.(measured);
-        maxOffset.value = Math.max(0, measured - peekHeight);
-        // A sheet that shrank below where it was already dragged would leave a gap under it.
-        if (offset.value > maxOffset.value) offset.value = maxOffset.value;
+
+        const max = Math.max(0, measured - peekHeight);
+        maxOffset.value = max;
+
+        if (!settled.current) {
+          // First measurement: drop straight onto the default detent, no motion — the entering
+          // animation above is already covering this frame.
+          settled.current = true;
+          offset.value = offsetFor(initialDetent);
+        } else if (offset.value > max) {
+          // A later relayout shrank the sheet below where it was dragged; close the gap.
+          offset.value = max;
+        }
       }}
     >
       {/*
@@ -136,7 +167,16 @@ export function DraggableSheet({
   );
 }
 
-const SPRING = { damping: 20, stiffness: 180, overshootClamping: true } as const;
+// Softer than a snap: enough stiffness to feel responsive, enough damping that it eases into
+// its stop rather than arriving with a jolt. Clamped so it never travels past either end.
+const SPRING = {
+  damping: 24,
+  stiffness: 165,
+  mass: 1,
+  overshootClamping: true,
+  restDisplacementThreshold: 0.1,
+  restSpeedThreshold: 0.1,
+} as const;
 
 const styles = StyleSheet.create({
   sheet: {
@@ -144,10 +184,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     paddingHorizontal: space.lg,
-    // `md`, not `lg`: the root `SafeAreaView` in `app/_layout.tsx` already insets the whole
-    // navigator above the gesture bar, so this is purely the breathing room below Continue —
-    // and at `lg` it was the single largest gap in the sheet.
-    paddingBottom: space.md,
+    // `sm`: the root `SafeAreaView` in `app/_layout.tsx` already insets the whole navigator
+    // above the gesture bar, so this is purely the breathing room below the last line — a tight
+    // gap is all it needs, anything more was the single largest empty stretch in the sheet.
+    paddingBottom: space.sm,
     ...shadow.card,
   },
   // Taller than the bar it contains: it is the only drag target now, so it needs a real height.

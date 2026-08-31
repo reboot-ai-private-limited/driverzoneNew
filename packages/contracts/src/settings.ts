@@ -13,7 +13,22 @@
  * off by 100.
  */
 
-export const SETTING_UNITS = ['RUPEES', 'MINUTES', 'SECONDS', 'COUNT', 'TIME_WINDOW'] as const;
+/**
+ * Every unit but `TIME_WINDOW` is a plain integer on the wire, which is what lets the admin form
+ * render one number input for all of them and switch only on the suffix. Adding a unit whose
+ * value is NOT a number — a list of wave radii, say — widens `SettingValue` below and breaks
+ * that, so it needs the form to grow a control at the same time.
+ */
+export const SETTING_UNITS = [
+  'RUPEES',
+  'MINUTES',
+  'SECONDS',
+  'HOURS',
+  'COUNT',
+  'METRES',
+  'BPS',
+  'TIME_WINDOW',
+] as const;
 export type SettingUnit = (typeof SETTING_UNITS)[number];
 
 export const SETTING_GROUPS = [

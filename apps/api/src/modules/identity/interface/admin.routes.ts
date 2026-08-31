@@ -28,6 +28,8 @@ export function buildAdminRouter(controllers: AdminControllers): Router {
 
   router.get('/drivers', controllers.listDrivers);
   router.get('/drivers/:id', controllers.getDriverDetails);
+  router.get('/drivers/:id/wallet', controllers.getDriverWallet);
+  router.get('/drivers/:id/duty-history', controllers.getDriverDutyHistory);
 
   router.post('/drivers/:id/approve', controllers.approveDriver);
   router.post('/drivers/:id/reject', controllers.rejectDriver);

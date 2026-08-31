@@ -92,6 +92,8 @@ concurrent-accept test with 20 simultaneous claims assigns exactly one driver.
 
 ## Phase 6 — Driver app (~4 weeks)
 
+Full design: [`driver-app.md`](driver-app.md).
+
 - Onboarding, document upload, verification status
 - Duty toggle with the **Android foreground service**
 - Full-screen offer with countdown; accept/decline; lost-race handling

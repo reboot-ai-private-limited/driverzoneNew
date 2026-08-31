@@ -1,6 +1,6 @@
+import { LOGO_SVG } from '@driverzone/mobile-ui/logo';
 import type { ReactElement } from 'react';
 import { SvgXml } from 'react-native-svg';
-import { LOGO_SVG } from './logoSvg';
 
 /** The mark's own aspect ratio, from its viewBox (236 × 126). */
 const ASPECT = 126 / 236;

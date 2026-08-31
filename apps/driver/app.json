@@ -4,8 +4,18 @@
     "slug": "driverzone-driver",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
-    "android": { "package": "in.driverzone.driver" },
-    "ios": { "bundleIdentifier": "in.driverzone.driver" }
+    "userInterfaceStyle": "light",
+    "scheme": "driverzone-driver",
+    "backgroundColor": "#F2F200",
+    "plugins": ["expo-router", "expo-secure-store", "expo-splash-screen", "expo-status-bar"],
+    "android": {
+      "package": "in.driverzone.driver",
+      "versionCode": 1
+    },
+    "ios": {
+      "bundleIdentifier": "in.driverzone.driver",
+      "buildNumber": "1",
+      "supportsTablet": false
+    }
   }
 }

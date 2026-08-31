@@ -17,6 +17,8 @@ import { ManageVehiclesUseCase } from '../src/modules/identity/application/useCa
 import { UpsertFromBookingUseCase } from '../src/modules/identity/application/useCases/upsertFromBooking.usecase.js';
 import { SubmitOnboardingUseCase } from '../src/modules/identity/application/useCases/submitOnboarding.usecase.js';
 import { VerifyDriverUseCase } from '../src/modules/identity/application/useCases/verifyDriver.usecase.js';
+import { ManageDriverDocumentsUseCase } from '../src/modules/identity/application/useCases/manageDriverDocuments.usecase.js';
+import type { PresignedUpload, StoragePort } from '../src/shared/storage/storage.port.js';
 import type { SavedAddress, Vehicle } from '../src/modules/identity/domain/customerProfile.entity.js';
 import type {
   CustomerProfile,
@@ -605,5 +607,111 @@ describe('VerifyDriverUseCase', () => {
 
     expect(drivers.current.onboardingStatus).toBe('SUBMITTED');
     expect(documents.list[0]?.status).toBe('REJECTED');
+  });
+});
+
+/**
+ * The presigned-upload passthrough.
+ *
+ * This seam has now broken twice. `CloudinaryStorage.presignUpload` returns the signed
+ * `uploadFields`, and `RequestUploadResult` had no property to carry them — so they were dropped
+ * between the adapter and the controller, and the client was handed a URL it could only ever get
+ * a 401 from. The second time, a merge reverted the fix while leaving the contract and the client
+ * still expecting the field; nothing detected it, because nothing tested it.
+ *
+ * The signature is HMAC'd with the API secret, which lives only on the server. Anything dropped
+ * here is therefore unrecoverable downstream — no client can reconstruct it. That is what makes
+ * this worth a test rather than a comment.
+ */
+describe('driver document upload authorisation', () => {
+  function fakeStorage(presigned: Partial<PresignedUpload> = {}): StoragePort {
+    return {
+      presignUpload: () =>
+        Promise.resolve({
+          uploadUrl: 'https://api.cloudinary.com/v1_1/test-cloud/auto/upload',
+          storageKey: 'driver-documents/drv_1/LICENCE-1',
+          expiresInSeconds: 300,
+          ...presigned,
+        }),
+      presignDownload: () => Promise.resolve('https://cdn.test/signed'),
+      getPublicUrl: () => 'https://cdn.test/public',
+      deleteFile: () => Promise.resolve(),
+    };
+  }
+
+  function useCase(presigned: Partial<PresignedUpload> = {}): ManageDriverDocumentsUseCase {
+    return new ManageDriverDocumentsUseCase(fakeDocuments(), fakeStorage(presigned), 10_000_000, [
+      'jpg',
+      'png',
+    ]);
+  }
+
+  const upload = { docType: 'LICENCE' } as const;
+
+  it('passes the provider signed fields through to the caller', async () => {
+    // Exactly the shape CloudinaryStorage produces.
+    const uploadFields = {
+      api_key: 'key-123',
+      timestamp: '1735689600',
+      public_id: 'driver-documents/drv_1/LICENCE-1',
+      type: 'authenticated',
+      signature: 'abc123signature',
+    };
+
+    const result = await useCase({ uploadFields }).requestUpload('drv_1', upload);
+
+    expect(result.uploadFields).toEqual(uploadFields);
+  });
+
+  /**
+   * Absent fields must stay absent rather than becoming `{}`. The client branches on `undefined`
+   * to choose a raw PUT (the S3 shape); an empty object would send it down the multipart path
+   * with nothing to sign, which S3 rejects.
+   */
+  it('omits the fields entirely when the provider needs none', async () => {
+    const result = await useCase().requestUpload('drv_1', upload);
+
+    expect(result.uploadFields).toBeUndefined();
+  });
+
+  /**
+   * The row is created BEFORE any byte is transferred, and the driver app depends on knowing
+   * that: a failed upload leaves a PENDING row indistinguishable from a successful one, which is
+   * why the documents screen tracks its own failures rather than trusting the status alone.
+   */
+  it('records the document row as part of authorising the upload', async () => {
+    const result = await useCase().requestUpload('drv_1', upload);
+
+    expect(result.document.id).toBe('doc_1');
+    expect(result.document.status).toBe('PENDING');
+    expect(result.uploadUrl).toBe('https://api.cloudinary.com/v1_1/test-cloud/auto/upload');
+  });
+
+  /**
+   * Driver documents are PRIVATE, and this is the guard on that.
+   *
+   * `isPrivate: true` is what makes Cloudinary store them as `type: 'authenticated'`, which is
+   * also what `presignDownload` looks for when an admin opens one. Flipping it would both break
+   * admin review and make every licence and Aadhaar card readable by anyone with the URL.
+   */
+  it('requests document uploads as private', async () => {
+    let capturedIsPrivate: boolean | undefined;
+    const storage: StoragePort = {
+      ...fakeStorage(),
+      presignUpload: (_key, isPrivate) => {
+        capturedIsPrivate = isPrivate;
+        return Promise.resolve({
+          uploadUrl: 'https://api.cloudinary.com/v1_1/test-cloud/auto/upload',
+          storageKey: 'driver-documents/drv_1/LICENCE-1',
+          expiresInSeconds: 300,
+        });
+      },
+    };
+
+    await new ManageDriverDocumentsUseCase(fakeDocuments(), storage, 10_000_000, [
+      'jpg',
+    ]).requestUpload('drv_1', upload);
+
+    expect(capturedIsPrivate).toBe(true);
   });
 });

@@ -9,7 +9,6 @@ import type {
 import { AppError } from '@/shared/errors/AppError.js';
 import { asyncHandler } from '@/shared/http/asyncHandler.js';
 import { sendSuccess } from '@/shared/http/response.util.js';
-import type { DriverDocument } from '../domain/driverDocument.repository.port.js';
 import type { DriverProfile } from '../domain/driverProfile.repository.port.js';
 import type { GetDriverProfileUseCase } from '../application/useCases/getDriverProfile.usecase.js';
 import type { UpdateDriverProfileUseCase } from '../application/useCases/updateDriverProfile.usecase.js';
@@ -138,6 +137,8 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
         upload_url: presigned.uploadUrl,
         expires_in_seconds: presigned.expiresInSeconds,
         storage_key: presigned.storageKey,
+        // Same reason as the document route: the signature cannot be rebuilt client-side.
+        ...(presigned.uploadFields === undefined ? {} : { upload_fields: presigned.uploadFields }),
       };
       sendSuccess(req, res, body, 'Upload authorised');
     }),
@@ -162,6 +163,9 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
         document_id: result.document.id,
         upload_url: result.uploadUrl,
         expires_in_seconds: result.expiresInSeconds,
+        // The signed form fields the provider demands. Without these the client holds a URL it
+        // can only get a 401 from — see the contract's note on `upload_fields`.
+        ...(result.uploadFields === undefined ? {} : { upload_fields: result.uploadFields }),
       };
       sendSuccess(req, res, body, 'Upload authorised');
     }),

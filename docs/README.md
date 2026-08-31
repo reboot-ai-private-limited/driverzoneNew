@@ -44,6 +44,7 @@ the low-level design in [`LLD/`](LLD/):
 | [User](LLD/user.md)                                     | Profiles, addresses, vehicles, driver onboarding, admin verification                            |
 | [Architecture](LLD/architecture.md)                     | Stack, services, realtime, deployment                                                           |
 | [Admin Panel](LLD/admin-panel.md)                       | Screens, the polygon editor, validation rules                                                   |
+| [Driver App](LLD/driver-app.md)                         | The Android driver app: the ringing trip-offer system, duty, onboarding, trip lifecycle         |
 | [Roadmap](LLD/roadmap.md)                               | Build phases                                                                                    |
 | [Open Questions](LLD/open-questions.md)                 | Decisions needed before/during build                                                            |
 

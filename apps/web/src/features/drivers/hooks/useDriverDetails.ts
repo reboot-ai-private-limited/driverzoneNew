@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import type {
   AdminDriverDetailsDto,
+  AdminDriverWalletDetailsDto,
+  AdminDriverDutyHistoryDto,
   ApproveDriverResponse,
   RejectDriverRequest,
   RejectDriverResponse,
@@ -14,6 +16,24 @@ export function useDriverDetails(id: string) {
     authedQueryOptions({
       queryKey: ['admin', 'drivers', id],
       fetch: (token, signal) => request<AdminDriverDetailsDto>(`/admin/drivers/${id}`, { token, signal }),
+    })
+  );
+}
+
+export function useDriverWallet(id: string) {
+  return useQuery(
+    authedQueryOptions({
+      queryKey: ['admin', 'drivers', id, 'wallet'],
+      fetch: (token, signal) => request<AdminDriverWalletDetailsDto>(`/admin/drivers/${id}/wallet`, { token, signal }),
+    })
+  );
+}
+
+export function useDriverDutyHistory(id: string) {
+  return useQuery(
+    authedQueryOptions({
+      queryKey: ['admin', 'drivers', id, 'duty'],
+      fetch: (token, signal) => request<AdminDriverDutyHistoryDto>(`/admin/drivers/${id}/duty-history`, { token, signal }),
     })
   );
 }

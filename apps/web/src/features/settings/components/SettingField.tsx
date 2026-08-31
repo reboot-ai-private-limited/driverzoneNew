@@ -24,6 +24,9 @@ import { type Draft, isWindowDraft } from '../lib/draft';
 const UNIT_SUFFIX: Record<string, string> = {
   MINUTES: 'minutes',
   SECONDS: 'seconds',
+  HOURS: 'hours',
+  METRES: 'metres',
+  BPS: 'bps',
   COUNT: '',
 };
 

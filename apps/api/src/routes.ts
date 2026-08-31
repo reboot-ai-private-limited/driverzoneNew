@@ -53,6 +53,12 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/admin/zones', c.zones.buildAdminRouter());
   router.use('/admin/settings', c.settings.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
+  /*
+   * `/admin/drivers/:id/wallet`. Identity's ADMIN router owns `/admin/drivers` and
+   * `/admin/drivers/:id`, neither of which matches three segments, so the request falls through to
+   * here — the module that owns the ledger rows answers for them.
+   */
+  router.use('/admin/drivers', c.ledger.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
   /**

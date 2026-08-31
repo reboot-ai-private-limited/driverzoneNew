@@ -13,6 +13,7 @@ export interface NewBooking {
   direction: Booking['direction'];
   distanceKm: number | null;
   fareSnapshot: FareSnapshot;
+  paymentMode: Booking['paymentMode'];
   isScheduled: boolean;
   scheduledAt: Date;
   dispatchAt: Date;

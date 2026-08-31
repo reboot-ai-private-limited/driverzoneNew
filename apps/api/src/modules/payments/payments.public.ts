@@ -27,7 +27,7 @@ export interface PaymentsContract {
     amountPaise: number;
     reference: string;
     idempotencyKey: string;
-  }): Promise<{ payment: Payment; clientToken: string | null }>;
+  }): Promise<{ payment: Payment; clientToken: string | null; publicKey: string | null }>;
 
   /** Sends money back. Omit `amountPaise` to refund everything still refundable. */
   refund(input: {

@@ -13,6 +13,8 @@ export interface CompleteTripInput {
   bookingId: string;
   driverId: string;
   actualDistanceM?: number | undefined;
+  /** Cash the driver actually took, on a CASH booking. Ignored on a prepaid one. */
+  cashCollectedPaise?: number | undefined;
   idempotencyKey: string;
 }
 
@@ -87,6 +89,13 @@ export class CompleteTripUseCase {
     // ── Settle the extras ───────────────────────────────────────────────────────────────────
     let settledPaise = 0;
 
+    /*
+     * A cash trip settles its extras in cash too — the driver takes fare plus waiting at the end —
+     * so there is no second Razorpay charge. The adjustment row is still written, because a
+     * receipt has to explain the extra either way.
+     */
+    const settleThroughGateway = booking.paymentMode === 'UPI';
+
     if (waiting.amountPaise > 0) {
       await this.charges.recordAdjustment({
         bookingId: booking.id,
@@ -95,27 +104,33 @@ export class CompleteTripUseCase {
         label: `Waiting — ${waiting.chargeableMinutes} min beyond the free ${snapshot['waiting.free_minutes']}`,
       });
 
-      try {
-        const { payment } = await this.payments.charge({
-          bookingId: booking.id,
-          customerId: booking.customerId,
-          kind: 'SETTLEMENT',
-          amountPaise: waiting.amountPaise,
-          reference: booking.reference,
-          // Derived from the booking, not from the request: a retry with a fresh client key must
-          // not become a second charge for the same waiting time.
-          idempotencyKey: `settle:${booking.id}`,
-        });
+      if (settleThroughGateway) {
+        try {
+          const { payment } = await this.payments.charge({
+            bookingId: booking.id,
+            customerId: booking.customerId,
+            kind: 'SETTLEMENT',
+            amountPaise: waiting.amountPaise,
+            reference: booking.reference,
+            // Derived from the booking, not from the request: a retry with a fresh client key must
+            // not become a second charge for the same waiting time. Hyphen, not a colon — the
+            // gateway's idempotency charset excludes it.
+            idempotencyKey: `settle-${booking.id}`,
+          });
 
-        await this.charges.markAdjustmentsSettled(booking.id, payment.id);
+          await this.charges.markAdjustmentsSettled(booking.id, payment.id);
+          settledPaise = waiting.amountPaise;
+        } catch (error) {
+          // The trip is over and the driver is owed regardless. An uncollected settlement is a
+          // receivable to chase, not a reason to fail the completion.
+          logger.error(
+            { err: error, bookingId: booking.id, amountPaise: waiting.amountPaise },
+            'could not collect the waiting charge — recorded as owed',
+          );
+        }
+      } else {
+        // Cash: the driver took it at the door along with the fare, so it is already collected.
         settledPaise = waiting.amountPaise;
-      } catch (error) {
-        // The trip is over and the driver is owed regardless. An uncollected settlement is a
-        // receivable to chase, not a reason to fail the completion.
-        logger.error(
-          { err: error, bookingId: booking.id, amountPaise: waiting.amountPaise },
-          'could not collect the waiting charge — recorded as owed',
-        );
       }
     }
 
@@ -129,6 +144,9 @@ export class CompleteTripUseCase {
         // From the FROZEN snapshot, never the live package: a rate changed since the booking was
         // made must not alter what was owed on it.
         amountPaise: split.driverPaise,
+        // The reference, not the id: `ledger` is four tiers below `bookings` and cannot look up a
+        // `DZ-…` for the admin wallet screen, so the caller that knows it says so here.
+        note: `Trip ${booking.reference}`,
       },
     ];
 
@@ -142,14 +160,34 @@ export class CompleteTripUseCase {
          * to earn a share of it. This is the line that carries that decision.
          */
         amountPaise: waiting.amountPaise,
+        note: `Waiting ${waiting.chargeableMinutes} min on ${booking.reference}`,
       });
     }
 
     /*
-     * NO `CASH_COLLECTED` ROW. The fare was prepaid online at confirmation, so the driver is
-     * holding none of the company's money. The entry type still exists for the day a cash mode
-     * does; it simply never fires on this path.
+     * CASH: the driver is now holding the company's money.
+     *
+     * NEGATIVE, and it is the entry that makes a driver's balance go into debt at all — they took
+     * the whole fare but earned only their share of it. This is what `driver.max_negative_balance`
+     * measures and what `MongoDriverPool` already filters dispatch on, so an unsettled driver
+     * stops being offered work without a line of new dispatch code.
+     *
+     * The amount is what the DRIVER reports collecting, not what we think the fare was: if those
+     * disagree, the ledger should record the real movement of money and let reconciliation find
+     * the gap, rather than quietly booking a number nobody handed over.
      */
+    if (booking.paymentMode === 'CASH') {
+      const collected = input.cashCollectedPaise ?? expectedCashPaise(booking, waiting.amountPaise);
+
+      entries.push({
+        driverId: input.driverId,
+        bookingId: booking.id,
+        entryType: 'CASH_COLLECTED',
+        amountPaise: -Math.abs(collected),
+        note: `Cash collected for ${booking.reference}`,
+      });
+    }
+
     try {
       await this.ledger.append(entries);
     } catch (error) {
@@ -172,4 +210,15 @@ export class CompleteTripUseCase {
       totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise,
     };
   }
+}
+
+/**
+ * What a cash trip should have collected: the frozen fare plus whatever waiting accrued.
+ *
+ * A fallback for a driver app that completes a trip without reporting a figure. It is the
+ * EXPECTED amount, not an observed one — which is why the reported number wins when there is one,
+ * and why a mismatch between them is worth surfacing to ops rather than smoothing over here.
+ */
+function expectedCashPaise(booking: Booking, waitingPaise: number): number {
+  return booking.fareSnapshot.fare.totalPaise + waitingPaise;
 }

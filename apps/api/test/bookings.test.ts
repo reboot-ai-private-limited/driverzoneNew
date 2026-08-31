@@ -26,6 +26,10 @@ import { DriverArrivedUseCase } from '../src/modules/bookings/application/useCas
 import { StartTripUseCase } from '../src/modules/bookings/application/useCases/startTrip.usecase.js';
 import { CompleteTripUseCase } from '../src/modules/bookings/application/useCases/completeTrip.usecase.js';
 import { CancelBookingByCustomerUseCase } from '../src/modules/bookings/application/useCases/cancelBooking.usecase.js';
+import {
+  ConfirmBookingPaymentUseCase,
+  FailBookingPaymentUseCase,
+} from '../src/modules/bookings/application/useCases/confirmBookingPayment.usecase.js';
 import { buildSnapshot } from '../src/modules/settings/domain/setting.entity.js';
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../src/modules/ledger/ledger.public.js';
@@ -92,6 +96,7 @@ function booking(over: Partial<Booking> = {}): Booking {
     distanceKm: null,
     quoteId: 'qot_1',
     fareSnapshot: fareSnapshot(),
+    paymentMode: 'UPI',
     paymentId: 'pay_1',
     isScheduled: false,
     scheduledAt: new Date('2026-08-31T09:00:00Z'),
@@ -200,10 +205,27 @@ function fakeCharges() {
     markAdjustmentsSettled: vi.fn(async () => undefined),
     listAdjustments: vi.fn(async () => adjustments),
     recordCancellationCharge: vi.fn(async (input) => {
-      cancellation ??= { id: 'can_1', ...input };
+      cancellation ??= {
+        id: 'can_1',
+        ...input,
+        settledByPaymentId: input.settledByPaymentId ?? null,
+      };
       return cancellation;
     }),
     findCancellationCharge: vi.fn(async () => cancellation),
+    /** Unsettled CUSTOMER charges only — a driver penalty is never a customer's debt. */
+    outstandingDues: vi.fn(async () =>
+      cancellation !== null &&
+      cancellation.chargedTo === 'CUSTOMER' &&
+      cancellation.settledByPaymentId === null
+        ? cancellation.amountPaise
+        : 0,
+    ),
+    settleDues: vi.fn(async (_customerId: string, paymentId: string) => {
+      if (cancellation !== null && cancellation.settledByPaymentId === null) {
+        cancellation = { ...cancellation, settledByPaymentId: paymentId };
+      }
+    }),
     recordPinReport: vi.fn(async (input) => {
       pinReports.push(input);
     }),
@@ -745,5 +767,218 @@ describe('the event log', () => {
       expect(event.metadata).toBeDefined();
       expect(typeof event.metadata).toBe('object');
     }
+  });
+});
+
+// ─── Cash ────────────────────────────────────────────────────────────────────────────────────
+
+describe('CompleteTripUseCase — cash', () => {
+  function build(seed: Booking) {
+    const repo = fakeRepo(seed);
+    const charges = fakeCharges();
+    const ledger = fakeLedger();
+    const payments = fakePayments();
+    return {
+      repo,
+      charges,
+      ledger,
+      payments,
+      useCase: new CompleteTripUseCase(repo, charges, settings, ledger, payments, fakeNotifications()),
+    };
+  }
+
+  /** A cash trip that also ran 40 minutes of waiting: 15 free, 25 chargeable at ₹2. */
+  const cashTrip = () =>
+    booking({
+      status: 'STARTED',
+      paymentMode: 'CASH',
+      paymentId: null,
+      arrivedAt: new Date('2026-08-31T09:00:00Z'),
+      startedAt: new Date('2026-08-31T09:40:00Z'),
+    });
+
+  it('records the cash the driver is now holding, as a NEGATIVE entry', async () => {
+    const { ledger, useCase } = build(cashTrip());
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      cashCollectedPaise: 110_000, // ₹1,050 fare + ₹50 waiting
+      idempotencyKey: 'k1',
+    });
+
+    const cash = ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED');
+    expect(cash?.amountPaise).toBe(-110_000);
+  });
+
+  it('records what the driver REPORTS, even when it differs from what was expected', async () => {
+    /*
+     * The ledger records the real movement of money. A driver who hands over ₹1,000 against an
+     * expected ₹1,100 is ₹100 short, and that gap belongs in the balance where reconciliation can
+     * find it — not smoothed away by booking the number we wished had been collected.
+     */
+    const { ledger, useCase } = build(cashTrip());
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      cashCollectedPaise: 100_000,
+      idempotencyKey: 'k1',
+    });
+
+    expect(ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED')?.amountPaise).toBe(
+      -100_000,
+    );
+  });
+
+  it('puts the driver into debt: they hold the fare but earned only their share', async () => {
+    const { ledger, useCase } = build(cashTrip());
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      cashCollectedPaise: 110_000,
+      idempotencyKey: 'k1',
+    });
+
+    // +77,250 trip +5,000 waiting −110,000 cash = −27,750. This is the number
+    // `driver.max_negative_balance` measures and dispatch already filters on.
+    const balance = ledger.entries().reduce((sum, e) => sum + e.amountPaise, 0);
+    expect(balance).toBe(-27_750);
+  });
+
+  it('takes no second gateway charge for the waiting — it was collected in cash', async () => {
+    const { payments, useCase } = build(cashTrip());
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      cashCollectedPaise: 110_000,
+      idempotencyKey: 'k1',
+    });
+
+    expect(payments.charge).not.toHaveBeenCalled();
+    // Still recorded, because the receipt has to explain the extra either way.
+    expect(result.waitingChargePaise).toBe(5_000);
+  });
+
+  it('falls back to the expected total when the driver reports no figure', async () => {
+    const { ledger, useCase } = build(cashTrip());
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'k1' });
+
+    // The frozen fare (₹1,050) plus the waiting that accrued (₹50).
+    expect(ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED')?.amountPaise).toBe(
+      -110_000,
+    );
+  });
+
+  it('writes no cash entry at all on a prepaid trip', async () => {
+    const { ledger, useCase } = build(
+      booking({
+        status: 'STARTED',
+        paymentMode: 'UPI',
+        arrivedAt: new Date('2026-08-31T09:00:00Z'),
+        startedAt: new Date('2026-08-31T09:10:00Z'),
+      }),
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'k1' });
+    expect(ledger.entries().some((e) => e.entryType === 'CASH_COLLECTED')).toBe(false);
+  });
+});
+
+describe('cancelling a CASH booking', () => {
+  function build(seed: Booking) {
+    const repo = fakeRepo(seed);
+    const charges = fakeCharges();
+    const payments = fakePayments();
+    return {
+      charges,
+      payments,
+      useCase: new CancelBookingByCustomerUseCase(
+        repo,
+        charges,
+        settings,
+        payments,
+        fakeNotifications(),
+      ),
+    };
+  }
+
+  const cashArrived = () =>
+    booking({ status: 'ARRIVED', paymentMode: 'CASH', paymentId: null, assignedAt: new Date() });
+
+  it('charges the fee but refunds nothing — we were holding none of their money', async () => {
+    const { payments, useCase } = build(cashArrived());
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      actorId: 'cus_1',
+      reason: 'Changed my mind',
+    });
+
+    expect(result.feePaise).toBe(10_000);
+    expect(result.refundedPaise).toBe(0);
+    expect(payments.refund).not.toHaveBeenCalled();
+  });
+
+  it('leaves the fee UNSETTLED, so it becomes a debt', async () => {
+    const { charges, useCase } = build(cashArrived());
+
+    await useCase.execute({ bookingId: 'bkg_1', actorId: 'cus_1', reason: 'Changed my mind' });
+
+    expect(charges.cancellation()?.settledByPaymentId).toBeNull();
+    expect(await charges.outstandingDues('cus_1')).toBe(10_000);
+  });
+
+  it('settles a prepaid booking’s fee immediately — it was kept out of the refund', async () => {
+    const { charges, useCase } = build(
+      booking({ status: 'ARRIVED', paymentMode: 'UPI', assignedAt: new Date() }),
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', actorId: 'cus_1', reason: 'Changed my mind' });
+
+    expect(charges.cancellation()?.settledByPaymentId).toBe('pay_1');
+    expect(await charges.outstandingDues('cus_1')).toBe(0);
+  });
+});
+
+describe('a failed payment never expires the booking', () => {
+  /*
+   * Razorpay sends `payment.failed` then `payment.captured` for one UPI transaction when the
+   * customer retries in their bank app. Expiring on the failure makes EXPIRED terminal before the
+   * capture lands: money out, no ride. The sweeper's 30-minute window is what clears a genuinely
+   * abandoned booking, and it outlives Razorpay's retries.
+   */
+  it('leaves the booking at PENDING_PAYMENT so a late capture can still confirm it', async () => {
+    const repo = fakeRepo(booking({ status: 'PENDING_PAYMENT' }));
+    const notifications = fakeNotifications();
+
+    const failed = await new FailBookingPaymentUseCase(repo, notifications).execute(
+      'bkg_1',
+      'UPI collect expired',
+    );
+
+    expect(failed?.status).toBe('PENDING_PAYMENT');
+    expect(repo.current().status).toBe('PENDING_PAYMENT');
+    expect(repo.transition).not.toHaveBeenCalled();
+  });
+
+  it('then confirms when the retry captures', async () => {
+    const repo = fakeRepo(booking({ status: 'PENDING_PAYMENT' }));
+    const notifications = fakeNotifications();
+    const charges = fakeCharges();
+
+    await new FailBookingPaymentUseCase(repo, notifications).execute('bkg_1', 'expired');
+
+    const confirmed = await new ConfirmBookingPaymentUseCase(
+      repo,
+      notifications,
+      async () => undefined,
+      charges,
+    ).execute('bkg_1');
+
+    expect(confirmed?.status).toBe('CONFIRMED');
   });
 });

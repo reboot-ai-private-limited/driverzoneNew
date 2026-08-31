@@ -82,6 +82,27 @@ const schema = z.object({
     .min(32, 'PAYMENT_WEBHOOK_SECRET must be at least 32 characters'),
 
   /**
+   * Razorpay. The key id is PUBLISHABLE — it is sent to the app beside the order id — while the
+   * secret signs checkout callbacks and authenticates our API calls. They are separate variables
+   * because they have separate blast radii, exactly like the two JWT secrets.
+   *
+   * Test-mode keys are `rzp_test_…`. Absent, the container falls back to the mock gateway, which
+   * refuses to run in production — so a production deploy missing these fails at boot rather than
+   * confirming bookings that collected nothing.
+   */
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+
+  /**
+   * Signs Razorpay's webhooks, and is NOT the key secret — a different secret over a different
+   * message. Set on the webhook itself in the Razorpay dashboard.
+   *
+   * Rotating it invalidates in-flight retries: Razorpay's own guidance is to validate older
+   * deliveries with the previous secret for a while after a rotation.
+   */
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+  /**
    * Whether the mock gateway captures automatically. Off is how the pending-then-webhook path is
    * exercised; on is the fast path for walking the booking flow by hand. Ignored in production,
    * where the mock gateway refuses to run at all.

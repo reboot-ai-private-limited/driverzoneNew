@@ -95,17 +95,31 @@ export class CancelBookingByCustomerUseCase {
       return explainLostTransition(this.repo, booking, 'CANCELLED_BY_CUSTOMER');
     }
 
+    /*
+     * WHO IS HOLDING THE MONEY DECIDES WHETHER THIS IS COLLECTED OR MERELY OWED.
+     *
+     * On a prepaid booking the fee is kept back out of the refund, so charging and collecting are
+     * the same act and the row is settled the moment it is written. On a CASH booking we hold
+     * nothing — the row stays unsettled and becomes a debt that the customer's next UPI booking
+     * clears, which is the only leverage left once the trip is gone.
+     */
+    const refundedPaise = await this.refund(booking, feePaise);
+
     if (feePaise > 0) {
+      const collectedNow = booking.paymentMode === 'UPI' && booking.paymentId !== null;
+
       await this.charges.recordCancellationCharge({
         bookingId: booking.id,
+        customerId: booking.customerId,
         chargedTo: 'CUSTOMER',
         amountPaise: feePaise,
         atStatus: booking.status,
         reason,
+        ...(collectedNow && booking.paymentId !== null
+          ? { settledByPaymentId: booking.paymentId }
+          : {}),
       });
     }
-
-    const refundedPaise = await this.refund(booking, feePaise);
 
     if (booking.driverId !== null) {
       await this.notifications.sendBookingUpdate(
@@ -122,9 +136,10 @@ export class CancelBookingByCustomerUseCase {
     return { booking: cancelled, feePaise, refundedPaise };
   }
 
-  /** Everything paid, less the fee. Nothing at all if the fee swallows the fare. */
+  /** Everything paid, less the fee. Nothing at all if the fee swallows the fare — or if cash. */
   private async refund(booking: Booking, feePaise: number): Promise<number> {
-    if (booking.paymentId === null) return 0;
+    // Nothing was collected, so there is nothing to send back. The fee becomes a due instead.
+    if (booking.paymentMode === 'CASH' || booking.paymentId === null) return 0;
 
     const payment = await this.payments.findById(booking.paymentId);
     if (payment === null || payment.status !== 'CAPTURED') return 0;
@@ -136,7 +151,10 @@ export class CancelBookingByCustomerUseCase {
       await this.payments.refund({
         paymentId: payment.id,
         amountPaise: refundable,
-        idempotencyKey: `refund:${booking.id}`,
+        // HYPHEN, not a colon: Razorpay's `X-Refund-Idempotency` accepts `[A-Za-z0-9_-]` only,
+        // and rejects the request outright otherwise. The adapter sanitises too; this is the
+        // call site being correct rather than relying on it.
+        idempotencyKey: `refund-${booking.id}`,
       });
       return refundable;
     } catch (error) {
@@ -195,10 +213,14 @@ export class CancelBookingByDriverUseCase {
     if (penaltyPaise > 0) {
       await this.charges.recordCancellationCharge({
         bookingId: booking.id,
+        customerId: booking.customerId,
         chargedTo: 'DRIVER',
         amountPaise: penaltyPaise,
         atStatus: booking.status,
         reason,
+        // A driver's penalty is a ledger debit taken from their earnings, never a customer debt —
+        // so it is settled on sight and can never appear in `outstandingDues`.
+        settledByPaymentId: booking.paymentId ?? undefined,
       });
 
       try {

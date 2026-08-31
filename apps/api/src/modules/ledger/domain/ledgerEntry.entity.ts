@@ -11,33 +11,22 @@
  * (docs/LLD/pricing-and-commission.md §The ledger).
  */
 
-export const LEDGER_ENTRY_TYPES = [
-  /** The driver's share of a completed trip's subtotal. Positive. */
-  'TRIP_EARNING',
-  /**
-   * Waiting time the customer was charged for, credited to the driver IN FULL with no commission
-   * taken. It compensates the driver's time and the company did nothing to earn a share of it.
-   * Positive, and a separate type from `TRIP_EARNING` precisely so that "how much did drivers
-   * earn waiting last month" is a query rather than an archaeology exercise.
-   */
-  'WAITING_EARNING',
-  /** Commission taken separately, for the cases where it was not already netted off. Negative. */
-  'COMMISSION_DEBIT',
-  /**
-   * Cash the driver took from the customer. NEGATIVE: they are holding the company's money, so
-   * it counts against what they are owed.
-   */
-  'CASH_COLLECTED',
-  /** A settlement paid out to the driver. Negative — it discharges a balance owed. */
-  'PAYOUT',
-  /** A manual correction by an admin. Either sign, and always with a reason. */
-  'ADJUSTMENT',
-  /** A late fine or a cancellation penalty. Negative. */
-  'PENALTY',
-  /** An incentive. Positive. */
-  'BONUS',
-] as const;
-export type LedgerEntryType = (typeof LEDGER_ENTRY_TYPES)[number];
+import { TRANSACTION_TYPES, type TransactionType } from '@driverzone/contracts';
+
+/**
+ * ONE LIST, NOT TWO THAT AGREE.
+ *
+ * The entry types are defined in `@driverzone/contracts` and imported here, rather than declared
+ * locally and pinned to the wire enum by a drift guard. A guard would catch a disagreement; this
+ * makes one impossible — the Mongoose `enum`, the domain type and the admin DTO are all the same
+ * array. That matters because the two lists HAD already drifted: the wire enum shipped without
+ * `CASH_COLLECTED`, which is the one row a cash trip exists to write.
+ *
+ * The alias is kept because `LedgerEntryType` reads correctly inside this module, where a row is
+ * a ledger entry rather than a "transaction".
+ */
+export const LEDGER_ENTRY_TYPES = TRANSACTION_TYPES;
+export type LedgerEntryType = TransactionType;
 
 /**
  * The types for which at most ONE row may exist per booking.

@@ -2,6 +2,7 @@ import { logger } from '../../../../shared/logging/logger.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
+import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
 
 /** Enqueues the dispatch job. Injected so `bookings` need not depend on `dispatch`, which is above it. */
 export type DispatchScheduler = (booking: Booking) => Promise<void>;
@@ -22,6 +23,7 @@ export class ConfirmBookingPaymentUseCase {
     private readonly repo: BookingRepositoryPort,
     private readonly notifications: NotificationsContract,
     private readonly scheduleDispatch: DispatchScheduler,
+    private readonly charges: ChargeRepositoryPort,
   ) {}
 
   async execute(bookingId: string): Promise<Booking | null> {
@@ -46,6 +48,24 @@ export class ConfirmBookingPaymentUseCase {
 
     // Lost the swap: something else moved it first. Whatever that was, it was not this.
     if (confirmed === null) return this.repo.findById(bookingId);
+
+    /*
+     * The order that just captured included any unpaid dues, so they are collected now.
+     *
+     * Settled HERE rather than when the order was created, because this is when the money actually
+     * arrived — clearing a debt at creation would wipe it for a customer who then abandoned
+     * checkout, and they would have got the cancellation fee waived by not paying.
+     */
+    if (confirmed.paymentId !== null) {
+      try {
+        await this.charges.settleDues(confirmed.customerId, confirmed.paymentId);
+      } catch (error) {
+        logger.error(
+          { err: error, bookingId },
+          'could not settle outstanding dues against the captured payment',
+        );
+      }
+    }
 
     /*
      * SIDE EFFECTS AFTER THE COMMIT, never inside it. A push that fails must not roll back a
@@ -78,11 +98,19 @@ export class ConfirmBookingPaymentUseCase {
 }
 
 /**
- * The other half of the webhook: a payment that failed leaves the booking unbookable.
+ * The other half of the webhook: a payment that failed.
  *
- * Expired rather than cancelled, and the distinction matters on a receipt — nobody cancelled
- * anything, the money simply never arrived. No cancellation fee applies, because there was never
- * a confirmed booking to cancel.
+ * IT DOES NOT TOUCH THE BOOKING, and that is the whole point.
+ *
+ * Razorpay documents that a UPI retry can deliver `payment.failed` and then `payment.captured` for
+ * ONE transaction. Expiring the booking on the failure looks tidy and is the expensive mistake:
+ * `EXPIRED` is terminal, so the capture that follows has nowhere to go — the customer's money has
+ * moved and there is no trip. That is a refund, a support call, and a person who does not use the
+ * app again.
+ *
+ * So the failure is recorded on the payment (already done by the time this runs) and told to the
+ * customer as "try again", while the booking waits at `PENDING_PAYMENT`. What eventually clears an
+ * abandoned one is the sweeper's 30-minute window, which comfortably outlives Razorpay's retries.
  */
 export class FailBookingPaymentUseCase {
   constructor(
@@ -94,26 +122,22 @@ export class FailBookingPaymentUseCase {
     const booking = await this.repo.findById(bookingId);
     if (booking === null || booking.status !== 'PENDING_PAYMENT') return booking;
 
-    const expired = await this.repo.transition({
-      bookingId,
-      from: 'PENDING_PAYMENT',
-      to: 'EXPIRED',
-      actor: { type: 'SYSTEM', id: null },
-      metadata: { via: 'payment.failed', reason },
-    });
+    logger.info(
+      { bookingId, reference: booking.reference, reason },
+      'payment failed — booking left pending in case a retry captures',
+    );
 
-    if (expired !== null) {
-      await this.notifications.sendBookingUpdate(
-        { role: 'CUSTOMER', id: booking.customerId },
-        {
-          bookingId: booking.id,
-          reference: booking.reference,
-          status: 'EXPIRED',
-          message: 'Your payment did not go through, so the booking was not made.',
-        },
-      );
-    }
+    await this.notifications.sendBookingUpdate(
+      { role: 'CUSTOMER', id: booking.customerId },
+      {
+        bookingId: booking.id,
+        reference: booking.reference,
+        // Still PENDING_PAYMENT: nothing about the booking changed, only the attempt to pay for it.
+        status: 'PENDING_PAYMENT',
+        message: 'Your payment did not go through. Please try again to confirm this booking.',
+      },
+    );
 
-    return expired ?? this.repo.findById(bookingId);
+    return booking;
   }
 }

@@ -10,6 +10,7 @@ export interface PaymentDoc {
   amountPaise: number;
   refundedPaise: number;
   gatewayRef?: string | null;
+  providerPaymentId?: string | null;
   idempotencyKey: string;
   failureReason?: string | null;
   createdAt: Date;
@@ -25,6 +26,7 @@ const paymentSchema = new Schema<PaymentDoc>(
     amountPaise: { type: Number, required: true, min: 0 },
     refundedPaise: { type: Number, required: true, default: 0, min: 0 },
     gatewayRef: { type: String, default: null },
+    providerPaymentId: { type: String, default: null },
     idempotencyKey: { type: String, required: true },
     failureReason: { type: String, default: null },
   },

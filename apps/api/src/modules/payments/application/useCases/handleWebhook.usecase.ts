@@ -1,7 +1,11 @@
 import { logger } from '../../../../shared/logging/logger.js';
 import { isCaptured } from '../../domain/payment.entity.js';
 import { WebhookSignatureError } from '../../domain/payment.errors.js';
-import type { GatewayEvent, PaymentGatewayPort } from '../../domain/paymentGateway.port.js';
+import type {
+  GatewayEvent,
+  PaymentGatewayPort,
+  WebhookRequest,
+} from '../../domain/paymentGateway.port.js';
 import type { PaymentRepositoryPort } from '../../domain/paymentRepository.port.js';
 
 /**
@@ -32,8 +36,8 @@ export class HandleWebhookUseCase {
     private readonly gateway: PaymentGatewayPort,
   ) {}
 
-  async execute(rawBody: string, signature: string): Promise<WebhookOutcome> {
-    const event = this.gateway.verifyWebhook(rawBody, signature);
+  async execute(request: WebhookRequest): Promise<WebhookOutcome> {
+    const event = this.gateway.verifyWebhook(request);
     if (event === null) throw new WebhookSignatureError();
 
     const isFirstDelivery = await this.repo.markEventProcessed(event.eventId);
@@ -60,8 +64,34 @@ export class HandleWebhookUseCase {
     status: Parameters<PaymentRepositoryPort['transition']>[1],
     refundedPaise: number,
   ): Promise<WebhookOutcome> {
+    /*
+     * The money is held but not taken. Capture it, or the authorisation reverses itself after a
+     * few days and a customer who was debited, and rode, is silently refunded. Correct whether or
+     * not the account has auto-capture on: with it on, this event does not arrive.
+     */
+    if (event.type === 'PAYMENT_AUTHORIZED') {
+      if (event.providerPaymentId === undefined) return { handled: false, reason: 'NOT_APPLICABLE' };
+      await this.gateway.capture(event.providerPaymentId, event.amountPaise);
+      return { handled: false, reason: 'NOT_APPLICABLE' };
+    }
+
     if (event.type === 'PAYMENT_CAPTURED') {
-      const captured = await this.repo.transition(paymentId, 'PENDING', 'CAPTURED');
+      /*
+       * FROM `PENDING` **OR** `FROM FAILED`, and the second one is not defensive programming.
+       *
+       * Razorpay documents that a UPI retry can deliver `payment.failed` and then
+       * `payment.captured` for the same transaction. If capture could only follow `PENDING`, the
+       * customer's money would have moved and this row would sit at `FAILED` forever — money out,
+       * no ride. The payment state machine has one exit from `FAILED` for exactly this.
+       */
+      const patch = event.providerPaymentId === undefined
+        ? {}
+        : { providerPaymentId: event.providerPaymentId };
+
+      const captured =
+        (await this.repo.transition(paymentId, 'PENDING', 'CAPTURED', patch)) ??
+        (await this.repo.transition(paymentId, 'FAILED', 'CAPTURED', patch));
+
       if (captured === null) return { handled: false, reason: 'NOT_APPLICABLE' };
       return { handled: true, kind: 'CAPTURED', paymentId, bookingId };
     }

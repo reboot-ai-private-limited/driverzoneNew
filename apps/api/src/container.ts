@@ -55,7 +55,7 @@ export function buildContainers(): AppContainers {
    * from a customer. Their adapters are mocks today; the ports are the real design.
    */
   const notifications = buildNotificationsContainer();
-  const ledger = buildLedgerContainer();
+  const ledger = buildLedgerContainer({ settings: settings.contract });
   const payments = buildPaymentsContainer();
 
   // tier 3 — polygons, resolution, the invariant write guard

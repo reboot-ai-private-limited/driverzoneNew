@@ -17,6 +17,8 @@ export interface CreatedPayment {
   payment: Payment;
   /** Handed to the app for the provider's SDK. Null when the payment was already settled. */
   clientToken: string | null;
+  /** The publishable key the SDK needs beside the token. Null when there is nothing to open. */
+  publicKey: string | null;
 }
 
 /**
@@ -45,7 +47,7 @@ export class CreatePaymentUseCase {
     // Already in flight or already settled: the caller is retrying, and the answer is whatever
     // happened the first time.
     if (payment.status !== 'CREATED') {
-      return { payment, clientToken: null };
+      return { payment, clientToken: null, publicKey: null };
     }
 
     const intent = await this.gateway.createIntent({
@@ -70,7 +72,11 @@ export class CreatePaymentUseCase {
         { paymentId: payment.id },
         'payment left CREATED before we could mark it pending — returning the stored row',
       );
-      return { payment: (await this.repo.findById(payment.id)) ?? payment, clientToken: null };
+      return {
+        payment: (await this.repo.findById(payment.id)) ?? payment,
+        clientToken: null,
+        publicKey: null,
+      };
     }
 
     /*
@@ -80,9 +86,9 @@ export class CreatePaymentUseCase {
      */
     if (intent.capturedImmediately) {
       const captured = await this.repo.transition(pending.id, 'PENDING', 'CAPTURED');
-      return { payment: captured ?? pending, clientToken: intent.clientToken };
+      return { payment: captured ?? pending, clientToken: intent.clientToken, publicKey: intent.publicKey };
     }
 
-    return { payment: pending, clientToken: intent.clientToken };
+    return { payment: pending, clientToken: intent.clientToken, publicKey: intent.publicKey };
   }
 }

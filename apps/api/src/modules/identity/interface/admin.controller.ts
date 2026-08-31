@@ -6,6 +6,8 @@ import type {
   AdminCustomerListItemDto,
   AdminDriverListDto,
   AdminDriverDetailsDto,
+  AdminDriverWalletDetailsDto,
+  AdminDriverDutyHistoryDto,
   DriverProfileDto,
   DriverDocumentDto,
   ApproveDriverResponse,
@@ -205,6 +207,8 @@ export interface AdminControllers {
   reviewDocument: RequestHandler;
   listDrivers: RequestHandler;
   getDriverDetails: RequestHandler;
+  getDriverWallet: RequestHandler;
+  getDriverDutyHistory: RequestHandler;
   listCustomers: RequestHandler;
   getCustomerDetails: RequestHandler;
   updateCustomer: RequestHandler;
@@ -304,6 +308,45 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
         documents: documents.map((doc) => mapDriverDocumentToDto(doc, doc.url)),
       };
       sendSuccess(req, res, body, 'Driver details retrieved');
+    }),
+
+    getDriverWallet: asyncHandler(async (req, res) => {
+      const { id } = driverIdParamSchema.parse(req.params);
+
+      // Return empty real data until the finance module is integrated
+      const body: AdminDriverWalletDetailsDto = {
+        wallet: {
+          balance_paise: 0,
+          is_suspended_for_balance: false,
+          lifetime_earnings_paise: 0,
+        },
+        ledger: [],
+        pagination: {
+          page: 1,
+          limit: 10,
+          total_items: 0,
+          total_pages: 1,
+        },
+      };
+
+      sendSuccess(req, res, body, 'Driver wallet retrieved');
+    }),
+
+    getDriverDutyHistory: asyncHandler(async (req, res) => {
+      const { id } = driverIdParamSchema.parse(req.params);
+
+      // Return empty real data until the dispatch/duty module is integrated
+      const body: AdminDriverDutyHistoryDto = {
+        sessions: [],
+        pagination: {
+          page: 1,
+          limit: 10,
+          total_items: 0,
+          total_pages: 1,
+        },
+      };
+
+      sendSuccess(req, res, body, 'Driver duty history retrieved');
     }),
 
     listCustomers: asyncHandler(async (req, res) => {

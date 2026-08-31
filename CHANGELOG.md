@@ -15,6 +15,75 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **The booking flow, server side, end to end** — `pricing`, `ledger`, `notifications`,
+  `payments`, `quotes`, `bookings` and `dispatch`, seven modules that between them take a customer
+  from two points on a map to a completed trip with the money settled. `apps/api` had none of
+  them: the admin could define what we sell and nobody could buy it.
+
+  **`pricing` is pure and that is the point.** Tier 0, no I/O, no clock reads — every fare
+  formula, both surcharge windows, the commission split and every post-quote charge are plain
+  functions, so the most dispute-prone logic in the product is exercised exhaustively in
+  milliseconds with no database anywhere near it. It cannot see `Rupees` either: `pricing` and
+  `settings` are both tier 0 and same-tier imports are forbidden, so the caller converts, which
+  puts the rupees-to-paise crossing where it is one visible line per field.
+
+  **The time-of-day surcharge is decided by the scheduled pickup instant, for both products** —
+  closing open question Q8 as its own recommendation proposed. An outstation package is one flat
+  fare however many days it runs, so there is no duration for a window test to attach to; incity
+  follows the same rule so one receipt line has one explanation. The cost is named in the code and
+  pinned by a test: a four-hour rental booked for 21:55 runs to 01:55 and pays no night charge.
+
+  **Tax absorbs the rounding**, which is the one place the LLD's arithmetic needed a decision
+  rather than a transcription. It says `total = roundToRupee(subtotal + tax)` and separately
+  asserts `driver + company + tax === total`; those cannot both hold, since the shares sum to the
+  subtotal exactly while the rounding is free to move the total by 99 paise. Rounding the total
+  and deriving tax as the remainder satisfies both, and tax is the only line here that is a
+  pass-through rather than someone's money. A property test walks the input space to prove it.
+
+  **Payment precedes confirmation.** A booking now starts at `PENDING_PAYMENT` — a new status, and
+  the only change to the documented state machine — and reaches `CONFIRMED` solely through a
+  signature-verified gateway webhook. The customer's app cannot confirm its own booking, which is
+  the whole reason for the ordering. `DRAFT` and `QUOTED` are gone from the enum: they described
+  someone who had not bought anything, and that lives on `quotes`.
+
+  **The waiting charge goes to the driver in full, uncommissioned** (`WAITING_EARNING`), closing
+  Q9 as it recommended. It compensates their time and the company did nothing to earn a share.
+  That one mechanism *is* the customer late fine — a free window then a per-minute charge already
+  is "free waiting, then a fine", and a second concept would be two clocks disagreeing at the
+  boundary.
+
+  **Arrive blocks; trip start still only warns.** Reaching `ARRIVED` starts the waiting-money
+  clock, so marking it from the highway bills a customer for time nobody spent waiting — beyond
+  `dispatch.arrival_radius_m` the call is refused with the measured distance so the app can say
+  "you are 1.2 km away", and a fix older than a minute is refused rather than trusted. START keeps
+  the documented warn-and-log behaviour, because by then the customer is in the car and refusing
+  strands a trip that is genuinely happening. The way out of a refusal is `pin-report` to ops, not
+  a self-serve override: at 500 m the cause is usually a customer who dropped the pin on the wrong
+  side of a flyover, and an override button would absorb that silently forever.
+
+  **Every transition is a compare-and-swap, not a lock.** The docs write `SELECT … FOR UPDATE`;
+  Mongo gives a better primitive, and `findOneAndUpdate` with the expected status in the filter
+  plus the `bookingEvents` insert in one transaction is what makes a customer cancelling at the
+  instant a driver accepts resolve to exactly one winner. The accept race swaps on two fields at
+  once, and a driver who loses is marked `SUPERSEDED` — never counted against their acceptance
+  rate, because they did everything right and were merely slower.
+
+  **The gateway and the push sender are ports with mock adapters.** The mock gateway signs its
+  webhooks for real, so the single most security-sensitive line in the payment path — an
+  unauthenticated public endpoint that confirms bookings — is exercised from the first day rather
+  than discovered broken against a real provider. It refuses to run in production. The mock push
+  sender records every send, which is what makes the whole flow walkable with no mobile app.
+
+- **Ten new settings**, all in the registry where the other nineteen live: the tax rate, the
+  arrival and start radii, the dispatch wave shape and lead time, the maximum driver debt, and the
+  outstation hours-per-day policy — which is display-only text with no fare consequence, read by
+  nothing in the arithmetic.
+
+- **A server-side money formatter.** `contracts` has always promised `Money { amount_paise,
+  amount_display }` so all four clients render a figure identically, and nothing has ever produced
+  the display half.
+
+
 - **The admin packages screen** at `/packages` — the editor for what we sell and what it costs.
   InCity is a table of packages; Outstation is a table of distance bands with the **gaps between
   them interleaved as rows**, because a gap is the one package failure nothing else reports: an
@@ -197,6 +266,22 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   accessibility claims in the design language are checked rather than asserted.
 
 ### Fixed
+
+- **BullMQ rejects a job id containing `:`** — the exact form
+  `docs/LLD/dispatch-and-assignment.md` gives (`wave:${bookingId}:${wave}`). Every dispatch job
+  failed to enqueue until the ids became hyphenated. Found by running the flow, not by a test, and
+  now pinned by one.
+
+- **The blunt cancellation free window excused fees it should not have.** The ladder scopes it to
+  "within 5 min of confirming, *before assignment*"; applied regardless of status it meant that on
+  a fast dispatch — a driver at the door inside five minutes — every customer cancelled free while
+  the driver had made the whole trip for nothing.
+
+- **`bookingEvents.metadata` was missing from the wire** on any transition that carried none:
+  Mongoose does not persist an empty Mixed object, so the contract promised a `Record` the
+  response omitted, and a client reading `event.metadata.x` would throw on precisely the
+  transitions that went fine.
+
 
 - **The zones screen's package count was always zero.** The packages controllers put camelCase
   domain entities on the wire while the contracts and swagger both promised snake_case, and the

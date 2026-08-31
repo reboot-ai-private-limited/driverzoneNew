@@ -3,6 +3,7 @@ import {
   BOOKING_ACTOR_TYPES,
   BOOKING_STATUSES,
   DIRECTIONS,
+  PAYMENT_MODES,
   SERVICE_TYPES,
 } from '@driverzone/contracts';
 
@@ -25,6 +26,7 @@ export interface BookingDoc {
   distanceKm?: number | null;
   quoteId: mongoose.Types.ObjectId;
   fareSnapshot: unknown;
+  paymentMode: string;
   paymentId?: mongoose.Types.ObjectId | null;
   isScheduled: boolean;
   scheduledAt: Date;
@@ -75,6 +77,7 @@ const bookingSchema = new Schema<BookingDoc>(
      * The real protection is that nothing in the module has a reason to write it twice.
      */
     fareSnapshot: { type: Schema.Types.Mixed, required: true, immutable: true },
+    paymentMode: { type: String, enum: PAYMENT_MODES, required: true },
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', default: null },
 
     isScheduled: { type: Boolean, required: true, default: false },

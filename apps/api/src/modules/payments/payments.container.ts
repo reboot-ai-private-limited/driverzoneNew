@@ -1,7 +1,11 @@
 import type { Router } from 'express';
+import { env } from '../../config/env.js';
+import { logger } from '../../shared/logging/logger.js';
 import type { PaymentsPublicContract } from './payments.public.js';
+import type { PaymentGatewayPort } from './domain/paymentGateway.port.js';
 import { MongoPaymentRepository } from './infrastructure/paymentRepository.impl.js';
 import { MockPaymentGateway } from './infrastructure/mock.gateway.js';
+import { RazorpayGateway } from './infrastructure/razorpay.gateway.js';
 import { CreatePaymentUseCase } from './application/useCases/createPayment.usecase.js';
 import { RefundPaymentUseCase } from './application/useCases/refundPayment.usecase.js';
 import {
@@ -24,13 +28,36 @@ export interface PaymentsContainer {
 /**
  * The only file permitted to name a concrete gateway.
  *
- * `MockPaymentGateway` throws on construction in production, so selecting it there fails at boot
- * rather than quietly confirming bookings that collected nothing. When the real adapter exists,
- * the choice is an `if (isProduction)` here and nothing else in the module changes.
+ * Razorpay whenever its three secrets are configured; the mock otherwise. The mock throws on
+ * construction in production, so a production deploy that forgot the keys dies at boot rather than
+ * quietly confirming bookings that collected nothing — which is the failure this selection exists
+ * to make impossible.
  */
+function selectGateway(): PaymentGatewayPort {
+  const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET } = env;
+
+  if (
+    RAZORPAY_KEY_ID !== undefined &&
+    RAZORPAY_KEY_SECRET !== undefined &&
+    RAZORPAY_WEBHOOK_SECRET !== undefined
+  ) {
+    logger.info(
+      { mode: RAZORPAY_KEY_ID.startsWith('rzp_test') ? 'test' : 'live' },
+      'payments: using Razorpay',
+    );
+    return new RazorpayGateway({
+      keyId: RAZORPAY_KEY_ID,
+      keySecret: RAZORPAY_KEY_SECRET,
+      webhookSecret: RAZORPAY_WEBHOOK_SECRET,
+    });
+  }
+
+  return new MockPaymentGateway();
+}
+
 export function buildPaymentsContainer(): PaymentsContainer {
   const repo = new MongoPaymentRepository();
-  const gateway = new MockPaymentGateway();
+  const gateway = selectGateway();
 
   const create = new CreatePaymentUseCase(repo, gateway);
   const refund = new RefundPaymentUseCase(repo, gateway);

@@ -39,7 +39,16 @@ export class RefundPaymentUseCase {
       });
     }
 
-    if (payment.gatewayRef === null) {
+    /*
+     * The PAYMENT id, falling back to the order id.
+     *
+     * Razorpay refunds are `POST /v1/payments/:id/refund` — against the payment, which only exists
+     * once someone has paid, so it arrives with the capture webhook rather than at order creation.
+     * `gatewayRef` holds the ORDER, and refunding with that hits the wrong resource. The fallback
+     * is for the mock gateway, where the two are the same string.
+     */
+    const refundTarget = payment.providerPaymentId ?? payment.gatewayRef;
+    if (refundTarget === null) {
       throw new PaymentStateError('This payment has no gateway reference to refund against');
     }
 
@@ -60,7 +69,7 @@ export class RefundPaymentUseCase {
     }
 
     await this.gateway.refund({
-      gatewayRef: payment.gatewayRef,
+      gatewayRef: refundTarget,
       amountPaise,
       idempotencyKey: input.idempotencyKey,
     });

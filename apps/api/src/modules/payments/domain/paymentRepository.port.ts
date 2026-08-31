@@ -27,7 +27,12 @@ export interface PaymentRepositoryPort {
     id: string,
     from: PaymentStatus,
     to: PaymentStatus,
-    patch?: { gatewayRef?: string; failureReason?: string; refundedPaise?: number },
+    patch?: {
+      gatewayRef?: string;
+      providerPaymentId?: string;
+      failureReason?: string;
+      refundedPaise?: number;
+    },
   ): Promise<Payment | null>;
 
   attachGatewayRef(id: string, gatewayRef: string): Promise<Payment | null>;

@@ -46,6 +46,20 @@ export const SERVICE_TYPES = ['INCITY', 'OUTSTATION'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
 /**
+ * How the customer pays.
+ *
+ * `UPI` is prepaid: the booking waits at `PENDING_PAYMENT` until Razorpay confirms, so a driver is
+ * never sent to someone who has not paid. `CASH` collects nothing up front and confirms
+ * immediately — the driver takes the fare at the end, which is why a cash trip is the only one
+ * that puts a driver into debt to the company.
+ *
+ * There is no card or netbanking mode. Checkout is restricted to UPI, and the Collect flow is
+ * deprecated by NPCI as of 28 February 2026, so it is UPI Intent specifically.
+ */
+export const PAYMENT_MODES = ['UPI', 'CASH'] as const;
+export type PaymentMode = (typeof PAYMENT_MODES)[number];
+
+/**
  * `Idempotency-Key` is REQUIRED on this request — one tap, one key, however many network retries
  * it takes. Without it a flaky connection charges a customer twice.
  */
@@ -53,15 +67,21 @@ export interface CreateBookingRequest {
   quoteId: string;
   pickupAddress: string;
   dropAddress: string;
+  paymentMode: PaymentMode;
 }
 
 export interface CreateBookingResponse {
   booking: BookingDto;
   /**
-   * Hand this to the payment provider's SDK. Null when the charge already settled, which is what
-   * a retry looks like — the app should poll the booking rather than opening a payment sheet.
+   * The Razorpay ORDER id, to hand to checkout. Null for a cash booking, which has no payment, and
+   * null on a retry whose charge already settled — in both cases the app shows the trip rather
+   * than a payment sheet.
    */
   client_token: string | null;
+  /** The publishable `rzp_test_…`/`rzp_live_…` key checkout needs beside the order. Null for cash. */
+  public_key: string | null;
+  /** What the order is for: the fare, plus any unpaid dues carried from an earlier booking. */
+  amount: Money | null;
 }
 
 export interface BookingDto {
@@ -70,6 +90,7 @@ export interface BookingDto {
   reference: string;
   status: BookingStatus;
   service_type: ServiceType;
+  payment_mode: PaymentMode;
 
   pickup: { lat: number; lng: number; address: string };
   drop: { lat: number; lng: number; address: string };
@@ -156,6 +177,19 @@ export interface CompleteTripResponse {
   booking: BookingDto;
   waiting_charge: Money;
   total: Money;
+}
+
+/**
+ * What the customer owes, and therefore how they may pay.
+ *
+ * A fact about the CUSTOMER, not about a trip, which is why it is its own endpoint rather than a
+ * field on a quote — a quote is priced for two points on a map and knows nothing about debts. It
+ * also keeps `quotes` from having to reach into `bookings`, which sits a tier above it.
+ */
+export interface CustomerDuesResponse {
+  outstanding: Money;
+  /** `CASH` disappears while dues are unpaid: a cash trip has no payment leg to clear them on. */
+  payment_modes: PaymentMode[];
 }
 
 export interface ReportPickupPinRequest {

@@ -13,10 +13,12 @@ export interface FareAdjustment {
 export interface CancellationCharge {
   id: string;
   bookingId: string;
+  customerId: string;
   chargedTo: 'CUSTOMER' | 'DRIVER';
   amountPaise: number;
   atStatus: BookingStatus;
   reason: string;
+  settledByPaymentId: string | null;
 }
 
 /**
@@ -46,13 +48,27 @@ export interface ChargeRepositoryPort {
   /** One per booking, idempotently — a cancellation cannot be charged for twice. */
   recordCancellationCharge(input: {
     bookingId: string;
+    customerId: string;
     chargedTo: CancellationCharge['chargedTo'];
     amountPaise: number;
     atStatus: BookingStatus;
     reason: string;
+    /** Set when the fee was collected as it was charged — kept back out of a refund. */
+    settledByPaymentId?: string | undefined;
   }): Promise<CancellationCharge>;
 
   findCancellationCharge(bookingId: string): Promise<CancellationCharge | null>;
+
+  /**
+   * What this customer still owes, from fees charged on bookings that held none of their money.
+   *
+   * Only ever non-zero after a CASH cancellation: a prepaid booking's fee is kept out of its own
+   * refund, so it is settled the instant it is charged.
+   */
+  outstandingDues(customerId: string): Promise<number>;
+
+  /** Marks every unpaid due as collected by this payment. Called when its capture lands. */
+  settleDues(customerId: string, paymentId: string): Promise<void>;
 
   recordPinReport(input: {
     bookingId: string;

@@ -19,6 +19,7 @@ import { getRedis } from './redis.js';
 export const QUEUE_NAMES = {
   dispatch: 'dispatch',
   notifications: 'notifications',
+  sweeper: 'sweeper',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

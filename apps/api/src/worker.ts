@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'bullmq';
 import { loadEnv } from '@/config/env.js';
-import { QUEUE_NAMES, closeQueues } from '@/shared/queue/queues.js';
+import { QUEUE_NAMES, closeQueues, getQueue } from '@/shared/queue/queues.js';
 import { disconnectRedis, getRedis } from '@/shared/queue/redis.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
 import { runWithContext } from '@/shared/http/request-context.js';
@@ -59,6 +59,35 @@ async function main(): Promise<void> {
     { connection: getRedis(), concurrency: 10 },
   );
 
+  
+  const sweeperWorker = new Worker(
+    QUEUE_NAMES.sweeper,
+    async (job) => {
+      const requestId = randomUUID();
+      await runWithContext({ requestId }, async () => {
+        logger.info({ name: job.name, id: job.id }, 'sweeper job running');
+        
+        if (job.name === 'process-expired-reviews') {
+          // Fetch the submission_window_hours from settings
+          const submissionWindowHours = (await containers.settings.contract.get('reviews.submission_window_hours')) as number;
+          await containers.reviews.processExpiredReviews(submissionWindowHours);
+        }
+      });
+    },
+    { connection: getRedis(), concurrency: 1 },
+  );
+
+  sweeperWorker.on('failed', (job, err) => {
+    logger.error({ id: job?.id, name: job?.name, err: err.message }, 'sweeper job failed');
+  });
+
+  // Setup the repeatable job
+  const sweeperQueue = getQueue(QUEUE_NAMES.sweeper);
+  await sweeperQueue.add('process-expired-reviews', {}, {
+    repeat: { pattern: '*/5 * * * *' }, // every 5 minutes
+    jobId: 'process-expired-reviews-cron', // prevent duplicates
+  });
+
   dispatchWorker.on('failed', (job, err) => {
     logger.error({ id: job?.id, name: job?.name, err: err.message }, 'dispatch job failed');
   });
@@ -70,6 +99,7 @@ async function main(): Promise<void> {
       logger.info({ signal }, 'signal received, closing workers');
       // Waits for the active job to finish. Killing mid-job leaves a booking half-dispatched.
       await dispatchWorker.close();
+      await sweeperWorker.close();
       await closeQueues();
       await disconnectMongo();
       disconnectRedis();

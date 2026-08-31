@@ -17,6 +17,7 @@ import { CustomerModel } from '@/modules/identity/infrastructure/customer.model.
 import { DriverModel } from '@/modules/identity/infrastructure/driver.model.js';
 import { DriverDocumentModel } from '@/modules/identity/infrastructure/driverDocument.model.js';
 import { SessionModel } from '@/modules/identity/infrastructure/session.model.js';
+import { ReviewModel } from '@/modules/reviews/infrastructure/review.model.js';
 import { AuditLogModel } from '@/shared/db/auditLog.model.js';
 
 /**
@@ -74,6 +75,7 @@ interface ClearableModel {
 const IDENTITY_MODELS: { name: string; model: ClearableModel }[] = [
   { name: 'sessions', model: SessionModel },
   { name: 'auditlogs', model: AuditLogModel },
+  { name: 'reviews', model: ReviewModel as unknown as ClearableModel },
   { name: 'driverdocuments', model: DriverDocumentModel },
   { name: 'drivers', model: DriverModel },
   { name: 'customers', model: CustomerModel },
@@ -256,6 +258,57 @@ async function seedCustomers(): Promise<void> {
     },
     { upsert: true, new: true },
   ).exec();
+}
+
+async function seedReviews(): Promise<void> {
+  const customerId = oid(DEV_CUSTOMER.id);
+  const driverId = oid(DEV_DRIVER.id);
+  const booking1 = new mongoose.Types.ObjectId();
+  const booking2 = new mongoose.Types.ObjectId();
+  const booking3 = new mongoose.Types.ObjectId();
+
+  await ReviewModel.deleteMany({
+    bookingId: { $in: [booking1, booking2, booking3] }
+  });
+
+  // 1. Customer reviews driver (Positive)
+  await ReviewModel.create({
+    bookingId: booking1,
+    reviewerId: customerId,
+    reviewerRole: 'CUSTOMER',
+    revieweeId: driverId,
+    revieweeRole: 'DRIVER',
+    rating: 5,
+    tags: ['Polite', 'Clean Car'],
+    comment: 'Great trip, very smooth driving!',
+    isPublished: true,
+  });
+
+  // 2. Driver reviews customer (Positive)
+  await ReviewModel.create({
+    bookingId: booking2,
+    reviewerId: driverId,
+    reviewerRole: 'DRIVER',
+    revieweeId: customerId,
+    revieweeRole: 'CUSTOMER',
+    rating: 4,
+    tags: ['On Time'],
+    comment: 'Customer was ready at pickup.',
+    isPublished: true,
+  });
+
+  // 3. Customer reviews driver (Negative / Flagged)
+  await ReviewModel.create({
+    bookingId: booking3,
+    reviewerId: customerId,
+    reviewerRole: 'CUSTOMER',
+    revieweeId: driverId,
+    revieweeRole: 'DRIVER',
+    rating: 2,
+    tags: ['Late', 'AC Issue'],
+    comment: 'Driver was 15 minutes late and AC barely worked.',
+    isPublished: true,
+  });
 }
 
 /**
@@ -457,6 +510,7 @@ async function main(): Promise<void> {
   await seedAdmin();
   await seedDriver();
   await seedCustomers();
+  await seedReviews();
 
   // After the admin exists — every zone is `createdBy` that account.
   const zoneOutcome = await seedZones(zones);

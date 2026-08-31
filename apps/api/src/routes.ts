@@ -53,6 +53,7 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/admin/zones', c.zones.buildAdminRouter());
   router.use('/admin/settings', c.settings.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
+  router.use('/admin/reviews', c.reviews.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
   /**
@@ -62,7 +63,9 @@ export function buildApiRouter(c: AppContainers): Router {
    * business, not an anonymous caller's.
    */
   router.use('/customer/settings', c.settings.buildAudienceRouter('CUSTOMER'));
+  router.use('/customer', c.reviews.buildAudienceRouter('CUSTOMER'));
   router.use('/driver/settings', c.settings.buildAudienceRouter('DRIVER'));
+  router.use('/driver', c.reviews.buildAudienceRouter('DRIVER'));
 
   return router;
 }

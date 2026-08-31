@@ -3,6 +3,7 @@ import { buildIdentityContainer } from '@/modules/identity/identity.container.js
 import { buildPackagesContainer } from '@/modules/packages/packages.container.js';
 import { buildSettingsContainer } from '@/modules/settings/settings.container.js';
 import { buildZonesContainer } from '@/modules/zones/zones.container.js';
+import { buildReviewsContainer } from '@/modules/reviews/reviews.container.js';
 
 /**
  * THE APPLICATION COMPOSITION ROOT.
@@ -24,6 +25,7 @@ export interface AppContainers {
   identity: ReturnType<typeof buildIdentityContainer>;
   zones: ReturnType<typeof buildZonesContainer>;
   packages: ReturnType<typeof buildPackagesContainer>;
+  reviews: ReturnType<typeof buildReviewsContainer>;
 }
 
 export function buildContainers(): AppContainers {
@@ -46,5 +48,8 @@ export function buildContainers(): AppContainers {
   // tier 4 — incity + outstation package definitions
   const packages = buildPackagesContainer();
 
-  return { health, settings, identity, zones, packages };
+  // tier 5 — post-trip reviews and ratings
+  const reviews = buildReviewsContainer(settings.contract);
+
+  return { health, settings, identity, zones, packages, reviews };
 }

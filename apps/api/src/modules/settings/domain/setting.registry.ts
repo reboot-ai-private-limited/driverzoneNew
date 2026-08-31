@@ -41,6 +41,7 @@ const timeWindow = z
 const rupees = z.number().int().min(0);
 const minutes = z.number().int().min(0);
 const seconds = z.number().int().min(0);
+const hours = z.number().int().min(0);
 
 export interface SettingDefinition {
   /** Validates both the stored override and the incoming PATCH value. One rule, not two. */
@@ -254,6 +255,17 @@ export const SETTING_REGISTRY = {
     audiences: ['ADMIN', 'DRIVER'],
     description: 'Debited from the driver who cancels after arriving. Never below the en-route penalty.',
   },
+
+  // ─── Reviews ───────────────────────────────────────────────────────────────────────────────
+  'reviews.submission_window_hours': {
+    schema: hours,
+    default: 24,
+    group: 'REVIEWS',
+    label: 'Review submission window',
+    unit: 'COUNT',
+    audiences: ['ADMIN', 'CUSTOMER', 'DRIVER'],
+    description: 'Hours after a trip completes during which a review can be submitted.',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTING_REGISTRY;
@@ -275,6 +287,7 @@ export const SETTING_GROUP_ORDER = [
   'DRIVER',
   'DISPATCH',
   'CANCELLATION',
+  'REVIEWS',
 ] as const satisfies readonly SettingGroup[];
 
 export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
@@ -284,4 +297,5 @@ export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   DRIVER: 'Driver conduct',
   DISPATCH: 'Dispatch',
   CANCELLATION: 'Cancellation',
+  REVIEWS: 'Trip reviews',
 };

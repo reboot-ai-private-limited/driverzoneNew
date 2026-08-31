@@ -67,6 +67,40 @@ export const FAULT_CODES = [
   'OTP_SEND_LIMIT_EXCEEDED',
   'SESSION_REVOKED',
   'REFRESH_TOKEN_INVALID',
+
+  // Payments (docs/LLD/pricing-and-commission.md). A booking is confirmed only once its payment
+  // is captured, so these are on the path between a quote and a driver being looked for.
+  'PAYMENT_NOT_FOUND',
+  /** The booking cannot advance because its payment has not been captured. 402. */
+  'PAYMENT_REQUIRED',
+  /** The gateway declined. Carries a customer-safe reason in `publicDetails`. 402. */
+  'PAYMENT_FAILED',
+  /** A webhook whose signature did not verify. 401 — and never processed. */
+  'PAYMENT_WEBHOOK_INVALID',
+  /** Refunding more than was captured, or capturing something already refunded. 409. */
+  'PAYMENT_STATE_INVALID',
+
+  // Bookings (docs/LLD/booking-lifecycle.md).
+  'BOOKING_NOT_FOUND',
+  /** The requested status change is not in the transition table. 409. */
+  'INVALID_BOOKING_TRANSITION',
+  /** Wrong trip-start OTP. Never says whether the code or the booking was the problem. 400. */
+  'OTP_INVALID',
+  /** Five wrong OTP attempts. The booking is locked and routed to support. 429. */
+  'OTP_LOCKED',
+  /**
+   * The driver is too far from the pickup point to mark themselves arrived. 422, and it carries
+   * the measured distance so the app can say how far off they are rather than just refusing.
+   */
+  'DRIVER_NOT_AT_PICKUP',
+  /** A location fix too old to make a decision on. 400. */
+  'DRIVER_LOCATION_STALE',
+
+  // Dispatch (docs/LLD/dispatch-and-assignment.md).
+  /** Another driver won the race. NOT counted against acceptance rate. 409. */
+  'ALREADY_ASSIGNED',
+  'OFFER_NOT_FOUND',
+  'OFFER_EXPIRED',
 ] as const;
 export type FaultCode = (typeof FAULT_CODES)[number];
 

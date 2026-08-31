@@ -10,7 +10,7 @@
 | **Hill zone** | Terrain classifier for outstation routing. Not tied to a city. |
 | **Package** | A sellable service definition. Incity (scoped to a city zone) or outstation (scoped to terrain and a distance band). Neither references a pickup zone. |
 | **Variant** | A duration option on an incity package (3H, 10H). |
-| **Car category** | Hatchback / Sedan / SUV / Luxury / EV. Prices are per category. |
+| **Car category** | Hatchback / Sedan / SUV / Luxury / EV. Decides which drivers may be offered a booking; **not** a pricing dimension since 2026-08-28. |
 | **Quote** | A server-computed, time-limited price for a specific pickup/drop/variant/car. |
 | **Booking** | A confirmed trip. Carries a frozen copy of its fare. |
 | **Offer** | A single dispatch invitation sent to one driver for one booking. |
@@ -130,13 +130,14 @@ violation should be impossible to create, not merely detected later.
 - **P-1** *Retired 2026-08-25*, with the package ↔ pickup-zone link it enforced. Packages do
   not reference pickup zones at all (`zones.md`). Label kept so P-2…P-4 hold their numbers.
 
-- **P-2** For a given (terrain, car category, direction), outstation distance bands must not
+- **P-2** For a given **terrain**, outstation distance bands must not
   overlap. Two matching packages = ambiguous price. *Scope widened* when the pickup-zone
   qualifier went: this is now a global check per terrain, which is both simpler to run and
   stricter than what it replaced.
 
-- **P-3** An active package has at least one active price row. A package that can never be sold
-  must not be marked active.
+- **P-3** *Incity only.* An active package has at least one active variant. **Retired for
+  outstation 2026-08-28**: a band's `oneWayFarePaise` is a required field, so "active but
+  unsellable" stopped being a representable state rather than merely a forbidden one.
 
 - **P-4** `min_km < max_km`. Bands are `[min_km, max_km)` — half-open, so adjacent bands
   (0–70, 70–100, 100–150) tile cleanly with no gap and no overlap at the boundary.

@@ -125,6 +125,14 @@ whole earth *minus* that shape — silently, with no error. See `zones.md` §Why
 
 ## `carCategories`
 
+**Not implemented, and not a pricing dimension.** No package references a category any more
+(retired 2026-08-28, [`../decision-log.md`](../decision-log.md)); what a category still decides
+is *who can drive* — dispatch matches a driver's competencies against the booking's category.
+The list currently lives as a closed constant, `CAR_CATEGORIES` in
+`packages/contracts/src/identity.ts`, because five rows that change once a year are not a
+collection anyone wants to administer. The schema below is what it becomes when that stops being
+true.
+
 ```ts
 const carCategorySchema = new Schema({
   code:      { type: String, required: true, unique: true },  // 'SEDAN'
@@ -139,38 +147,33 @@ const carCategorySchema = new Schema({
 
 ## `incityPackages`
 
-The variant/price split is embedded rather than referenced. Variants are always read with their
-package, never queried independently, and the whole document is a few kilobytes — well within
-the 16MB limit. Embedding makes a quote one read instead of three.
+Variants are embedded rather than referenced. They are always read with their package, never
+queried independently, and the whole document is well under a kilobyte. Embedding makes a quote
+one read instead of two.
+
+**There is no `incityPriceSchema`.** A variant used to hold a price row per car category; that
+was retired 2026-08-28 ([`../decision-log.md`](../decision-log.md)) and the fare moved onto the
+variant itself.
 
 ```ts
-const incityPriceSchema = new Schema({
-  carCategoryId:         { type: Schema.Types.ObjectId, ref: 'CarCategory', required: true },
-  baseFarePaise:         { type: Number, required: true, min: 0 },
-  extraMinuteRatePaise:  { type: Number, default: 0, min: 0 },
-  extraKmRatePaise:      { type: Number, default: 0, min: 0 },
-  nightChargePaise:      { type: Number, default: 0, min: 0 },
-
-  driverCommissionType:   { type: String, enum: ['PERCENT', 'FLAT'], required: true },
-  driverCommissionValue:  { type: Number, required: true },   // basis points if PERCENT
-  companyCommissionType:  { type: String, enum: ['PERCENT', 'FLAT'], required: true },
-  companyCommissionValue: { type: Number, required: true },
-
-  isActive: { type: Boolean, default: true },
-}, { _id: true });
-
 const incityVariantSchema = new Schema({
   label:           { type: String, required: true },    // '3 Hours'
+  // What the customer buys, and what tells the driver when they are released. There is NO
+  // overage: extraMinuteRatePaise, extraKmRatePaise and the includedKm cap they billed against
+  // were removed 2026-08-28 (open-questions.md Q2), along with enforceDropInCity (Q1) and
+  // sortOrder. Variants display in stored order.
   includedMinutes: { type: Number, required: true, min: 1 },
-  includedKm:      { type: Number, required: true, min: 0 },
 
-  // See open-questions.md Q1. Defaults from duration: a 10-hour rental's destination is
-  // advisory, a 3-hour one's is not.
-  enforceDropInCity: { type: Boolean, default: true },
+  baseFarePaise:   { type: Number, required: true, min: 0 },
 
-  prices:    [incityPriceSchema],
-  sortOrder: { type: Number, default: 0 },
-  isActive:  { type: Boolean, default: true },
+  // Basis points: 7500 is 75%. The COMPANY's share is `10000 - this` and is not stored —
+  // two independently stored shares are two numbers that can fail to add up.
+  driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
+
+  // No nightChargePaise: the early-morning and late-night surcharges are GLOBAL, set once in
+  // globalSettings rather than per package (decision-log.md, 2026-08-28).
+
+  isActive: { type: Boolean, default: true },
 }, { _id: true });
 
 const incityPackageSchema = new Schema({
@@ -195,29 +198,28 @@ There is no cross-collection check left on this schema: matching an incity packa
 
 ## `outstationPackages`
 
-```ts
-const outstationPriceSchema = new Schema({
-  carCategoryId:        { type: Schema.Types.ObjectId, ref: 'CarCategory', required: true },
-  direction:            { type: String, enum: ['ONE_WAY', 'ROUND_TRIP'], required: true },
-  baseFarePaise:        { type: Number, required: true, min: 0 },
-  extraKmRatePaise:     { type: Number, default: 0, min: 0 },
-  driverAllowancePaise: { type: Number, default: 0, min: 0 },   // night halt / food
+**The band IS the price.** There was an `outstationPriceSchema` here keyed by
+`(carCategory, direction)` — ten rows per band — retired 2026-08-28
+([`../decision-log.md`](../decision-log.md)). Two fares and a commission split remain, and the
+fare is **flat across the band**: 72 km and 98 km both pay the `70–100` fare. That closes
+`open-questions.md` Q3, whose warning still applies — flat pricing needs many narrow bands.
 
-  driverCommissionType:   { type: String, enum: ['PERCENT', 'FLAT'], required: true },
-  driverCommissionValue:  { type: Number, required: true },
-  companyCommissionType:  { type: String, enum: ['PERCENT', 'FLAT'], required: true },
-  companyCommissionValue: { type: Number, required: true },
+```ts
+const outstationPackageSchema = new Schema({
+  name:    { type: String, required: true },       // 'PKG-1'
+  terrain: { type: String, enum: ['PLAIN', 'HILL'], required: true },
+  minKm:   { type: Number, required: true, min: 0 },
+  maxKm:   { type: Number, required: true },       // band is [minKm, maxKm)
+
+  oneWayFarePaise: { type: Number, required: true, min: 0 },
+  // The whole two-way journey, however many days it takes. `null` means this band does not sell
+  // a return trip. `default: null`, never `default: 0` — a missing fare and a free trip must not
+  // look the same.
+  roundTripFarePaise: { type: Number, default: null, min: 0 },
+
+  driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
 
   isActive: { type: Boolean, default: true },
-}, { _id: true });
-
-const outstationPackageSchema = new Schema({
-  name:          { type: String, required: true },       // 'PKG-1'
-  terrain:       { type: String, enum: ['PLAIN', 'HILL'], required: true },
-  minKm:         { type: Number, required: true, min: 0 },
-  maxKm:         { type: Number, required: true },       // band is [minKm, maxKm)
-  prices:        [outstationPriceSchema],
-  isActive:      { type: Boolean, default: true },
 }, { timestamps: true });
 
 outstationPackageSchema.index({ terrain: 1, minKm: 1, maxKm: 1, isActive: 1 });

@@ -20,6 +20,82 @@ entry links to it.
 
 ---
 
+## 2026-08-28 — An incity variant is a duration and a price; a return fare is the whole two-way trip
+
+**Decision:** two changes, both narrowing what a package can express.
+
+- **The incity variant loses `includedKm`, `extraMinuteRatePaise`, `extraKmRatePaise`,
+  `enforceDropInCity` and `sortOrder`.** What is left is `label`, `includedMinutes`,
+  `baseFarePaise` and `driverCommissionBps`. `includedMinutes` stays because it is what the
+  customer buys and what tells the driver when they are released.
+- **`roundTripFarePaise` is the whole two-way journey**, not a same-day round trip. A 540 km
+  destination matches the band containing 540 — the ONE-WAY distance — and that band's return
+  fare covers all 1,080 km of driving, however many days the driver is away.
+
+This closes three open questions, all by deletion rather than by specification:
+[`LLD/open-questions.md`](LLD/open-questions.md) **Q1** (no destination rule), **Q2** (no overage
+billing at all), and **Q4** (a round trip is however long it takes).
+
+**It also removes the rung-(a) guard in `resolveForTrip`.** Incity used to win only within
+`incity.max_distance_multiple` × the longest variant's `includedKm`; that field is gone and the
+guard was dropped rather than re-expressed as a flat km limit. This reverses the 2026-08-20 entry
+below that introduced the multiple, and the `incity.max_distance_multiple` settings key that entry
+promised is no longer coming.
+
+**What it costs, and none of it is hypothetical:**
+
+- **A 3-hour booking that runs 3h 40m is free.** The most common real-world event in an hourly
+  product now has no fare consequence — it is an operations conversation.
+- **A long cross-city trip sells as an hourly rental.** Both points inside the city zone means
+  incity at any distance, and with overage gone there is nothing to collect the difference. A
+  60 km run at ₹900 is now a legal outcome.
+- **A 2-day and a 5-day outstation trip to the same town pay the same**, because distance is the
+  only thing that selects a band and there is no per-day allowance.
+
+**Why anyway:** the fields were carrying a pricing model nobody was going to operate. An unused
+overage rate is not free — it is a number in a form that has to be right, a field in a snapshot
+that has to be frozen, and a dispute path that has to be defended. Removing them makes the
+product smaller and the admin screen honest about what it actually charges. Each cost above is
+recoverable by restoring the field it came from; none of them is recoverable by accident.
+
+---
+
+## 2026-08-28 — Price no longer varies by car category; an outstation band is a flat fare
+
+**Decision:** A package's price is not keyed by car category. An outstation band carries
+`oneWayFarePaise`, a nullable `roundTripFarePaise` and one `driverCommissionBps`; an incity
+variant carries `baseFarePaise`, its two overage rates and one `driverCommissionBps`. The
+`prices[]` subdocument is gone from both, along with `CommissionType` (`PERCENT | FLAT`) and the
+separately stored company commission.
+
+Three things follow, each deliberate:
+
+- **The band fare is flat.** `extraKmRatePaise` and `driverAllowancePaise` were removed rather
+  than defaulted to zero — a field that is always zero is a field someone eventually sets. This
+  closes [`LLD/open-questions.md`](LLD/open-questions.md) Q3.
+- **The company's commission is derived**, `10000 − driver`. Storing both let a form save 75%
+  and 20% and leave 5% of every trip in nobody's column.
+- **`roundTripFarePaise` is nullable**, meaning "this band does not sell a same-day return" —
+  never "the return is free".
+
+**Why:** the admin editor made the old model's cost concrete. A band asked for ten price rows
+(five categories × two directions) and ops filled in one; the screen was a column of `not sold`.
+That is flat pricing with more ways to get it wrong, plus a grid nobody could scan.
+
+**What it costs, and it is real:** an SUV and a hatchback now pay the same fare for the same
+trip. That is pricing power we have given up, not an inefficiency we have removed. Flat bands
+also need to be narrower to stay fair, which is why splitting a band became a first-class admin
+action and why an uncovered distance is a red row in the band list rather than a silence.
+
+**Not affected:** car category still exists and still matters. It is recorded on the booking and
+it decides which drivers may be offered it
+([`LLD/dispatch-and-assignment.md`](LLD/dispatch-and-assignment.md)). The list moved to
+`CAR_CATEGORIES` in `packages/contracts/src/identity.ts`; there is still no `carCategories`
+collection. Reversing this decision means restoring a price table keyed by category — the wire
+field is gone, the concept is not.
+
+---
+
 ## 2026-08-28 — Global settings are a key-value collection with the defaults in code
 
 **Decision:** `globalSettings` stores one document per **overridden** key and nothing else. Each

@@ -1,4 +1,8 @@
-import type { ListIncityPackagesQuery, ListZonesQuery } from '@driverzone/contracts';
+import type {
+  ListIncityPackagesQuery,
+  ListOutstationPackagesQuery,
+  ListZonesQuery,
+} from '@driverzone/contracts';
 import type { ListCustomersQuery } from '../api/endpoints/customers';
 
 /**
@@ -23,9 +27,18 @@ export const keys = {
     validate: (fingerprint: string) => ['zones', 'validate', fingerprint] as const,
   },
   packages: {
+    /**
+     * One root for both products, so a save on either invalidates the whole screen. They are
+     * separate collections but one page, and the outstation coverage ladder is derived from the
+     * list — a narrower key would leave a stale ladder next to a fresh row.
+     */
     all: () => ['packages'] as const,
     incityList: (query?: ListIncityPackagesQuery) =>
       ['packages', 'incity', 'list', query ?? {}] as const,
+    incityDetail: (id: string) => ['packages', 'incity', 'detail', id] as const,
+    outstationList: (query?: ListOutstationPackagesQuery) =>
+      ['packages', 'outstation', 'list', query ?? {}] as const,
+    outstationDetail: (id: string) => ['packages', 'outstation', 'detail', id] as const,
   },
   settings: {
     /**

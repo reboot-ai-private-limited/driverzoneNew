@@ -1,9 +1,11 @@
 import { Feather } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { type ReactElement, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { type ReactElement, useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
+import { hasConfirmedBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { getProfile } from '@/lib/api/endpoints/driver';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
@@ -36,6 +38,27 @@ export default function HomeScreen(): ReactElement {
 
   const firstName = profile.data?.full_name?.trim().split(' ')[0] ?? 'there';
 
+  /**
+   * The battery-optimisation nudge (S-12). Shows until the driver confirms they have lifted the
+   * restriction, and re-checks every time Home regains focus — so it clears the instant they
+   * come back from the setup screen having pressed "I've set this up".
+   *
+   * `undefined` while the first read is in flight, so the banner does not flash in and out on a
+   * cold start.
+   */
+  const [batteryConfirmed, setBatteryConfirmed] = useState<boolean | undefined>(undefined);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void hasConfirmedBatterySetup().then((value) => {
+        if (active) setBatteryConfirmed(value);
+      });
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
@@ -52,6 +75,25 @@ export default function HomeScreen(): ReactElement {
         <Text style={styles.greetingSub}>
           {onDuty ? 'You are online. Trip offers will ring on this phone.' : 'Go online to start receiving trips.'}
         </Text>
+
+        {batteryConfirmed === false ? (
+          <Pressable
+            onPress={() => router.push('/battery-setup')}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.batteryBanner, pressed && styles.batteryBannerPressed]}
+          >
+            <View style={styles.batteryIcon}>
+              <Feather name="alert-triangle" size={16} color={colors.warning} />
+            </View>
+            <View style={styles.batteryText}>
+              <Text style={styles.batteryTitle}>Finish alert setup</Text>
+              <Text style={styles.batteryBody}>
+                Your phone may still silence trip offers in the background.
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.faint} />
+          </Pressable>
+        ) : null}
 
         {/* The duty card. One control, deliberately the largest thing on the screen — it is the
             only decision a driver makes between trips. */}
@@ -120,7 +162,31 @@ const styles = StyleSheet.create({
   body: { padding: space.lg },
 
   greeting: { ...text.title, color: colors.fg },
-  greetingSub: { ...text.body, color: colors.muted, marginTop: space.xs, marginBottom: space.xl },
+  greetingSub: { ...text.body, color: colors.muted, marginTop: space.xs, marginBottom: space.lg },
+
+  batteryBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    backgroundColor: '#FFF6E0',
+    borderWidth: 1,
+    borderColor: '#F0D9A0',
+    borderRadius: radius.md,
+    padding: space.md,
+    marginBottom: space.xl,
+  },
+  batteryBannerPressed: { opacity: 0.9 },
+  batteryIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  batteryText: { flex: 1 },
+  batteryTitle: { ...text.label, color: colors.fg },
+  batteryBody: { ...text.caption, color: colors.muted, marginTop: 2 },
 
   dutyCard: {
     borderRadius: radius.lg,

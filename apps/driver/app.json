@@ -10,7 +10,8 @@
     "plugins": ["expo-router", "expo-secure-store", "expo-splash-screen", "expo-status-bar"],
     "android": {
       "package": "in.driverzone.driver",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": ["android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]
     },
     "ios": {
       "bundleIdentifier": "in.driverzone.driver",

@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { type ReactElement, useEffect } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Logo } from '@/components/Logo';
+import { hasSeenBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { getProfile } from '@/lib/api/endpoints/driver';
 import * as session from '@/lib/auth/session';
 import { keys } from '@/lib/query/keys';
@@ -33,9 +34,30 @@ export default function GateScreen(): ReactElement {
   useEffect(() => {
     if (status === undefined) return;
 
-    // `replace`, not `push` — this screen is a junction, not a destination. Leaving it on the
-    // stack would put the back button between the driver and exiting the app.
-    router.replace(status === 'APPROVED' ? '/home' : '/onboarding-status');
+    let cancelled = false;
+
+    void (async () => {
+      if (status !== 'APPROVED') {
+        if (!cancelled) router.replace('/onboarding-status');
+        return;
+      }
+
+      /**
+       * A freshly-approved driver is sent through the battery-optimisation screen ONCE (S-12)
+       * before they ever see Home. It is the highest-leverage screen in the app and a driver who
+       * skips past it on Home may never come back to it — so it gets one guaranteed showing,
+       * right when "so my offers reach me" is the thing they care about.
+       *
+       * `hasSeenBatterySetup` flips the moment that screen decides not to nag harder, so this
+       * fires at most once per install. Everything after is the Home banner's job.
+       */
+      const seen = await hasSeenBatterySetup();
+      if (!cancelled) router.replace(seen ? '/home' : '/battery-setup');
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [status]);
 
   if (profile.isError) {

@@ -91,6 +91,13 @@ export default function AccountScreen(): ReactElement {
             label="Your documents"
             onPress={() => router.push('/onboarding-documents')}
           />
+          {/* Reachable again after the one-time run from `/gate` — a driver who skipped it, or
+              changed phones, needs a way back to it. */}
+          <Row
+            icon="bell"
+            label="Alert & battery setup"
+            onPress={() => router.push('/battery-setup')}
+          />
         </View>
 
         <View style={styles.group}>

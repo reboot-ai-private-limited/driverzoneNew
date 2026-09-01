@@ -61,6 +61,59 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
     return row?.total ?? 0;
   }
 
+  /** `$gt: 0` in the match, so payouts and cash-collected rows cannot cancel out earnings. */
+  async sumEarningsForDriver(driverId: string): Promise<number> {
+    if (!mongoose.isValidObjectId(driverId)) return 0;
+
+    const [row] = await DriverEarningModel.aggregate<{ total: number }>([
+      { $match: { driverId: new mongoose.Types.ObjectId(driverId), amountPaise: { $gt: 0 } } },
+      { $group: { _id: null, total: { $sum: '$amountPaise' } } },
+    ]);
+
+    return row?.total ?? 0;
+  }
+
+  async pageForDriver(
+    driverId: string,
+    page: number,
+    limit: number,
+  ): Promise<{ entries: LedgerEntry[]; totalItems: number }> {
+    if (!mongoose.isValidObjectId(driverId)) return { entries: [], totalItems: 0 };
+
+    /*
+     * Sorted by `createdAt` DESC then `_id` DESC. The tiebreak is not decoration: several entries
+     * are written in one batch at trip completion and share a timestamp to the millisecond, so
+     * without it the sort is unstable and a row can appear on two pages or none. `_id` is a
+     * UUIDv7-adjacent ObjectId, so it orders by insertion.
+     */
+    const [entries, totalItems] = await Promise.all([
+      DriverEarningModel.find({ driverId })
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      DriverEarningModel.countDocuments({ driverId }),
+    ]);
+
+    return {
+      entries: entries.map((doc) => toEntity(doc.toObject() as DriverEarningDoc)),
+      totalItems,
+    };
+  }
+
+  /** Same sort as `pageForDriver`, or the two would disagree about which rows are "newer". */
+  async sumMostRecentForDriver(driverId: string, count: number): Promise<number> {
+    if (count <= 0 || !mongoose.isValidObjectId(driverId)) return 0;
+
+    const [row] = await DriverEarningModel.aggregate<{ total: number }>([
+      { $match: { driverId: new mongoose.Types.ObjectId(driverId) } },
+      { $sort: { createdAt: -1, _id: -1 } },
+      { $limit: count },
+      { $group: { _id: null, total: { $sum: '$amountPaise' } } },
+    ]);
+
+    return row?.total ?? 0;
+  }
+
   async listForDriver(driverId: string, limit: number): Promise<LedgerEntry[]> {
     if (!mongoose.isValidObjectId(driverId)) return [];
     const docs = await DriverEarningModel.find({ driverId }).sort({ createdAt: -1 }).limit(limit);

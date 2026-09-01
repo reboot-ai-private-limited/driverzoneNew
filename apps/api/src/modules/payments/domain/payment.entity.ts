@@ -47,7 +47,13 @@ const TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
   PENDING: ['CAPTURED', 'FAILED'],
   CAPTURED: ['REFUNDED', 'PARTIALLY_REFUNDED'],
   PARTIALLY_REFUNDED: ['REFUNDED', 'PARTIALLY_REFUNDED'],
-  FAILED: [],
+  /*
+   * ONE exit, and only this one. Razorpay documents that a UPI retry can send `payment.failed`
+   * followed by `payment.captured` for a single transaction — so a failed payment that later
+   * captures is a real, expected sequence, not a resurrection. Without it the customer is debited
+   * and the booking still expires.
+   */
+  FAILED: ['CAPTURED'],
   REFUNDED: [],
 };
 
@@ -69,8 +75,20 @@ export interface Payment {
   amountPaise: number;
   /** How much of `amountPaise` has gone back. Always 0 for a REFUND row itself. */
   refundedPaise: number;
-  /** The gateway's own id for this payment. Null until an intent has been created. */
+  /**
+   * The gateway's id for the thing we CREATED — for Razorpay the ORDER (`order_…`). Null until an
+   * intent exists. Webhooks are matched back to this row by it.
+   */
   gatewayRef: string | null;
+  /**
+   * The gateway's id for the PAYMENT itself (`pay_…`), which only exists once a customer has paid,
+   * so it arrives with the webhook and never at creation.
+   *
+   * Stored separately because Razorpay refunds are `POST /v1/payments/:id/refund` — against the
+   * payment, not the order. Refunding with the order id hits the wrong endpoint entirely, and
+   * nothing would reveal that until money had to go back.
+   */
+  providerPaymentId: string | null;
   /**
    * The caller's idempotency key, unique-indexed.
    *

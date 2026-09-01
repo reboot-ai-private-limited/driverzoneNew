@@ -38,6 +38,7 @@ export const SETTING_GROUPS = [
   'DRIVER',
   'DISPATCH',
   'CANCELLATION',
+  'REVIEWS',
 ] as const;
 export type SettingGroup = (typeof SETTING_GROUPS)[number];
 

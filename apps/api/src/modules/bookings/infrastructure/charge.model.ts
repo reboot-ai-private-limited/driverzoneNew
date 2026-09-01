@@ -51,27 +51,46 @@ export const FareAdjustmentModel =
 export interface CancellationChargeDoc {
   _id: mongoose.Types.ObjectId;
   bookingId: mongoose.Types.ObjectId;
+  /** Denormalised so dues can be summed without joining bookings. */
+  customerId: mongoose.Types.ObjectId;
   /** Who pays. A driver's penalty is a ledger debit; a customer's is money kept from the refund. */
   chargedTo: string;
   amountPaise: number;
   /** The status the booking was in when it was cancelled — what the ladder was read at. */
   atStatus: string;
   reason: string;
+  /**
+   * Set once the customer has actually paid this fee.
+   *
+   * A PREPAID booking settles it instantly — the fee is kept back out of the refund, so charging
+   * and collecting are the same moment. A CASH booking holds none of their money, so the row stays
+   * unsettled and becomes a debt that rides on their next UPI booking. Null therefore means
+   * "still owed", and that is exactly what `outstandingDues` sums.
+   */
+  settledByPaymentId?: mongoose.Types.ObjectId | null;
   createdAt: Date;
 }
 
 const cancellationChargeSchema = new Schema<CancellationChargeDoc>(
   {
     bookingId: { type: Schema.Types.ObjectId, ref: 'Booking', required: true },
+    customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
     chargedTo: { type: String, enum: ['CUSTOMER', 'DRIVER'], required: true },
     amountPaise: { type: Number, required: true, min: 0 },
     atStatus: { type: String, required: true },
     reason: { type: String, required: true },
+    settledByPaymentId: { type: Schema.Types.ObjectId, ref: 'Payment', default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
 cancellationChargeSchema.index({ bookingId: 1 }, { unique: true });
+
+/** The dues query: everything this customer still owes. Partial, so it indexes only unpaid rows. */
+cancellationChargeSchema.index(
+  { customerId: 1 },
+  { partialFilterExpression: { settledByPaymentId: null, chargedTo: 'CUSTOMER' } },
+);
 
 export const CancellationChargeModel =
   (mongoose.models['CancellationCharge'] as mongoose.Model<CancellationChargeDoc> | undefined) ??

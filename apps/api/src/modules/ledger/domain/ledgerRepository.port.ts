@@ -20,7 +20,33 @@ export interface LedgerRepositoryPort {
   /** The authoritative balance: the sum of every row for this driver. */
   sumForDriver(driverId: string): Promise<number>;
 
+  /**
+   * Everything the driver has ever been credited — the sum of POSITIVE rows only.
+   *
+   * Not the same question as the balance, and it is worth saying why they are separate: a driver
+   * who has earned ₹4,00,000 and been paid out ₹3,90,000 has a balance of ₹10,000 and lifetime
+   * earnings of ₹4,00,000. An admin looking at a wallet needs both, and neither derives from the
+   * other.
+   */
+  sumEarningsForDriver(driverId: string): Promise<number>;
+
   listForDriver(driverId: string, limit: number): Promise<LedgerEntry[]>;
+
+  /** One page of a driver's statement, newest first, with the total for the pager. */
+  pageForDriver(
+    driverId: string,
+    page: number,
+    limit: number,
+  ): Promise<{ entries: LedgerEntry[]; totalItems: number }>;
+
+  /**
+   * The sum of the `count` most recent entries.
+   *
+   * Exists so a page of the statement can be anchored: the running balance shown beside the newest
+   * row on page 3 is the current balance minus everything newer than it, and this is that
+   * "everything newer" without re-fetching the rows themselves.
+   */
+  sumMostRecentForDriver(driverId: string, count: number): Promise<number>;
 
   listForBooking(bookingId: string): Promise<LedgerEntry[]>;
 }

@@ -154,6 +154,48 @@ const adminDriverDetailsResponseSchema = z.object({
   documents: z.array(driverDocumentDtoSchema),
 });
 
+const adminDriverWalletDetailsResponseSchema = z.object({
+  wallet: z.object({
+    balance_paise: z.number(),
+    is_suspended_for_balance: z.boolean(),
+    lifetime_earnings_paise: z.number(),
+  }),
+  ledger: z.array(z.object({
+    id: z.string(),
+    driver_id: z.string(),
+    type: z.enum(['TRIP_EARNING', 'COMMISSION_DEDUCTION', 'PAYOUT', 'ADJUSTMENT', 'PENALTY']),
+    amount_paise: z.number(),
+    balance_after_paise: z.number(),
+    reference_id: z.string().nullable(),
+    description: z.string(),
+    created_at: z.string(),
+  })),
+  pagination: z.object({
+    page: z.number(),
+    limit: z.number(),
+    total_items: z.number(),
+    total_pages: z.number(),
+  })
+});
+
+const adminDriverDutyHistoryResponseSchema = z.object({
+  sessions: z.array(z.object({
+    id: z.string(),
+    driver_id: z.string(),
+    started_at: z.string(),
+    ended_at: z.string().nullable(),
+    duration_minutes: z.number(),
+    trips_completed: z.number(),
+    earnings_paise: z.number(),
+  })),
+  pagination: z.object({
+    page: z.number(),
+    limit: z.number(),
+    total_items: z.number(),
+    total_pages: z.number(),
+  })
+});
+
 const approveDriverResponseSchema = z.object({
   onboarding_status: z.enum(['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED']),
   is_verified: z.boolean(),
@@ -459,6 +501,36 @@ export function registerIdentitySwaggerPaths(): void {
     request: { params: driverIdParamSchema },
     responses: {
       200: { description: 'Driver details', content: { 'application/json': { schema: successResponse(adminDriverDetailsResponseSchema) } } },
+      401: unauthenticated,
+      404: { description: 'Driver not found', ...jsonError },
+    },
+  });
+
+  // GET /admin/drivers/{id}/wallet
+  registry.registerPath({
+    method: 'get',
+    path: '/admin/drivers/{id}/wallet',
+    tags: adminTags,
+    summary: 'Get driver wallet details and ledger',
+    security: bearerAuth,
+    request: { params: driverIdParamSchema },
+    responses: {
+      200: { description: 'Driver wallet', content: { 'application/json': { schema: successResponse(adminDriverWalletDetailsResponseSchema) } } },
+      401: unauthenticated,
+      404: { description: 'Driver not found', ...jsonError },
+    },
+  });
+
+  // GET /admin/drivers/{id}/duty-history
+  registry.registerPath({
+    method: 'get',
+    path: '/admin/drivers/{id}/duty-history',
+    tags: adminTags,
+    summary: 'Get driver duty history sessions',
+    security: bearerAuth,
+    request: { params: driverIdParamSchema },
+    responses: {
+      200: { description: 'Driver duty history', content: { 'application/json': { schema: successResponse(adminDriverDutyHistoryResponseSchema) } } },
       401: unauthenticated,
       404: { description: 'Driver not found', ...jsonError },
     },

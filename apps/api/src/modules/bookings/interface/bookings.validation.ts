@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PAYMENT_MODES } from '@driverzone/contracts';
 
 const latLng = z.object({
   lat: z.number().min(-90).max(90),
@@ -10,6 +11,8 @@ export const createBookingSchema = z
     quoteId: z.string().min(1),
     pickupAddress: z.string().min(1).max(500),
     dropAddress: z.string().min(1).max(500),
+    /** Required, with no default: which way a customer pays is their choice, not ours. */
+    paymentMode: z.enum(PAYMENT_MODES),
   })
   .strict();
 
@@ -40,7 +43,11 @@ export const startTripSchema = z
   .strict();
 
 export const completeTripSchema = z
-  .object({ actualDistanceM: z.number().int().min(0).optional() })
+  .object({
+    actualDistanceM: z.number().int().min(0).optional(),
+    /** What the driver actually took, on a cash trip. Absent falls back to the expected total. */
+    cashCollectedPaise: z.number().int().min(0).optional(),
+  })
   .strict();
 
 export const reportPinSchema = z

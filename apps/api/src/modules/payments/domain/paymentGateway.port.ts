@@ -19,8 +19,28 @@ export interface PaymentIntent {
    * order id for Razorpay, a client secret for Stripe. Passed through to the app untouched.
    */
   clientToken: string;
+  /**
+   * The PUBLISHABLE key the SDK needs beside the token — `rzp_test_…` for Razorpay, a publishable
+   * key for Stripe. Safe to send to a device by design; the secret half never leaves the server.
+   *
+   * Null for a gateway that does not have the pair.
+   */
+  publicKey: string | null;
   /** True when the provider settled it synchronously and no webhook is coming. */
   capturedImmediately: boolean;
+}
+
+/**
+ * A webhook as it arrived. A struct rather than two strings because the field that makes
+ * redelivery safe is a HEADER, not part of the body: Razorpay's `x-razorpay-event-id` is unique
+ * per event, and the body carries only the event NAME.
+ */
+export interface WebhookRequest {
+  /** The exact bytes as received. Reserialising a parsed body will not reproduce the signature. */
+  rawBody: string;
+  signature: string;
+  /** The provider's unique delivery id, from whichever header carries it. */
+  eventId: string | undefined;
 }
 
 export interface RefundResult {
@@ -32,8 +52,19 @@ export interface RefundResult {
 export interface GatewayEvent {
   /** The provider's own event id. Deduplicated on, so a redelivered webhook does nothing twice. */
   eventId: string;
-  type: 'PAYMENT_CAPTURED' | 'PAYMENT_FAILED' | 'REFUND_COMPLETED';
+  /**
+   * `PAYMENT_AUTHORIZED` means the money is held but not taken, and something must capture it.
+   * The other three are settled outcomes.
+   */
+  type: 'PAYMENT_AUTHORIZED' | 'PAYMENT_CAPTURED' | 'PAYMENT_FAILED' | 'REFUND_COMPLETED';
+  /**
+   * OUR payment's gateway reference — for Razorpay the ORDER id, which is what we stored when the
+   * intent was created. A refund event carries the order of the payment being refunded, not the
+   * refund's own id, so every event maps back to one row of ours.
+   */
   gatewayRef: string;
+  /** The provider's id for the payment itself, needed to capture or refund it. */
+  providerPaymentId?: string | undefined;
   amountPaise: number;
   /** Customer-safe decline reason, when the provider gives one. */
   failureReason?: string | undefined;
@@ -50,9 +81,19 @@ export interface PaymentGatewayPort {
   refund(input: { gatewayRef: string; amountPaise: number; idempotencyKey: string }): Promise<RefundResult>;
 
   /**
-   * Verifies a raw webhook body and signature, returning the event or `null` if it does not
-   * verify. Returns rather than throws: an unverified webhook is not an exception, it is a
-   * request from someone who is not the payment provider, and the caller answers it with a 401.
+   * Captures an authorised-but-uncaptured payment.
+   *
+   * Needed because auto-capture is an ACCOUNT SETTING at Razorpay, not a per-order one. With it
+   * off we are sent `payment.authorized` and the money is merely held — an authorisation nobody
+   * captures reverses itself after a few days, so the customer is debited, gets a ride, and is
+   * silently refunded. Calling this on `authorized` is correct under either configuration.
    */
-  verifyWebhook(rawBody: string, signature: string): GatewayEvent | null;
+  capture(gatewayRef: string, amountPaise: number): Promise<void>;
+
+  /**
+   * Verifies a webhook, returning the event or `null` if it does not verify. Returns rather than
+   * throws: an unverified webhook is not an exception, it is a request from someone who is not the
+   * payment provider, and the caller answers it with a 401.
+   */
+  verifyWebhook(request: WebhookRequest): GatewayEvent | null;
 }

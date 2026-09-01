@@ -50,7 +50,9 @@ const MODULE_TIERS = [
   ['packages'], //                     packages, variants, prices
   ['quotes'], //                       zones + packages + pricing
   ['bookings'], //                     quotes + pricing + identity + notifications + ledger
-  ['dispatch'], //                     the only module permitted to set bookings.driverId
+  // Same tier, and they never speak: dispatch finds a driver for a booking, reviews reads one
+  // that is already over. Both need `bookings` below them and nothing needs either.
+  ['dispatch', 'reviews'], //          dispatch: the only module permitted to set bookings.driverId
   ['admin', 'reporting'], //           top of the graph; nothing may depend on these
 ];
 

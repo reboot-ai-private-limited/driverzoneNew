@@ -65,8 +65,20 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
   const repo = new MongoBookingRepository();
   const charges = new MongoChargeRepository();
 
-  const create = new CreateBookingUseCase(repo, deps.quotes, deps.payments, deps.settings);
-  const confirm = new ConfirmBookingPaymentUseCase(repo, deps.notifications, deps.scheduleDispatch);
+  const create = new CreateBookingUseCase(
+    repo,
+    deps.quotes,
+    deps.payments,
+    deps.settings,
+    charges,
+    deps.scheduleDispatch,
+  );
+  const confirm = new ConfirmBookingPaymentUseCase(
+    repo,
+    deps.notifications,
+    deps.scheduleDispatch,
+    charges,
+  );
   const failPayment = new FailBookingPaymentUseCase(repo, deps.notifications);
 
   const cancelByCustomer = new CancelBookingByCustomerUseCase(
@@ -166,6 +178,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     buildCustomerRouter: () =>
       buildCustomerRouter({
         create: controllers.makeCreateBookingController(create),
+        dues: controllers.makeGetDuesController(charges),
         get: controllers.makeGetCustomerBookingController(repo, charges),
         cancel: controllers.makeCancelByCustomerController(cancelByCustomer),
       }),

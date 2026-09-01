@@ -2,6 +2,7 @@ import type {
   BookingActorType,
   BookingStatus,
   Direction,
+  PaymentMode,
   ServiceType,
   Terrain,
 } from '@driverzone/contracts';
@@ -145,6 +146,11 @@ export interface Booking {
 
   quoteId: string;
   fareSnapshot: FareSnapshot;
+  /**
+   * How this trip is paid for. `CASH` means there is no payment row at all until completion, and
+   * the driver collects — which is the only way a booking reaches `CONFIRMED` without a webhook.
+   */
+  paymentMode: PaymentMode;
   paymentId: string | null;
 
   /** True when the pickup is far enough out that dispatch waits rather than searching now. */

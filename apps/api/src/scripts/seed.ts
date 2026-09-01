@@ -17,6 +17,7 @@ import { CustomerModel } from '@/modules/identity/infrastructure/customer.model.
 import { DriverModel } from '@/modules/identity/infrastructure/driver.model.js';
 import { DriverDocumentModel } from '@/modules/identity/infrastructure/driverDocument.model.js';
 import { SessionModel } from '@/modules/identity/infrastructure/session.model.js';
+import { ReviewModel } from '@/modules/reviews/infrastructure/review.model.js';
 import { AuditLogModel } from '@/shared/db/auditLog.model.js';
 
 /**
@@ -74,6 +75,7 @@ interface ClearableModel {
 const IDENTITY_MODELS: { name: string; model: ClearableModel }[] = [
   { name: 'sessions', model: SessionModel },
   { name: 'auditlogs', model: AuditLogModel },
+  { name: 'reviews', model: ReviewModel as unknown as ClearableModel },
   { name: 'driverdocuments', model: DriverDocumentModel },
   { name: 'drivers', model: DriverModel },
   { name: 'customers', model: CustomerModel },
@@ -256,6 +258,75 @@ async function seedCustomers(): Promise<void> {
     },
     { upsert: true, new: true },
   ).exec();
+}
+
+/**
+ * Three reviews against the dev accounts, so the admin ledger and both profile screens have
+ * something to render before anyone has taken a trip.
+ *
+ * The booking ids are FIXED rather than freshly generated, which is what makes this idempotent:
+ * generated ones made the delete below a no-op and every run appended another three rows. They
+ * point at no real booking — this script seeds no bookings — and nothing reads through them; the
+ * admin list renders the id as a string.
+ *
+ * The cached averages are written to match. Publishing a review without updating the cache is a
+ * state the app itself cannot reach (`PublishReviewsUseCase` does both), and a seed that produces
+ * one has the driver showing 5.0 from zero ratings next to three visible reviews.
+ */
+const SEEDED_REVIEW_BOOKINGS = [
+  oid('000000000000000000000ba1'),
+  oid('000000000000000000000ba2'),
+  oid('000000000000000000000ba3'),
+];
+
+async function seedReviews(): Promise<void> {
+  const customerId = oid(DEV_CUSTOMER.id);
+  const driverId = oid(DEV_DRIVER.id);
+  const [booking1, booking2, booking3] = SEEDED_REVIEW_BOOKINGS;
+
+  await ReviewModel.deleteMany({ bookingId: { $in: SEEDED_REVIEW_BOOKINGS } }).exec();
+
+  await ReviewModel.create([
+    {
+      bookingId: booking1,
+      reviewerId: customerId,
+      reviewerRole: 'CUSTOMER',
+      revieweeId: driverId,
+      revieweeRole: 'DRIVER',
+      rating: 5,
+      tags: ['Polite', 'Clean Car'],
+      comment: 'Great trip, very smooth driving!',
+      isPublished: true,
+    },
+    {
+      bookingId: booking2,
+      reviewerId: driverId,
+      reviewerRole: 'DRIVER',
+      revieweeId: customerId,
+      revieweeRole: 'CUSTOMER',
+      rating: 4,
+      tags: ['On Time'],
+      comment: 'Customer was ready at pickup.',
+      isPublished: true,
+    },
+    // Flagged automatically by the 1-2 star rule, so the ops filter has a row to find.
+    {
+      bookingId: booking3,
+      reviewerId: customerId,
+      reviewerRole: 'CUSTOMER',
+      revieweeId: driverId,
+      revieweeRole: 'DRIVER',
+      rating: 2,
+      tags: ['Late', 'AC Issue'],
+      comment: 'Driver was 15 minutes late and AC barely worked.',
+      adminFlagged: true,
+      isPublished: true,
+    },
+  ]);
+
+  // The driver has two (5 and 2); the customer has one (4).
+  await DriverModel.updateOne({ _id: driverId }, { $set: { rating: 3.5, ratingCount: 2 } }).exec();
+  await CustomerModel.updateOne({ _id: customerId }, { $set: { rating: 4, ratingCount: 1 } }).exec();
 }
 
 /**
@@ -457,6 +528,7 @@ async function main(): Promise<void> {
   await seedAdmin();
   await seedDriver();
   await seedCustomers();
+  await seedReviews();
 
   // After the admin exists — every zone is `createdBy` that account.
   const zoneOutcome = await seedZones(zones);

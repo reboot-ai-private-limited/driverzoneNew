@@ -27,8 +27,8 @@ export interface IdentityAccount {
  * admin panel's booking list renders a customer name on every line — see the "batch, don't
  * invite N+1" rule in docs/engineering/module-anatomy.md.
  *
- * NOT IMPLEMENTED YET — phase 2. Declared now because the shape is a design decision and
- * `bookings` will be built against it.
+ * `reviews` is the first consumer: the admin review ledger renders a reviewer and a reviewee name
+ * on every row, and both come out of one call per role rather than two lookups per row.
  */
 export interface AccountDirectoryContract {
   namesByIds(role: Role, ids: string[]): Promise<Map<string, string | null>>;
@@ -68,12 +68,23 @@ export interface CustomerBookingProfileContract {
 }
 
 /**
+ * The cached rolling average on a customer or driver document.
+ *
+ * `reviews` owns the arithmetic and the `reviews` collection; identity owns the account row. So
+ * this takes an ALREADY-COMPUTED figure and stores it — it does not read reviews, and could not,
+ * since `reviews` sits above it. Dispatch and the apps read `rating` off the account rather than
+ * aggregating a collection, which is the whole reason the cache exists (docs/LLD/reviews.md).
+ */
+export interface RatingCacheContract {
+  setRating(role: Role, id: string, average: number, count: number): Promise<void>;
+}
+
+/**
  * The whole surface, as returned by `buildIdentityContainer()`.
  *
- * Only the write-side contract so far. Authentication is consumed over HTTP and through the
- * shared JWT verifier rather than through a module contract, and nothing has yet needed
- * `AccountDirectoryContract` — it stays declared but unimplemented until `bookings` or `admin`
- * actually renders a name, because a contract with no consumer is a guess about what the
- * consumer will want.
+ * Authentication is deliberately absent: it is consumed over HTTP and through the shared JWT
+ * verifier rather than through a module contract, so nothing here issues or checks a token.
  */
-export type IdentityPublicContract = CustomerBookingProfileContract;
+export type IdentityPublicContract = CustomerBookingProfileContract &
+  AccountDirectoryContract &
+  RatingCacheContract;

@@ -1,7 +1,10 @@
 import { randomInt } from 'node:crypto';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
+import type { PaymentMode } from '@driverzone/contracts';
 import type { PaymentsContract } from '../../../payments/payments.public.js';
+import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
+import type { DispatchScheduler } from './confirmBookingPayment.usecase.js';
 import type { QuoteConsumptionContract } from '../../../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
 import {
@@ -17,14 +20,19 @@ export interface CreateBookingInput {
   quoteId: string;
   pickupAddress: string;
   dropAddress: string;
+  paymentMode: PaymentMode;
   /** One tap, one key. Passed to the gateway so a retried request charges once. */
   idempotencyKey: string;
 }
 
 export interface CreatedBooking {
   booking: Booking;
-  /** For the payment SDK. Null when the charge already settled — an auto-captured retry. */
+  /** The gateway order id, for checkout. Null for cash, and null on an already-settled retry. */
   clientToken: string | null;
+  /** The publishable key checkout needs beside the order. Null for cash. */
+  publicKey: string | null;
+  /** What is being charged: the fare plus any dues carried in. Null for cash. */
+  amountPaise: number | null;
 }
 
 /**
@@ -45,6 +53,13 @@ export class CreateBookingUseCase {
     private readonly quotes: QuoteConsumptionContract,
     private readonly payments: PaymentsContract,
     private readonly settings: SettingsReadContract,
+    private readonly charges: ChargeRepositoryPort,
+    /**
+     * Only reached on the CASH path. A prepaid booking is dispatched by the payment webhook, which
+     * for cash never fires — so this use case has to do it, and it is injected for the same reason
+     * the webhook's copy is: `dispatch` is a tier above `bookings` and cannot be imported.
+     */
+    private readonly scheduleDispatch: DispatchScheduler,
   ) {}
 
   async execute(input: CreateBookingInput): Promise<CreatedBooking> {
@@ -62,7 +77,23 @@ export class CreateBookingUseCase {
     // Already booked — return that booking rather than making a second.
     if (quote.consumedBy !== null) {
       const existing = await this.repo.findById(quote.consumedBy);
-      if (existing !== null) return { booking: existing, clientToken: null };
+      if (existing !== null) return settled(existing);
+    }
+
+    /*
+     * A customer carrying unpaid dues MUST pay by UPI.
+     *
+     * Cash has no payment leg to settle them on, so allowing it would let a cancellation fee
+     * outlive every future trip — and the cheapest way to never pay one would be to always book
+     * cash. Refused rather than silently upgraded to UPI, because the customer chose a mode and
+     * deserves to be told why they cannot have it.
+     */
+    const duesPaise = await this.charges.outstandingDues(input.customerId);
+    if (duesPaise > 0 && input.paymentMode === 'CASH') {
+      throw AppError.badRequest(
+        'You have an unpaid cancellation fee. Please pay for this trip by UPI to clear it.',
+        { outstanding_dues_paise: duesPaise },
+      );
     }
 
     const now = new Date();
@@ -101,6 +132,7 @@ export class CreateBookingUseCase {
       direction: quote.direction,
       distanceKm: quote.distanceKm,
       fareSnapshot,
+      paymentMode: input.paymentMode,
       isScheduled,
       scheduledAt: quote.scheduledAt,
       dispatchAt,
@@ -113,7 +145,7 @@ export class CreateBookingUseCase {
     if (!claim.claimed) {
       if (claim.reason === 'ALREADY_CONSUMED') {
         const winner = await this.repo.findById(claim.bookingId);
-        if (winner !== null) return { booking: winner, clientToken: null };
+        if (winner !== null) return settled(winner);
       }
 
       /*
@@ -129,12 +161,52 @@ export class CreateBookingUseCase {
       });
     }
 
-    // ── Collect ─────────────────────────────────────────────────────────────────────────────
-    const { payment, clientToken } = await this.payments.charge({
+    /*
+     * ── CASH: no gateway, no payment row, and no webhook is coming ────────────────────────────
+     *
+     * This is the one path to CONFIRMED that is not a signature-verified capture, and it is only
+     * safe because nothing has been promised in exchange: the money is collected at the end of the
+     * trip by the driver, who becomes liable for it (`CASH_COLLECTED` at completion).
+     *
+     * Dispatch is enqueued HERE because the webhook — which does it for a prepaid booking — will
+     * never fire for this one.
+     */
+    if (input.paymentMode === 'CASH') {
+      const confirmed = await this.repo.transition({
+        bookingId: booking.id,
+        from: 'PENDING_PAYMENT',
+        to: 'CONFIRMED',
+        actor: { type: 'SYSTEM', id: null },
+        metadata: { via: 'cash' },
+      });
+
+      const result = confirmed ?? booking;
+
+      try {
+        await this.scheduleDispatch(result);
+      } catch (error) {
+        logger.error(
+          { err: error, bookingId: booking.id },
+          'could not enqueue dispatch for a cash booking — the sweeper will pick this up',
+        );
+      }
+
+      logger.info(
+        { bookingId: booking.id, reference: booking.reference },
+        'cash booking confirmed without a payment',
+      );
+
+      return settled(result);
+    }
+
+    // ── UPI: collect before anyone is dispatched ────────────────────────────────────────────
+    const amountPaise = quote.fare.totalPaise + duesPaise;
+
+    const { payment, clientToken, publicKey } = await this.payments.charge({
       bookingId: booking.id,
       customerId: input.customerId,
       kind: 'BOOKING',
-      amountPaise: quote.fare.totalPaise,
+      amountPaise,
       reference: booking.reference,
       idempotencyKey: input.idempotencyKey,
     });
@@ -142,12 +214,22 @@ export class CreateBookingUseCase {
     await this.repo.attachPayment(booking.id, payment.id);
 
     logger.info(
-      { bookingId: booking.id, reference: booking.reference, paymentId: payment.id },
+      { bookingId: booking.id, reference: booking.reference, paymentId: payment.id, duesPaise },
       'booking created, awaiting payment',
     );
 
-    return { booking: { ...booking, paymentId: payment.id }, clientToken };
+    return {
+      booking: { ...booking, paymentId: payment.id },
+      clientToken,
+      publicKey,
+      amountPaise,
+    };
   }
+}
+
+/** A booking with nothing left to pay — cash, or a retry whose charge already went through. */
+function settled(booking: Booking): CreatedBooking {
+  return { booking, clientToken: null, publicKey: null, amountPaise: null };
 }
 
 /**

@@ -60,11 +60,12 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
   return asyncHandler(async (req, res) => {
     const body = createBookingSchema.parse(req.body);
 
-    const { booking, clientToken } = await useCase.execute({
+    const result = await useCase.execute({
       customerId: principalOf(req),
       quoteId: body.quoteId,
       pickupAddress: body.pickupAddress,
       dropAddress: body.dropAddress,
+      paymentMode: body.paymentMode,
       idempotencyKey: idempotencyKeyOf(req),
     });
 
@@ -72,10 +73,14 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       req,
       res,
       {
-        booking: toBookingDto({ booking, adjustments: [] }),
-        client_token: clientToken,
+        booking: toBookingDto({ booking: result.booking, adjustments: [] }),
+        client_token: result.clientToken,
+        public_key: result.publicKey,
+        amount: result.amountPaise === null ? null : toMoney(result.amountPaise),
       },
-      'Booking created — awaiting payment',
+      result.booking.paymentMode === 'CASH'
+        ? 'Booking confirmed — pay the driver at the end of your trip'
+        : 'Booking created — awaiting payment',
       201,
     );
   });
@@ -222,6 +227,9 @@ export function makeCompleteTripController(
       bookingId: id,
       driverId: principalOf(req),
       ...(body.actualDistanceM === undefined ? {} : { actualDistanceM: body.actualDistanceM }),
+      ...(body.cashCollectedPaise === undefined
+        ? {}
+        : { cashCollectedPaise: body.cashCollectedPaise }),
       idempotencyKey: idempotencyKeyOf(req),
     });
 
@@ -236,6 +244,30 @@ export function makeCompleteTripController(
         total: toMoney(result.totalPaise),
       },
       'Trip complete',
+    );
+  });
+}
+
+/**
+ * `GET /customer/bookings/dues`.
+ *
+ * Registered BEFORE `/:id`, or `dues` is read as a booking id and answers 404.
+ */
+export function makeGetDuesController(charges: ChargeRepositoryPort): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const outstandingPaise = await charges.outstandingDues(principalOf(req));
+
+    sendSuccess(
+      req,
+      res,
+      {
+        outstanding: toMoney(outstandingPaise),
+        // Cash cannot clear a debt, so it is withheld until there is none.
+        payment_modes: outstandingPaise > 0 ? ['UPI'] : ['UPI', 'CASH'],
+      },
+      outstandingPaise > 0
+        ? 'You have an unpaid cancellation fee, which will be added to your next trip.'
+        : 'Nothing outstanding',
     );
   });
 }

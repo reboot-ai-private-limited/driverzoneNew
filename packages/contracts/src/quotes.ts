@@ -21,6 +21,13 @@ export interface CreateQuoteRequest {
   scheduledAt?: string | undefined;
   /** Outstation only, ignored for incity. Defaults to ONE_WAY. */
   direction?: Direction | undefined;
+  /**
+   * Whether the INSURANCE line is priced into this trip. Omit for `true` — the charge stays on
+   * by default, matching every quote before this field existed; pass `false` to opt out. Applies
+   * to both incity and outstation, and every option in the resulting fare card agrees, since one
+   * request prices one trip and the toggle is a property of the trip, not the option.
+   */
+  insurance?: boolean | undefined;
 }
 
 /** One line on the fare card. `code` is stable; `label` is prose and may be rewritten. */

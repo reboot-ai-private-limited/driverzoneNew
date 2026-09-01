@@ -115,54 +115,69 @@ export function DraggableSheet({
   }));
 
   return (
+    /*
+      TWO VIEWS, ONE SHEET, AND THEY CANNOT BE MERGED.
+
+      The wrapper owns the enter/exit; the inner view owns the drag. Both animate `transform` —
+      `FadeInDown` slides the sheet up by translating it, and the pan writes `translateY` every
+      frame — so with the two on one component Reanimated warns that the layout animation may
+      overwrite the style, and it is right: for the length of the entrance the entering animation
+      and the gesture are writing the same property, and whichever lands last wins the frame.
+
+      Splitting them is the documented remedy, not a workaround. The wrapper carries no styles of
+      its own, so it adds a node to the tree and nothing to the layout.
+    */
     <Animated.View
       // When one sheet swaps for another (idle ⇄ picking) the incoming one rises into place
       // instead of the content blinking over. The outgoing one only fades — an opacity-only
       // exit keeps its layout box from shoving the controls above it around while it leaves.
       entering={FadeInDown.springify().damping(22).stiffness(170).mass(0.9)}
       exiting={FadeOut.duration(140)}
-      style={[styles.sheet, animatedStyle]}
-      onLayout={(event) => {
-        const measured = event.nativeEvent.layout.height;
-        if (measured <= 0) return;
-        setHeight(measured);
-        onHeightChange?.(measured);
-
-        const max = Math.max(0, measured - peekHeight);
-        maxOffset.value = max;
-
-        if (!settled.current) {
-          // First measurement: drop straight onto the default detent, no motion — the entering
-          // animation above is already covering this frame.
-          settled.current = true;
-          offset.value = offsetFor(initialDetent);
-        } else if (offset.value > max) {
-          // A later relayout shrank the sheet below where it was dragged; close the gap.
-          offset.value = max;
-        }
-      }}
     >
-      {/*
+      <Animated.View
+        style={[styles.sheet, animatedStyle]}
+        onLayout={(event) => {
+          const measured = event.nativeEvent.layout.height;
+          if (measured <= 0) return;
+          setHeight(measured);
+          onHeightChange?.(measured);
+
+          const max = Math.max(0, measured - peekHeight);
+          maxOffset.value = max;
+
+          if (!settled.current) {
+            // First measurement: drop straight onto the default detent, no motion — the entering
+            // animation above is already covering this frame.
+            settled.current = true;
+            offset.value = offsetFor(initialDetent);
+          } else if (offset.value > max) {
+            // A later relayout shrank the sheet below where it was dragged; close the gap.
+            offset.value = max;
+          }
+        }}
+      >
+        {/*
         THE DRAG HANDLE IS THE GRABBER, NOT THE WHOLE SHEET, and that is a fix rather than a
         preference. A pan gesture covering the sheet swallowed every vertical drag inside it —
         so the saved-places list underneath could never scroll: each swipe moved the sheet
         instead. Two vertical gestures cannot share the same finger on the same area, so the
         sheet gets the strip that exists to be grabbed and the content keeps its own scrolling.
       */}
-      <GestureDetector gesture={pan}>
-        <View style={styles.grabberArea}>
-          <View style={styles.grabber} />
-        </View>
-      </GestureDetector>
+        <GestureDetector gesture={pan}>
+          <View style={styles.grabberArea}>
+            <View style={styles.grabber} />
+          </View>
+        </GestureDetector>
 
-      {children}
+        {children}
 
-      {/*
+        {/*
           Fills whatever the sheet exposes below itself once dragged down. Without it the sheet's
           own background stops at its content and the map shows through beneath a sheet that is
           supposed to be anchored to the bottom edge.
         */}
-      <View style={[styles.tail, { height: Math.max(0, height) }]} />
+        <View style={[styles.tail, { height: Math.max(0, height) }]} />
+      </Animated.View>
     </Animated.View>
   );
 }

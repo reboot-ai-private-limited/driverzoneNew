@@ -23,6 +23,7 @@ export function makeCreateQuoteController(useCase: CreateQuoteUseCase): RequestH
       drop: body.drop,
       ...(body.scheduledAt === undefined ? {} : { scheduledAt: body.scheduledAt }),
       ...(body.direction === undefined ? {} : { direction: body.direction }),
+      ...(body.insurance === undefined ? {} : { insurance: body.insurance }),
     });
 
     /*

@@ -99,6 +99,14 @@ export interface BookingDto {
   is_scheduled: boolean;
 
   /**
+   * Incity only, frozen at booking time. Outstation is null — a package there is a package
+   * however long it takes, there is no minutes figure to freeze (see the same field on
+   * `QuoteOptionDto`). Lets the trip screen say when an incity rental is due back without
+   * inventing an ETA the fare itself does not have an opinion about.
+   */
+  included_minutes: number | null;
+
+  /**
    * The four-digit code the customer reads to the driver at pickup.
    *
    * PRESENT ONLY ON THE CUSTOMER'S OWN READ of their own booking, and null everywhere else — the

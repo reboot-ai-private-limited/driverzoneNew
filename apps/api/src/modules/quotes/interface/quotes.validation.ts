@@ -25,6 +25,8 @@ export const createQuoteSchema = z
      */
     scheduledAt: z.coerce.date().optional(),
     direction: z.enum(DIRECTIONS).optional(),
+    /** Omitted means the insurance line stays on — see CreateQuoteRequest. */
+    insurance: z.boolean().optional(),
   })
   .strict();
 

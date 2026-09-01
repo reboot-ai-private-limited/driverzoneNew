@@ -219,6 +219,12 @@ function buildHtml(lat: number, lng: number): string {
     .dz-pickup { background: ${colors.fg}; }
     .dz-drop { background: ${colors.fg}; border-radius: 3px; }
     .dz-user { background: #1A73E8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,0.20); }
+    /* The dashes MARCH toward the destination — a static dashed line reads as a border, a moving
+       one reads as direction, which is the one thing a straight line between two pins otherwise
+       cannot say on its own. The distance and duration are one full dash-pair, so the loop has no
+       visible seam. */
+    @keyframes dz-flow { to { stroke-dashoffset: -24; } }
+    .dz-route-dash { animation: dz-flow 1.1s linear infinite; }
   </style>
 </head>
 <body>
@@ -248,12 +254,23 @@ function buildHtml(lat: number, lng: number): string {
       map.attributionControl.setPosition('topright');
 
       // Added in painting order, and it matters: the pickup starts AT the user's position, so a
-      // user dot added last sits on top of the marker and hides the point being chosen.
+      // user dot added last sits on top of the marker and hides the point being chosen. The
+      // route sits UNDER both — a line is a straight edge in this app, not the road, so it must
+      // never look like it is sitting on top of a pin it merely connects.
+      var routeLayer = L.layerGroup().addTo(map);
       var userLayer = L.layerGroup().addTo(map);
       var markerLayer = L.layerGroup().addTo(map);
 
       /** Points of map hidden behind the bottom sheet. Everything below reads it. */
       var inset = 0;
+
+      /**
+       * The last pickup/drop pair the map was fitted to, so it re-fits exactly once per NEW pair
+       * rather than on every sync() call — which also fires when only the sheet's height changes
+       * (bottomInset) as rows like Return appear or disappear. Re-zooming on that would fight
+       * a customer who has since panned or pinched to look at something else on their own trip.
+       */
+      var lastRoute = null;
 
       function post(payload) {
         if (window.ReactNativeWebView) {
@@ -310,6 +327,67 @@ function buildHtml(lat: number, lng: number): string {
           userLayer.clearLayers();
           if (user) {
             L.marker([user.lat, user.lng], { icon: icon('user'), interactive: false }).addTo(userLayer);
+          }
+
+          // A STRAIGHT DASHED LINE, THE inDrive READING, NOT A ROUTE. This map has no routing
+          // engine behind it — the road distance that decides the fare comes from the server,
+          // never from anything drawn here — so a solid line implying "this is the way you will
+          // drive" would be a claim this screen cannot back up. Dashed reads as "these two points
+          // are linked" without claiming to be the path between them.
+          routeLayer.clearLayers();
+          var pickup = markers.filter(function (m) { return m.kind === 'pickup'; })[0];
+          var drop = markers.filter(function (m) { return m.kind === 'drop'; })[0];
+          if (pickup && drop) {
+            var path = [[pickup.lat, pickup.lng], [drop.lat, drop.lng]];
+
+            // TWO LINES, NOT ONE — the CASING first, underneath. A single dashed stroke sits flush
+            // against whatever the tile happens to be doing at that pixel and disappears over a
+            // pale road or a park; a wider white line behind it guarantees contrast against any
+            // tile colour, the same trick Google's and Apple's own route rendering uses.
+            L.polyline(path, {
+              color: '#FFFFFF',
+              weight: 6,
+              opacity: 0.9,
+              lineCap: 'round',
+              interactive: false
+            }).addTo(routeLayer);
+
+            L.polyline(path, {
+              color: '${colors.fg}',
+              weight: 3,
+              opacity: 0.85,
+              dashArray: '1, 12',
+              lineCap: 'round',
+              interactive: false,
+              className: 'dz-route-dash'
+            }).addTo(routeLayer);
+
+            // ZOOM TO FIT BOTH PINS — the request this whole block exists for. A route only two
+            // streets long and one that spans a hill drive need very different zoom levels, and
+            // neither is knowable in advance, so this asks Leaflet to solve for "smallest zoom
+            // that still shows both" rather than guessing one.
+            var routeKey = pickup.lat + ',' + pickup.lng + '|' + drop.lat + ',' + drop.lng;
+            if (routeKey !== lastRoute) {
+              lastRoute = routeKey;
+              var bounds = L.latLngBounds([
+                [pickup.lat, pickup.lng],
+                [drop.lat, drop.lng]
+              ]);
+              map.fitBounds(bounds, {
+                // Padding is asymmetric because the OCCLUSION is: the sheet covers the bottom, so
+                // that side needs the inset on top of its own margin, or the fitted view would
+                // place a pin exactly where the sheet is about to hide it.
+                paddingTopLeft: [36, 80],
+                paddingBottomRight: [36, inset + 36],
+                // Capped so two pins ten metres apart do not zoom all the way into street level —
+                // past this, "smallest zoom that fits both" stops being a useful reading of the trip.
+                maxZoom: 16,
+                animate: true,
+                duration: 0.6
+              });
+            }
+          } else {
+            lastRoute = null;
           }
         }
       };

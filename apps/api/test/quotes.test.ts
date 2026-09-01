@@ -56,7 +56,10 @@ const settings: SettingsReadContract = {
   get: async (key) => buildSnapshot([])[key],
 };
 
-function fakeZones(from: Partial<ReturnType<typeof resolved>>, to: Partial<ReturnType<typeof resolved>>): ZoneResolutionContract {
+function fakeZones(
+  from: Partial<ReturnType<typeof resolved>>,
+  to: Partial<ReturnType<typeof resolved>>,
+): ZoneResolutionContract {
   return {
     resolveAt: vi.fn(async (point: LatLng) =>
       point.lat === SILIGURI.lat ? resolved(from) : resolved(to),
@@ -75,7 +78,12 @@ function fakeRepo(): QuoteRepositoryPort & { written: NewQuote[] } {
     written,
     createMany: vi.fn(async (quotes: readonly NewQuote[]) => {
       written.push(...quotes);
-      return quotes.map((q, i): Quote => ({ ...q, id: `qot_${i}`, consumedBy: null, createdAt: new Date() }));
+      return quotes.map((q, i): Quote => ({
+        ...q,
+        id: `qot_${i}`,
+        consumedBy: null,
+        createdAt: new Date(),
+      }));
     }),
     findById: vi.fn(async () => null),
     consume: vi.fn(async () => null),
@@ -185,7 +193,11 @@ describe('CreateQuoteUseCase — unavailable answers', () => {
       repo,
     );
 
-    const result = await useCase.execute({ customerId: 'cus_1', pickup: SILIGURI, drop: DARJEELING });
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+    });
     expect(result).toMatchObject({ available: false, reason: 'ROUTE_NOT_FOUND' });
   });
 
@@ -206,7 +218,11 @@ describe('CreateQuoteUseCase — unavailable answers', () => {
       repo,
     );
 
-    const result = await useCase.execute({ customerId: 'cus_1', pickup: SILIGURI, drop: DARJEELING });
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+    });
     expect(result).toMatchObject({ available: false, reason: 'NO_PACKAGE_FOR_DISTANCE' });
   });
 });
@@ -248,7 +264,44 @@ describe('CreateQuoteUseCase — incity', () => {
     expect(codes).not.toContain('PICKUP_FEE');
   });
 
-  it("falls back to the settings default for a PAID zone with no override", async () => {
+  it('charges insurance by default, when the request is silent about it', async () => {
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { city: cityZone }),
+      incityPackages(),
+      settings,
+      distance(8),
+      repo,
+    );
+
+    const result = await useCase.execute({ customerId: 'cus_1', pickup: SILIGURI, drop: SILIGURI });
+    if (!result.available) throw new Error('expected a quote');
+
+    const insuranceLine = result.quotes[0]?.fare.lines.find((l) => l.code === 'INSURANCE');
+    expect(insuranceLine?.amountPaise).toBe(3_000); // pricing.insurance_charge is ₹30 in the registry.
+  });
+
+  it('drops the insurance line entirely when the customer opts out', async () => {
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { city: cityZone }),
+      incityPackages(),
+      settings,
+      distance(8),
+      repo,
+    );
+
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: SILIGURI,
+      insurance: false,
+    });
+    if (!result.available) throw new Error('expected a quote');
+
+    const codes = result.quotes[0]?.fare.lines.map((l) => l.code);
+    expect(codes).not.toContain('INSURANCE');
+  });
+
+  it('falls back to the settings default for a PAID zone with no override', async () => {
     const useCase = new CreateQuoteUseCase(
       fakeZones({ city: cityZone, pickup: paidPickup }, { city: cityZone }),
       incityPackages(),

@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import { DateTimeChooser } from '@/components/DateTimeChooser';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
@@ -8,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -21,7 +21,7 @@ import Animated, {
   FadeOut,
   LinearTransition,
 } from 'react-native-reanimated';
-import type { AddressLabel, SavedAddressDto } from '@driverzone/contracts';
+import type { AddressLabel, Direction, SavedAddressDto } from '@driverzone/contracts';
 import { Logo } from '@/components/Logo';
 import { BottomSheet } from '@/components/BottomSheet';
 import { DraggableSheet } from '@/components/DraggableSheet';
@@ -38,6 +38,16 @@ import {
   fromSavedAddress,
   samePoint,
 } from '@/features/booking/tripPoint';
+import { FareSheet } from '@/components/FareSheet';
+import { TripOptions } from '@/components/TripOptions';
+import { unavailableTitle } from '@/features/booking/quote';
+import {
+  defaultScheduleAnchor,
+  returnProblem,
+  scheduleBounds,
+  scheduleProblem,
+} from '@/features/booking/schedule';
+import { useTripQuote } from '@/features/booking/useTripQuote';
 import { forwardGeocode, reverseGeocode } from '@/features/location/geocoding';
 import { useCurrentLocation } from '@/features/location/useCurrentLocation';
 import { checkCoverage } from '@/lib/api/endpoints/coverage';
@@ -54,12 +64,20 @@ import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
  * imitation for its own sake: a customer arriving here has used Rapido or Uber this week, and a
  * home screen that puts its controls somewhere else makes them hunt for no gain.
  *
- * **Where it stops, deliberately.** `POST /quotes` and the `bookings` module do not exist yet
- * (`apps/api/src/routes.ts` mounts identity, zones, settings and packages only), so Continue has
- * nowhere to go and says so. This screen also does NOT decide incity versus outstation:
- * docs/LLD/api-contracts.md makes that a server decision — the quote response carries
- * `service_type` and the `DROP_OUTSIDE_CITY` suggestion — and an app that guessed would be a
- * second pricing brain to keep in step.
+ * **It asks TWO questions before Continue lights up**, because they have different answers.
+ * `/coverage/check` says whether we come to this pickup point at all. `POST /quotes` — via
+ * `useTripQuote` — says whether we sell anything for this particular trip, which is the only
+ * place "no package covers this distance" can come from. Both can stop the flow, each renders
+ * its own line above the button, and the button is disabled while either is unresolved.
+ *
+ * **Continue opens a sheet, it does not navigate.** The fare card is the last question this
+ * screen asks, so it rises over the map with the trip still behind it — changing a pin is a
+ * dismiss rather than a back navigation and a remount. It also means one component holds the
+ * quote, the pins and the trip terms together, instead of serialising them through route params.
+ *
+ * This screen also does NOT decide incity versus outstation: docs/LLD/api-contracts.md makes
+ * that a server decision — the quote response carries `service_type` and the `DROP_OUTSIDE_CITY`
+ * suggestion — and an app that guessed would be a second pricing brain to keep in step.
  */
 
 /**
@@ -128,6 +146,26 @@ export default function HomeScreen(): ReactElement {
   const [mapPick, setMapPick] = useState(false);
 
   /**
+   * THE TRIP'S TERMS, owned here rather than on the fare screen, because they are chosen before a
+   * price is asked for and every one of them changes what that price is. They travel forward as
+   * route params so the fare screen quotes the same trip and reads the same cache entry.
+   *
+   * `ONE_WAY` and `null` are the defaults precisely because they are also what the SERVER assumes
+   * when the fields are absent — so an untouched trip produces the same request, and the same
+   * query key, as one where the customer explicitly picked the defaults.
+   */
+  const [direction, setDirection] = useState<Direction>('ONE_WAY');
+  const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
+  /** Local only — nothing on the wire carries a return time. See `RETURN_IS_LOCAL_ONLY`. */
+  const [returnAt, setReturnAt] = useState<Date | null>(null);
+  /** On by default, matching what the server assumes when the field is left off the request. */
+  const [insurance, setInsurance] = useState(true);
+  /** Which picker is open, if any. One at a time: they write to different fields. */
+  const [timePicker, setTimePicker] = useState<'schedule' | 'return' | null>(null);
+  /** The fare sheet. Opened by Continue, and the last step this screen owns. */
+  const [fareOpen, setFareOpen] = useState(false);
+
+  /**
    * True while the pickup is still the device's own position rather than something the customer
    * chose. A later, more accurate fix may overwrite an automatic pickup; it must never overwrite
    * one they set by hand.
@@ -174,6 +212,137 @@ export default function HomeScreen(): ReactElement {
         : coverage.data === undefined
           ? { kind: 'checking' }
           : toCoverageState(coverage.data);
+
+  /**
+   * `served` and `servedFree` are the only two coverage states that let us go on and ask for a
+   * price; `checking` and `failed` are both "we do not know yet", and quoting on a pickup we
+   * could not verify is how a paid pickup zone surprises somebody.
+   */
+  const servedHere = coverageState.kind === 'served' || coverageState.kind === 'servedFree';
+
+  /**
+   * THE SECOND QUESTION, AND COVERAGE CANNOT ANSWER IT.
+   *
+   * `/coverage/check` resolves zones. Whether a PACKAGE exists for this particular trip — the
+   * distance band, the direction, the terrain — is decided by `packages.resolveForTrip` and is
+   * only ever reported through `POST /quotes`. So "no package covers this distance" is
+   * unknowable here without asking for the price, and asking here is the only way Continue can
+   * be blocked before the customer presses it rather than after.
+   *
+   * The cost of asking early is real and worth naming: setting a destination now spends a quote,
+   * and quoting is rate limited to 30/min per customer. It is bounded by `enabled` — no request
+   * until both points exist AND coverage came back served — and the answer is not thrown away:
+   * the fare screen reads this very cache entry under the same key, so pressing Continue costs
+   * no second round trip and shows the price on its first frame.
+   */
+  /**
+   * NO QUOTE UNTIL THERE IS A PICKUP TIME, and this is not merely tidiness.
+   *
+   * The instant decides which surcharge window the trip falls in, so a price fetched before one is
+   * chosen is a price for a different trip — and since an unset time cannot be booked at all, it
+   * would be a price nobody could buy, plus a wasted row against the 30/min quote limit. Waiting
+   * also means the "no package" verdict on this screen is always computed for the trip the
+   * customer is actually about to take.
+   */
+  const trip = useTripQuote(
+    pickup,
+    drop,
+    servedHere && scheduledAt !== null,
+    direction,
+    scheduledAt,
+    insurance,
+  );
+
+  /**
+   * What the server said this trip is — `null` until it has said anything, which is a state the
+   * options block renders differently rather than hiding through.
+   *
+   * `stale` is not consulted on purpose: while a re-quote is in flight the PREVIOUS trip's service
+   * type is a far better guess than "unknown", and flipping the direction control out and back on
+   * every destination change would be the more distracting of the two wrongs.
+   */
+  const serviceType = trip.card?.service_type ?? null;
+
+  /**
+   * A round trip on an incity trip is not a thing that exists, and the server ignores `direction`
+   * there — so a customer who chose it before the answer arrived would otherwise keep a Return row
+   * on screen for a product with no return, quietly keyed into their quote.
+   */
+  useEffect(() => {
+    if (serviceType === 'INCITY' && direction === 'ROUND_TRIP') {
+      setDirection('ONE_WAY');
+      setReturnAt(null);
+    }
+  }, [serviceType, direction]);
+
+  /**
+   * Continue needs both points, a pickup we serve, AND a fare that exists.
+   *
+   * A FAILED quote does NOT block. An unavailable answer is the server saying "there is nothing
+   * to sell you here", which is final and worth stopping for; a network failure is the app not
+   * knowing, and the fare screen has a real retry for it. Blocking on "we could not ask" would
+   * strand a customer on a lift ride with no way forward and nothing to press.
+   */
+  /**
+   * `stale` guards both of these. The hook keeps the previous answer on screen while a new one
+   * loads — which the fare screen's direction toggle needs — so without this check, changing the
+   * destination would flash the OLD destination's "no package" verdict over the new one for as
+   * long as the request takes.
+   */
+  const noPackage = trip.unavailable !== null && !trip.stale;
+  /** The INSURANCE line's own rendered amount, so the toggle states a real number, not a guess. */
+  const insuranceAmount =
+    trip.stale || trip.card === null
+      ? null
+      : (trip.card.options[0]?.fare.lines.find((line) => line.code === 'INSURANCE')?.amount
+          .amount_display ?? null);
+  const pricing = trip.query.isFetching;
+  /**
+   * The app's OWN rules about its own pickers — a pickup at least an hour out, a return after the
+   * pickup — as opposed to every other clause here, which is the server's verdict. Each renders
+   * on the offending row itself, so the button still needs no explanation of its own.
+   */
+  const timesInvalid =
+    scheduleProblem(scheduledAt) !== null || returnProblem(returnAt, scheduledAt) !== null;
+
+  /**
+   * EVERY FIELD THE TRIP NEEDS, in one place — a destination, a pickup time, and a return time
+   * when the customer asked for a round trip. An unset field is not an ERROR and gets no red line:
+   * the row it belongs to says "Select a time" or "Not set" in muted type, which is an instruction
+   * rather than a complaint about something they have not done yet. Red is reserved for a choice
+   * that was made and cannot be used.
+   *
+   * The pickup point is in the list even though the device usually supplies it — permission can be
+   * refused, and a trip with no origin must not reach a fare.
+   */
+  const tripIncomplete =
+    pickup === null ||
+    drop === null ||
+    scheduledAt === null ||
+    (direction === 'ROUND_TRIP' && returnAt === null);
+
+  const canContinue = !tripIncomplete && servedHere && !noPackage && !pricing && !timesInvalid;
+
+  /**
+   * The two points travel as ROUTE PARAMS rather than in a store, because they are the entire
+   * input to the fare screen and expo-router persists them across a remount for free. A
+   * module-scoped "current trip" object would be a second source of truth for the same two
+   * coordinates, and the copy that goes stale is always the one not in the URL.
+   */
+  /**
+   * Continue opens the fare SHEET, over this screen — it does not navigate.
+   *
+   * Choosing a duration is the last question this screen asks, not a departure from it, and the
+   * map staying behind the sheet is what makes changing a pin a dismiss rather than a back
+   * navigation and a remount. It also keeps the quote, the pins and the trip options in one
+   * component's state: nothing is serialised into route params and parsed back, which was the
+   * only reason the terms ever needed a wire format between screens.
+   */
+  const openFareCard = useCallback(() => {
+    if (pickup === null || drop === null) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFareOpen(true);
+  }, [pickup, drop]);
 
   /**
    * Saving a place is a real write to `POST /customer/addresses`, and the saved list lives on the
@@ -617,6 +786,12 @@ export default function HomeScreen(): ReactElement {
                         mode === 'pick-pickup' ? pickup : drop,
                         fromSavedAddress(saved),
                       )}
+                      // Deleting moved here with the list. This is now the ONLY place in the app
+                      // a saved place can be removed — Account renders them read-only — so
+                      // dropping the prop when the home list went would have deleted the
+                      // capability rather than relocated it.
+                      onRemove={forgetAddress.mutate}
+                      removing={forgetAddress.isPending && forgetAddress.variables?.id === saved.id}
                     />
                   ))}
                 </View>
@@ -668,27 +843,38 @@ export default function HomeScreen(): ReactElement {
               </View>
             )}
 
-            {savedAddresses.length > 0 ? (
-              <View style={styles.savedBlock}>
-                <ScrollView
-                  style={styles.savedScroll}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                >
-                  {savedAddresses.map((saved) => (
-                    <SavedPlaceRow
-                      key={saved.id}
-                      saved={saved}
-                      onPress={applySaved}
-                      // Compared by COORDINATE, not by id: the same place can also be reached by
-                      // dropping a pin on it, and it is the same destination either way.
-                      selected={samePoint(drop, fromSavedAddress(saved))}
-                      onRemove={forgetAddress.mutate}
-                      removing={forgetAddress.isPending && forgetAddress.variables?.id === saved.id}
-                    />
-                  ))}
-                </ScrollView>
-              </View>
+            {/*
+              THE SAVED LIST USED TO BE HERE. It moved rather than went: both pickers still show
+              it, which is where it answers the question it is for. This block answers the two the
+              sheet cannot ask anywhere else — when, and which way — and both change the price.
+
+              Only once a destination exists. Before that there is no trip to set terms for, and a
+              return-time row under an empty destination field is a question about nothing.
+            */}
+            {drop !== null ? (
+              <TripOptions
+                serviceType={serviceType}
+                direction={direction}
+                onDirectionChange={(next) => {
+                  void Haptics.selectionAsync();
+                  setDirection(next);
+                  // Leaving a return time on a one-way trip would keep a value the customer can
+                  // no longer see, and silently restore it if they switched back.
+                  if (next === 'ONE_WAY') setReturnAt(null);
+                }}
+                busy={trip.query.isFetching}
+                scheduledAt={scheduledAt}
+                onPickTime={() => setTimePicker('schedule')}
+                returnAt={returnAt}
+                onPickReturn={() => setTimePicker('return')}
+                onClearReturn={() => setReturnAt(null)}
+                insurance={insurance}
+                onInsuranceChange={(next) => {
+                  void Haptics.selectionAsync();
+                  setInsurance(next);
+                }}
+                insuranceAmount={insuranceAmount}
+              />
             ) : null}
 
             <CoverageNotice
@@ -697,16 +883,47 @@ export default function HomeScreen(): ReactElement {
               onRetry={() => void coverage.refetch()}
             />
 
+            {/*
+              THE SECOND BLOCKER, DIRECTLY ABOVE THE BUTTON IT BLOCKS. Coverage says whether we
+              come to this pickup; this says whether we sell anything for this particular trip.
+              They are different questions with different answers, so they get separate lines
+              rather than one notice that would have to explain which of the two it means.
+
+              It renders only when the answer is no. A "yes, we have a package" line would appear
+              on every ordinary use of the screen and stop being read, exactly as the coverage
+              notice's own silent-on-success rule found.
+            */}
+            {noPackage && trip.unavailable !== null ? (
+              <Animated.View
+                entering={FadeIn.duration(180)}
+                exiting={FadeOut.duration(120)}
+                style={[styles.notice, styles.tone_bad]}
+                accessibilityLiveRegion="polite"
+              >
+                <Feather
+                  name="alert-circle"
+                  size={16}
+                  color={colors.danger}
+                  style={styles.noticeIcon}
+                />
+                <View style={styles.flex}>
+                  <Text style={styles.noticeTitleBad}>
+                    {unavailableTitle(trip.unavailable.reason)}
+                  </Text>
+                  <Text style={styles.noticeBody}>{trip.unavailable.message}</Text>
+                </View>
+              </Animated.View>
+            ) : null}
+
             <PrimaryButton
               label="Continue"
-              onPress={() => undefined}
-              // Permanently inert, and honestly labelled below. Enabling it would promise a
-              // fare screen that does not exist.
-              disabled
+              onPress={openFareCard}
+              // Every reason it can be disabled is already spelled out directly above — the
+              // coverage notice, or the no-package notice — so the button carries no second
+              // line of explanation of its own.
+              disabled={!canContinue}
+              loading={pricing}
             />
-            <Text style={styles.pendingNote} numberOfLines={1} adjustsFontSizeToFit>
-              Fares and booking open once quotes go live.
-            </Text>
           </DraggableSheet>
         )}
       </KeyboardAvoidingView>
@@ -739,6 +956,51 @@ export default function HomeScreen(): ReactElement {
           </Pressable>
         ))}
       </BottomSheet>
+
+      {/*
+        `mode="datetime"` gives iOS one combined wheel. Android has no combined mode and shows a
+        date dialog followed by a time dialog off the same call, which is the platform's own
+        convention rather than something to work around.
+
+        Rendered conditionally, not with a `visible` prop: the component unmounts itself on
+        Android after a choice, so keeping it mounted leaves a picker that will not reopen.
+      */}
+      <FareSheet
+        visible={fareOpen}
+        onClose={() => setFareOpen(false)}
+        trip={trip}
+        onRequote={() => void trip.query.refetch()}
+      />
+
+      {/*
+        KEYED BY FIELD. The chooser seeds its draft once from `value`, so one instance serving two
+        rows must remount when the row changes — without the key, opening Return after Pickup
+        would open on the pickup's instant.
+      */}
+      {timePicker !== null ? (
+        <DateTimeChooser
+          key={timePicker}
+          visible
+          title={timePicker === 'schedule' ? 'Pickup time' : 'Return time'}
+          value={timePicker === 'schedule' ? scheduledAt : returnAt}
+          // A fresh picker opens on the earliest LEGAL instant rather than on "now", so the first
+          // thing the customer sees is already a valid answer. The return leg opens an hour after
+          // the pickup for the same reason.
+          anchor={
+            timePicker === 'return' && scheduledAt !== null
+              ? new Date(scheduledAt.getTime() + 60 * 60_000)
+              : defaultScheduleAnchor()
+          }
+          minimumDate={scheduleBounds().minimumDate}
+          maximumDate={scheduleBounds().maximumDate}
+          onCancel={() => setTimePicker(null)}
+          onConfirm={(at) => {
+            if (timePicker === 'schedule') setScheduledAt(at);
+            else setReturnAt(at);
+            setTimePicker(null);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -937,7 +1199,6 @@ const styles = StyleSheet.create({
   summaryBlock: { marginTop: space.md, marginBottom: space.lg },
 
   // Capped rather than free-growing: four saved places must not push Continue off the screen.
-  savedBlock: { marginBottom: space.sm },
   savedLabel: { ...text.label, color: colors.muted, marginBottom: space.sm },
   // Shorter than the idle sheet's list: this sheet also carries a title, the pinned address, the
   // save link and a confirm button, and the confirm button must never be pushed off screen.
@@ -975,7 +1236,6 @@ const styles = StyleSheet.create({
   mapPickBody: { ...text.caption, color: colors.muted, marginTop: 1 },
   pickSavedBlock: { marginBottom: space.md },
   pickSavedScroll: { maxHeight: 132 },
-  savedScroll: { maxHeight: 148 },
 
   draftRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: space.sm },
   draftAddress: { ...text.body, color: colors.fg, flex: 1, marginLeft: space.sm },
@@ -1001,6 +1261,10 @@ const styles = StyleSheet.create({
   },
   noticeIcon: { marginRight: space.sm, marginTop: 1 },
   noticeTitle: { ...text.label, color: colors.fg },
+  // Red ink for the one notice that stops the flow outright. The coverage notice's `tone_bad`
+  // keeps ink titles because it sits beside a retry; this one has no way forward, so the colour
+  // is doing the work the missing button would have.
+  noticeTitleBad: { ...text.label, color: colors.danger },
   noticeBody: { ...text.caption, color: colors.muted, marginTop: 2 },
   retryButton: {
     flexDirection: 'row',
@@ -1030,7 +1294,6 @@ const styles = StyleSheet.create({
 
   // No top margin: Continue follows the coverage notice (or the saved list, when the notice is
   // silent) directly, closing the gap that made this the tallest empty stretch in the sheet.
-  pendingNote: { ...text.caption, color: colors.muted, textAlign: 'center', marginTop: space.xs },
 
   menuLabel: { ...text.caption, color: colors.muted },
   menuAddress: { ...text.body, color: colors.fg, marginTop: 2, marginBottom: space.md },

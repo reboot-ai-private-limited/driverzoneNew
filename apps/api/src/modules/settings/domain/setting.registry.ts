@@ -31,11 +31,9 @@ const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected HH:mm,
  * or "all day", because those are opposite readings of the same input. To switch a surcharge off,
  * set its CHARGE to 0; the window stays meaningful and the intent is unambiguous.
  */
-const timeWindow = z
-  .object({ start: timeOfDay, end: timeOfDay })
-  .refine((w) => w.start !== w.end, {
-    message: 'start and end must differ — set the charge to 0 to disable a surcharge',
-  });
+const timeWindow = z.object({ start: timeOfDay, end: timeOfDay }).refine((w) => w.start !== w.end, {
+  message: 'start and end must differ — set the charge to 0 to disable a surcharge',
+});
 
 /** Money. Whole rupees only: `₹2.50` is not representable, deliberately. */
 const rupees = z.number().int().min(0);
@@ -104,7 +102,8 @@ export const SETTING_REGISTRY = {
     label: 'Late night window',
     unit: 'TIME_WINDOW',
     audiences: ['ADMIN', 'CUSTOMER'],
-    description: 'Pickups scheduled inside this window attract the late night charge. May cross midnight.',
+    description:
+      'Pickups scheduled inside this window attract the late night charge. May cross midnight.',
   },
   'pricing.late_night_charge': {
     schema: rupees,
@@ -124,7 +123,8 @@ export const SETTING_REGISTRY = {
     label: 'Insurance charge',
     unit: 'RUPEES',
     audiences: ['ADMIN', 'CUSTOMER'],
-    description: 'One flat, taxable line on every booking, incity and outstation alike.',
+    description:
+      'One flat, taxable line, incity and outstation alike. On by default; the customer can opt out per trip.',
   },
 
   // ─── Tax ───────────────────────────────────────────────────────────────────────────────────
@@ -172,7 +172,8 @@ export const SETTING_REGISTRY = {
     label: 'Free waiting time',
     unit: 'MINUTES',
     audiences: ['ADMIN', 'CUSTOMER', 'DRIVER'],
-    description: 'Waiting is free for this long after the driver marks ARRIVED. Charging starts after.',
+    description:
+      'Waiting is free for this long after the driver marks ARRIVED. Charging starts after.',
   },
   'waiting.charge_per_minute': {
     schema: rupees,
@@ -366,7 +367,8 @@ export const SETTING_REGISTRY = {
     label: 'Customer fee — driver arrived',
     unit: 'RUPEES',
     audiences: ['ADMIN', 'CUSTOMER'],
-    description: 'Charged when the customer cancels after the driver has arrived. Never below the en-route fee.',
+    description:
+      'Charged when the customer cancels after the driver has arrived. Never below the en-route fee.',
   },
   'cancellation.driver_penalty_en_route': {
     schema: rupees,
@@ -384,7 +386,8 @@ export const SETTING_REGISTRY = {
     label: 'Driver penalty — arrived',
     unit: 'RUPEES',
     audiences: ['ADMIN', 'DRIVER'],
-    description: 'Debited from the driver who cancels after arriving. Never below the en-route penalty.',
+    description:
+      'Debited from the driver who cancels after arriving. Never below the en-route penalty.',
   },
 } as const satisfies Record<string, SettingDefinition>;
 

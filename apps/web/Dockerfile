@@ -55,6 +55,16 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ENV NODE_ENV=production
+
+# Unset, `next build` succeeds and bakes in the localhost fallback from src/lib/api/client.ts —
+# an image that looks fine until a browser on another machine cannot reach the API. Fail here
+# instead, where the message can say what to do. The Maps key is deliberately NOT checked: unset
+# is a supported state that degrades to a setup notice.
+RUN test -n "$NEXT_PUBLIC_API_BASE_URL" || { \
+      echo "NEXT_PUBLIC_API_BASE_URL is empty. It is inlined at build time, so an image built" >&2; \
+      echo "without it silently calls http://localhost:4000/api. Set it in the repo-root .env" >&2; \
+      echo "and rebuild - see docs/engineering/build-and-deploy.md." >&2; exit 1; }
+
 RUN pnpm --filter @driverzone/web build
 
 

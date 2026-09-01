@@ -118,6 +118,15 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* must arrive as BUILD args, not runtime env: `next build` inlines them into
+      # the client bundle, so by the time a container starts the strings are already frozen into
+      # the JS chunks. Values are interpolated from the repo-root `.env` (compose reads it
+      # automatically) — see .env.example. Changing one is a rebuild, not a restart.
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+    # Runtime env for the standalone server. Nothing NEXT_PUBLIC_* belongs here — it would be read
+    # far too late — but this stays the right channel for a genuine server-side variable.
     env_file: [apps/web/.env.prod]
     depends_on:
       api: { condition: service_healthy }

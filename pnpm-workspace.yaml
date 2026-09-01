@@ -25,3 +25,23 @@ minimumReleaseAgeExclude:
 # explaining WHY hoisting is required is still the one to read; only its location was wrong.
 # See docs/engineering/mobile-in-monorepo.md.
 nodeLinker: hoisted
+
+# One React for the whole workspace, and it is Expo's choice.
+#
+# `nodeLinker: hoisted` above puts exactly ONE copy of a package at the root of node_modules
+# and nests the rest. With two React versions in the workspace — Expo 57 / RN 0.86 pin
+# react 19.2.3 exactly, while `^19` in apps/web floated up to 19.2.8 — whichever one loses the
+# root slot ends up nested, and `next` resolving react from the root while the app's components
+# resolve it from apps/web/node_modules gives you two Reacts in one render. react-dom then sets
+# the hook dispatcher on one copy and the components read it off the other, which surfaces as
+#     TypeError: Cannot read properties of null (reading 'useRef')
+# while prerendering /404 — a page with no code of ours in it, so it reads like a Next bug.
+# It only ever appeared in the Docker build because a fresh install lays the tree out differently
+# than the incrementally-updated node_modules on a dev machine.
+#
+# Expo pins react exactly and its native renderer expects that version, so alignment goes
+# downward: web and design-system follow the mobile apps, not the other way round. Bumping this
+# means bumping the `react`/`react-dom` specifiers in apps/web and packages/mobile-ui to match.
+overrides:
+  react: 19.2.3
+  react-dom: 19.2.3

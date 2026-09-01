@@ -21,6 +21,8 @@ export interface CreateQuoteInput {
   /** Omitted means now. The SERVER decides, so a device with a wrong clock cannot book backwards. */
   scheduledAt?: Date | undefined;
   direction?: Direction | undefined;
+  /** Omitted (or `true`) keeps the INSURANCE line on; `false` prices the trip without it. */
+  insurance?: boolean | undefined;
 }
 
 export interface QuotedTrip {
@@ -101,7 +103,10 @@ export class CreateQuoteUseCase {
       earlyMorningChargePaise: rupeesToPaise(snapshot['pricing.early_morning_charge']),
       lateNightWindow: snapshot['pricing.late_night_window'],
       lateNightChargePaise: rupeesToPaise(snapshot['pricing.late_night_charge']),
-      insuranceChargePaise: rupeesToPaise(snapshot['pricing.insurance_charge']),
+      // `false` prices the trip with no INSURANCE line at all — `computeFare` already treats 0
+      // as "no line", the same convention every other optional charge here uses.
+      insuranceChargePaise:
+        input.insurance === false ? 0 : rupeesToPaise(snapshot['pricing.insurance_charge']),
       taxBps: snapshot['pricing.tax_bps'],
     };
 

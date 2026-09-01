@@ -1,4 +1,4 @@
-import type { Gender } from '@driverzone/contracts';
+import type { CustomerProfileDto, Gender } from '@driverzone/contracts';
 
 /** Everything the profile form collects, including the parts the API cannot store yet. */
 export interface ProfileDraft {
@@ -42,6 +42,25 @@ export function completionPercent(draft: ProfileDraft): number {
     draft.email.trim().length > 0,
     draft.paymentMethod !== null,
     draft.address.trim().length > 0,
+  ];
+  const done = filled.filter(Boolean).length;
+  return Math.round((done / filled.length) * 100);
+}
+
+/**
+ * The account tab's own completion bar — over the STORED profile, not the onboarding draft
+ * above. A different question: onboarding asks "how much of the form did you fill in before this
+ * was ever saved", this asks "how much of what the API actually persists is filled in now". Same
+ * equal-weight rule and the same reason for it — no evidence exists to weight one field over
+ * another, so an even split is the honest reading rather than a dressed-up guess.
+ */
+export function profileCompletionFromDto(profile: CustomerProfileDto): number {
+  const filled = [
+    true, // mobile_number — verified at sign-in, cannot be absent
+    profile.full_name !== null && profile.full_name.trim().length > 0,
+    profile.gender !== null,
+    profile.dob !== null,
+    profile.saved_addresses.length > 0,
   ];
   const done = filled.filter(Boolean).length;
   return Math.round((done / filled.length) * 100);

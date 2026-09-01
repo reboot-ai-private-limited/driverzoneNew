@@ -118,7 +118,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    env_file: [apps/web/.env]
+    env_file: [apps/web/.env.prod]
     depends_on:
       api: { condition: service_healthy }
     ports: ['3000:3000']

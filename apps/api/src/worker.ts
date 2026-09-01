@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'bullmq';
 import { loadEnv } from '@/config/env.js';
-import { QUEUE_NAMES, closeQueues, getQueue } from '@/shared/queue/queues.js';
+import { QUEUE_NAMES, closeQueues } from '@/shared/queue/queues.js';
+import { DISPATCH_JOBS, enqueueDispatch } from '@/shared/queue/dispatchJobs.js';
 import { disconnectRedis, getRedis } from '@/shared/queue/redis.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
 import { runWithContext } from '@/shared/http/request-context.js';
 import { logger } from '@/shared/logging/logger.js';
-import { buildContainers } from './container.js';
+import { buildContainers, type AppContainers } from './container.js';
 
 /**
  * The background entrypoint — a SECOND composition root, not a second application.
@@ -17,19 +18,20 @@ import { buildContainers } from './container.js';
  *
  * It imports `container.js`, never `routes.js`. Containers expose `buildRouter()` as a function
  * precisely so this process never constructs an Express router it has no listener to serve.
- *
- * This is where dispatch waves, scheduled dispatch and the sweeper will run
- * (docs/LLD/dispatch-and-assignment.md).
  */
+
+/** How often the sweeper looks for work the queue should already have picked up. */
+const SWEEPER_INTERVAL_MS = 60_000;
+
+/** A booking that never got paid for within this is not going to be. */
+const ABANDONED_PAYMENT_MINUTES = 30;
+
 async function main(): Promise<void> {
   loadEnv();
 
   await connectMongo();
 
   const containers = buildContainers();
-  // Referenced so the wiring is real rather than decorative — the queue consumers below will
-  // call into these contracts as the dispatch and notification modules land.
-  logger.debug({ modules: Object.keys(containers) }, 'containers built');
 
   const dispatchWorker = new Worker(
     QUEUE_NAMES.dispatch,
@@ -39,9 +41,8 @@ async function main(): Promise<void> {
        *
        * Seeded from the ID the enqueuing request travelled under when the job carries one, which
        * is what makes a dispatch wave traceable back to the booking request that started it —
-       * across a process boundary and minutes of delay. Producers should put `requestId` in the
-       * job payload; a fresh ID is the fallback for jobs with no originating request, like the
-       * sweeper.
+       * across a process boundary and minutes of delay. A fresh ID is the fallback for jobs with
+       * no originating request, like the sweeper.
        */
       const payload: unknown = job.data;
       const inherited =
@@ -52,54 +53,28 @@ async function main(): Promise<void> {
       const requestId = typeof inherited === 'string' && inherited !== '' ? inherited : randomUUID();
 
       await runWithContext({ requestId }, async () => {
-        logger.info({ name: job.name, id: job.id }, 'dispatch job');
-        // Wave timeouts and scheduled dispatch land here in phase 5.
+        await handleDispatchJob(containers, job.name, payload);
       });
     },
     { connection: getRedis(), concurrency: 10 },
   );
 
-  
-  const sweeperWorker = new Worker(
-    QUEUE_NAMES.sweeper,
-    async (job) => {
-      const requestId = randomUUID();
-      await runWithContext({ requestId }, async () => {
-        logger.info({ name: job.name, id: job.id }, 'sweeper job running');
-        
-        if (job.name === 'process-expired-reviews') {
-          // Fetch the submission_window_hours from settings
-          const submissionWindowHours = (await containers.settings.contract.get('reviews.submission_window_hours')) as number;
-          await containers.reviews.processExpiredReviews(submissionWindowHours);
-        }
-      });
-    },
-    { connection: getRedis(), concurrency: 1 },
-  );
-
-  sweeperWorker.on('failed', (job, err) => {
-    logger.error({ id: job?.id, name: job?.name, err: err.message }, 'sweeper job failed');
-  });
-
-  // Setup the repeatable job
-  const sweeperQueue = getQueue(QUEUE_NAMES.sweeper);
-  await sweeperQueue.add('process-expired-reviews', {}, {
-    repeat: { pattern: '*/5 * * * *' }, // every 5 minutes
-    jobId: 'process-expired-reviews-cron', // prevent duplicates
-  });
-
   dispatchWorker.on('failed', (job, err) => {
     logger.error({ id: job?.id, name: job?.name, err: err.message }, 'dispatch job failed');
   });
+
+  const sweeper = setInterval(() => {
+    void runSweep(containers);
+  }, SWEEPER_INTERVAL_MS);
 
   logger.info({ queues: Object.values(QUEUE_NAMES) }, 'worker started');
 
   const shutdown = (signal: string) => {
     void (async () => {
       logger.info({ signal }, 'signal received, closing workers');
+      clearInterval(sweeper);
       // Waits for the active job to finish. Killing mid-job leaves a booking half-dispatched.
       await dispatchWorker.close();
-      await sweeperWorker.close();
       await closeQueues();
       await disconnectMongo();
       disconnectRedis();
@@ -109,6 +84,85 @@ async function main(): Promise<void> {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+async function handleDispatchJob(
+  containers: AppContainers,
+  name: string,
+  payload: unknown,
+): Promise<void> {
+  const data = payload as { bookingId?: unknown; wave?: unknown };
+  const bookingId = typeof data.bookingId === 'string' ? data.bookingId : null;
+
+  if (bookingId === null) {
+    logger.error({ name }, 'dispatch job with no bookingId — discarding');
+    return;
+  }
+
+  if (name === DISPATCH_JOBS.dispatch) {
+    logger.info({ bookingId }, 'starting dispatch');
+    await containers.dispatch.runWave(bookingId);
+    return;
+  }
+
+  if (name === DISPATCH_JOBS.waveTimeout) {
+    const wave = typeof data.wave === 'number' ? data.wave : 1;
+    logger.info({ bookingId, wave }, 'wave timed out');
+    await containers.dispatch.expireWave(bookingId, wave);
+    return;
+  }
+
+  logger.warn({ name }, 'unknown dispatch job');
+}
+
+/**
+ * The safety net behind the delayed jobs.
+ *
+ * Everything the sweeper does is ALREADY meant to have happened: a `dispatch` job was enqueued
+ * when the booking was confirmed, and a wave timeout when the wave was rung. It exists because a
+ * Redis flush, a failed enqueue or a job that errored past its retries all end the same way — a
+ * booking sitting in CONFIRMED forever with nobody looking for it, which is the failure mode
+ * `docs/LLD/dispatch-and-assignment.md` opens by naming.
+ *
+ * Re-enqueueing is safe precisely because the job ids are deterministic: a booking whose original
+ * job is merely running late gets the same id and no second dispatch.
+ */
+async function runSweep(containers: AppContainers): Promise<void> {
+  await runWithContext({ requestId: randomUUID() }, async () => {
+    try {
+      const now = new Date();
+
+      const due = await containers.bookings.contract.findDueForDispatch(now, 100);
+      for (const booking of due) {
+        logger.warn(
+          { bookingId: booking.id, dispatchAt: booking.dispatchAt },
+          'booking was due for dispatch and still waiting — re-enqueueing',
+        );
+        await enqueueDispatch(booking.id, now);
+      }
+
+      /*
+       * Bookings whose payment never completed. Expired rather than cancelled: nobody cancelled
+       * anything, the money simply never arrived, and no cancellation fee applies because there
+       * was never a confirmed booking to cancel.
+       */
+      const cutoff = new Date(now.getTime() - ABANDONED_PAYMENT_MINUTES * 60_000);
+      const abandoned = await containers.bookings.sweepAbandonedPayments(cutoff, 100);
+      if (abandoned > 0) logger.info({ abandoned }, 'expired bookings that were never paid for');
+
+      /*
+       * Reviews whose blind window has closed. Unlike the two above this is not a safety net for
+       * a job that failed — nothing was ever scheduled. A review stays unpublished until the
+       * OTHER party rates too, and if they never do, only the clock can release it
+       * (docs/LLD/reviews.md §Retaliation prevention). The sweep is the clock.
+       */
+      const published = await containers.reviews.processExpiredReviews();
+      if (published > 0) logger.info({ published }, 'published reviews whose window elapsed');
+    } catch (error) {
+      // The sweeper must never die. It is the thing that catches everything else failing.
+      logger.error({ err: error }, 'sweep failed');
+    }
+  });
 }
 
 main().catch((err: unknown) => {

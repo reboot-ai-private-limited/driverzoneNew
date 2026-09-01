@@ -1,18 +1,26 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { requireAuth } from '@/shared/http/auth.middleware.js';
-import type { ReviewsControllers } from './reviews.controller.js';
+import type { AdminReviewsControllers } from './reviews.controller.js';
 
-export function buildAudienceReviewsRouter(role: 'CUSTOMER' | 'DRIVER', controllers: ReviewsControllers): Router {
+/**
+ * Mounted at `/api/customer/bookings` and `/api/driver/bookings`, BEHIND the bookings module's
+ * routers for the same prefix — `routes.ts` explains the fall-through. Hence `/:id/rate` rather
+ * than `/bookings/:id/rate`.
+ */
+export function buildAudienceReviewsRouter(
+  role: 'CUSTOMER' | 'DRIVER',
+  rateTrip: RequestHandler,
+): Router {
   const router = Router();
   router.use(requireAuth(role));
 
-  // The caller is hitting `/customer/bookings/:id/rate` or `/driver/bookings/:id/rate`
-  router.post('/bookings/:id/rate', controllers.rateTrip);
+  router.post('/:id/rate', rateTrip);
 
   return router;
 }
 
-export function buildAdminReviewsRouter(controllers: ReviewsControllers): Router {
+/** Mounted at `/api/admin/reviews`. */
+export function buildAdminReviewsRouter(controllers: AdminReviewsControllers): Router {
   const router = Router();
   router.use(requireAuth('ADMIN'));
 

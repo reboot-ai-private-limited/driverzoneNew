@@ -15,6 +15,158 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **Razorpay, and cash as a second payment mode.** `MockPaymentGateway` moved nothing and refused
+  production; `RazorpayGateway` sits beside it behind the same port, and the container picks
+  Razorpay whenever its three secrets are set. Raw `fetch` rather than the SDK — it is two
+  endpoints and two HMACs, and `osrm.roadDistance.ts` already sets that precedent.
+
+  **Cash is not a second gateway, it is the absence of one**, and that is what made it invasive.
+  `PENDING_PAYMENT → CONFIRMED` had been reachable only through a signature-verified webhook, and
+  a cash booking has no webhook coming: it confirms in `CreateBookingUseCase` and enqueues its own
+  dispatch. Cash is allowed on BOTH products — flagged, and overruled deliberately: an outstation
+  no-show now costs a driver their whole day with nothing collected.
+
+  **UPI only, Intent flow.** Collect is deprecated by NPCI as of 28 February 2026, so Intent is
+  the only forward path and there is no card or netbanking mode to support.
+
+  **Three Razorpay facts that look alike and are not**, all now pinned by tests with real HMACs:
+  the webhook signature is the raw body under the WEBHOOK secret; the checkout signature is
+  `order_id|payment_id` under the KEY secret; and the unique event id is a HEADER
+  (`x-razorpay-event-id`), not a body field. Amounts are already paise, so nothing converts.
+
+  **Refunds go against the PAYMENT, not the order.** `payments.gatewayRef` holds the `order_…` we
+  created, but `POST /v1/payments/:id/refund` wants the `pay_…` that only exists once someone has
+  paid — so it is captured from the webhook into a new `providerPaymentId`. Refunding with the
+  order id would have hit the wrong resource, and nothing would have revealed it until money had
+  to go back.
+
+- **Cash makes the driver's wallet real.** A completed cash trip writes the `CASH_COLLECTED` row
+  the ledger has carried an entry type for since day one — negative, because the driver took the
+  whole fare and earned only their share of it. That single row is what finally gives
+  `driver.max_negative_balance` something to measure: `MongoDriverPool` already filtered dispatch
+  on `walletBalancePaise`, so an over-extended driver stops being offered work with no new
+  dispatch code.
+
+- **Customer dues.** A cancellation fee on a cash booking cannot be kept back from a refund that
+  does not exist, so the `cancellationCharges` row stays unsettled and becomes a debt. The next
+  booking must be UPI — cash would never clear it — and the amount rides on that order, settling
+  when the capture lands. `GET /customer/bookings/dues` reports it, on the customer rather than on
+  a quote: which modes a person may use is a fact about them, not about a trip, and putting it on
+  the quote would have made `quotes` reach into `bookings`, a tier above it.
+
+### Changed
+
+- **One ledger enum instead of two that disagreed.** `contracts/finance.ts` shipped
+  `TRANSACTION_TYPES` with five values while the `ledger` module persisted eight — it spelled
+  commission `COMMISSION_DEDUCTION` against a database saying `COMMISSION_DEBIT`, and had **no
+  name at all for `CASH_COLLECTED`**, the one row cash exists to write. The module now imports the
+  contract enum rather than declaring its own, so the Mongoose `enum`, the domain type and the
+  admin DTO are the same array and cannot drift again.
+
+- **`GET /admin/drivers/:id/wallet` returns real data.** It was a stub returning `balance_paise: 0`
+  and an empty ledger *"until the finance module is integrated"* — merely incomplete until cash
+  shipped, and then actively misleading on the one screen an admin checks to find out whether a
+  driver is holding the company's money.
+
+  It moved from `identity` to `ledger`, which owns the rows. `identity` is tier 1 and `ledger` is
+  tier 2, so identity cannot import it even as a type, and passing the contract in from the
+  composition root would be the backwards wiring `container.ts` says means the tiers are wrong.
+  `/admin/drivers/:id/wallet` reaches it by the same prefix fall-through `/admin/zones` uses.
+
+  `balance_after_paise` is DERIVED, not stored: the use case anchors each page to the true balance
+  and the mapper walks it backwards. A per-row running total would need serialised appends — a
+  trip writes three entries at once — and could drift from `SUM()`, which the LLD forbids.
+
+### Fixed
+
+- **A failed UPI payment no longer expires the booking.** Razorpay documents that a UPI retry
+  sends `payment.failed` and then `payment.captured` for ONE transaction. `EXPIRED` is terminal,
+  so the capture that followed had nowhere to go: the customer's money moved and there was no
+  trip. The failure is now recorded on the payment and told to the customer as "try again" while
+  the booking waits; the sweeper's 30-minute window, which outlives Razorpay's retries, is what
+  clears a genuinely abandoned one. The payment machine gains exactly one exit from `FAILED`, to
+  `CAPTURED`, for this and nothing else.
+
+- **`payment.authorized` is now captured.** Auto-capture is an ACCOUNT setting at Razorpay; with
+  it off the money is merely held, and an authorisation nobody captures reverses after a few days
+  — the customer debited, given a ride, then silently refunded.
+
+- **The refund idempotency key contained a colon.** `refund:${booking.id}` went straight to
+  Razorpay's `X-Refund-Idempotency`, whose charset is `[A-Za-z0-9_-]`, so every real refund would
+  have been rejected. Same class as the BullMQ job id, and invisible until money needed to go
+  back. Sanitising now lives in the adapter that owns the rule.
+
+### Added
+
+- **The booking flow, server side, end to end** — `pricing`, `ledger`, `notifications`,
+  `payments`, `quotes`, `bookings` and `dispatch`, seven modules that between them take a customer
+  from two points on a map to a completed trip with the money settled. `apps/api` had none of
+  them: the admin could define what we sell and nobody could buy it.
+
+  **`pricing` is pure and that is the point.** Tier 0, no I/O, no clock reads — every fare
+  formula, both surcharge windows, the commission split and every post-quote charge are plain
+  functions, so the most dispute-prone logic in the product is exercised exhaustively in
+  milliseconds with no database anywhere near it. It cannot see `Rupees` either: `pricing` and
+  `settings` are both tier 0 and same-tier imports are forbidden, so the caller converts, which
+  puts the rupees-to-paise crossing where it is one visible line per field.
+
+  **The time-of-day surcharge is decided by the scheduled pickup instant, for both products** —
+  closing open question Q8 as its own recommendation proposed. An outstation package is one flat
+  fare however many days it runs, so there is no duration for a window test to attach to; incity
+  follows the same rule so one receipt line has one explanation. The cost is named in the code and
+  pinned by a test: a four-hour rental booked for 21:55 runs to 01:55 and pays no night charge.
+
+  **Tax absorbs the rounding**, which is the one place the LLD's arithmetic needed a decision
+  rather than a transcription. It says `total = roundToRupee(subtotal + tax)` and separately
+  asserts `driver + company + tax === total`; those cannot both hold, since the shares sum to the
+  subtotal exactly while the rounding is free to move the total by 99 paise. Rounding the total
+  and deriving tax as the remainder satisfies both, and tax is the only line here that is a
+  pass-through rather than someone's money. A property test walks the input space to prove it.
+
+  **Payment precedes confirmation.** A booking now starts at `PENDING_PAYMENT` — a new status, and
+  the only change to the documented state machine — and reaches `CONFIRMED` solely through a
+  signature-verified gateway webhook. The customer's app cannot confirm its own booking, which is
+  the whole reason for the ordering. `DRAFT` and `QUOTED` are gone from the enum: they described
+  someone who had not bought anything, and that lives on `quotes`.
+
+  **The waiting charge goes to the driver in full, uncommissioned** (`WAITING_EARNING`), closing
+  Q9 as it recommended. It compensates their time and the company did nothing to earn a share.
+  That one mechanism *is* the customer late fine — a free window then a per-minute charge already
+  is "free waiting, then a fine", and a second concept would be two clocks disagreeing at the
+  boundary.
+
+  **Arrive blocks; trip start still only warns.** Reaching `ARRIVED` starts the waiting-money
+  clock, so marking it from the highway bills a customer for time nobody spent waiting — beyond
+  `dispatch.arrival_radius_m` the call is refused with the measured distance so the app can say
+  "you are 1.2 km away", and a fix older than a minute is refused rather than trusted. START keeps
+  the documented warn-and-log behaviour, because by then the customer is in the car and refusing
+  strands a trip that is genuinely happening. The way out of a refusal is `pin-report` to ops, not
+  a self-serve override: at 500 m the cause is usually a customer who dropped the pin on the wrong
+  side of a flyover, and an override button would absorb that silently forever.
+
+  **Every transition is a compare-and-swap, not a lock.** The docs write `SELECT … FOR UPDATE`;
+  Mongo gives a better primitive, and `findOneAndUpdate` with the expected status in the filter
+  plus the `bookingEvents` insert in one transaction is what makes a customer cancelling at the
+  instant a driver accepts resolve to exactly one winner. The accept race swaps on two fields at
+  once, and a driver who loses is marked `SUPERSEDED` — never counted against their acceptance
+  rate, because they did everything right and were merely slower.
+
+  **The gateway and the push sender are ports with mock adapters.** The mock gateway signs its
+  webhooks for real, so the single most security-sensitive line in the payment path — an
+  unauthenticated public endpoint that confirms bookings — is exercised from the first day rather
+  than discovered broken against a real provider. It refuses to run in production. The mock push
+  sender records every send, which is what makes the whole flow walkable with no mobile app.
+
+- **Ten new settings**, all in the registry where the other nineteen live: the tax rate, the
+  arrival and start radii, the dispatch wave shape and lead time, the maximum driver debt, and the
+  outstation hours-per-day policy — which is display-only text with no fare consequence, read by
+  nothing in the arithmetic.
+
+- **A server-side money formatter.** `contracts` has always promised `Money { amount_paise,
+  amount_display }` so all four clients render a figure identically, and nothing has ever produced
+  the display half.
+
+
 - **The admin packages screen** at `/packages` — the editor for what we sell and what it costs.
   InCity is a table of packages; Outstation is a table of distance bands with the **gaps between
   them interleaved as rows**, because a gap is the one package failure nothing else reports: an
@@ -197,6 +349,22 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
   accessibility claims in the design language are checked rather than asserted.
 
 ### Fixed
+
+- **BullMQ rejects a job id containing `:`** — the exact form
+  `docs/LLD/dispatch-and-assignment.md` gives (`wave:${bookingId}:${wave}`). Every dispatch job
+  failed to enqueue until the ids became hyphenated. Found by running the flow, not by a test, and
+  now pinned by one.
+
+- **The blunt cancellation free window excused fees it should not have.** The ladder scopes it to
+  "within 5 min of confirming, *before assignment*"; applied regardless of status it meant that on
+  a fast dispatch — a driver at the door inside five minutes — every customer cancelled free while
+  the driver had made the whole trip for nothing.
+
+- **`bookingEvents.metadata` was missing from the wire** on any transition that carried none:
+  Mongoose does not persist an empty Mixed object, so the contract promised a `Record` the
+  response omitted, and a client reading `event.metadata.x` would throw on precisely the
+  transitions that went fine.
+
 
 - **The zones screen's package count was always zero.** The packages controllers put camelCase
   domain entities on the wire while the contracts and swagger both promised snake_case, and the

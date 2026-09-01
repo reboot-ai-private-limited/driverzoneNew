@@ -4,8 +4,31 @@
     "slug": "driverzone-customer",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
-    "android": { "package": "in.driverzone.customer" },
-    "ios": { "bundleIdentifier": "in.driverzone.customer" }
+    "userInterfaceStyle": "light",
+    "scheme": "driverzone",
+    "backgroundColor": "#F2F200",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-splash-screen",
+      "expo-status-bar",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area.",
+          "locationWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area."
+        }
+      ]
+    ],
+    "android": {
+      "package": "in.driverzone.customer",
+      "versionCode": 1,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "ios": {
+      "bundleIdentifier": "in.driverzone.customer",
+      "buildNumber": "1",
+      "supportsTablet": false
+    }
   }
 }

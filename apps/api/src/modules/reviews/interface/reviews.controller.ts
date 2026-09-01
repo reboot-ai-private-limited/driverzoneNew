@@ -1,134 +1,140 @@
-import type { Request, Response, NextFunction } from 'express';
-import { RateTripInput, RateTripUseCase } from '../application/useCases/rateTrip.usecase.js';
-import { ReviewModel } from '../infrastructure/review.model.js';
-import { CustomerModel } from '../../identity/infrastructure/customer.model.js';
-import { DriverModel } from '../../identity/infrastructure/driver.model.js';
+import type { Request, RequestHandler } from 'express';
+import { z } from 'zod';
+import { AppError } from '@/shared/errors/AppError.js';
+import { asyncHandler } from '@/shared/http/asyncHandler.js';
+import { sendSuccess } from '@/shared/http/response.util.js';
+import type { AccountDirectoryContract } from '../../identity/identity.public.js';
+import { RateTripInput, type RateTripUseCase } from '../application/useCases/rateTrip.usecase.js';
+import type { Review, ReviewRepositoryPort } from '../domain/reviewRepository.port.js';
 
-export interface ReviewsControllers {
-  rateTrip: (req: Request, res: Response, next: NextFunction) => Promise<void>;
-  listAdminReviews: (req: Request, res: Response, next: NextFunction) => Promise<void>;
-  deleteReview: (req: Request, res: Response, next: NextFunction) => Promise<void>;
-  toggleFlagReview: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Not a valid id.');
+const idParam = z.object({ id: objectId });
+
+/** `?reviewee_role=DRIVER&rating_lte=2` — the two the ops list is actually driven by. */
+const adminQuery = z.object({
+  reviewee_role: z.enum(['CUSTOMER', 'DRIVER']).optional(),
+  reviewee_id: objectId.optional(),
+  booking_id: objectId.optional(),
+  rating_lte: z.coerce.number().int().min(1).max(5).optional(),
+  flagged: z.coerce.boolean().optional(),
+});
+
+const ADMIN_PAGE_SIZE = 200;
+
+export interface AdminReviewsControllers {
+  listAdminReviews: RequestHandler;
+  deleteReview: RequestHandler;
+  toggleFlagReview: RequestHandler;
 }
 
-export function makeReviewsControllers(rateTripUc: RateTripUseCase): ReviewsControllers {
+/**
+ * INTERFACE — HTTP in, HTTP out. Every policy question is answered a layer down.
+ */
+export function makeAdminReviewsControllers(
+  repo: ReviewRepositoryPort,
+  directory: AccountDirectoryContract,
+): AdminReviewsControllers {
   return {
-    rateTrip: async (req, res, next) => {
-      try {
-        const bookingId = req.params.id as string;
-        const input = RateTripInput.parse(req.body);
-        const user = (req as any).user;
-        const sub = (user?.sub as string) ?? 'dummy-sub';
-        const aud = (user?.aud as string) ?? 'CUSTOMER';
-        const reviewerRole = aud as 'CUSTOMER' | 'DRIVER';
+    listAdminReviews: asyncHandler(async (req, res) => {
+      const q = adminQuery.parse(req.query);
 
-        // Normally we'd fetch the booking to get the revieweeId, but we'll simulate passing it
-        // from a booking lookup. In a real system, we look up the booking first.
-        const revieweeId = 'dummy-reviewee-id'; // Requires actual booking module integration
+      const reviews = await repo.listForAdmin(
+        {
+          revieweeRole: q.reviewee_role,
+          revieweeId: q.reviewee_id,
+          bookingId: q.booking_id,
+          ratingLte: q.rating_lte,
+          flaggedOnly: q.flagged,
+        },
+        ADMIN_PAGE_SIZE,
+      );
 
-        const result = await rateTripUc.execute(bookingId, sub, reviewerRole, revieweeId, input);
+      sendSuccess(req, res, await withNames(reviews, directory));
+    }),
 
-        res.status(201).json({
-          success: true,
-          statusCode: 201,
-          data: result,
-          message: 'Review submitted successfully.',
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
+    deleteReview: asyncHandler(async (req, res) => {
+      const { id } = idParam.parse(req.params);
+      if (!(await repo.deleteById(id))) throw AppError.notFound('That review does not exist.');
 
-    listAdminReviews: async (req, res, next) => {
-      try {
-        const revieweeRole = req.query.reviewee_role === 'CUSTOMER' ? 'CUSTOMER' : 'DRIVER';
-        const reviews = await ReviewModel.find({ revieweeRole }).sort({ createdAt: -1 }).lean();
+      sendSuccess(req, res, { id }, 'Review deleted');
+    }),
 
-        // Populate names for the admin dashboard
-        const data = await Promise.all(
-          reviews.map(async (rev) => {
-            let reviewerName = 'Unknown';
-            let revieweeName = 'Unknown';
+    toggleFlagReview: asyncHandler(async (req, res) => {
+      const { id } = idParam.parse(req.params);
 
-            if (rev.reviewerRole === 'CUSTOMER') {
-              const cust = await CustomerModel.findById(rev.reviewerId).select('fullName phone').lean();
-              reviewerName = cust?.fullName || cust?.phone || 'Unknown Customer';
-            } else {
-              const drv = await DriverModel.findById(rev.reviewerId).select('fullName phone').lean();
-              reviewerName = drv?.fullName || drv?.phone || 'Unknown Driver';
-            }
+      const flagged = await repo.toggleFlag(id);
+      if (flagged === null) throw AppError.notFound('That review does not exist.');
 
-            if (rev.revieweeRole === 'CUSTOMER') {
-              const cust = await CustomerModel.findById(rev.revieweeId).select('fullName phone').lean();
-              revieweeName = cust?.fullName || cust?.phone || 'Unknown Customer';
-            } else {
-              const drv = await DriverModel.findById(rev.revieweeId).select('fullName phone').lean();
-              revieweeName = drv?.fullName || drv?.phone || 'Unknown Driver';
-            }
-
-            return {
-              id: rev._id.toString(),
-              booking_id: rev.bookingId.toString(),
-              reviewer: { id: rev.reviewerId.toString(), role: rev.reviewerRole, name: reviewerName },
-              reviewee: { id: rev.revieweeId.toString(), role: rev.revieweeRole, name: revieweeName },
-              rating: rev.rating,
-              tags: rev.tags,
-              comment: rev.comment,
-              created_at: rev.createdAt.toISOString(),
-              admin_flagged: rev.adminFlagged,
-            };
-          })
-        );
-
-        res.json({
-          success: true,
-          statusCode: 200,
-          data,
-          meta: { total: data.length, page: 1 },
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
-
-    deleteReview: async (req, res, next) => {
-      try {
-        const id = req.params.id;
-        await ReviewModel.findByIdAndDelete(id);
-
-        res.json({
-          success: true,
-          statusCode: 200,
-          message: 'Review deleted successfully',
-          data: { id },
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
-
-    toggleFlagReview: async (req, res, next) => {
-      try {
-        const id = req.params.id;
-        const review = await ReviewModel.findById(id);
-        if (!review) {
-          const err = new Error('Not found');
-          (err as any).statusCode = 404;
-          throw err;
-        }
-
-        review.adminFlagged = !review.adminFlagged;
-        await review.save();
-
-        res.json({
-          success: true,
-          statusCode: 200,
-          message: 'Review flag updated successfully',
-          data: { id, admin_flagged: review.adminFlagged },
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
+      sendSuccess(req, res, { id, admin_flagged: flagged }, 'Review flag updated');
+    }),
   };
+}
+
+/**
+ * The rate handler, bound to the role of the router mounting it.
+ *
+ * `role` is the role of the ROUTER this is mounted on, not a claim read out of the token —
+ * `requireAuth` has already refused anyone holding the other audience, so the mount point is the
+ * stronger of the two facts. Note what this does NOT read from the request: who is being rated.
+ * The reviewer comes from the token and the reviewee comes from the booking, so a caller cannot
+ * address a review at someone they never travelled with.
+ */
+export function makeRateTripController(
+  rateTripUc: RateTripUseCase,
+  role: 'CUSTOMER' | 'DRIVER',
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = idParam.parse(req.params);
+    const input = RateTripInput.parse(req.body);
+
+    const result = await rateTripUc.execute(id, principalOf(req), role, input);
+    sendSuccess(req, res, result, 'Thanks for rating your trip', 201);
+  });
+}
+
+/**
+ * Attaches the display name to each side of every row.
+ *
+ * TWO queries for the whole page, not two per row: the ids are collected per role first and
+ * resolved in one batch each, which is exactly what `namesByIds` exists for.
+ */
+async function withNames(
+  reviews: Review[],
+  directory: AccountDirectoryContract,
+): Promise<unknown[]> {
+  const customerIds: string[] = [];
+  const driverIds: string[] = [];
+  for (const r of reviews) {
+    (r.reviewerRole === 'CUSTOMER' ? customerIds : driverIds).push(r.reviewerId);
+    (r.revieweeRole === 'CUSTOMER' ? customerIds : driverIds).push(r.revieweeId);
+  }
+
+  const [customers, drivers] = await Promise.all([
+    directory.namesByIds('CUSTOMER', customerIds),
+    directory.namesByIds('DRIVER', driverIds),
+  ]);
+  const nameOf = (role: 'CUSTOMER' | 'DRIVER', id: string): string =>
+    (role === 'CUSTOMER' ? customers : drivers).get(id) ?? 'Unknown';
+
+  return reviews.map((r) => ({
+    id: r.id,
+    booking_id: r.bookingId,
+    reviewer: { id: r.reviewerId, role: r.reviewerRole, name: nameOf(r.reviewerRole, r.reviewerId) },
+    reviewee: { id: r.revieweeId, role: r.revieweeRole, name: nameOf(r.revieweeRole, r.revieweeId) },
+    rating: r.rating,
+    tags: r.tags,
+    comment: r.comment,
+    created_at: r.createdAt.toISOString(),
+    admin_flagged: r.adminFlagged,
+  }));
+}
+
+function principalOf(req: Request): string {
+  const sub = req.principal?.sub;
+  if (sub === undefined) {
+    throw AppError.internal('INTERNAL', {
+      reason: 'requireAuth ran but left no principal on the request',
+    });
+  }
+  return sub;
 }

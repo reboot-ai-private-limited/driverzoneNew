@@ -25,6 +25,7 @@ import { ListCustomersAdminUseCase } from './application/useCases/listCustomersA
 import { ManageCustomerAdminUseCase } from './application/useCases/manageCustomerAdmin.usecase.js';
 import { GetDriverDetailsAdminUseCase } from './application/useCases/getDriverDetailsAdmin.usecase.js';
 import { MongoAccountRepository } from './infrastructure/account.repository.impl.js';
+import { MongoAccountDirectory } from './infrastructure/accountDirectory.impl.js';
 import { MongoSessionRepository } from './infrastructure/session.repository.impl.js';
 import { MongoCustomerProfileRepository } from './infrastructure/customerProfile.repository.impl.js';
 import { MongoDriverProfileRepository } from './infrastructure/driverProfile.repository.impl.js';
@@ -177,8 +178,17 @@ export function buildIdentityContainer(): IdentityContainer {
     }));
   };
 
+  // Backs the read-side and rating-cache halves of the public contract. Stateless, so it is
+  // constructed here beside the repositories rather than threaded through a use case.
+  const directory = new MongoAccountDirectory();
+
   return {
     contract: {
+      // The read side and the rating cache. Consumed by `reviews`, which renders names in the
+      // admin ledger and writes back the rolling average it computes.
+      namesByIds: (role, ids) => directory.namesByIds(role, ids),
+      setRating: (role, id, average, count) => directory.setRating(role, id, average, count),
+
       // The write-side surface `bookings` (tier 6) consumes when POST /bookings carries
       // `save_pickup_address` or `save_vehicle`.
       upsertAddressFromBooking: (customerId, address) =>

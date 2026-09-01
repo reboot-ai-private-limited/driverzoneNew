@@ -24,21 +24,26 @@ const ReviewDto = z.object({
   admin_flagged: z.boolean(),
 });
 
-const ReviewListResponse = z.object({
-  data: z.array(ReviewDto),
-  meta: z.object({ total: z.number(), page: z.number() }),
-});
+/*
+ * Bare, NOT wrapped in `{ data, meta }`. `successResponse` supplies the envelope, and the web
+ * client unwraps `data` before a caller ever sees it — a second `data` here would document a
+ * response nobody sends.
+ */
+const ReviewListResponse = z.array(ReviewDto);
 
-const ReviewActionResponse = z.object({
-  data: z.object({ id: z.string(), admin_flagged: z.boolean().optional() }),
-});
+const RateResponse = z.object({ id: z.string(), rating: z.number() });
+const DeleteResponse = z.object({ id: z.string() });
+const FlagResponse = z.object({ id: z.string(), admin_flagged: z.boolean() });
 
 // ─── Shared error entries ───────────────────────────────────────────────────────────────────
 
 const jsonError = { content: { 'application/json': { schema: errorResponse } } };
 const badRequest = { description: 'Invalid input', ...jsonError };
-const forbidden = { description: 'Forbidden', ...jsonError };
-const notFound = { description: 'Review not found', ...jsonError };
+const forbidden = {
+  description: 'Not your trip, not COMPLETED, or past the submission window',
+  ...jsonError,
+};
+const notFound = { description: 'Not found', ...jsonError };
 const conflict = { description: 'Already rated this trip', ...jsonError };
 
 // ─── Registration ───────────────────────────────────────────────────────────────────────────
@@ -58,9 +63,13 @@ export function registerReviewsSwaggerPaths(): void {
       },
     },
     responses: {
-      201: { description: 'Review submitted', content: { 'application/json': { schema: successResponse(z.object({ id: z.string(), rating: z.number() })) } } },
+      201: {
+        description: 'Review submitted',
+        content: { 'application/json': { schema: successResponse(RateResponse) } },
+      },
       400: badRequest,
       403: forbidden,
+      404: notFound,
       409: conflict,
     },
   });
@@ -79,9 +88,13 @@ export function registerReviewsSwaggerPaths(): void {
       },
     },
     responses: {
-      201: { description: 'Review submitted', content: { 'application/json': { schema: successResponse(z.object({ id: z.string(), rating: z.number() })) } } },
+      201: {
+        description: 'Review submitted',
+        content: { 'application/json': { schema: successResponse(RateResponse) } },
+      },
       400: badRequest,
       403: forbidden,
+      404: notFound,
       409: conflict,
     },
   });
@@ -96,10 +109,17 @@ export function registerReviewsSwaggerPaths(): void {
     request: {
       query: z.object({
         reviewee_role: z.enum(['CUSTOMER', 'DRIVER']).optional(),
+        reviewee_id: z.string().optional(),
+        booking_id: z.string().optional(),
+        rating_lte: z.coerce.number().int().min(1).max(5).optional(),
+        flagged: z.coerce.boolean().optional(),
       }),
     },
     responses: {
-      200: { description: 'Reviews retrieved', content: { 'application/json': { schema: successResponse(ReviewListResponse) } } },
+      200: {
+        description: 'Reviews retrieved',
+        content: { 'application/json': { schema: successResponse(ReviewListResponse) } },
+      },
       403: forbidden,
     },
   });
@@ -115,7 +135,10 @@ export function registerReviewsSwaggerPaths(): void {
       params: z.object({ id: z.string().openapi({ description: 'Review ID' }) }),
     },
     responses: {
-      200: { description: 'Review flag toggled', content: { 'application/json': { schema: successResponse(ReviewActionResponse) } } },
+      200: {
+        description: 'Review flag toggled',
+        content: { 'application/json': { schema: successResponse(FlagResponse) } },
+      },
       403: forbidden,
       404: notFound,
     },
@@ -132,8 +155,12 @@ export function registerReviewsSwaggerPaths(): void {
       params: z.object({ id: z.string().openapi({ description: 'Review ID' }) }),
     },
     responses: {
-      200: { description: 'Review deleted', content: { 'application/json': { schema: successResponse(ReviewActionResponse) } } },
+      200: {
+        description: 'Review deleted',
+        content: { 'application/json': { schema: successResponse(DeleteResponse) } },
+      },
       403: forbidden,
+      404: notFound,
     },
   });
 }

@@ -28,7 +28,11 @@ export function buildAdminRouter(controllers: AdminControllers): Router {
 
   router.get('/drivers', controllers.listDrivers);
   router.get('/drivers/:id', controllers.getDriverDetails);
-  router.get('/drivers/:id/wallet', controllers.getDriverWallet);
+  /*
+   * `/drivers/:id/wallet` is NOT here. It lives in the `ledger` module, which owns the rows — this
+   * router has no route matching it, so the request falls through to the `/admin/drivers` mount in
+   * routes.ts. `identity` is tier 1 and cannot see `ledger` at tier 2.
+   */
   router.get('/drivers/:id/duty-history', controllers.getDriverDutyHistory);
 
   router.post('/drivers/:id/approve', controllers.approveDriver);

@@ -53,6 +53,12 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/admin/zones', c.zones.buildAdminRouter());
   router.use('/admin/settings', c.settings.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
+  /*
+   * `/admin/drivers/:id/wallet`. Identity's ADMIN router owns `/admin/drivers` and
+   * `/admin/drivers/:id`, neither of which matches three segments, so the request falls through to
+   * here — the module that owns the ledger rows answers for them.
+   */
+  router.use('/admin/drivers', c.ledger.buildAdminRouter());
   router.use('/admin/reviews', c.reviews.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
@@ -63,9 +69,50 @@ export function buildApiRouter(c: AppContainers): Router {
    * business, not an anonymous caller's.
    */
   router.use('/customer/settings', c.settings.buildAudienceRouter('CUSTOMER'));
-  router.use('/customer', c.reviews.buildAudienceRouter('CUSTOMER'));
   router.use('/driver/settings', c.settings.buildAudienceRouter('DRIVER'));
-  router.use('/driver', c.reviews.buildAudienceRouter('DRIVER'));
+
+  /** Same fall-through again: these miss identity's role routers and land here. */
+  router.use('/customer/quotes', c.quotes.buildCustomerRouter());
+  router.use('/customer/bookings', c.bookings.buildCustomerRouter());
+  router.use('/driver/bookings', c.bookings.buildDriverRouter());
+  router.use('/admin/bookings', c.bookings.buildAdminRouter());
+  router.use('/driver/offers', c.dispatch.buildDriverRouter());
+
+  /*
+   * `/{customer,driver}/bookings/:id/rate`, and the fall-through one level deeper than the mounts
+   * above: the bookings routers own `/:id` and `/:id/cancel` and match neither, so the request
+   * arrives here — the module that owns the review rows answers for it.
+   *
+   * Mounted on `/customer/bookings` rather than on `/customer`, which would sit in front of every
+   * future `/customer/*` route in this file for the sake of one endpoint.
+   */
+  router.use('/customer/bookings', c.reviews.buildAudienceRouter('CUSTOMER'));
+  router.use('/driver/bookings', c.reviews.buildAudienceRouter('DRIVER'));
+
+  /**
+   * The payment provider's callback. NOT under a role prefix and NOT behind `requireAuth` — the
+   * caller is a gateway's server, which holds no session and belongs to no audience. It
+   * authenticates with a signature over the raw request body instead, checked before anything
+   * else happens.
+   *
+   * This is where a booking actually becomes CONFIRMED. The customer's app cannot do it, which is
+   * the whole reason payment precedes confirmation rather than following it — so the callback
+   * below is the one path from "paid" to "we are finding you a driver".
+   */
+  router.use(
+    '/payments',
+    c.payments.buildWebhookRouter(async (outcome) => {
+      if (outcome.kind === 'CAPTURED') {
+        await c.bookings.onPaymentCaptured(outcome.bookingId);
+        return;
+      }
+      if (outcome.kind === 'FAILED') {
+        await c.bookings.onPaymentFailed(outcome.bookingId, 'The payment was declined');
+      }
+      // A refund needs no booking-side action: the cancellation that caused it has already
+      // transitioned the booking and recorded the fee.
+    }),
+  );
 
   return router;
 }

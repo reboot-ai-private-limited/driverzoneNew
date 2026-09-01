@@ -42,6 +42,11 @@ const rupees = z.number().int().min(0);
 const minutes = z.number().int().min(0);
 const seconds = z.number().int().min(0);
 const hours = z.number().int().min(0);
+const metres = z.number().int().min(0);
+const count = z.number().int().min(1);
+
+/** Basis points, the repo-wide way of writing a percentage. `2500` is 25%; `10000` is all of it. */
+const bps = z.number().int().min(0).max(10000);
 
 export interface SettingDefinition {
   /** Validates both the stored override and the incoming PATCH value. One rule, not two. */
@@ -122,6 +127,40 @@ export const SETTING_REGISTRY = {
     description: 'One flat, taxable line on every booking, incity and outstation alike.',
   },
 
+  // ─── Tax ───────────────────────────────────────────────────────────────────────────────────
+  // Applied to the subtotal and EXCLUDED from the commissionable amount — tax is passed through
+  // to the government, not split with the driver (docs/LLD/pricing-and-commission.md).
+  //
+  // The rate itself is still open question Q13 and is a question for an accountant, not for us.
+  // It lives here rather than as a constant so answering it is a settings write and not a
+  // deploy; 500 is the placeholder the LLD carries, not advice.
+  'pricing.tax_bps': {
+    schema: bps,
+    default: 500,
+    group: 'PRICING',
+    label: 'Tax rate',
+    unit: 'BPS',
+    audiences: ['ADMIN'],
+    description:
+      'Basis points applied to the fare subtotal. 500 is 5%. Tax is never split with the driver.',
+  },
+
+  // ─── Outstation duty policy ────────────────────────────────────────────────────────────────
+  // DISPLAY ONLY. Nothing reads this to price, gate or end a trip: an outstation package is one
+  // flat fare for the whole journey however many days it runs, so a per-day figure has nothing
+  // to attach to. It exists so the fare card and the driver's trip card can state the policy
+  // both sides are agreeing to. If it ever acquires a fare consequence, that is a new decision.
+  'outstation.hours_per_day': {
+    schema: hours,
+    default: 10,
+    group: 'PRICING',
+    label: 'Outstation hours per day',
+    unit: 'HOURS',
+    audiences: ['ADMIN', 'CUSTOMER', 'DRIVER'],
+    description:
+      'The daily driving hours an outstation booking is sold on. Shown to both sides; nothing enforces it.',
+  },
+
   // ─── Waiting / customer late fee ───────────────────────────────────────────────────────────
   // This clock starts when the driver reaches ARRIVED (docs/LLD/booking-lifecycle.md). It is NOT
   // the overage grace inside the fare, which measures the trip running past its included minutes
@@ -184,6 +223,19 @@ export const SETTING_REGISTRY = {
     audiences: ['ADMIN', 'DRIVER'],
     description: 'Debited from the driver when they arrive beyond the grace period. 0 disables it.',
   },
+  // A driver holding this much of the company's cash stops being offered trips, because the debt
+  // is only ever collected out of future earnings. Set low at launch and raised per driver with
+  // history (docs/LLD/pricing-and-commission.md §Negative balance policy).
+  'driver.max_negative_balance': {
+    schema: rupees,
+    default: 5000,
+    group: 'DRIVER',
+    label: 'Maximum driver debt',
+    unit: 'RUPEES',
+    audiences: ['ADMIN', 'DRIVER'],
+    description:
+      'A driver owing more than this cannot go on duty until they settle. 0 blocks any debt at all.',
+  },
 
   // ─── Dispatch ──────────────────────────────────────────────────────────────────────────────
   'dispatch.offer_ttl_seconds': {
@@ -194,6 +246,85 @@ export const SETTING_REGISTRY = {
     unit: 'SECONDS',
     audiences: ['ADMIN', 'DRIVER'],
     description: 'How long a driver has to accept an offer before it moves to the next driver.',
+  },
+  'dispatch.wave_size': {
+    schema: count,
+    default: 5,
+    group: 'DISPATCH',
+    label: 'Drivers rung per wave',
+    unit: 'COUNT',
+    audiences: ['ADMIN'],
+    description: 'How many drivers are offered a booking at once before widening the search.',
+  },
+  'dispatch.max_waves': {
+    schema: count,
+    default: 4,
+    group: 'DISPATCH',
+    label: 'Maximum waves',
+    unit: 'COUNT',
+    audiences: ['ADMIN'],
+    description:
+      'How many times the search widens before the booking is given up as NO_DRIVER_FOUND.',
+  },
+  /**
+   * The first wave's search radius. Each later wave DOUBLES it, so the ladder from this default
+   * is 3 km → 6 km → 12 km → 24 km.
+   *
+   * A geometric ladder from one number rather than the literal list in
+   * docs/LLD/dispatch-and-assignment.md ([3, 7, 15, 30] km): the shape and the worst case are the
+   * same, and a list-valued setting would be the only non-scalar in the registry — it needs its
+   * own admin form control, since every other unit renders as one number input. When per-wave
+   * radii genuinely need to differ, that control is the thing to build.
+   */
+  'dispatch.wave_base_radius_m': {
+    schema: metres,
+    default: 3000,
+    group: 'DISPATCH',
+    label: 'First wave radius',
+    unit: 'METRES',
+    audiences: ['ADMIN'],
+    description:
+      'How far the first wave looks for a driver. Each subsequent wave doubles this distance.',
+  },
+  'dispatch.scheduled_lead_minutes': {
+    schema: minutes,
+    default: 90,
+    group: 'DISPATCH',
+    label: 'Scheduled booking lead time',
+    unit: 'MINUTES',
+    audiences: ['ADMIN'],
+    description:
+      'How far ahead of its pickup time a scheduled booking starts looking for a driver.',
+  },
+
+  // ─── Location gates ────────────────────────────────────────────────────────────────────────
+  // Two radii that read alike and behave deliberately differently.
+  //
+  // ARRIVAL BLOCKS. Reaching ARRIVED starts the waiting-charge clock, so a driver who can mark
+  // it from the highway is a driver who can bill a customer for time they were not waiting.
+  //
+  // START ONLY WARNS, and that asymmetry is the point: by then the customer is in the car, and a
+  // hard block on a drifting GPS strands a trip that is genuinely happening. The override is
+  // recorded in bookingEvents.metadata instead — a driver with many of them is worth a look.
+  'dispatch.arrival_radius_m': {
+    schema: metres,
+    default: 500,
+    group: 'DISPATCH',
+    label: 'Arrival radius',
+    unit: 'METRES',
+    audiences: ['ADMIN', 'DRIVER'],
+    description:
+      'How close a driver must be to the pickup point to mark themselves arrived. Beyond it the button is refused.',
+  },
+  'dispatch.start_warn_radius_m': {
+    schema: metres,
+    default: 500,
+    group: 'DISPATCH',
+    label: 'Trip start warning radius',
+    unit: 'METRES',
+    audiences: ['ADMIN', 'DRIVER'],
+    description:
+      'Starting a trip further than this from the pickup point is allowed, but recorded against the driver.',
   },
 
   // ─── Cancellation ──────────────────────────────────────────────────────────────────────────
@@ -256,13 +387,17 @@ export const SETTING_REGISTRY = {
     description: 'Debited from the driver who cancels after arriving. Never below the en-route penalty.',
   },
 
-  // ─── Reviews ───────────────────────────────────────────────────────────────────────────────
+  // ─── Reviews ─────────────────────────────────────────────────────────────────
+  // Does double duty (docs/LLD/reviews.md). It is the deadline a `/rate` POST is refused past,
+  // and it is also how long a review stays BLIND — unpublished, invisible in either average —
+  // when only one side has rated. Shortening it publishes sooner and gives the second party less
+  // time; the two cannot be tuned apart.
   'reviews.submission_window_hours': {
     schema: hours,
     default: 24,
     group: 'REVIEWS',
     label: 'Review submission window',
-    unit: 'COUNT',
+    unit: 'HOURS',
     audiences: ['ADMIN', 'CUSTOMER', 'DRIVER'],
     description: 'Hours after a trip completes during which a review can be submitted.',
   },

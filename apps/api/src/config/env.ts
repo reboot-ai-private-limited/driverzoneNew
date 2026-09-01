@@ -69,6 +69,49 @@ const schema = z.object({
   CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),
   CLOUDINARY_API_SECRET: z.string().min(1, 'CLOUDINARY_API_SECRET is required'),
 
+  /**
+   * Signs the payment gateway's webhooks. The mock gateway signs with it too, so the signature
+   * path is exercised locally rather than bypassed and discovered broken against the real one.
+   *
+   * A webhook is an unauthenticated public endpoint that moves a booking to CONFIRMED — the
+   * signature is the ONLY thing standing between the internet and a free ride, which is why this
+   * has the same 32-character floor as the token secrets.
+   */
+  PAYMENT_WEBHOOK_SECRET: z
+    .string()
+    .min(32, 'PAYMENT_WEBHOOK_SECRET must be at least 32 characters'),
+
+  /**
+   * Razorpay. The key id is PUBLISHABLE — it is sent to the app beside the order id — while the
+   * secret signs checkout callbacks and authenticates our API calls. They are separate variables
+   * because they have separate blast radii, exactly like the two JWT secrets.
+   *
+   * Test-mode keys are `rzp_test_…`. Absent, the container falls back to the mock gateway, which
+   * refuses to run in production — so a production deploy missing these fails at boot rather than
+   * confirming bookings that collected nothing.
+   */
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+
+  /**
+   * Signs Razorpay's webhooks, and is NOT the key secret — a different secret over a different
+   * message. Set on the webhook itself in the Razorpay dashboard.
+   *
+   * Rotating it invalidates in-flight retries: Razorpay's own guidance is to validate older
+   * deliveries with the previous secret for a while after a rotation.
+   */
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+  /**
+   * Whether the mock gateway captures automatically. Off is how the pending-then-webhook path is
+   * exercised; on is the fast path for walking the booking flow by hand. Ignored in production,
+   * where the mock gateway refuses to run at all.
+   */
+  MOCK_PAYMENT_AUTO_CAPTURE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+
   /** Maximum allowed file size for uploads in megabytes. Default: 3MB. */
   UPLOAD_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().default(3),
 
@@ -106,6 +149,7 @@ export const env: Env = parsed.success
         JWT_ACCESS_SECRET: z.string().default('test-only-access-secret-not-for-any-real-use'),
         JWT_REFRESH_SECRET: z.string().default('test-only-refresh-secret-not-for-any-real-use'),
         OTP_PEPPER: z.string().default('test-only-otp-pepper-not-for-any-real-use-x'),
+        PAYMENT_WEBHOOK_SECRET: z.string().default('test-only-webhook-secret-not-for-any-real-use'),
         CLOUDINARY_CLOUD_NAME: z.string().default('test-cloud'),
         CLOUDINARY_API_KEY: z.string().default('test-key'),
         CLOUDINARY_API_SECRET: z.string().default('test-secret'),

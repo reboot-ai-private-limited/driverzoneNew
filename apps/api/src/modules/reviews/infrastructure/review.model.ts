@@ -21,11 +21,10 @@ export interface ReviewDoc {
   tags: string[];
   comment?: string | null;
 
-  // False until the other party reviews, or the submission window elapses.
+  /** False until the other party reviews, or the submission window elapses. */
   isPublished: boolean;
+  /** Raised automatically on a 1- or 2-star review, and toggled by ops from the admin panel. */
   adminFlagged: boolean;
-
-  // Flagged for ops intervention (e.g. 1-2 star reviews)
 
   createdAt: Date;
   updatedAt: Date;
@@ -56,6 +55,10 @@ reviewSchema.index({ bookingId: 1, reviewerId: 1 }, { unique: true });
 
 // For computing averages and displaying history for a given user.
 reviewSchema.index({ revieweeId: 1, isPublished: 1, createdAt: -1 });
+
+// The sweep's query, which the index above cannot serve: it leads with `revieweeId`, and the
+// sweep has no reviewee — it asks for everything still blind past a cutoff, once a minute.
+reviewSchema.index({ isPublished: 1, createdAt: 1 });
 
 // For Ops filtering by flagged reviews or low ratings.
 reviewSchema.index({ rating: 1 });

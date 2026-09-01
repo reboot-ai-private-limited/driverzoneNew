@@ -260,55 +260,73 @@ async function seedCustomers(): Promise<void> {
   ).exec();
 }
 
+/**
+ * Three reviews against the dev accounts, so the admin ledger and both profile screens have
+ * something to render before anyone has taken a trip.
+ *
+ * The booking ids are FIXED rather than freshly generated, which is what makes this idempotent:
+ * generated ones made the delete below a no-op and every run appended another three rows. They
+ * point at no real booking — this script seeds no bookings — and nothing reads through them; the
+ * admin list renders the id as a string.
+ *
+ * The cached averages are written to match. Publishing a review without updating the cache is a
+ * state the app itself cannot reach (`PublishReviewsUseCase` does both), and a seed that produces
+ * one has the driver showing 5.0 from zero ratings next to three visible reviews.
+ */
+const SEEDED_REVIEW_BOOKINGS = [
+  oid('000000000000000000000ba1'),
+  oid('000000000000000000000ba2'),
+  oid('000000000000000000000ba3'),
+];
+
 async function seedReviews(): Promise<void> {
   const customerId = oid(DEV_CUSTOMER.id);
   const driverId = oid(DEV_DRIVER.id);
-  const booking1 = new mongoose.Types.ObjectId();
-  const booking2 = new mongoose.Types.ObjectId();
-  const booking3 = new mongoose.Types.ObjectId();
+  const [booking1, booking2, booking3] = SEEDED_REVIEW_BOOKINGS;
 
-  await ReviewModel.deleteMany({
-    bookingId: { $in: [booking1, booking2, booking3] }
-  });
+  await ReviewModel.deleteMany({ bookingId: { $in: SEEDED_REVIEW_BOOKINGS } }).exec();
 
-  // 1. Customer reviews driver (Positive)
-  await ReviewModel.create({
-    bookingId: booking1,
-    reviewerId: customerId,
-    reviewerRole: 'CUSTOMER',
-    revieweeId: driverId,
-    revieweeRole: 'DRIVER',
-    rating: 5,
-    tags: ['Polite', 'Clean Car'],
-    comment: 'Great trip, very smooth driving!',
-    isPublished: true,
-  });
+  await ReviewModel.create([
+    {
+      bookingId: booking1,
+      reviewerId: customerId,
+      reviewerRole: 'CUSTOMER',
+      revieweeId: driverId,
+      revieweeRole: 'DRIVER',
+      rating: 5,
+      tags: ['Polite', 'Clean Car'],
+      comment: 'Great trip, very smooth driving!',
+      isPublished: true,
+    },
+    {
+      bookingId: booking2,
+      reviewerId: driverId,
+      reviewerRole: 'DRIVER',
+      revieweeId: customerId,
+      revieweeRole: 'CUSTOMER',
+      rating: 4,
+      tags: ['On Time'],
+      comment: 'Customer was ready at pickup.',
+      isPublished: true,
+    },
+    // Flagged automatically by the 1-2 star rule, so the ops filter has a row to find.
+    {
+      bookingId: booking3,
+      reviewerId: customerId,
+      reviewerRole: 'CUSTOMER',
+      revieweeId: driverId,
+      revieweeRole: 'DRIVER',
+      rating: 2,
+      tags: ['Late', 'AC Issue'],
+      comment: 'Driver was 15 minutes late and AC barely worked.',
+      adminFlagged: true,
+      isPublished: true,
+    },
+  ]);
 
-  // 2. Driver reviews customer (Positive)
-  await ReviewModel.create({
-    bookingId: booking2,
-    reviewerId: driverId,
-    reviewerRole: 'DRIVER',
-    revieweeId: customerId,
-    revieweeRole: 'CUSTOMER',
-    rating: 4,
-    tags: ['On Time'],
-    comment: 'Customer was ready at pickup.',
-    isPublished: true,
-  });
-
-  // 3. Customer reviews driver (Negative / Flagged)
-  await ReviewModel.create({
-    bookingId: booking3,
-    reviewerId: customerId,
-    reviewerRole: 'CUSTOMER',
-    revieweeId: driverId,
-    revieweeRole: 'DRIVER',
-    rating: 2,
-    tags: ['Late', 'AC Issue'],
-    comment: 'Driver was 15 minutes late and AC barely worked.',
-    isPublished: true,
-  });
+  // The driver has two (5 and 2); the customer has one (4).
+  await DriverModel.updateOne({ _id: driverId }, { $set: { rating: 3.5, ratingCount: 2 } }).exec();
+  await CustomerModel.updateOne({ _id: customerId }, { $set: { rating: 4, ratingCount: 1 } }).exec();
 }
 
 /**

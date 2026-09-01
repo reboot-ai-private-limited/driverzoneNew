@@ -42,12 +42,17 @@ const MODULE_TIERS = [
   // the most dispute-prone logic in the product be tested without a database (docs/LLD/architecture.md).
   ['health', 'settings', 'pricing'],
   ['identity'], //                     customers, drivers, admins, auth
-  ['notifications', 'ledger'], //      push/socket fan-out; earnings entries
+  // payments sits beside them rather than above: it collects from CUSTOMERS, while ledger records
+  // what is owed to DRIVERS. Neither reads the other, and the booking that ties the two together
+  // is four tiers up.
+  ['notifications', 'ledger', 'payments'], // push/socket fan-out; earnings; customer money
   ['zones'], //                        polygons, resolution, the invariant write guard
   ['packages'], //                     packages, variants, prices
   ['quotes'], //                       zones + packages + pricing
   ['bookings'], //                     quotes + pricing + identity + notifications + ledger
-  ['dispatch'], //                     the only module permitted to set bookings.driverId
+  // Same tier, and they never speak: dispatch finds a driver for a booking, reviews reads one
+  // that is already over. Both need `bookings` below them and nothing needs either.
+  ['dispatch', 'reviews'], //          dispatch: the only module permitted to set bookings.driverId
   ['admin', 'reporting'], //           top of the graph; nothing may depend on these
 ];
 

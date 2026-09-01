@@ -115,11 +115,12 @@ Base URL: `https://api.driverzone.in/v1`
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/admin/reviews` | `?reviewee_id=&booking_id=&rating_lte=` |
-| `PATCH` | `/admin/reviews/:id` | Hide/delete a fraudulent review |
+| `DELETE` | `/admin/reviews/:id` | Delete a fraudulent review |
+| `PATCH` | `/admin/reviews/:id/flag` | Toggle the ops-attention flag |
 
 #### `GET /admin/reviews`
 
-Queryable ledger of all reviews. Often filtered to `?rating_lte=2` to find trips that need ops intervention.
+Queryable ledger of all reviews. Often filtered to `?rating_lte=2` to find trips that need ops intervention — though a 1- or 2-star review already arrives with `admin_flagged` raised, so `?flagged=true` is the usual entry point.
 
 ```jsonc
 // 200 OK
@@ -147,7 +148,7 @@ Queryable ledger of all reviews. Often filtered to `?rating_lte=2` to find trips
 1. **Trip Completion:** When `POST /driver/bookings/:id/complete` fires, the app navigates both the Customer and Driver to the Rating screen.
 2. **Submission Window:** The API rejects any `POST` to `/rate` if the current time is past `booking.completedAt + settings.reviews.submission_window_hours`.
 3. **Submission:** When either party submits a rating within the window, a `Review` document is created with `isPublished: false`.
-4. **Visibility & Aggregation (The "Blind" Phase):** 
-   - A cron job (`metrics.worker.ts`) or an event listener watches for reviews.
-   - If **both** reviews for a booking exist, OR if the submission window (`submission_window_hours`) expires, it marks the reviews as `isPublished: true`.
-   - Only when `isPublished: true` is the user's overall `rating` cache recomputed.
+4. **Visibility & Aggregation (The "Blind" Phase):**
+   - If **both** reviews for a booking exist, the second `POST /rate` publishes them itself — there is nothing left to retaliate against once both sides have committed.
+   - If only one side ever rates, the worker's sweep (`runSweep` in `apps/api/src/worker.ts`, once a minute) releases it when `submission_window_hours` elapses. It is the same sweep that re-enqueues dropped dispatch jobs, not a second scheduler.
+   - Only when `isPublished: true` is the user's overall `rating` cache recomputed. Both paths go through `PublishReviewsUseCase`, so a published review and a stale cache is not a reachable state.

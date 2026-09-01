@@ -313,12 +313,12 @@ export function DriverDetailsScreen() {
                 {documents.map((doc) => {
                   const expStatus = getExpirationStatus(doc.expires_on);
                   return (
-                  <div key={doc.id} className="flex gap-4 p-3 rounded-md border border-border bg-surface items-center">
-                    <button
-                      onClick={() => setReviewingDoc(doc)}
-                      className="relative flex-shrink-0 flex items-center justify-center w-16 h-16 overflow-hidden rounded bg-accent text-accent-ink hover:bg-accent-hover transition-colors"
-                      aria-label="Preview document"
-                    >
+                  <button
+                    key={doc.id}
+                    onClick={() => setReviewingDoc(doc)}
+                    className="text-left w-full flex gap-4 p-3 rounded-md bg-surface-sunken border border-transparent hover:border-interactive transition-colors cursor-pointer items-center"
+                  >
+                    <div className="relative flex-shrink-0 flex items-center justify-center w-16 h-16 overflow-hidden rounded bg-accent text-accent-ink">
                       {doc.url ? (
                         doc.url.toLowerCase().endsWith('.pdf') ? (
                           <FileText className="size-6" />
@@ -338,7 +338,7 @@ export function DriverDetailsScreen() {
                       ) : (
                         <span className="text-[10px] font-medium">No file</span>
                       )}
-                    </button>
+                    </div>
 
                     <div className="flex-1 flex flex-col gap-1.5 min-w-0">
                       <div className="flex items-start justify-between gap-2">
@@ -380,7 +380,7 @@ export function DriverDetailsScreen() {
                         </div>
                       )}
                     </div>
-                  </div>
+                  </button>
                   );
                 })}
               </div>

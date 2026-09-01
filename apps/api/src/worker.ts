@@ -149,6 +149,15 @@ async function runSweep(containers: AppContainers): Promise<void> {
       const cutoff = new Date(now.getTime() - ABANDONED_PAYMENT_MINUTES * 60_000);
       const abandoned = await containers.bookings.sweepAbandonedPayments(cutoff, 100);
       if (abandoned > 0) logger.info({ abandoned }, 'expired bookings that were never paid for');
+
+      /*
+       * Reviews whose blind window has closed. Unlike the two above this is not a safety net for
+       * a job that failed — nothing was ever scheduled. A review stays unpublished until the
+       * OTHER party rates too, and if they never do, only the clock can release it
+       * (docs/LLD/reviews.md §Retaliation prevention). The sweep is the clock.
+       */
+      const published = await containers.reviews.processExpiredReviews();
+      if (published > 0) logger.info({ published }, 'published reviews whose window elapsed');
     } catch (error) {
       // The sweeper must never die. It is the thing that catches everything else failing.
       logger.error({ err: error }, 'sweep failed');

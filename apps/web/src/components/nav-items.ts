@@ -11,6 +11,7 @@ import {
   Settings,
   Users,
   UserCog,
+  Star,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -40,6 +41,7 @@ export const NAV_ITEMS: NavItem[] = [
   // exist in `apps/api`. It is the editor the zones screen's city card links out to.
   { label: 'Packages', href: '/packages', icon: Package },
   { label: 'Zones', href: '/zones', icon: Building2 },
+  { label: 'Reviews', href: '/reviews', icon: Star },
   { label: 'Finance', href: '/finance', icon: Coins, comingSoon: true },
   { label: 'Reports', href: '/reports', icon: BarChart3, comingSoon: true },
   { label: 'Audit Log', href: '/audit', icon: ScrollText, comingSoon: true },

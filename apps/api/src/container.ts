@@ -8,6 +8,7 @@ import { buildNotificationsContainer } from '@/modules/notifications/notificatio
 import { buildPackagesContainer } from '@/modules/packages/packages.container.js';
 import { buildPaymentsContainer } from '@/modules/payments/payments.container.js';
 import { buildQuotesContainer } from '@/modules/quotes/quotes.container.js';
+import { buildReviewsContainer } from '@/modules/reviews/reviews.container.js';
 import { buildSettingsContainer } from '@/modules/settings/settings.container.js';
 import { buildZonesContainer } from '@/modules/zones/zones.container.js';
 
@@ -37,6 +38,7 @@ export interface AppContainers {
   quotes: ReturnType<typeof buildQuotesContainer>;
   bookings: ReturnType<typeof buildBookingsContainer>;
   dispatch: ReturnType<typeof buildDispatchContainer>;
+  reviews: ReturnType<typeof buildReviewsContainer>;
 }
 
 export function buildContainers(): AppContainers {
@@ -100,6 +102,17 @@ export function buildContainers(): AppContainers {
     scheduleWaveTimeout: enqueueWaveTimeout,
   });
 
+  /*
+   * Also tier 7, beside `dispatch` rather than above it: the two never speak. A review is written
+   * after the trip is over, so it needs to READ a finished booking and nothing more — which is
+   * why it is handed `BookingReviewContract` and not the dispatch contract `bookings` exposes.
+   */
+  const reviews = buildReviewsContainer({
+    bookings: bookings.contract,
+    identity: identity.contract,
+    settings: settings.contract,
+  });
+
   return {
     health,
     settings,
@@ -112,5 +125,6 @@ export function buildContainers(): AppContainers {
     quotes,
     bookings,
     dispatch,
+    reviews,
   };
 }

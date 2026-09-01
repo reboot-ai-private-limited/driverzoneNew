@@ -320,7 +320,15 @@ describe('Settings Module', () => {
 
       expect(all).toHaveLength(SETTING_KEYS.length);
       expect(groups.every((g) => g.settings.length > 0)).toBe(true);
-      expect(groups.map((g) => g.group)).toEqual(['PICKUP', 'PRICING', 'WAITING', 'DRIVER', 'DISPATCH', 'CANCELLATION']);
+      expect(groups.map((g) => g.group)).toEqual([
+        'PICKUP',
+        'PRICING',
+        'WAITING',
+        'DRIVER',
+        'DISPATCH',
+        'CANCELLATION',
+        'REVIEWS',
+      ]);
 
       const fine = all.find((s) => s.key === 'driver.late_fine');
       expect(fine).toMatchObject({ value: 75, default_value: 50, is_overridden: true, unit: 'RUPEES' });

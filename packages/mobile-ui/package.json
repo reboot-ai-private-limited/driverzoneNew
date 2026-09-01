@@ -13,7 +13,7 @@
     "@driverzone/design-system": "workspace:*"
   },
   "peerDependencies": {
-    "react": "*",
+    "react": "19.2.3",
     "react-native": "*"
   },
   "devDependencies": {

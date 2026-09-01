@@ -970,6 +970,8 @@ export default function HomeScreen(): ReactElement {
         onClose={() => setFareOpen(false)}
         trip={trip}
         onRequote={() => void trip.query.refetch()}
+        pickup={pickup}
+        drop={drop}
       />
 
       {/*

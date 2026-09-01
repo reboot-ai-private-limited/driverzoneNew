@@ -40,4 +40,8 @@ export const keys = {
       insurance: boolean,
     ) => ['quotes', pickup, drop, direction, scheduledAt, insurance] as const,
   },
+  bookings: {
+    all: () => ['bookings'] as const,
+    detail: (id: string) => ['bookings', id] as const,
+  },
 } as const;

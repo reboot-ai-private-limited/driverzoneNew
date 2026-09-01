@@ -1,8 +1,12 @@
 import { Feather } from '@expo/vector-icons';
+import { useMutation } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
-import { type ReactElement, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import type { CreateBookingResponse } from '@driverzone/contracts';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Checkbox } from '@/components/Checkbox';
 import { FareOptionCard } from '@/components/FareOptionCard';
@@ -13,7 +17,10 @@ import {
   unavailableTitle,
   useQuoteCountdown,
 } from '@/features/booking/quote';
+import type { TripPoint } from '@/features/booking/tripPoint';
 import type { TripQuote } from '@/features/booking/useTripQuote';
+import { ApiError } from '@/lib/api/ApiError';
+import { createBooking } from '@/lib/api/endpoints/bookings';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 interface FareSheetProps {
@@ -21,6 +28,9 @@ interface FareSheetProps {
   onClose: () => void;
   trip: TripQuote;
   onRequote: () => void;
+  /** Where the trip starts and ends, WITH the address strings `POST /bookings` sends verbatim. */
+  pickup: TripPoint | null;
+  drop: TripPoint | null;
 }
 
 /**
@@ -38,7 +48,14 @@ interface FareSheetProps {
  * needs it to decide whether Continue can be pressed at all — so this receives the same
  * `TripQuote` rather than asking a second time.
  */
-export function FareSheet({ visible, onClose, trip, onRequote }: FareSheetProps): ReactElement {
+export function FareSheet({
+  visible,
+  onClose,
+  trip,
+  onRequote,
+  pickup,
+  drop,
+}: FareSheetProps): ReactElement {
   const { card, unavailable, query, stale } = trip;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -63,14 +80,65 @@ export function FareSheet({ visible, onClose, trip, onRequote }: FareSheetProps)
   const [agreed, setAgreed] = useState(false);
 
   /**
+   * ONE KEY PER ATTEMPT, held in a ref so it survives re-renders but not a change of mind. It
+   * covers every RETRY of confirming THIS option — a flaky connection resending the same tap must
+   * charge or book once — which is exactly why it must NOT be regenerated on every render, only
+   * when what is being confirmed actually changes.
+   */
+  const idempotencyKey = useRef(Crypto.randomUUID());
+
+  /**
    * RE-CONSENT ON EVERY SELECTION CHANGE, not just when the warning appears or disappears. A tick
    * left over from the 6-hour option should not silently cover the outstation package the
    * customer switched to a moment later — a checked box is supposed to mean "I read this for the
-   * trip I am about to pay for", not "I once ticked a box in this sheet".
+   * trip I am about to pay for", not "I once ticked a box in this sheet". A re-quote lands here
+   * too: it hands back new `quote_id`s, so this is also where a stale idempotency key from an
+   * expired price gets replaced rather than reused for a different one.
    */
   useEffect(() => {
     setAgreed(false);
+    idempotencyKey.current = Crypto.randomUUID();
   }, [selected?.quote_id]);
+
+  /**
+   * CASH ONLY, FOR NOW. `PaymentMode` also has `'UPI'`, which needs a real checkout SDK this app
+   * does not carry yet — see the decision to keep this a demo without one. Cash is not a
+   * placeholder standing in for that: it is a first-class path the API confirms synchronously,
+   * with no gateway, no client token and no webhook to wait on, so this is the whole booking flow
+   * working for real, just without a payment screen.
+   */
+  const confirmBooking = useMutation<CreateBookingResponse, Error, void>({
+    mutationFn: () => {
+      if (selected === null || pickup === null || drop === null) {
+        return Promise.reject(new Error('This trip is missing a pickup or a destination.'));
+      }
+      return createBooking(
+        {
+          quoteId: selected.quote_id,
+          pickupAddress: pickup.address,
+          dropAddress: drop.address,
+          paymentMode: 'CASH',
+        },
+        idempotencyKey.current,
+      );
+    },
+    onSuccess: (result) => {
+      onClose();
+      // The SEARCHING screen, not the trip screen directly — dispatch has not run yet at this
+      // instant (CASH confirms synchronously; the wave that finds a driver is a separate queued
+      // job), so landing straight on the trip screen would show a customer a receipt with a
+      // "Finding your driver" line buried in it instead of the full-screen moment that deserves.
+      router.push(`/searching/${result.booking.id}`);
+    },
+  });
+
+  /**
+   * The one error worth its own words. Every other failure gets the server's own `message`
+   * (`confirmBooking.error.message`); this one is a 409 with no fare left behind it, so pressing
+   * Confirm again would just fail the same way — the only useful next step is a new price.
+   */
+  const quoteExpired =
+    confirmBooking.error instanceof ApiError && confirmBooking.error.code === 'QUOTE_EXPIRED';
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
@@ -213,26 +281,46 @@ export function FareSheet({ visible, onClose, trip, onRequote }: FareSheetProps)
         <PrimaryButton label="Change the trip" onPress={onClose} showArrow={false} />
       ) : (
         <>
-          {/*
-            INERT, AND LABELLED AS SUCH — the same rule the Rides tab follows. `POST /bookings`
-            exists and works; the app's confirm-and-pay flow is the next piece of client work, and
-            a button that opened a payment sheet which is not there yet would be the worse lie.
-            `disabled` therefore stays hardcoded rather than reading `agreed` — an ENABLED button
-            that still did nothing on tap would be exactly that lie, worn differently. Once a real
-            handler lands here, its own guard is `needsAgreement && !agreed` alongside whatever the
-            payment step needs; the checkbox above is already collecting the real answer.
-          */}
           <PrimaryButton
             label={
-              selected === null
-                ? 'Confirm and pay'
-                : `Confirm · ${selected.fare.total.amount_display}`
+              quoteExpired
+                ? 'Get a new price'
+                : selected === null
+                  ? 'Confirm booking'
+                  : `Confirm booking · ${selected.fare.total.amount_display}`
             }
-            onPress={() => undefined}
-            disabled
+            onPress={() => {
+              if (quoteExpired) {
+                // A DIFFERENT ACTION WEARING THE SAME BUTTON, so the mutation's own failed state
+                // must not follow it — otherwise the fresh price would render behind an error
+                // banner for a booking attempt that has already been abandoned.
+                confirmBooking.reset();
+                onRequote();
+                return;
+              }
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              confirmBooking.mutate();
+            }}
+            loading={quoteExpired ? query.isFetching : confirmBooking.isPending}
+            // The agreement gate does not apply to "get a new price" — that tap is not the one
+            // the checkbox is about, and blocking it would trap a customer who has not yet
+            // agreed behind a stale price they cannot even refresh.
+            disabled={quoteExpired ? false : needsAgreement && !agreed}
+            showArrow={false}
           />
-          <Text style={styles.pending} numberOfLines={1} adjustsFontSizeToFit>
-            Booking opens once payment is wired up.
+          <Text
+            style={[styles.pending, (quoteExpired || confirmBooking.isError) && styles.pendingBad]}
+            numberOfLines={2}
+          >
+            {quoteExpired
+              ? 'That price just expired — this gets you a current one.'
+              : confirmBooking.isError
+                ? confirmBooking.error instanceof Error
+                  ? confirmBooking.error.message
+                  : 'Could not confirm your booking.'
+                : needsAgreement && !agreed
+                  ? 'Agree to the note above to confirm.'
+                  : 'Pay the driver in cash at the end of your trip.'}
           </Text>
         </>
       )}
@@ -285,6 +373,7 @@ const styles = StyleSheet.create({
   noticeBody: { ...text.caption, color: colors.fg, marginTop: 2 },
 
   pending: { ...text.caption, color: colors.faint, textAlign: 'center', marginTop: space.sm },
+  pendingBad: { color: colors.danger },
 
   terms: {
     borderRadius: radius.md,

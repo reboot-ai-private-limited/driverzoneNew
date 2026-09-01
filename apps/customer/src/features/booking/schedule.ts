@@ -137,8 +137,14 @@ const MONTHS = [
   'Dec',
 ] as const;
 
-/** 12-hour with a lowercase suffix — `6:05 pm`. Midnight and noon read as 12, not 0. */
-function formatTime(at: Date): string {
+/**
+ * 12-hour with a lowercase suffix — `6:05 pm`. Midnight and noon read as 12, not 0.
+ *
+ * Exported on its own: the trip screen's progress timeline wants a bare time against each
+ * milestone (`Arrived · 6:05 pm`), not `formatWhen`'s "Today, …" framing, which reads oddly
+ * repeated down a list of things that mostly happened minutes apart on the same day.
+ */
+export function formatTime(at: Date): string {
   const hours = at.getHours();
   const suffix = hours < 12 ? 'am' : 'pm';
   const twelve = hours % 12 === 0 ? 12 : hours % 12;

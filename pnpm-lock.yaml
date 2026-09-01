@@ -11472,7 +11472,7 @@ snapshots:
 
   expo-crypto@57.0.2(expo@57.0.16):
     dependencies:
-      expo: 57.0.16(baf5a453d7e0ca19770ece1a5b9f7541)
+      expo: 57.0.16(678455dcbdfff9c4ee414d468f4ffe90)
 
   expo-file-system@57.0.5(expo@57.0.16)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)):
     dependencies:

@@ -114,6 +114,32 @@ services:
       OSRM_BASE_URL: http://osrm:5000
     restart: unless-stopped
 
+  # Seeds the known development accounts and zones into a DEPLOYED stack. One-shot, and behind a
+  # profile so `up -d` never touches it:
+  #
+  #   docker compose -f docker-compose.prod.yml run --rm seed
+  #   docker compose -f docker-compose.prod.yml run --rm seed node dist/scripts/seed.js --reset
+  #
+  # Run it AFTER the stack is up, so mongo-init has promoted the replica set. The script itself
+  # refuses to run against NODE_ENV=production unless STAGING_UNSAFE=true is in .env.prod — the
+  # accounts it creates have a published login, so this is a staging-only convenience.
+  seed:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles: ['seed']
+    # dist/scripts/, not dist/ — esbuild mirrors each entrypoint's path below src/.
+    command: ['node', 'dist/scripts/seed.js']
+    depends_on:
+      mongo: { condition: service_healthy }
+    env_file: [apps/api/.env.prod]
+    # Same overrides as api and worker: service names win over anything in the env file.
+    environment:
+      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      REDIS_URL: redis://redis:6379
+      OSRM_BASE_URL: http://osrm:5000
+    restart: 'no'
+
   web:
     build:
       context: .

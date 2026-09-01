@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Role } from '@driverzone/contracts';
-import { env, isProduction } from '@/config/env.js';
+import { allowDevShortcuts, env, isProduction } from '@/config/env.js';
 import { DEV_ACCOUNT_PHONES } from '@/config/devAccounts.js';
 import { getRedis } from '@/shared/queue/redis.js';
 import { TokenIssuer } from './application/tokenIssuer.js';
@@ -94,15 +94,19 @@ export function buildIdentityContainer(): IdentityContainer {
   // The pepper is read here rather than inside the entity that uses it, which keeps
   // `otpChallenge.entity.ts` a pure function of its arguments and testable with no environment.
   /**
-   * THE one line that decides whether a development login bypass exists at all.
+   * THE one line that decides whether a login bypass exists at all.
    *
-   * Both conditions, and both here rather than inside the use case: the use case cannot switch
-   * itself on, so "can this happen in production" is answerable by reading this expression
-   * instead of auditing a branch buried in application logic. `loadEnv()` is the second lock —
-   * it refuses to start a production process that has `DEV_FIXED_OTP` set at all.
+   * Still one expression, and still here rather than inside the use case: the use case cannot
+   * switch itself on, so "can this happen in production" is answerable by reading this
+   * expression instead of auditing a branch buried in application logic. `loadEnv()` is the
+   * second lock — it refuses to start a production process that has `DEV_FIXED_OTP` set without
+   * `STAGING_UNSAFE` alongside it, and shouts on every boot when it does.
+   *
+   * `allowDevShortcuts` is the staging escape hatch (config/env.ts). It does not weaken the
+   * other half: an unseeded number takes the ordinary path here as it always has.
    */
   const devBypass =
-    !isProduction && env.DEV_FIXED_OTP !== undefined
+    (!isProduction || allowDevShortcuts) && env.DEV_FIXED_OTP !== undefined
       ? { code: env.DEV_FIXED_OTP, phones: DEV_ACCOUNT_PHONES }
       : undefined;
 

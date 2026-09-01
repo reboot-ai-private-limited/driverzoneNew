@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { isProduction, loadEnv } from '@/config/env.js';
+import { allowDevShortcuts, isProduction, loadEnv } from '@/config/env.js';
 import {
   DEV_ACCOUNTS,
   DEV_ADMIN,
@@ -500,10 +500,14 @@ async function main(): Promise<void> {
    *
    * A seed script is a data-writing script wearing a friendly name, and the accounts it creates
    * have a fixed, published login. Running it against production would hand anyone who read this
-   * file an administrator.
+   * file an administrator — which is precisely what `STAGING_UNSAFE` opts into, and why that flag
+   * is documented as belonging on a throwaway host only (config/env.ts).
    */
-  if (isProduction) {
-    console.error('seed refuses to run with NODE_ENV=production — it creates known-credential accounts');
+  if (isProduction && !allowDevShortcuts) {
+    console.error(
+      'seed refuses to run with NODE_ENV=production — it creates known-credential accounts. ' +
+        'Set STAGING_UNSAFE=true if this really is a throwaway staging host.',
+    );
     process.exit(1);
   }
 

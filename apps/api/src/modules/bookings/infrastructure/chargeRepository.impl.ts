@@ -29,10 +29,12 @@ function toCancellationCharge(doc: CancellationChargeDoc): CancellationCharge {
   return {
     id: String(doc._id),
     bookingId: String(doc.bookingId),
+    customerId: String(doc.customerId),
     chargedTo: doc.chargedTo as CancellationCharge['chargedTo'],
     amountPaise: doc.amountPaise,
     atStatus: doc.atStatus as BookingStatus,
     reason: doc.reason,
+    settledByPaymentId: doc.settledByPaymentId ? String(doc.settledByPaymentId) : null,
   };
 }
 
@@ -73,25 +75,66 @@ export class MongoChargeRepository implements ChargeRepositoryPort {
 
   async recordCancellationCharge(input: {
     bookingId: string;
+    customerId: string;
     chargedTo: CancellationCharge['chargedTo'];
     amountPaise: number;
     atStatus: BookingStatus;
     reason: string;
+    settledByPaymentId?: string | undefined;
   }): Promise<CancellationCharge> {
     const doc = await CancellationChargeModel.findOneAndUpdate(
       { bookingId: new mongoose.Types.ObjectId(input.bookingId) },
       {
         $setOnInsert: {
+          customerId: new mongoose.Types.ObjectId(input.customerId),
           chargedTo: input.chargedTo,
           amountPaise: input.amountPaise,
           atStatus: input.atStatus,
           reason: input.reason,
+          settledByPaymentId:
+            input.settledByPaymentId === undefined
+              ? null
+              : new mongoose.Types.ObjectId(input.settledByPaymentId),
         },
       },
       { new: true, upsert: true },
     );
 
     return toCancellationCharge(doc.toObject() as CancellationChargeDoc);
+  }
+
+  /**
+   * `chargedTo: 'CUSTOMER'` in the match, because a driver's penalty is a ledger debit against
+   * their earnings and is never a customer's debt.
+   */
+  async outstandingDues(customerId: string): Promise<number> {
+    if (!mongoose.isValidObjectId(customerId)) return 0;
+
+    const [row] = await CancellationChargeModel.aggregate<{ total: number }>([
+      {
+        $match: {
+          customerId: new mongoose.Types.ObjectId(customerId),
+          chargedTo: 'CUSTOMER',
+          settledByPaymentId: null,
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$amountPaise' } } },
+    ]);
+
+    return row?.total ?? 0;
+  }
+
+  async settleDues(customerId: string, paymentId: string): Promise<void> {
+    if (!mongoose.isValidObjectId(customerId)) return;
+
+    await CancellationChargeModel.updateMany(
+      {
+        customerId: new mongoose.Types.ObjectId(customerId),
+        chargedTo: 'CUSTOMER',
+        settledByPaymentId: null,
+      },
+      { $set: { settledByPaymentId: new mongoose.Types.ObjectId(paymentId) } },
+    );
   }
 
   async findCancellationCharge(bookingId: string): Promise<CancellationCharge | null> {

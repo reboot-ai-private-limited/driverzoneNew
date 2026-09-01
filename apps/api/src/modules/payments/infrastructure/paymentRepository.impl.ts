@@ -18,6 +18,7 @@ function toEntity(doc: PaymentDoc): Payment {
     amountPaise: doc.amountPaise,
     refundedPaise: doc.refundedPaise,
     gatewayRef: doc.gatewayRef ?? null,
+    providerPaymentId: doc.providerPaymentId ?? null,
     idempotencyKey: doc.idempotencyKey,
     failureReason: doc.failureReason ?? null,
     createdAt: doc.createdAt,
@@ -85,7 +86,12 @@ export class MongoPaymentRepository implements PaymentRepositoryPort {
     id: string,
     from: PaymentStatus,
     to: PaymentStatus,
-    patch: { gatewayRef?: string; failureReason?: string; refundedPaise?: number } = {},
+    patch: {
+      gatewayRef?: string;
+      providerPaymentId?: string;
+      failureReason?: string;
+      refundedPaise?: number;
+    } = {},
   ): Promise<Payment | null> {
     if (!mongoose.isValidObjectId(id)) return null;
 

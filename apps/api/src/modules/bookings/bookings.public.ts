@@ -39,6 +39,19 @@ export interface BookingDispatchContract {
   findDueForDispatch(now: Date, limit: number): Promise<Booking[]>;
 }
 
+/**
+ * Read-only, for a module that needs to know a trip happened and who was on it.
+ *
+ * Split from `BookingDispatchContract` rather than reusing it, for the same Interface Segregation
+ * reason `identity.public.ts` splits its read and write sides: `reviews` needs one lookup, and
+ * handing it the dispatch contract would hand it `claimForDriver` — the one method in this module
+ * with a race in it — for no reason. The tier list says reviews may import bookings; this says
+ * what it may do once it has.
+ */
+export interface BookingReviewContract {
+  findById(bookingId: string): Promise<Booking | null>;
+}
+
 export type BookingsPublicContract = BookingDispatchContract;
 
 export type { Booking, FareSnapshot, GeoPoint } from './domain/booking.entity.js';

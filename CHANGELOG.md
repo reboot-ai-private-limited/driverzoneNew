@@ -15,6 +15,89 @@ is, see [`docs/decision-log.md`](docs/decision-log.md).
 
 ### Added
 
+- **Razorpay, and cash as a second payment mode.** `MockPaymentGateway` moved nothing and refused
+  production; `RazorpayGateway` sits beside it behind the same port, and the container picks
+  Razorpay whenever its three secrets are set. Raw `fetch` rather than the SDK — it is two
+  endpoints and two HMACs, and `osrm.roadDistance.ts` already sets that precedent.
+
+  **Cash is not a second gateway, it is the absence of one**, and that is what made it invasive.
+  `PENDING_PAYMENT → CONFIRMED` had been reachable only through a signature-verified webhook, and
+  a cash booking has no webhook coming: it confirms in `CreateBookingUseCase` and enqueues its own
+  dispatch. Cash is allowed on BOTH products — flagged, and overruled deliberately: an outstation
+  no-show now costs a driver their whole day with nothing collected.
+
+  **UPI only, Intent flow.** Collect is deprecated by NPCI as of 28 February 2026, so Intent is
+  the only forward path and there is no card or netbanking mode to support.
+
+  **Three Razorpay facts that look alike and are not**, all now pinned by tests with real HMACs:
+  the webhook signature is the raw body under the WEBHOOK secret; the checkout signature is
+  `order_id|payment_id` under the KEY secret; and the unique event id is a HEADER
+  (`x-razorpay-event-id`), not a body field. Amounts are already paise, so nothing converts.
+
+  **Refunds go against the PAYMENT, not the order.** `payments.gatewayRef` holds the `order_…` we
+  created, but `POST /v1/payments/:id/refund` wants the `pay_…` that only exists once someone has
+  paid — so it is captured from the webhook into a new `providerPaymentId`. Refunding with the
+  order id would have hit the wrong resource, and nothing would have revealed it until money had
+  to go back.
+
+- **Cash makes the driver's wallet real.** A completed cash trip writes the `CASH_COLLECTED` row
+  the ledger has carried an entry type for since day one — negative, because the driver took the
+  whole fare and earned only their share of it. That single row is what finally gives
+  `driver.max_negative_balance` something to measure: `MongoDriverPool` already filtered dispatch
+  on `walletBalancePaise`, so an over-extended driver stops being offered work with no new
+  dispatch code.
+
+- **Customer dues.** A cancellation fee on a cash booking cannot be kept back from a refund that
+  does not exist, so the `cancellationCharges` row stays unsettled and becomes a debt. The next
+  booking must be UPI — cash would never clear it — and the amount rides on that order, settling
+  when the capture lands. `GET /customer/bookings/dues` reports it, on the customer rather than on
+  a quote: which modes a person may use is a fact about them, not about a trip, and putting it on
+  the quote would have made `quotes` reach into `bookings`, a tier above it.
+
+### Changed
+
+- **One ledger enum instead of two that disagreed.** `contracts/finance.ts` shipped
+  `TRANSACTION_TYPES` with five values while the `ledger` module persisted eight — it spelled
+  commission `COMMISSION_DEDUCTION` against a database saying `COMMISSION_DEBIT`, and had **no
+  name at all for `CASH_COLLECTED`**, the one row cash exists to write. The module now imports the
+  contract enum rather than declaring its own, so the Mongoose `enum`, the domain type and the
+  admin DTO are the same array and cannot drift again.
+
+- **`GET /admin/drivers/:id/wallet` returns real data.** It was a stub returning `balance_paise: 0`
+  and an empty ledger *"until the finance module is integrated"* — merely incomplete until cash
+  shipped, and then actively misleading on the one screen an admin checks to find out whether a
+  driver is holding the company's money.
+
+  It moved from `identity` to `ledger`, which owns the rows. `identity` is tier 1 and `ledger` is
+  tier 2, so identity cannot import it even as a type, and passing the contract in from the
+  composition root would be the backwards wiring `container.ts` says means the tiers are wrong.
+  `/admin/drivers/:id/wallet` reaches it by the same prefix fall-through `/admin/zones` uses.
+
+  `balance_after_paise` is DERIVED, not stored: the use case anchors each page to the true balance
+  and the mapper walks it backwards. A per-row running total would need serialised appends — a
+  trip writes three entries at once — and could drift from `SUM()`, which the LLD forbids.
+
+### Fixed
+
+- **A failed UPI payment no longer expires the booking.** Razorpay documents that a UPI retry
+  sends `payment.failed` and then `payment.captured` for ONE transaction. `EXPIRED` is terminal,
+  so the capture that followed had nowhere to go: the customer's money moved and there was no
+  trip. The failure is now recorded on the payment and told to the customer as "try again" while
+  the booking waits; the sweeper's 30-minute window, which outlives Razorpay's retries, is what
+  clears a genuinely abandoned one. The payment machine gains exactly one exit from `FAILED`, to
+  `CAPTURED`, for this and nothing else.
+
+- **`payment.authorized` is now captured.** Auto-capture is an ACCOUNT setting at Razorpay; with
+  it off the money is merely held, and an authorisation nobody captures reverses after a few days
+  — the customer debited, given a ride, then silently refunded.
+
+- **The refund idempotency key contained a colon.** `refund:${booking.id}` went straight to
+  Razorpay's `X-Refund-Idempotency`, whose charset is `[A-Za-z0-9_-]`, so every real refund would
+  have been rejected. Same class as the BullMQ job id, and invisible until money needed to go
+  back. Sanitising now lives in the adapter that owns the rule.
+
+### Added
+
 - **The booking flow, server side, end to end** — `pricing`, `ledger`, `notifications`,
   `payments`, `quotes`, `bookings` and `dispatch`, seven modules that between them take a customer
   from two points on a map to a completed trip with the money settled. `apps/api` had none of

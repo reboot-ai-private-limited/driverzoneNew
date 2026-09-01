@@ -22,6 +22,8 @@ export interface LedgerWriteContract {
 export interface LedgerReadContract {
   /** Summed from the entries. The cache on `drivers` is not consulted and is not authoritative. */
   walletBalance(driverId: string): Promise<number>;
+  /** The sum of positive rows only — what they have earned, before anything was paid back. */
+  lifetimeEarnings(driverId: string): Promise<number>;
   entriesForBooking(bookingId: string): Promise<LedgerEntry[]>;
   recentEntriesForDriver(driverId: string, limit: number): Promise<LedgerEntry[]>;
 }

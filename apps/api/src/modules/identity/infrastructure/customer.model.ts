@@ -29,6 +29,8 @@ export interface CustomerDoc {
   emergencyContact?: { name?: string; phone?: string } | null;
   savedAddresses?: unknown[];
   vehicles?: unknown[];
+  rating: number;
+  ratingCount: number;
   isBlocked: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -98,6 +100,9 @@ const customerSchema = new Schema<CustomerDoc>(
       ],
       default: [],
     },
+
+    rating: { type: Number, default: 5.0 },
+    ratingCount: { type: Number, default: 0 },
 
     isBlocked: { type: Boolean, default: false },
   },

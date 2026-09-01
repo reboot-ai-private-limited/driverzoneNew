@@ -389,6 +389,21 @@ export const SETTING_REGISTRY = {
     description:
       'Debited from the driver who cancels after arriving. Never below the en-route penalty.',
   },
+
+  // ─── Reviews ─────────────────────────────────────────────────────────────────
+  // Does double duty (docs/LLD/reviews.md). It is the deadline a `/rate` POST is refused past,
+  // and it is also how long a review stays BLIND — unpublished, invisible in either average —
+  // when only one side has rated. Shortening it publishes sooner and gives the second party less
+  // time; the two cannot be tuned apart.
+  'reviews.submission_window_hours': {
+    schema: hours,
+    default: 24,
+    group: 'REVIEWS',
+    label: 'Review submission window',
+    unit: 'HOURS',
+    audiences: ['ADMIN', 'CUSTOMER', 'DRIVER'],
+    description: 'Hours after a trip completes during which a review can be submitted.',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTING_REGISTRY;
@@ -410,6 +425,7 @@ export const SETTING_GROUP_ORDER = [
   'DRIVER',
   'DISPATCH',
   'CANCELLATION',
+  'REVIEWS',
 ] as const satisfies readonly SettingGroup[];
 
 export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
@@ -419,4 +435,5 @@ export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   DRIVER: 'Driver conduct',
   DISPATCH: 'Dispatch',
   CANCELLATION: 'Cancellation',
+  REVIEWS: 'Trip reviews',
 };

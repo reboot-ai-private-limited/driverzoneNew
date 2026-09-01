@@ -10,7 +10,11 @@ import type { HandleWebhookUseCase, WebhookOutcome } from '../application/useCas
  * The signature header. Providers each pick their own name; when a real one is wired in, this
  * moves to the adapter alongside `verifyWebhook` rather than staying a constant here.
  */
-const SIGNATURE_HEADER = 'x-payment-signature';
+const SIGNATURE_HEADER = 'x-razorpay-signature';
+/** Unique per event, and the only place a delivery id appears — it is not in the body. */
+const EVENT_ID_HEADER = 'x-razorpay-event-id';
+/** The mock gateway signs with its own header name, so local walks do not need Razorpay's. */
+const MOCK_SIGNATURE_HEADER = 'x-payment-signature';
 
 /**
  * Called by the payment provider, never by an app.
@@ -29,7 +33,7 @@ export function makeWebhookController(
   onHandled: (outcome: Extract<WebhookOutcome, { handled: true }>) => Promise<void>,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const signature = req.get(SIGNATURE_HEADER);
+    const signature = req.get(SIGNATURE_HEADER) ?? req.get(MOCK_SIGNATURE_HEADER);
     if (signature === undefined || signature === '') throw new WebhookSignatureError();
 
     const rawBody = getRawBody(req);
@@ -42,7 +46,11 @@ export function makeWebhookController(
       });
     }
 
-    const outcome = await useCase.execute(rawBody, signature);
+    const outcome = await useCase.execute({
+      rawBody,
+      signature,
+      eventId: req.get(EVENT_ID_HEADER),
+    });
 
     if (outcome.handled) await onHandled(outcome);
 

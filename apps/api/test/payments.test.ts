@@ -109,10 +109,20 @@ describe('payment state machine', () => {
     expect(canTransition('CAPTURED', 'REFUNDED')).toBe(true);
   });
 
-  it('refuses a failed payment being resurrected by a late webhook', () => {
-    expect(canTransition('FAILED', 'CAPTURED')).toBe(false);
+  it('lets a FAILED payment still capture — the UPI retry Razorpay documents', () => {
+    /*
+     * The one exit from FAILED, and it is not defensive programming: Razorpay warns that a UPI
+     * retry can deliver `payment.failed` and then `payment.captured` for a single transaction.
+     * Without this the customer's money moves and the booking expires anyway.
+     */
+    expect(canTransition('FAILED', 'CAPTURED')).toBe(true);
+  });
+
+  it('still refuses every other resurrection', () => {
     expect(canTransition('REFUNDED', 'CAPTURED')).toBe(false);
     expect(canTransition('CREATED', 'CAPTURED')).toBe(false);
+    expect(canTransition('FAILED', 'PENDING')).toBe(false);
+    expect(canTransition('FAILED', 'REFUNDED')).toBe(false);
   });
 });
 
@@ -163,7 +173,13 @@ describe('HandleWebhookUseCase', () => {
 
   function deliver(event: GatewayEvent) {
     const { body, signature } = MockPaymentGateway.signedWebhook(event);
-    return new HandleWebhookUseCase(repo, gateway).execute(body, signature);
+    return new HandleWebhookUseCase(repo, gateway).execute({
+      rawBody: body,
+      signature,
+      // The mock puts the id in the body; a real provider sends it as a header. Passing it here
+      // exercises the header path, which is the one that actually runs in production.
+      eventId: event.eventId,
+    });
   }
 
   it('captures a pending payment', async () => {
@@ -194,7 +210,11 @@ describe('HandleWebhookUseCase', () => {
     });
 
     await expect(
-      new HandleWebhookUseCase(repo, gateway).execute(body, 'not-the-signature'),
+      new HandleWebhookUseCase(repo, gateway).execute({
+        rawBody: body,
+        signature: 'not-the-signature',
+        eventId: 'evt_2',
+      }),
     ).rejects.toThrow(/Signature verification failed/);
   });
 
@@ -214,7 +234,13 @@ describe('HandleWebhookUseCase', () => {
       amountPaise: 999_999,
     });
 
-    await expect(new HandleWebhookUseCase(repo, gateway).execute(tampered, signature)).rejects.toThrow();
+    await expect(
+      new HandleWebhookUseCase(repo, gateway).execute({
+        rawBody: tampered,
+        signature,
+        eventId: 'evt_3',
+      }),
+    ).rejects.toThrow();
   });
 
   it('does nothing on a redelivered event', async () => {

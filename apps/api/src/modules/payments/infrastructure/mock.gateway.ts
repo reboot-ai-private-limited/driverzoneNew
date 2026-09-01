@@ -6,6 +6,7 @@ import type {
   PaymentGatewayPort,
   PaymentIntent,
   RefundResult,
+  WebhookRequest,
 } from '../domain/paymentGateway.port.js';
 
 /**
@@ -48,8 +49,14 @@ export class MockPaymentGateway implements PaymentGatewayPort {
     return {
       gatewayRef,
       clientToken: `mock_token_${gatewayRef}`,
+      // No publishable key exists for a gateway that talks to nobody.
+      publicKey: null,
       capturedImmediately: this.autoCapture,
     };
+  }
+
+  async capture(gatewayRef: string, amountPaise: number): Promise<void> {
+    logger.info({ gatewayRef, amountPaise }, 'mock gateway: captured an authorised payment');
   }
 
   async refund(input: {
@@ -65,11 +72,11 @@ export class MockPaymentGateway implements PaymentGatewayPort {
     return { gatewayRef: refundRef, amountPaise: input.amountPaise };
   }
 
-  verifyWebhook(rawBody: string, signature: string): GatewayEvent | null {
-    if (!verifySignature(rawBody, signature)) return null;
+  verifyWebhook(request: WebhookRequest): GatewayEvent | null {
+    if (!verifySignature(request.rawBody, request.signature)) return null;
 
     try {
-      const parsed: unknown = JSON.parse(rawBody);
+      const parsed: unknown = JSON.parse(request.rawBody);
       return asGatewayEvent(parsed);
     } catch {
       // A body that verified but does not parse is our own bug, not an attack — but it is still
@@ -102,7 +109,12 @@ function verifySignature(rawBody: string, signature: string): boolean {
   return expected.length === given.length && timingSafeEqual(expected, given);
 }
 
-const EVENT_TYPES = new Set(['PAYMENT_CAPTURED', 'PAYMENT_FAILED', 'REFUND_COMPLETED']);
+const EVENT_TYPES = new Set([
+  'PAYMENT_AUTHORIZED',
+  'PAYMENT_CAPTURED',
+  'PAYMENT_FAILED',
+  'REFUND_COMPLETED',
+]);
 
 /** Narrows a verified body. A signed body is trusted for authorship, never for shape. */
 function asGatewayEvent(value: unknown): GatewayEvent | null {

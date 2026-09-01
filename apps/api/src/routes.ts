@@ -53,6 +53,13 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/admin/zones', c.zones.buildAdminRouter());
   router.use('/admin/settings', c.settings.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
+  /*
+   * `/admin/drivers/:id/wallet`. Identity's ADMIN router owns `/admin/drivers` and
+   * `/admin/drivers/:id`, neither of which matches three segments, so the request falls through to
+   * here — the module that owns the ledger rows answers for them.
+   */
+  router.use('/admin/drivers', c.ledger.buildAdminRouter());
+  router.use('/admin/reviews', c.reviews.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
   /**
@@ -70,6 +77,17 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/driver/bookings', c.bookings.buildDriverRouter());
   router.use('/admin/bookings', c.bookings.buildAdminRouter());
   router.use('/driver/offers', c.dispatch.buildDriverRouter());
+
+  /*
+   * `/{customer,driver}/bookings/:id/rate`, and the fall-through one level deeper than the mounts
+   * above: the bookings routers own `/:id` and `/:id/cancel` and match neither, so the request
+   * arrives here — the module that owns the review rows answers for it.
+   *
+   * Mounted on `/customer/bookings` rather than on `/customer`, which would sit in front of every
+   * future `/customer/*` route in this file for the sake of one endpoint.
+   */
+  router.use('/customer/bookings', c.reviews.buildAudienceRouter('CUSTOMER'));
+  router.use('/driver/bookings', c.reviews.buildAudienceRouter('DRIVER'));
 
   /**
    * The payment provider's callback. NOT under a role prefix and NOT behind `requireAuth` — the

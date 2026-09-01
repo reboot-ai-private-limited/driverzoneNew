@@ -44,7 +44,8 @@ export interface DriverDoc {
   canDriveHill: boolean;
   canDriveHillVerified: boolean;
 
-  rating?: number | null;
+  rating: number;
+  ratingCount: number;
   acceptanceRate?: number | null;
   walletBalancePaise: number;
   lastLocation?: { type: 'Point'; coordinates: number[] } | null;
@@ -100,7 +101,8 @@ const driverSchema = new Schema<DriverDoc>(
     canDriveHill: { type: Boolean, default: false },
     canDriveHillVerified: { type: Boolean, default: false },
 
-    rating: { type: Number, default: null },
+    rating: { type: Number, default: 5.0 },
+    ratingCount: { type: Number, default: 0 },
     acceptanceRate: { type: Number, default: null },
     walletBalancePaise: { type: Number, default: 0 },
 

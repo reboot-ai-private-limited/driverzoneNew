@@ -1,7 +1,7 @@
 'use client';
 
 import { Wallet, IndianRupee, ArrowDownRight, ArrowUpRight } from 'lucide-react';
-import type { LedgerEntryDto } from '@driverzone/contracts';
+import type { LedgerEntryDto, TransactionType } from '@driverzone/contracts';
 import {
   Badge,
   DataState,
@@ -36,12 +36,20 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
       header: 'Transaction Type',
       width: COLUMN_WIDTHS[1] ?? '',
       render: (entry) => {
-        const labels: Record<string, string> = {
+        /*
+         * One label per value of `TRANSACTION_TYPES`. `CASH_COLLECTED` is the one an admin opens
+         * this screen for: it is the money a driver is holding on the company's behalf, and it is
+         * why a balance can be negative at all.
+         */
+        const labels: Record<TransactionType, string> = {
           TRIP_EARNING: 'Trip Earning',
-          COMMISSION_DEDUCTION: 'Commission Deduction',
+          WAITING_EARNING: 'Waiting Time',
+          COMMISSION_DEBIT: 'Commission',
+          CASH_COLLECTED: 'Cash Collected',
           PAYOUT: 'Payout',
           ADJUSTMENT: 'Adjustment',
           PENALTY: 'Penalty',
+          BONUS: 'Bonus',
         };
         return <span className="font-medium">{labels[entry.type] || entry.type}</span>;
       },

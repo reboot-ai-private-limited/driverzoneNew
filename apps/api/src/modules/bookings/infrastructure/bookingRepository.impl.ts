@@ -32,6 +32,7 @@ function toEntity(doc: BookingDoc): Booking {
     distanceKm: doc.distanceKm ?? null,
     quoteId: String(doc.quoteId),
     fareSnapshot: doc.fareSnapshot as FareSnapshot,
+    paymentMode: doc.paymentMode as Booking['paymentMode'],
     paymentId: doc.paymentId ? String(doc.paymentId) : null,
     isScheduled: doc.isScheduled,
     scheduledAt: doc.scheduledAt,

@@ -27,6 +27,7 @@ export function toBookingDto(view: BookingView): BookingDto {
     reference: booking.reference,
     status: booking.status,
     service_type: booking.serviceType,
+    payment_mode: booking.paymentMode,
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },
     drop: { ...booking.drop, address: booking.dropAddress },

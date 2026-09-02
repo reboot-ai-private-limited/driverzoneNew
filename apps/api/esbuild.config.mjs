@@ -23,7 +23,15 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 const external = Object.keys(pkg.dependencies).filter((d) => !d.startsWith('@driverzone/'));
 
 await esbuild.build({
-  entryPoints: ['src/server.ts', 'src/worker.ts'],
+  /**
+   * Three entrypoints, three composition roots. `seed.ts` is here so a DEPLOYED stack can be
+   * seeded — the runtime image carries `dist/` and production node_modules, with no `tsx` and no
+   * TypeScript to run `src/scripts/seed.ts` with. It lands at `dist/scripts/seed.js` — esbuild
+   * mirrors each entrypoint's path below the common ancestor, so it does NOT sit beside
+   * server.js. See the `seed` service in docker-compose.prod.yml; it refuses to run unless
+   * STAGING_UNSAFE is set.
+   */
+  entryPoints: ['src/server.ts', 'src/worker.ts', 'src/scripts/seed.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',

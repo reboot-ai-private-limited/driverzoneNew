@@ -20,6 +20,47 @@ entry links to it.
 
 ---
 
+## 2026-09-01 — `STAGING_UNSAFE`: one opt-in flag opens the login guards, for staging only
+
+**Decision:** a single env var, off unless set to exactly `true`, relaxes four production guards
+together: `loadEnv()` accepts `DEV_FIXED_OTP`, `identity.container.ts` wires the fixed-OTP bypass,
+`LoggingOtpSender` writes codes to the log instead of faulting, and `scripts/seed.ts` runs. The
+API prints a warning block naming all four on every boot while it is set.
+
+**This supersedes the second consequence of [2026-08-24](#2026-08-24--a-dev-only-fixed-otp-scoped-to-seeded-accounts)**,
+which said a production process with `DEV_FIXED_OTP` set does not start. It still does not — unless
+this flag is set alongside it. Everything else in that entry stands, including the scoping to
+seeded numbers and the shared `completeSignIn`.
+
+**Why:** a staging host is a production BUILD, and nobody could log into one. `LoggingOtpSender` is
+the only `OtpSenderPort` that exists (no SMS provider is chosen yet) and it refuses to run in
+production, so `otp/send` returned 500 and the login screen never reached its code field. The
+rejected alternative was running staging as `NODE_ENV=development`, which buys the same thing while
+also dropping `Secure` from the refresh cookie, putting stack traces and client IPs in error
+bodies, serving `/docs` to the internet and re-enabling the mock payment gateway — four unrelated
+production behaviours changed to fix one.
+
+**Consequences:** `NODE_ENV` stays `production` on staging, so everything not named above behaves
+as it does in production. The four guards read `isProduction && !allowDevShortcuts`, keeping both
+halves visible at the point of use rather than hiding the exception inside `isProduction`.
+
+The cost is real and accepted: the seeded phone numbers and the conventional code `000000` are both
+committed, so a host with this flag set can be signed into as an administrator by anyone who has
+read this repository. It belongs on a throwaway VM holding no real data. `apps/api/.env.prod.example`
+says so, and the boot warning repeats it on every restart rather than once at deploy time — the
+failure mode is a staging env file outliving staging.
+
+**Also decided here:** `src/scripts/seed.ts` becomes a third esbuild entrypoint, so a deployed
+stack can be seeded at all. The runtime image carries `dist/` and production `node_modules` with no
+`tsx` and no TypeScript. It builds to `dist/scripts/seed.js` and runs as a profiled one-shot compose
+service, so `up -d` never triggers it.
+
+**Refs:** `apps/api/src/config/env.ts`, `apps/api/src/modules/identity/identity.container.ts`,
+`apps/api/src/modules/identity/infrastructure/otpSender.log.ts`, `apps/api/src/scripts/seed.ts`,
+`apps/api/test/stagingUnsafe.test.ts`, `docker-compose.prod.yml`
+
+---
+
 ## 2026-08-28 — An incity variant is a duration and a price; a return fare is the whole two-way trip
 
 **Decision:** two changes, both narrowing what a package can express.

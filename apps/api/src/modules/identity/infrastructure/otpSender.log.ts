@@ -1,5 +1,5 @@
 import type { Role } from '@driverzone/contracts';
-import { isProduction } from '@/config/env.js';
+import { allowDevShortcuts, isProduction } from '@/config/env.js';
 import { logger } from '@/shared/logging/logger.js';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { OtpSenderPort } from '../domain/otpSender.port.js';
@@ -11,14 +11,19 @@ import type { OtpSenderPort } from '../domain/otpSender.port.js';
  * end to end today, and so the real one is a single swap in `identity.container.ts` when a
  * provider is chosen.
  *
- * **It refuses to run in production.** Not a warning, not a fallback — a hard fault at the point
- * of use. A misconfigured deploy that silently logged login codes instead of texting them would
- * look like "SMS is down" while writing live credentials to stdout, where the log pipeline keeps
- * them. Failing loudly makes that a five-minute diagnosis instead of a breach.
+ * **It refuses to run in production**, unless `STAGING_UNSAFE` is set. Not a warning, not a
+ * fallback — a hard fault at the point of use. A misconfigured deploy that silently logged login
+ * codes instead of texting them would look like "SMS is down" while writing live credentials to
+ * stdout, where the log pipeline keeps them. Failing loudly makes that a five-minute diagnosis
+ * instead of a breach.
+ *
+ * The escape hatch exists because a staging host is a production BUILD with no SMS provider, so
+ * without it there is no way to log in at all. Turning it on means accepting that login codes for
+ * every number are in that host's logs — see `allowDevShortcuts` in config/env.ts.
  */
 export class LoggingOtpSender implements OtpSenderPort {
   send(role: Role, phone: string, code: string): Promise<void> {
-    if (isProduction) {
+    if (isProduction && !allowDevShortcuts) {
       return Promise.reject(
         AppError.internal('INTERNAL', {
           reason: 'LoggingOtpSender must never run in production — no SMS provider is configured',
@@ -32,7 +37,8 @@ export class LoggingOtpSender implements OtpSenderPort {
      * be used to log in. The field names below deliberately dodge those paths, and this is the
      * one place in the codebase where that is the intent rather than a mistake.
      *
-     * Safe only because of the production guard above.
+     * Safe only because of the guard above — and on a `STAGING_UNSAFE` host it is deliberately
+     * not safe, which is what that flag's boot warning is for.
      */
     logger.warn(
       { role, dev_recipient: phone, dev_login_code: code },

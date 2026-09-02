@@ -47,12 +47,39 @@ const schema = z.object({
   OTP_PEPPER: z.string().min(32, 'OTP_PEPPER must be at least 32 characters'),
 
   /**
-   * DEVELOPMENT ONLY — a fixed OTP accepted for the seeded accounts in `devAccounts.ts`.
+   * THE STAGING ESCAPE HATCH. Off unless set to exactly `true`, and it opens four doors at once.
+   *
+   * A staging deployment is a production BUILD that nobody can log into: `LoggingOtpSender` is
+   * the only sender that exists and it refuses to run in production, so `otp/send` 500s and the
+   * login screen never reaches its code field. The choice is this flag or running staging as
+   * `NODE_ENV=development`, which would also silently drop the Secure flag from the refresh
+   * cookie, put stack traces and client IPs in error bodies, serve `/docs` to the internet, and
+   * re-enable the mock payment gateway. This keeps all of that production-correct and moves only
+   * the four guards named below.
+   *
+   * What it opens — nothing else consults it:
+   *   1. `loadEnv()` accepts `DEV_FIXED_OTP` in production instead of exiting.
+   *   2. `identity.container.ts` wires the fixed-OTP bypass for the seeded numbers.
+   *   3. `otpSender.log.ts` writes login codes to the log instead of refusing.
+   *   4. `scripts/seed.ts` runs, creating accounts with a published login.
+   *
+   * TOGETHER those mean anyone who can read this repository can sign in as the seeded admin.
+   * It belongs on a throwaway staging host and nowhere else. `loadEnv()` says so on every boot.
+   */
+  STAGING_UNSAFE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  /**
+   * A fixed OTP accepted for the seeded accounts in `devAccounts.ts` — development, or staging
+   * with `STAGING_UNSAFE`.
    *
    * Unset by default, and it takes three independent conditions to do anything: this variable
-   * set, `NODE_ENV` not production, and the number on the seed allowlist. `loadEnv()` below
-   * additionally refuses to start if it is set in production, so a value leaking into a prod env
-   * file kills the process instead of quietly opening a login.
+   * set, the number on the seed allowlist, and either `NODE_ENV` not production or the escape
+   * hatch above. `loadEnv()` below refuses to start a production process that has this set
+   * WITHOUT the escape hatch, so a value leaking into a real prod env file kills the process
+   * instead of quietly opening a login.
    *
    * Any other number still gets a real random code, so the generation, hashing and
    * attempt-burning paths stay exercised locally.
@@ -168,6 +195,16 @@ export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
 
 /**
+ * The single expression every relaxed guard consults, so "what does staging open" is answered by
+ * grepping one identifier rather than auditing four modules.
+ *
+ * Deliberately NOT folded into `isProduction`. The guards read `isProduction && !allowDevShortcuts`
+ * so that both halves stay visible at the point of use — a reader who sees only `isProduction`
+ * there would have to know that it secretly meant something else in staging.
+ */
+export const allowDevShortcuts = env.STAGING_UNSAFE;
+
+/**
  * Validates the environment for real. Call once, first thing, from every entrypoint.
  *
  * A missing variable fails the process immediately with the variable named, rather than
@@ -182,19 +219,46 @@ export function loadEnv(): Env {
   }
 
   /**
-   * A development login bypass must never reach production, and the container already refuses to
-   * wire it there. This is the second, louder lock: if the variable is present in a production
-   * environment at all, the process does not start.
+   * A login bypass must never reach production BY ACCIDENT, and the container already refuses to
+   * wire it there. This is the second, louder lock: a production environment carrying
+   * `DEV_FIXED_OTP` without having explicitly asked for the staging escape hatch does not start.
    *
    * Failing here rather than ignoring the value is the whole point — a silently-ignored bypass
    * variable in a prod env file is a landmine for whoever later "fixes" the code that ignores it.
    */
-  if (parsed.data.NODE_ENV === 'production' && parsed.data.DEV_FIXED_OTP !== undefined) {
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    parsed.data.DEV_FIXED_OTP !== undefined &&
+    !parsed.data.STAGING_UNSAFE
+  ) {
     console.error(
       'Invalid environment:\n  DEV_FIXED_OTP: must not be set when NODE_ENV=production — ' +
-        'it is a development login bypass',
+        'it is a login bypass. Set STAGING_UNSAFE=true as well if this really is a ' +
+        'throwaway staging host.',
     );
     process.exit(1);
+  }
+
+  /**
+   * Said on EVERY boot, not once at deploy time, because the whole failure mode this guards
+   * against is a staging env file quietly outliving staging. Not the logger: it reads LOG_LEVEL
+   * off this very object, and this must be impossible to filter out with LOG_LEVEL anyway.
+   */
+  if (parsed.data.NODE_ENV === 'production' && parsed.data.STAGING_UNSAFE) {
+    console.warn(
+      [
+        '',
+        '  ┌─ STAGING_UNSAFE=true ─────────────────────────────────────────────────────┐',
+        '  │ This production build is running with its login guards open:              │',
+        '  │   • the seeded accounts accept a fixed OTP (DEV_FIXED_OTP)                │',
+        '  │   • login codes are written to the log, not sent by SMS                   │',
+        '  │   • the seed script will run, creating known-credential accounts          │',
+        '  │ Anyone who can read the repository can sign in as the seeded admin.       │',
+        '  │ Correct for a throwaway staging host. NEVER for a real deployment.        │',
+        '  └───────────────────────────────────────────────────────────────────────────┘',
+        '',
+      ].join('\n'),
+    );
   }
 
   return parsed.data;

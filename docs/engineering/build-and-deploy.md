@@ -240,12 +240,37 @@ Nothing here needs rearchitecting to reach 10× the year-one target.
 | Where                 | How                           | Why                                                                                   |
 | --------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
 | API (runtime)         | compose `env_file`            | Secrets must never enter an image layer — a baked `.env` leaks to anyone who can pull |
+| Staging login         | `STAGING_UNSAFE` in `.env.prod` | Opens the OTP guards on a throwaway host — see below                                |
 | Web (`NEXT_PUBLIC_*`) | Docker build args             | Inlined into the client bundle at build time                                          |
 | Mobile                | EAS secrets + `app.config.ts` | Baked into the binary                                                                 |
 
 `apps/api/src/config/env.ts` parses everything through Zod at boot. A missing variable fails the
 process immediately with the variable named, rather than surfacing as `undefined` inside a
 connection string an hour into a deploy.
+
+### Staging: `STAGING_UNSAFE`
+
+A staging host is a production BUILD, and out of the box nobody can log into one — the only
+`OtpSenderPort` writes codes to the log and refuses to run in production, so `otp/send` 500s.
+`STAGING_UNSAFE=true` in `apps/api/.env.prod` opens four guards at once: `DEV_FIXED_OTP` is
+accepted, the seeded accounts take it, codes go to the log, and the seed script runs.
+
+The seeded numbers and the conventional `000000` are both committed, so a host with it set can be
+signed into as an administrator by anyone who has read this repository. Throwaway staging VMs only;
+the API prints a warning block on every boot while it is set. See the decision log, 2026-09-01.
+
+### Seeding a deployed stack
+
+`src/scripts/seed.ts` is built into the image as `dist/scripts/seed.js` and runs as a profiled
+one-shot service, so `up -d` never triggers it:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm seed                              # idempotent
+docker compose -f docker-compose.prod.yml run --rm seed node dist/scripts/seed.js --reset
+```
+
+Run it after the stack is up, so `mongo-init` has promoted the replica set. It refuses to run
+without `STAGING_UNSAFE`.
 
 ## Release checklist
 

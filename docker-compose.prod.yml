@@ -114,22 +114,46 @@ services:
       OSRM_BASE_URL: http://osrm:5000
     restart: unless-stopped
 
+  # Seeds the known development accounts and zones into a DEPLOYED stack. One-shot, and behind a
+  # profile so `up -d` never touches it:
+  #
+  #   docker compose -f docker-compose.prod.yml run --rm seed
+  #   docker compose -f docker-compose.prod.yml run --rm seed node dist/scripts/seed.js --reset
+  #
+  # Run it AFTER the stack is up, so mongo-init has promoted the replica set. The script itself
+  # refuses to run against NODE_ENV=production unless STAGING_UNSAFE=true is in .env.prod — the
+  # accounts it creates have a published login, so this is a staging-only convenience.
+  seed:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles: ['seed']
+    # dist/scripts/, not dist/ — esbuild mirrors each entrypoint's path below src/.
+    command: ['node', 'dist/scripts/seed.js']
+    depends_on:
+      mongo: { condition: service_healthy }
+    env_file: [apps/api/.env.prod]
+    # Same overrides as api and worker: service names win over anything in the env file.
+    environment:
+      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      REDIS_URL: redis://redis:6379
+      OSRM_BASE_URL: http://osrm:5000
+    restart: 'no'
+
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* must arrive as BUILD args, not runtime env: `next build` inlines them into
+      # the client bundle, so by the time a container starts the strings are already frozen into
+      # the JS chunks. Values are interpolated from the repo-root `.env` (compose reads it
+      # automatically) — see .env.example. Changing one is a rebuild, not a restart.
       args:
-        # Inlined into the client bundle at BUILD time, which makes this image
-        # environment-specific: pointing it at a different API is a rebuild, not a restart.
-        # Override for a real deploy:
-        #   NEXT_PUBLIC_API_BASE_URL=https://api.example.com/api \
-        #     docker compose -f docker-compose.prod.yml build web
-        # It is the browser that calls this URL, so it must be reachable from the browser —
-        # `http://api:4000` would resolve inside the network and nowhere else.
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api}
-        # The zone editor's map. Restrict this key by HTTP referrer AND to the Maps JavaScript
-        # + Places APIs before it goes anywhere — it ships inside the client bundle.
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+    # Runtime env for the standalone server. Nothing NEXT_PUBLIC_* belongs here — it would be read
+    # far too late — but this stays the right channel for a genuine server-side variable.
+    env_file: [apps/web/.env.prod]
     depends_on:
       api: { condition: service_healthy }
     ports: ['3000:3000']

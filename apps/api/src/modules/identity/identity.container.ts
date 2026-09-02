@@ -18,6 +18,8 @@ import { UpdateDriverProfileUseCase } from './application/useCases/updateDriverP
 import { ManageDriverDocumentsUseCase } from './application/useCases/manageDriverDocuments.usecase.js';
 import { RequestProfilePictureUploadUseCase } from './application/useCases/requestProfilePictureUpload.usecase.js';
 import { SubmitOnboardingUseCase } from './application/useCases/submitOnboarding.usecase.js';
+import { SetDutyStatusUseCase } from './application/useCases/setDutyStatus.usecase.js';
+import { RecordLocationPingsUseCase } from './application/useCases/recordLocationPings.usecase.js';
 import { ManageAdminProfileUseCase } from './application/useCases/manageAdminProfile.usecase.js';
 import { VerifyDriverUseCase } from './application/useCases/verifyDriver.usecase.js';
 import { ListDriversAdminUseCase } from './application/useCases/listDriversAdmin.usecase.js';
@@ -30,6 +32,7 @@ import { MongoSessionRepository } from './infrastructure/session.repository.impl
 import { MongoCustomerProfileRepository } from './infrastructure/customerProfile.repository.impl.js';
 import { MongoDriverProfileRepository } from './infrastructure/driverProfile.repository.impl.js';
 import { MongoDriverDocumentRepository } from './infrastructure/driverDocument.repository.impl.js';
+import { MongoDriverDeviceRepository } from './infrastructure/driverDevice.repository.impl.js';
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
@@ -131,6 +134,9 @@ export function buildIdentityContainer(): IdentityContainer {
     env.UPLOAD_ALLOWED_FORMATS
   );
   const submitOnboarding = new SubmitOnboardingUseCase(drivers, documents);
+  const setDuty = new SetDutyStatusUseCase(drivers);
+  const recordLocation = new RecordLocationPingsUseCase(drivers);
+  const devices = new MongoDriverDeviceRepository();
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
   const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit);
@@ -165,6 +171,9 @@ export function buildIdentityContainer(): IdentityContainer {
           requestProfilePictureUpload,
           documents: manageDocuments,
           submitOnboarding,
+          setDuty,
+          recordLocation,
+          devices,
         }),
       );
     }

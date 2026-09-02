@@ -5,6 +5,9 @@ import type {
   RequestDocumentUploadResponse,
   RequestProfilePictureUploadResponse,
   SubmitOnboardingResponse,
+  DutyStateDto,
+  LocationPingsAcceptedDto,
+  RegisterDeviceResponse,
 } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
 import { asyncHandler } from '@/shared/http/asyncHandler.js';
@@ -14,8 +17,17 @@ import type { GetDriverProfileUseCase } from '../application/useCases/getDriverP
 import type { UpdateDriverProfileUseCase } from '../application/useCases/updateDriverProfile.usecase.js';
 import type { ManageDriverDocumentsUseCase, DriverDocumentWithUrl } from '../application/useCases/manageDriverDocuments.usecase.js';
 import type { SubmitOnboardingUseCase } from '../application/useCases/submitOnboarding.usecase.js';
+import type { SetDutyStatusUseCase } from '../application/useCases/setDutyStatus.usecase.js';
+import type { RecordLocationPingsUseCase } from '../application/useCases/recordLocationPings.usecase.js';
+import type { DriverDeviceRepositoryPort } from '../domain/driverDevice.repository.port.js';
 import type { RequestProfilePictureUploadUseCase } from '../application/useCases/requestProfilePictureUpload.usecase.js';
-import { requestDocumentUploadSchema, updateDriverProfileSchema } from './identity.validation.js';
+import {
+  requestDocumentUploadSchema,
+  registerDeviceSchema,
+  sendLocationPingsSchema,
+  setDutyStatusSchema,
+  updateDriverProfileSchema,
+} from './identity.validation.js';
 
 /** INTERFACE — the driver's own profile, documents and onboarding submission. */
 
@@ -55,6 +67,7 @@ function profileToDto(p: DriverProfile): DriverProfileDto {
     onboarding_status: p.onboardingStatus,
     onboarding_rejection_reason: p.onboardingRejectionReason,
     is_verified: p.isVerified,
+    is_on_duty: p.isOnDuty,
   };
 }
 
@@ -82,6 +95,9 @@ export interface DriverControllerDeps {
   requestProfilePictureUpload: RequestProfilePictureUploadUseCase;
   documents: ManageDriverDocumentsUseCase;
   submitOnboarding: SubmitOnboardingUseCase;
+  setDuty: SetDutyStatusUseCase;
+  recordLocation: RecordLocationPingsUseCase;
+  devices: DriverDeviceRepositoryPort;
 }
 
 export interface DriverControllers {
@@ -91,6 +107,9 @@ export interface DriverControllers {
   listDocuments: RequestHandler;
   requestDocumentUpload: RequestHandler;
   submitOnboarding: RequestHandler;
+  setDuty: RequestHandler;
+  recordLocation: RequestHandler;
+  registerDevice: RequestHandler;
 }
 
 export function makeDriverControllers(deps: DriverControllerDeps): DriverControllers {
@@ -174,6 +193,54 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
       const result = await deps.submitOnboarding.execute(subjectId(req));
       const body: SubmitOnboardingResponse = { onboarding_status: result.onboardingStatus };
       sendSuccess(req, res, body, 'Submitted for review');
+    }),
+
+    /**
+     * Going on or off duty.
+     *
+     * Answers with the resulting STATE rather than echoing the request, so an app that asked for
+     * ONLINE and was refused cannot paint itself on duty while dispatch ignores it.
+     */
+    setDuty: asyncHandler(async (req, res) => {
+      const input = setDutyStatusSchema.parse(req.body);
+      const result = await deps.setDuty.execute(subjectId(req), input.status);
+
+      const body: DutyStateDto = { is_on_duty: result.isOnDuty };
+      sendSuccess(req, res, body, result.isOnDuty ? 'You are on duty' : 'You are off duty');
+    }),
+
+    /**
+     * A batch of GPS fixes. This is what keeps a driver in the dispatch pool — `MongoDriverPool`
+     * drops anything whose `lastLocationAt` is more than two minutes old.
+     */
+    recordLocation: asyncHandler(async (req, res) => {
+      const input = sendLocationPingsSchema.parse(req.body);
+
+      const result = await deps.recordLocation.execute(
+        subjectId(req),
+        input.pings.map((p) => ({ lat: p.lat, lng: p.lng, recordedAt: new Date(p.recorded_at) })),
+      );
+
+      const body: LocationPingsAcceptedDto = {
+        accepted: result.accepted,
+        is_on_duty: result.isOnDuty,
+      };
+      sendSuccess(req, res, body, 'Location recorded');
+    }),
+
+    /**
+     * Register this handset for push.
+     *
+     * Idempotent, because FCM hands the app the same token on every launch — the app calls this
+     * on sign-in and on every rotation without checking whether it changed, which is the only way
+     * to be sure a rotated token is never missed.
+     */
+    registerDevice: asyncHandler(async (req, res) => {
+      const input = registerDeviceSchema.parse(req.body);
+      await deps.devices.register(subjectId(req), input.fcm_token);
+
+      const body: RegisterDeviceResponse = { registered: true };
+      sendSuccess(req, res, body, 'Device registered');
     }),
   };
 }

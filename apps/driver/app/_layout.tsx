@@ -8,6 +8,7 @@ import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
 import { SessionProvider } from '@/lib/auth/SessionProvider';
+import { useOfferPushBridge } from '@/notifications/useOfferPushBridge';
 import { createQueryClient } from '@/lib/query/client';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
 import { colors } from '@/theme/theme';
@@ -36,6 +37,18 @@ export default function RootLayout(): ReactElement | null {
   useEffect(() => {
     if (fontsReady) void SplashScreen.hideAsync();
   }, [fontsReady]);
+
+  /**
+   * Notification channels, and routing a tapped or full-screen offer to the ring screen.
+   *
+   * Lives in the ROOT layout because both jobs outlive any one screen: the channels must exist
+   * before the first push can be displayed, and a full-screen intent can land the app on this
+   * tree when no screen of ours has ever mounted.
+   *
+   * Called before the `fontsReady` early return so it is never conditionally skipped — a hook
+   * after that line would violate the rules of hooks on the very first render.
+   */
+  useOfferPushBridge();
 
   // Nothing paints until the typeface is in — the native splash is still covering the screen at
   // this point, so this is invisible, not a flash of blank white.

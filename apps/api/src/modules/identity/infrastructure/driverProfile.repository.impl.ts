@@ -27,6 +27,7 @@ interface RawDriver {
   onboardingStatus?: string;
   onboardingRejectionReason?: string | null;
   isVerified?: boolean;
+  isOnDuty?: boolean;
 }
 
 function toDomain(doc: RawDriver): DriverProfile {
@@ -52,6 +53,7 @@ function toDomain(doc: RawDriver): DriverProfile {
     onboardingStatus: (doc.onboardingStatus as OnboardingStatus | undefined) ?? 'INCOMPLETE',
     onboardingRejectionReason: doc.onboardingRejectionReason ?? null,
     isVerified: doc.isVerified ?? false,
+    isOnDuty: doc.isOnDuty ?? false,
   };
 }
 
@@ -173,6 +175,41 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
       },
       { new: true },
     )
+      .lean()
+      .exec();
+    return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async recordLocation(
+    driverId: string,
+    fix: { lat: number; lng: number; recordedAt: Date },
+  ): Promise<DriverProfile | undefined> {
+    if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;
+
+    const doc = await DriverModel.findByIdAndUpdate(
+      driverId,
+      {
+        $set: {
+          /*
+           * GeoJSON order is [lng, lat] — the reverse of how humans and this codebase's own
+           * `LatLngDto` write it. Getting it backwards does not throw; it silently places every
+           * driver in the Arabian Sea and every wave finds nobody (docs/README.md §Conventions).
+           */
+          lastLocation: { type: 'Point', coordinates: [fix.lng, fix.lat] },
+          lastLocationAt: fix.recordedAt,
+        },
+      },
+      { new: true },
+    )
+      .lean()
+      .exec();
+    return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async setDutyStatus(driverId: string, isOnDuty: boolean): Promise<DriverProfile | undefined> {
+    if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;
+
+    const doc = await DriverModel.findByIdAndUpdate(driverId, { $set: { isOnDuty } }, { new: true })
       .lean()
       .exec();
     return doc === null ? undefined : toDomain(doc as unknown as RawDriver);

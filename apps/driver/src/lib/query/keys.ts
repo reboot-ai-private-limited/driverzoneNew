@@ -8,6 +8,10 @@ export const keys = {
     all: () => ['profile'] as const,
     me: () => ['profile', 'me'] as const,
   },
+  offers: {
+    all: () => ['offers'] as const,
+    current: () => ['offers', 'current'] as const,
+  },
   documents: {
     all: () => ['documents'] as const,
     list: () => ['documents', 'list'] as const,

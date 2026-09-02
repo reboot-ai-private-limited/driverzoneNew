@@ -1,4 +1,12 @@
 import type {
+  DutyStateDto,
+  LocationPingDto,
+  LocationPingsAcceptedDto,
+  SendLocationPingsRequest,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
+  DutyStatus,
+  SetDutyStatusRequest,
   DriverDocumentDto,
   DriverProfileDto,
   RequestDocumentUploadRequest,
@@ -75,6 +83,51 @@ export function requestProfilePictureUpload(): Promise<RequestProfilePictureUplo
 export function submitOnboarding(): Promise<SubmitOnboardingResponse> {
   return request<SubmitOnboardingResponse>(`${ROLE_PREFIX}/onboarding/submit`, {
     method: 'POST',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * Go on or off duty.
+ *
+ * Answers with the resulting STATE, not an echo of the request — a driver whose approval is
+ * missing asks for ONLINE and is refused with a 409, and the app must not paint itself on duty
+ * when dispatch will never ring it.
+ */
+export function setDuty(status: DutyStatus): Promise<DutyStateDto> {
+  return request<DutyStateDto>(`${ROLE_PREFIX}/duty`, {
+    method: 'POST',
+    body: { status } satisfies SetDutyStatusRequest,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * A batch of GPS fixes. Never one request per fix — that drains a driver's battery and, at
+ * scale, costs a driver base (docs/LLD/api-contracts.md).
+ *
+ * The response carries `is_on_duty` so a driver taken off duty server-side finds out within one
+ * ping rather than on their next cold start.
+ */
+export function sendLocationPings(pings: LocationPingDto[]): Promise<LocationPingsAcceptedDto> {
+  return request<LocationPingsAcceptedDto>(`${ROLE_PREFIX}/location`, {
+    method: 'POST',
+    body: { pings } satisfies SendLocationPingsRequest,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * Register this handset for push.
+ *
+ * Idempotent server-side, so the app calls it on every launch and every FCM token rotation
+ * without checking whether anything changed — which is the only way to be sure a rotation is
+ * never missed.
+ */
+export function registerDevice(body: RegisterDeviceRequest): Promise<RegisterDeviceResponse> {
+  return request<RegisterDeviceResponse>(`${ROLE_PREFIX}/devices`, {
+    method: 'POST',
+    body,
     token: getAccessToken() ?? undefined,
   });
 }

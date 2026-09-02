@@ -4,7 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { type ReactElement, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { BottomSheet } from '@/components/BottomSheet';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import { StatusPill } from '@/components/StatusPill';
 import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { getProfile } from '@/lib/api/endpoints/driver';
@@ -15,30 +17,27 @@ import { colors, radius, space, text } from '@/theme/theme';
 type FeatherName = ComponentProps<typeof Feather>['name'];
 
 /**
- * The account tab. Identity, verification state, and the way out.
+ * The Account tab — identity, verification state, the driver-ops shortcuts, the app rows, and
+ * the way out.
+ *
+ * Shaped to match `apps/customer/app/(tabs)/account.tsx`: the same two-group layout, the same
+ * legal/help/about rows behind a single `info/[topic]` stand-in, and an in-app confirm sheet for
+ * sign-out rather than a native `Alert` — the two apps should feel like one product.
  *
  * Verification is shown here as well as in onboarding on purpose: an approved driver can still
  * have one rejected document (`user.md` — per-document review is independent of the overall
- * approval), and this is the only screen they will visit once they are past onboarding.
+ * approval), and this is the only screen they visit once they are past onboarding.
  */
 export default function AccountScreen(): ReactElement {
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const profile = useQuery({ queryKey: keys.profile.me(), queryFn: getProfile });
 
-  function confirmSignOut(): void {
-    Alert.alert('Sign out?', 'You will need your mobile number and an OTP to sign back in.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out',
-        style: 'destructive',
-        onPress: () => {
-          setSigningOut(true);
-          // `signOut` clears this device even if the server call fails — a driver who taps sign
-          // out is signed out, whatever the network did.
-          void session.signOut().then(() => router.replace('/phone'));
-        },
-      },
-    ]);
+  function handleSignOut(): void {
+    setSigningOut(true);
+    // `signOut` clears this device even if the server call fails — a driver who taps sign out is
+    // signed out, whatever the network did.
+    void session.signOut().then(() => router.replace('/phone'));
   }
 
   if (profile.isPending) {
@@ -52,69 +51,133 @@ export default function AccountScreen(): ReactElement {
   const data = profile.data;
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Account</Text>
-      </View>
-
-      <View style={styles.body}>
-        <View style={styles.identity}>
-          <View style={styles.avatar}>
-            <Feather name="user" size={26} color={colors.muted} />
-          </View>
-          <View style={styles.identityText}>
-            <Text style={styles.name}>{data?.full_name ?? 'Your profile'}</Text>
-            <Text style={styles.phone}>
-              {data === undefined ? '' : formatForDisplay(data.mobile_number)}
-            </Text>
-          </View>
+    <>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Account</Text>
         </View>
 
-        {data !== undefined ? (
-          <View style={styles.statusRow}>
-            <StatusPill
-              label={data.is_verified ? 'Verified driver' : ONBOARDING_LABELS[data.onboarding_status]}
-              tone={data.is_verified ? 'success' : ONBOARDING_TONES[data.onboarding_status]}
+        <View style={styles.body}>
+          <View style={styles.identity}>
+            <View style={styles.avatar}>
+              <Feather name="user" size={26} color={colors.muted} />
+            </View>
+            <View style={styles.identityText}>
+              <Text style={styles.name}>{data?.full_name ?? 'Your profile'}</Text>
+              <Text style={styles.phone}>
+                {data === undefined ? '' : formatForDisplay(data.mobile_number)}
+              </Text>
+            </View>
+          </View>
+
+          {data !== undefined ? (
+            <View style={styles.statusRow}>
+              <StatusPill
+                label={
+                  data.is_verified ? 'Verified driver' : ONBOARDING_LABELS[data.onboarding_status]
+                }
+                tone={data.is_verified ? 'success' : ONBOARDING_TONES[data.onboarding_status]}
+              />
+              {data.can_drive_hill_verified ? (
+                <StatusPill label="Hill approved" tone="success" />
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={styles.group}>
+            <Row icon="user" label="Your details" onPress={() => router.push('/onboarding-profile')} />
+            <Row
+              icon="file-text"
+              label="Your documents"
+              onPress={() => router.push('/onboarding-documents')}
             />
-            {data.can_drive_hill_verified ? <StatusPill label="Hill approved" tone="success" /> : null}
+            {/* Reachable again after the one-time run from `/gate` — a driver who skipped it, or
+                changed phones, needs a way back to it. */}
+            <Row
+              icon="bell"
+              label="Alert & battery setup"
+              onPress={() => router.push('/battery-setup')}
+            />
           </View>
-        ) : null}
 
-        <View style={styles.group}>
-          <Row
-            icon="user"
-            label="Your details"
-            onPress={() => router.push('/onboarding-profile')}
-          />
-          <Row
-            icon="file-text"
-            label="Your documents"
-            onPress={() => router.push('/onboarding-documents')}
-          />
-          {/* Reachable again after the one-time run from `/gate` — a driver who skipped it, or
-              changed phones, needs a way back to it. */}
-          <Row
-            icon="bell"
-            label="Alert & battery setup"
-            onPress={() => router.push('/battery-setup')}
-          />
+          {/* The app rows. Every destination is the `info/[topic]` stand-in until it has an API
+              behind it — same as the customer app. */}
+          <View style={styles.group}>
+            <Row
+              icon="bell"
+              label="Notifications"
+              onPress={() => router.push('/info/notifications')}
+            />
+            <Row
+              icon="help-circle"
+              label="Help & Support"
+              onPress={() => router.push('/info/help')}
+            />
+            <Row
+              icon="shield"
+              label="Privacy Policy"
+              onPress={() => router.push('/info/privacy')}
+            />
+            <Row
+              icon="file-text"
+              label="Terms & Conditions"
+              onPress={() => router.push('/info/terms')}
+            />
+            <Row
+              icon="info"
+              label="About DriverZone"
+              onPress={() => router.push('/info/about')}
+            />
+          </View>
+
+          <View style={styles.group}>
+            <Row
+              icon="log-out"
+              label="Sign out"
+              tone="danger"
+              busy={signingOut}
+              onPress={() => setConfirmSignOut(true)}
+            />
+          </View>
+
+          <Text style={styles.version}>
+            DriverZone Driver · v{Constants.expoConfig?.version ?? '0.1.0'}
+          </Text>
         </View>
+      </ScrollView>
 
-        <View style={styles.group}>
-          <Row
-            icon="log-out"
-            label="Sign out"
-            tone="danger"
-            busy={signingOut}
-            onPress={confirmSignOut}
-          />
+      {/*
+        An in-app confirm rather than `Alert.alert`, matching the customer app. A native dialog on
+        the one destructive action in the app is jarring against every other confirmation being a
+        sheet — and it cannot show a spinner while the sign-out request is in flight.
+      */}
+      <BottomSheet visible={confirmSignOut} onClose={() => setConfirmSignOut(false)}>
+        <View style={styles.sheetIcon}>
+          <Feather name="log-out" size={24} color={colors.danger} />
         </View>
-
-        <Text style={styles.version}>
-          DriverZone Driver · v{Constants.expoConfig?.version ?? '0.1.0'}
+        <Text style={styles.sheetTitle}>Sign out?</Text>
+        <Text style={styles.sheetBody}>
+          You will need your mobile number and an OTP to sign back in.
         </Text>
-      </View>
-    </ScrollView>
+
+        <View style={styles.sheetActions}>
+          <PrimaryButton
+            label="Sign out"
+            onPress={handleSignOut}
+            loading={signingOut}
+            showArrow={false}
+          />
+          <Pressable
+            onPress={() => setConfirmSignOut(false)}
+            disabled={signingOut}
+            accessibilityRole="button"
+            style={styles.sheetCancel}
+          >
+            <Text style={styles.sheetCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+      </BottomSheet>
+    </>
   );
 }
 
@@ -189,7 +252,7 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', gap: space.sm, marginTop: space.md, flexWrap: 'wrap' },
 
   group: {
-    marginTop: space.xl,
+    marginTop: space.lg,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -202,4 +265,26 @@ const styles = StyleSheet.create({
   rowLabel: { ...text.body, flex: 1 },
 
   version: { ...text.caption, color: colors.faint, textAlign: 'center', marginTop: space.xl },
+
+  sheetIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    backgroundColor: '#FDEDEE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: space.md,
+  },
+  sheetTitle: { ...text.heading, color: colors.fg, textAlign: 'center' },
+  sheetBody: {
+    ...text.body,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: space.xs,
+    marginBottom: space.lg,
+  },
+  sheetActions: { gap: space.sm },
+  sheetCancel: { alignItems: 'center', paddingVertical: space.md },
+  sheetCancelText: { ...text.body, color: colors.muted },
 });

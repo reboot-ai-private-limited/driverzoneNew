@@ -19,5 +19,14 @@ export function buildDriverRouter(controllers: DriverControllers): Router {
   // on their record.
   router.post('/onboarding/submit', controllers.submitOnboarding);
 
+  // Operational, not a profile edit — dispatch reads this flag on every wave.
+  router.post('/duty', controllers.setDuty);
+
+  // Batched GPS fixes. What keeps a driver inside the dispatch pool's freshness window.
+  router.post('/location', controllers.recordLocation);
+
+  // Where to ring this driver. Idempotent — FCM returns the same token every launch.
+  router.post('/devices', controllers.registerDevice);
+
   return router;
 }

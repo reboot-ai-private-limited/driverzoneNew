@@ -20,6 +20,8 @@ export interface DriverProfile {
   onboardingStatus: OnboardingStatus;
   onboardingRejectionReason: string | null;
   isVerified: boolean;
+  /** Currently on duty. What `MongoDriverPool` filters on when picking who to ring. */
+  isOnDuty: boolean;
 }
 
 export interface DriverProfilePatch {
@@ -74,4 +76,25 @@ export interface DriverProfileRepositoryPort {
    * showing "approved" who cannot go on duty, or worse, the reverse.
    */
   approve(driverId: string, adminId: string, at: Date): Promise<DriverProfile | undefined>;
+
+  /**
+   * Go on or off duty.
+   *
+   * Separate from `updateProfile` because it is not a profile edit: it is an operational flag
+   * that dispatch reads on every wave, and the use case that calls it enforces a gate
+   * (`isVerified`) that no other profile field has.
+   */
+  setDutyStatus(driverId: string, isOnDuty: boolean): Promise<DriverProfile | undefined>;
+
+  /**
+   * The driver's current position, and when it was taken.
+   *
+   * Both are written together because `MongoDriverPool` reads them together — a `lastLocation`
+   * without a matching `lastLocationAt` is a position of unknown age, which the freshness filter
+   * has to treat as no position at all.
+   */
+  recordLocation(
+    driverId: string,
+    fix: { lat: number; lng: number; recordedAt: Date },
+  ): Promise<DriverProfile | undefined>;
 }

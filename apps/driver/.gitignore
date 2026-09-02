@@ -4,3 +4,6 @@
 
 # Local native build outputs.
 /build-output/
+
+# Firebase — per-environment, contains project identifiers.
+/google-services.json

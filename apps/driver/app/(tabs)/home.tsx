@@ -1,42 +1,138 @@
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useFocusEffect } from 'expo-router';
-import { type ReactElement, useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { type ReactElement, useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
 import { hasConfirmedBatterySetup } from '@/features/onboarding/batteryOptimisation';
-import { getProfile } from '@/lib/api/endpoints/driver';
+import { isPinging, startLocationPings, stopLocationPings } from '@/duty/locationPings';
+import { registerForPush, stopPushRegistration } from '@/notifications/registerDevice';
+import { getProfile, setDuty } from '@/lib/api/endpoints/driver';
+import { getCurrentOffer } from '@/lib/api/endpoints/offers';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
 /**
  * The duty screen — where an approved driver spends every shift.
  *
- * **The toggle is local state and nothing else, for now.** `POST /driver/duty` does not exist
- * yet (the API is at Phase 1 — zones and identity), and neither does the Android foreground
- * service, the socket, or the location pings that a real duty toggle has to start and stop
- * (docs/LLD/driver-app.md S-8).
+ * **Duty is SERVER state.** `MongoDriverPool` filters on `isOnDuty` when a wave picks who to
+ * ring, so a driver who is "on duty" only in their app's memory is offered nothing and has no
+ * way to tell. The toggle is a mutation against `POST /driver/duty`; the rendered state comes
+ * from the profile's own `is_on_duty`. That is also why it survives closing the app — there is
+ * nothing local to lose.
  *
- * Building the screen ahead of them is deliberate rather than premature: the layout, the states
- * and the copy are what the offer system will land into, and having them settled means that work
- * is only the hard part. Every place a real call belongs is marked TODO(S-8) below so none of
- * them is discovered by accident later.
+ * Still to come with the offer system (docs/LLD/driver-app.md S-8/S-9): the Android foreground
+ * service, FCM token registration, and the location pings that keep a driver eligible. Going on
+ * duty will start all three; the marks are below.
  */
 export default function HomeScreen(): ReactElement {
-  /**
-   * TODO(S-8): replace with server state.
-   *
-   * Duty is NOT a client opinion — dispatch reads `is_on_duty` off the driver record, so the
-   * server is the only thing that can say. When `POST /driver/duty` lands this becomes a
-   * mutation plus the profile's own flag, and this `useState` goes away entirely. It is here so
-   * the screen can be looked at, not because a local boolean is a reasonable model of duty.
-   */
-  const [onDuty, setOnDuty] = useState(false);
-
+  const queryClient = useQueryClient();
   const profile = useQuery({ queryKey: keys.profile.me(), queryFn: getProfile });
 
+  const onDuty = profile.data?.is_on_duty ?? false;
+  const [dutyError, setDutyError] = useState<string | null>(null);
+
+  const duty = useMutation({
+    mutationFn: (next: boolean) => setDuty(next ? 'ONLINE' : 'OFFLINE'),
+    onMutate: () => setDutyError(null),
+    onSuccess: async (state) => {
+      // Refetch rather than write the flag in by hand: the server decides, and a hand-patched
+      // cache that disagrees with it is exactly the drift this screen is meant not to have.
+      await queryClient.invalidateQueries({ queryKey: keys.profile.all() });
+
+      /**
+       * Duty and the location loop start and stop together, because duty alone does not make a
+       * driver dispatchable: `MongoDriverPool` also requires a `lastLocationAt` inside a
+       * two-minute window. On duty with no pings is invisible to every wave.
+       */
+      if (state.is_on_duty) {
+        const started = await startLocationPings();
+        if (!started) {
+          setDutyError(
+            'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
+          );
+        }
+        /**
+         * Register for push in the same breath.
+         *
+         * This is what makes an offer ring with the app CLOSED — the polling below only runs
+         * while this screen is alive. A driver who declines notification permission can still
+         * work, but only with the app open, so it is worth saying so rather than leaving them to
+         * wonder why trips stopped.
+         */
+        const pushable = await registerForPush();
+        if (!pushable) {
+          setDutyError(
+            'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
+          );
+        }
+      } else {
+        stopLocationPings();
+        stopPushRegistration();
+      }
+    },
+    onError: (cause) => {
+      // The server's wording, verbatim — a 409 here means not approved, and later documents
+      // expired or wallet blocked. Never build that copy from `code`.
+      setDutyError(
+        cause instanceof Error ? cause.message : 'Could not change your duty status.',
+      );
+    },
+  });
+
   const firstName = profile.data?.full_name?.trim().split(' ')[0] ?? 'there';
+
+  /**
+   * Polling for a ringing offer.
+   *
+   * A stand-in for the push that lands with S-9: polling only works while this screen is alive,
+   * so it cannot ring a closed app — but it proves the whole chain (book → wave → offer →
+   * accept) with no Firebase, and the ring screen it opens is the same one FCM will open later.
+   *
+   * Only while ON DUTY. An off-duty driver has no offers by definition, and polling anyway would
+   * burn battery to always be told no.
+   */
+  const offer = useQuery({
+    queryKey: keys.offers.current(),
+    queryFn: ({ signal }) => getCurrentOffer(signal),
+    enabled: onDuty,
+    refetchInterval: onDuty ? 4000 : false,
+    // Never serve a cached answer: an offer that arrived a second ago is the whole point.
+    staleTime: 0,
+  });
+
+  /**
+   * Open the ring screen the moment one appears.
+   *
+   * `router.push`, so declining or losing the race returns here rather than unwinding to a blank
+   * stack. The offer id is in the path, but the screen re-reads the offer itself — see its
+   * header for why.
+   */
+  const ringingOfferId = offer.data?.offer?.offer_id ?? null;
+  useEffect(() => {
+    if (ringingOfferId !== null) router.push(`/offer/${ringingOfferId}`);
+  }, [ringingOfferId]);
+
+  /**
+   * Resume the on-duty machinery on a cold start.
+   *
+   * Duty survives closing the app, but nothing that DELIVERS work to the driver does — both the
+   * location loop and the push registration live in this process. A driver who was on duty
+   * yesterday reopens the app already "online" and would otherwise sit there invisible to
+   * dispatch until they toggled off and on again.
+   *
+   * Re-registering for push is the half that is easy to forget and impossible to notice: without
+   * it a driver on a fresh install is on duty with no FCM token, dispatch logs "driver has no
+   * registered device", and every offer lapses in silence while the app looks perfectly healthy.
+   * Both calls are idempotent — `isPinging()` guards one and the server's `$addToSet` guards the
+   * other — so this is safe on every render pass.
+   */
+  useEffect(() => {
+    if (!onDuty) return;
+    if (!isPinging()) void startLocationPings();
+    void registerForPush();
+  }, [onDuty]);
 
   /**
    * The battery-optimisation nudge (S-12). Shows until the driver confirms they have lifted the
@@ -114,22 +210,31 @@ export default function HomeScreen(): ReactElement {
           </Text>
 
           <Pressable
-            // TODO(S-8): POST /driver/duty { on_duty }, then start/stop the foreground service,
-            // the socket connection and location pings in that order. A 409 here means not yet
-            // approved, documents expired, or wallet blocked — render its `message` verbatim.
-            onPress={() => setOnDuty((current) => !current)}
+            onPress={() => duty.mutate(!onDuty)}
+            disabled={duty.isPending || profile.isPending}
             accessibilityRole="switch"
-            accessibilityState={{ checked: onDuty }}
+            accessibilityState={{ checked: onDuty, busy: duty.isPending }}
             style={({ pressed }) => [
               styles.dutyButton,
               onDuty ? styles.dutyButtonOn : styles.dutyButtonOff,
               pressed && styles.dutyButtonPressed,
+              duty.isPending && styles.dutyButtonBusy,
             ]}
           >
-            <Text style={[styles.dutyButtonText, onDuty && styles.dutyButtonTextOn]}>
-              {onDuty ? 'Go off duty' : 'Go on duty'}
-            </Text>
+            {duty.isPending ? (
+              <ActivityIndicator color={onDuty ? colors.dutyOn : colors.brandOnFg} />
+            ) : (
+              <Text style={[styles.dutyButtonText, onDuty && styles.dutyButtonTextOn]}>
+                {onDuty ? 'Go off duty' : 'Go on duty'}
+              </Text>
+            )}
           </Pressable>
+
+          {dutyError !== null ? (
+            <Text style={styles.dutyError} accessibilityLiveRegion="polite">
+              {dutyError}
+            </Text>
+          ) : null}
         </View>
 
         {/*
@@ -221,8 +326,10 @@ const styles = StyleSheet.create({
   dutyButtonOff: { backgroundColor: colors.fg },
   dutyButtonOn: { backgroundColor: colors.bg, borderWidth: 1.5, borderColor: colors.dutyOn },
   dutyButtonPressed: { opacity: 0.85 },
+  dutyButtonBusy: { opacity: 0.7 },
   dutyButtonText: { ...text.heading, color: colors.brandOnFg },
   dutyButtonTextOn: { color: colors.dutyOn },
+  dutyError: { ...text.caption, color: colors.danger, textAlign: 'center', marginTop: space.md },
 
   notice: {
     flexDirection: 'row',

@@ -77,6 +77,7 @@ function mapDriverProfileToDto(driver: DriverProfile, profilePictureUrl: string 
     onboarding_status: driver.onboardingStatus,
     onboarding_rejection_reason: driver.onboardingRejectionReason,
     is_verified: driver.isVerified,
+    is_on_duty: driver.isOnDuty,
   };
 }
 

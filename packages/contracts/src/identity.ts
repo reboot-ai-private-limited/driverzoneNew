@@ -264,6 +264,15 @@ export interface DriverProfileDto {
   onboarding_rejection_reason: string | null;
   /** The single flag dispatch and `POST /driver/duty` gate on. */
   is_verified: boolean;
+
+  /**
+   * Whether the driver is currently on duty.
+   *
+   * SERVER STATE, not a client toggle. Dispatch reads `isOnDuty` off the driver record to decide
+   * who to ring, so a driver "on duty" only in their app's memory would be offered nothing and
+   * would not know it. The app renders this and changes it through `POST /driver/duty`.
+   */
+  is_on_duty: boolean;
 }
 
 export interface UpdateDriverProfileRequest {

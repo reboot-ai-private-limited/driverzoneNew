@@ -17,6 +17,7 @@ import { ManageVehiclesUseCase } from '../src/modules/identity/application/useCa
 import { UpsertFromBookingUseCase } from '../src/modules/identity/application/useCases/upsertFromBooking.usecase.js';
 import { SubmitOnboardingUseCase } from '../src/modules/identity/application/useCases/submitOnboarding.usecase.js';
 import { VerifyDriverUseCase } from '../src/modules/identity/application/useCases/verifyDriver.usecase.js';
+import { SetDutyStatusUseCase } from '../src/modules/identity/application/useCases/setDutyStatus.usecase.js';
 import { ManageDriverDocumentsUseCase } from '../src/modules/identity/application/useCases/manageDriverDocuments.usecase.js';
 import type { PresignedUpload, StoragePort } from '../src/shared/storage/storage.port.js';
 import type { SavedAddress, Vehicle } from '../src/modules/identity/domain/customerProfile.entity.js';
@@ -118,6 +119,7 @@ function driverProfile(over: Partial<DriverProfile> = {}): DriverProfile {
     onboardingStatus: 'INCOMPLETE',
     onboardingRejectionReason: null,
     isVerified: false,
+    isOnDuty: false,
     ...over,
   };
 }
@@ -136,6 +138,10 @@ function fakeDrivers(initial: DriverProfile): DriverProfileRepositoryPort & { cu
     },
     approve: () => {
       current = { ...current, onboardingStatus: 'APPROVED', isVerified: true, onboardingRejectionReason: null };
+      return Promise.resolve(current);
+    },
+    setDutyStatus: (_id, isOnDuty) => {
+      current = { ...current, isOnDuty };
       return Promise.resolve(current);
     },
   };
@@ -713,5 +719,50 @@ describe('driver document upload authorisation', () => {
     ]).requestUpload('drv_1', upload);
 
     expect(capturedIsPrivate).toBe(true);
+  });
+});
+
+/**
+ * Going on duty.
+ *
+ * The gate matters because duty is what `MongoDriverPool` filters on: an unverified driver who
+ * could flip themselves ONLINE would enter the dispatch pool and be rung for real trips. The
+ * asymmetry — ON is gated, OFF never is — matters just as much the other way: nothing should be
+ * able to trap a driver online.
+ */
+describe('SetDutyStatusUseCase', () => {
+  const approved = (): DriverProfile =>
+    driverProfile({ onboardingStatus: 'APPROVED', isVerified: true });
+
+  it('lets an approved driver go on duty', async () => {
+    const drivers = fakeDrivers(approved());
+
+    const result = await new SetDutyStatusUseCase(drivers).execute('drv_1', 'ONLINE');
+
+    expect(result.isOnDuty).toBe(true);
+    expect(drivers.current.isOnDuty).toBe(true);
+  });
+
+  it('refuses ONLINE for a driver who is not verified', async () => {
+    const drivers = fakeDrivers(driverProfile({ onboardingStatus: 'SUBMITTED', isVerified: false }));
+
+    const code = await codeOfRejection(new SetDutyStatusUseCase(drivers).execute('drv_1', 'ONLINE'));
+
+    expect(code).toBe('CONFLICT');
+    // And critically, the flag did not move.
+    expect(drivers.current.isOnDuty).toBe(false);
+  });
+
+  /**
+   * OFF is never gated. A driver whose approval was revoked mid-shift, or whose documents just
+   * expired, must still be able to stop — otherwise the app is something they fight.
+   */
+  it('always lets a driver go off duty, even unverified', async () => {
+    const drivers = fakeDrivers(driverProfile({ isVerified: false, isOnDuty: true }));
+
+    const result = await new SetDutyStatusUseCase(drivers).execute('drv_1', 'OFFLINE');
+
+    expect(result.isOnDuty).toBe(false);
+    expect(drivers.current.isOnDuty).toBe(false);
   });
 });

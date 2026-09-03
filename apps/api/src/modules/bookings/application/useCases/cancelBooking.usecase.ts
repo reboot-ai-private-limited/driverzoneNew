@@ -8,6 +8,7 @@ import {
 import type { LedgerWriteContract } from '../../../ledger/ledger.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import type { PaymentsContract } from '../../../payments/payments.public.js';
+import type { WalletPublicContract } from '../../../wallet/wallet.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
@@ -59,6 +60,8 @@ export class CancelBookingByCustomerUseCase {
     private readonly charges: ChargeRepositoryPort,
     private readonly settings: SettingsReadContract,
     private readonly payments: PaymentsContract,
+    /** Where an uncollected fee becomes the debt the customer's next trip carries. */
+    private readonly wallet: WalletPublicContract,
     private readonly notifications: NotificationsContract,
   ) {}
 
@@ -119,6 +122,37 @@ export class CancelBookingByCustomerUseCase {
           ? { settledByPaymentId: booking.paymentId }
           : {}),
       });
+
+      /*
+       * AND INTO THE WALLET, but only when it was not collected on the spot.
+       *
+       * The charge row above is the AUDIT — what was levied, at which status, and why. The wallet
+       * row is the DEBT, and the two are deliberately not the same record: a prepaid fee that was
+       * kept out of its own refund is fully settled and must never appear as an outstanding
+       * balance, while a cash one has nothing behind it and becomes what the next trip collects.
+       *
+       * Once-per-booking, so a retried cancellation cannot charge it twice. Logged rather than
+       * thrown because the booking is already cancelled — failing here would leave the customer
+       * with a cancelled trip and an error, and the fee is recoverable from the charge row.
+       */
+      if (!collectedNow) {
+        try {
+          await this.wallet.append([
+            {
+              customerId: booking.customerId,
+              bookingId: booking.id,
+              entryType: 'CANCELLATION_FEE',
+              amountPaise: -feePaise,
+              note: `Cancellation fee for trip ${booking.reference}`,
+            },
+          ]);
+        } catch (error) {
+          logger.error(
+            { err: error, bookingId: booking.id },
+            'could not record the cancellation fee on the wallet',
+          );
+        }
+      }
     }
 
     if (booking.driverId !== null) {

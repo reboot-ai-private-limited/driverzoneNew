@@ -66,13 +66,21 @@ export function DriversScreen() {
       header: 'Prefers',
       width: COLUMN_WIDTHS[1] ?? '',
       render: (driver) => {
-        if (!driver.vehicle_type_preference && driver.vehicle_category_preference.length === 0) {
-          return <span className="text-text-subtle">—</span>;
+        /*
+         * "Not set" is NOT "Any" — it is why this driver never rings. Since the competency gate
+         * went in, an empty preference excludes a driver from every wave, so the column has to
+         * say so rather than render a reassuring dash.
+         */
+        if (
+          driver.vehicle_type_preferences.length === 0 &&
+          driver.vehicle_category_preference.length === 0
+        ) {
+          return <span className="text-text-subtle">Not set — no offers</span>;
         }
         return (
           <CellStack
-            primary={driver.vehicle_category_preference.join(', ') || 'Any'}
-            secondary={driver.vehicle_type_preference ?? 'Any Type'}
+            primary={driver.vehicle_category_preference.join(', ') || 'No categories'}
+            secondary={driver.vehicle_type_preferences.join(', ') || 'No types'}
           />
         );
       },

@@ -1,29 +1,53 @@
 import { Feather } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { type ComponentProps, type ReactElement, type ReactNode, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
+import { router, useFocusEffect } from 'expo-router';
+import {
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { BottomSheet } from '@/components/BottomSheet';
 import {
-  DEMO_RIDES,
-  type DemoRide,
-  type DemoRideStatus,
-  formatDemoPaise,
-} from '@/features/rides/demoRides';
+  toRideHistoryRow,
+  type RideHistoryRow,
+  type RideStatus,
+} from '@/features/rides/rideHistory';
+import { listBookings } from '@/lib/api/endpoints/bookings';
+import { formatPaise } from '@/lib/money';
+import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 type FeatherName = ComponentProps<typeof Feather>['name'];
 
 /**
- * Ride history.
+ * Ride history — this customer's real bookings, newest first.
  *
- * DEMO DATA, ON PURPOSE AND VISIBLY SO — see `demoRides.ts`'s own header for the full reasoning.
- * `GET /customer/bookings` (a list) does not exist on the API; this screen renders exactly what
- * was asked for, with a badge that never lets it pass as real. The badge is not decoration, it is
- * the condition this screen was built under.
+ * WAS DEMO DATA UNTIL `GET /customer/bookings` EXISTED. The whole screen ran off `demoRides.ts`
+ * behind a "not a real ride" badge, because the API had a single-booking read and no list. The
+ * list endpoint shipped, so the badge, the fixture and every invented field are gone — see
+ * `rideHistory.ts` on which fields had no honest source and were dropped rather than faked.
+ *
+ * FILTERS, SEARCH AND SORT STAY CLIENT-SIDE, over the (server-capped) history. They were always
+ * real logic applied to fake rows; now they are real logic applied to real ones. Moving them to
+ * the server is the same change that adds pagination, and neither is worth doing before a
+ * customer's history outgrows one response.
  */
 
-type Filter = 'TODAY' | 'THIS_MONTH' | DemoRideStatus;
+type Filter = 'TODAY' | 'THIS_MONTH' | RideStatus;
 
 const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
   { value: 'TODAY', label: 'Today' },
@@ -42,14 +66,37 @@ export default function RidesScreen(): ReactElement {
   const [sortSheet, setSortSheet] = useState(false);
   const [sort, setSort] = useState<SortOrder>('NEWEST');
 
+  /*
+   * REFETCHED ON FOCUS, not polled. History changes only when the customer does something —
+   * finishes a trip, cancels one — and both of those happen on another screen in this same app,
+   * so coming back to this tab is exactly when it can be stale and the only time it can be.
+   */
+  const history = useQuery({
+    queryKey: keys.bookings.list(),
+    queryFn: listBookings,
+    select: (response) => response.bookings.map(toRideHistoryRow),
+  });
+
+  useFocusEffect(
+    useCallback(() => {
+      void history.refetch();
+      // `refetch` is stable for a given query key; depending on the whole query object would
+      // re-run this on every status change it makes, including the refetch's own.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
+  const all = useMemo(() => history.data ?? [], [history.data]);
+
   const rides = useMemo(() => {
-    let list = [...DEMO_RIDES];
+    let list = [...all];
 
     if (filter === 'COMPLETED' || filter === 'CANCELLED' || filter === 'RUNNING') {
       list = list.filter((ride) => ride.status === filter);
     }
-    // "Today"/"This Month" are real date filters over the (invented) `at` field — the FILTER is
-    // real logic, only the rows it filters are fabricated.
+    // Both read `at` — when the trip actually happened, not when it was booked. See
+    // `rideHappenedAt`: a trip completed at 9pm belongs under today even if it was scheduled
+    // yesterday, and a still-searching one falls back to its scheduled time.
     if (filter === 'TODAY' || filter === 'THIS_MONTH') {
       const now = new Date();
       list = list.filter((ride) => {
@@ -67,10 +114,12 @@ export default function RidesScreen(): ReactElement {
 
     const needle = query.trim().toLowerCase();
     if (needle.length > 0) {
+      // `reference` is what the customer can actually read off a row; the booking id is a Mongo
+      // ObjectId they have never seen and could not type.
       list = list.filter(
         (ride) =>
-          ride.id.toLowerCase().includes(needle) ||
-          ride.driverName.toLowerCase().includes(needle) ||
+          ride.reference.toLowerCase().includes(needle) ||
+          (ride.driverName?.toLowerCase().includes(needle) ?? false) ||
           ride.pickup.toLowerCase().includes(needle) ||
           ride.drop.toLowerCase().includes(needle),
       );
@@ -81,16 +130,25 @@ export default function RidesScreen(): ReactElement {
     );
 
     return list;
-  }, [filter, query, sort]);
+  }, [all, filter, query, sort]);
 
+  /*
+   * OVER THE WHOLE HISTORY, never the filtered view. "Total Trips" that dropped to 2 because a
+   * filter chip is on would be a different statistic wearing the same label.
+   *
+   * Spend counts COMPLETED trips only: a cancelled ride may still have cost a fee, but that fee
+   * is a charge row, not this trip's fare, and adding fares for trips that never happened would
+   * overstate what the customer has spent.
+   */
   const stats = useMemo(() => {
-    const completed = DEMO_RIDES.filter((r) => r.status === 'COMPLETED');
-    const totalSpent = completed.reduce((sum, r) => sum + r.totalPaise, 0);
-    return {
-      total: DEMO_RIDES.length,
-      totalSpent,
-    };
-  }, []);
+    // `paidPaise`, not `totalPaise` — money that left the customer, so a trip wallet credit
+    // reduced counts for what they actually handed over.
+    const totalSpent = all
+      .filter((ride) => ride.status === 'COMPLETED')
+      .reduce((sum, ride) => sum + ride.paidPaise, 0);
+
+    return { total: all.length, totalSpent };
+  }, [all]);
 
   return (
     <View style={styles.root}>
@@ -118,13 +176,6 @@ export default function RidesScreen(): ReactElement {
         </View>
       </View>
 
-      <View style={styles.demoBadge}>
-        <Feather name="info" size={12} color={colors.muted} />
-        <Text style={styles.demoBadgeText}>
-          Demo data — the API has no ride-history list yet. These are not your real trips.
-        </Text>
-      </View>
-
       {searching ? (
         <Animated.View entering={FadeInDown.duration(180)} style={styles.searchBox}>
           <Feather name="search" size={16} color={colors.faint} />
@@ -149,6 +200,15 @@ export default function RidesScreen(): ReactElement {
         style={styles.flex}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        // Pull-to-refresh, because this is a list a customer will reach for after a trip ends and
+        // "did my last ride land?" deserves an answer they can ask for directly.
+        refreshControl={
+          <RefreshControl
+            refreshing={history.isRefetching && !history.isPending}
+            onRefresh={() => void history.refetch()}
+            tintColor={colors.muted}
+          />
+        }
       >
         <ScrollView
           horizontal
@@ -181,17 +241,49 @@ export default function RidesScreen(): ReactElement {
             <StatTile
               icon="credit-card"
               label="Total Spent"
-              value={formatDemoPaise(stats.totalSpent)}
+              value={formatPaise(stats.totalSpent)}
             />
           </Stagger>
         </View>
 
-        {rides.length === 0 ? (
+        {history.isPending ? (
+          <View style={styles.empty}>
+            <ActivityIndicator color={colors.muted} />
+          </View>
+        ) : history.isError ? (
+          <View style={styles.empty}>
+            <View style={styles.emptyIcon}>
+              <Feather name="wifi-off" size={22} color={colors.muted} />
+            </View>
+            <Text style={styles.emptyText}>
+              {history.error instanceof Error
+                ? history.error.message
+                : 'We could not load your rides.'}
+            </Text>
+            <Pressable
+              onPress={() => void history.refetch()}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
+            >
+              <Feather name="refresh-cw" size={14} color={colors.fg} />
+              <Text style={styles.retryLabel}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : rides.length === 0 ? (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <Feather name="inbox" size={22} color={colors.muted} />
             </View>
-            <Text style={styles.emptyText}>No rides match this filter.</Text>
+            {/*
+              TWO DIFFERENT EMPTIES. "No rides yet" is a new customer and "nothing matches" is a
+              filter they can undo — telling a first-time customer their filter found nothing
+              would point them at a control that is not the problem.
+            */}
+            <Text style={styles.emptyText}>
+              {all.length === 0
+                ? 'No rides yet. Your trips will show up here.'
+                : 'No rides match this filter.'}
+            </Text>
           </View>
         ) : (
           rides.map((ride, index) => (
@@ -277,13 +369,13 @@ function StatTile({
   );
 }
 
-const STATUS_COPY: Record<DemoRideStatus, { label: string; color: string; tint: string }> = {
+const STATUS_COPY: Record<RideStatus, { label: string; color: string; tint: string }> = {
   COMPLETED: { label: 'Completed', color: colors.success, tint: '#E7F5EC' },
   CANCELLED: { label: 'Cancelled', color: colors.danger, tint: '#FDECEC' },
   RUNNING: { label: 'Running', color: colors.link, tint: '#E9F0FC' },
 };
 
-function RideRow({ ride }: { ride: DemoRide }): ReactElement {
+function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
   const statusCopy = STATUS_COPY[ride.status];
   const when = new Date(ride.at);
   const dateLabel = `${String(when.getDate()).padStart(2, '0')} ${MONTHS[when.getMonth()]} ${String(
@@ -303,7 +395,7 @@ function RideRow({ ride }: { ride: DemoRide }): ReactElement {
       <View style={styles.flex}>
         <View style={styles.rideTopRow}>
           <Text style={styles.rideId} numberOfLines={1}>
-            {ride.id}
+            {ride.reference}
           </Text>
           <View style={[styles.statusPill, { backgroundColor: statusCopy.tint }]}>
             <Text style={[styles.rideStatus, { color: statusCopy.color }]}>{statusCopy.label}</Text>
@@ -311,12 +403,16 @@ function RideRow({ ride }: { ride: DemoRide }): ReactElement {
         </View>
         <Text style={styles.rideDate}>{dateLabel}</Text>
 
+        {/*
+          NO RATING BESIDE THE NAME. The demo rows carried one; `BookingDto.driver` is `{ id,
+          name }` and nothing more, so the star went rather than being filled with a constant.
+          The row itself stays even with no driver yet — a trip still searching has a name-shaped
+          gap, and collapsing it would make searching rows a different height from every other.
+        */}
         <View style={styles.rideDriverRow}>
           <Text style={styles.rideDriver} numberOfLines={1}>
-            {ride.driverName}
+            {ride.driverName ?? 'Driver not assigned yet'}
           </Text>
-          <Feather name="star" size={11} color={colors.brand} style={styles.rideStar} />
-          <Text style={styles.rideRating}>{ride.driverRating.toFixed(1)}</Text>
         </View>
 
         {/*
@@ -342,7 +438,7 @@ function RideRow({ ride }: { ride: DemoRide }): ReactElement {
       </View>
 
       <View style={styles.rideRight}>
-        <Text style={styles.ridePrice}>{formatDemoPaise(ride.totalPaise)}</Text>
+        <Text style={styles.ridePrice}>{ride.totalDisplay}</Text>
         <Feather name="chevron-right" size={16} color={colors.faint} />
       </View>
     </Pressable>
@@ -380,18 +476,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  demoBadge: {
+  retry: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.xs,
-    marginHorizontal: space.lg,
-    marginTop: space.sm,
-    paddingHorizontal: space.sm,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
-    backgroundColor: colors.bgSunken,
+    gap: space.sm,
+    marginTop: space.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  demoBadgeText: { ...text.caption, color: colors.muted, flex: 1 },
+  retryPressed: { backgroundColor: colors.bgSunken },
+  retryLabel: { ...text.label, color: colors.fg },
 
   searchBox: {
     flexDirection: 'row',
@@ -493,8 +590,6 @@ const styles = StyleSheet.create({
   rideDate: { ...text.caption, color: colors.faint, marginTop: 2 },
   rideDriverRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   rideDriver: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
-  rideStar: { marginLeft: space.xs, marginRight: 2 },
-  rideRating: { ...text.caption, color: colors.muted },
 
   rideRoute: { flexDirection: 'row', marginTop: space.sm },
   rideRouteMarkers: { alignItems: 'center', width: 8, marginRight: space.sm },

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CAR_CATEGORIES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
 import { bearerAuth, errorResponse, registry, successResponse } from '@/shared/http/swagger.util.js';
 import {
   createAddressSchema,
@@ -123,8 +124,8 @@ const driverProfileDtoSchema = z.object({
   alternate_number: z.string().nullable(),
   emergency_contact: z.object({ name: z.string(), number: z.string() }).nullable(),
   address: z.string().nullable(),
-  vehicle_type_preference: z.enum(['AUTO', 'MANUAL', 'EV']).nullable(),
-  vehicle_category_preference: z.array(z.string()),
+  vehicle_type_preferences: z.array(z.enum(VEHICLE_TYPE_PREFERENCES)),
+  vehicle_category_preference: z.array(z.enum(CAR_CATEGORIES)),
   can_drive_hill: z.boolean(),
   can_drive_hill_verified: z.boolean(),
   onboarding_status: z.enum(['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED']),

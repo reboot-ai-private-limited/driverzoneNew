@@ -1,12 +1,13 @@
 import { randomInt } from 'node:crypto';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
-import type { PaymentMode } from '@driverzone/contracts';
+import type { CarCategory, PaymentMode, VehicleTypePreference } from '@driverzone/contracts';
 import type { PaymentsContract } from '../../../payments/payments.public.js';
 import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
 import type { DispatchScheduler } from './confirmBookingPayment.usecase.js';
 import type { QuoteConsumptionContract } from '../../../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
+import type { WalletPublicContract } from '../../../wallet/wallet.public.js';
 import {
   generateReference,
   isScheduledBooking,
@@ -21,6 +22,12 @@ export interface CreateBookingInput {
   pickupAddress: string;
   dropAddress: string;
   paymentMode: PaymentMode;
+  /**
+   * The car the driver is being booked for. Not a pricing input — it never reaches the fare — so
+   * it arrives here rather than on the quote, and its only consumer is the eligibility query.
+   */
+  carCategory: CarCategory;
+  vehicleType: VehicleTypePreference;
   /** One tap, one key. Passed to the gateway so a retried request charges once. */
   idempotencyKey: string;
 }
@@ -54,6 +61,8 @@ export class CreateBookingUseCase {
     private readonly payments: PaymentsContract,
     private readonly settings: SettingsReadContract,
     private readonly charges: ChargeRepositoryPort,
+    /** The customer's balance: what it takes off this fare, and what it adds to it. */
+    private readonly wallet: WalletPublicContract,
     /**
      * Only reached on the CASH path. A prepaid booking is dispatched by the payment webhook, which
      * for cash never fires — so this use case has to do it, and it is injected for the same reason
@@ -81,18 +90,34 @@ export class CreateBookingUseCase {
     }
 
     /*
-     * A customer carrying unpaid dues MUST pay by UPI.
+     * WHAT THE WALLET DOES TO THIS TRIP'S PRICE — credit off, debt on.
      *
-     * Cash has no payment leg to settle them on, so allowing it would let a cancellation fee
-     * outlive every future trip — and the cheapest way to never pay one would be to always book
+     * PLANNED, NOT SPENT. Nothing is written here: the rows are appended when the booking is
+     * CONFIRMED (`confirmBookingPayment`, and the cash path below), because a customer who
+     * abandons UPI checkout must not have spent their credit on a booking that then expires.
+     *
+     * KNOWN RACE, and it is bounded. Two bookings created in the same instant both plan against
+     * the same balance and both spend it, taking the wallet negative — which lands as a debt on
+     * the next trip rather than as lost money. The fix is a reservation on the balance, which is
+     * only worth building when a customer can plausibly have two checkouts open at once.
+     */
+    const plan = await this.wallet.planFor(input.customerId, quote.fare.totalPaise);
+
+    /*
+     * A customer carrying a DEBT must pay by UPI. Credit is fine on either mode.
+     *
+     * Cash has no payment leg to settle a debt on, so allowing it would let a cancellation fee
+     * outlive every future trip — and the cheapest way never to pay one would be to always book
      * cash. Refused rather than silently upgraded to UPI, because the customer chose a mode and
      * deserves to be told why they cannot have it.
+     *
+     * Credit is the opposite case and needs no such guard: it makes a cash trip CHEAPER, and the
+     * driver is told the reduced figure to collect (`expectedCashPaise`).
      */
-    const duesPaise = await this.charges.outstandingDues(input.customerId);
-    if (duesPaise > 0 && input.paymentMode === 'CASH') {
+    if (plan.debtAddedPaise > 0 && input.paymentMode === 'CASH') {
       throw AppError.badRequest(
         'You have an unpaid cancellation fee. Please pay for this trip by UPI to clear it.',
-        { outstanding_dues_paise: duesPaise },
+        { outstanding_dues_paise: plan.debtAddedPaise },
       );
     }
 
@@ -131,6 +156,10 @@ export class CreateBookingUseCase {
       dropAddress: input.dropAddress,
       direction: quote.direction,
       distanceKm: quote.distanceKm,
+      carCategory: input.carCategory,
+      vehicleType: input.vehicleType,
+      walletCreditPaise: plan.creditAppliedPaise,
+      walletDebtPaise: plan.debtAddedPaise,
       fareSnapshot,
       paymentMode: input.paymentMode,
       isScheduled,
@@ -182,6 +211,34 @@ export class CreateBookingUseCase {
 
       const result = confirmed ?? booking;
 
+      /*
+       * The cash path is the one that confirms synchronously, so it is where cash spends the
+       * credit — there is no webhook coming to do it later.
+       *
+       * A failure here is logged and swallowed, because the booking IS confirmed and a driver is
+       * about to be dispatched: throwing would fail a request whose trip is already happening. The
+       * cost of the log line is a customer who keeps credit they should have spent, which is the
+       * error worth having of the two.
+       */
+      if (plan.creditAppliedPaise > 0) {
+        try {
+          await this.wallet.append([
+            {
+              customerId: input.customerId,
+              bookingId: booking.id,
+              entryType: 'SPENT_ON_RIDE',
+              amountPaise: -plan.creditAppliedPaise,
+              note: `Used on trip ${booking.reference}`,
+            },
+          ]);
+        } catch (error) {
+          logger.error(
+            { err: error, bookingId: booking.id },
+            'could not spend wallet credit on a confirmed cash booking',
+          );
+        }
+      }
+
       try {
         await this.scheduleDispatch(result);
       } catch (error) {
@@ -200,7 +257,8 @@ export class CreateBookingUseCase {
     }
 
     // ── UPI: collect before anyone is dispatched ────────────────────────────────────────────
-    const amountPaise = quote.fare.totalPaise + duesPaise;
+    // The fare, less whatever credit covers, plus whatever debt is being collected with it.
+    const amountPaise = plan.payablePaise;
 
     const { payment, clientToken, publicKey } = await this.payments.charge({
       bookingId: booking.id,
@@ -214,7 +272,13 @@ export class CreateBookingUseCase {
     await this.repo.attachPayment(booking.id, payment.id);
 
     logger.info(
-      { bookingId: booking.id, reference: booking.reference, paymentId: payment.id, duesPaise },
+      {
+        bookingId: booking.id,
+        reference: booking.reference,
+        paymentId: payment.id,
+        creditAppliedPaise: plan.creditAppliedPaise,
+        debtAddedPaise: plan.debtAddedPaise,
+      },
       'booking created, awaiting payment',
     );
 

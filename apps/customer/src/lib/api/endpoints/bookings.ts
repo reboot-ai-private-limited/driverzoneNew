@@ -4,6 +4,7 @@ import type {
   CancelBookingResponse,
   CreateBookingRequest,
   CreateBookingResponse,
+  ListBookingsResponse,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { request } from '../client';
@@ -34,6 +35,19 @@ export function createBooking(
     method: 'POST',
     body,
     idempotencyKey,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `GET /customer/bookings` — this customer's own ride history, newest first, capped server-side.
+ *
+ * Scoped by the access token alone; there is no id to pass and therefore no way to ask for
+ * anybody else's. Rows carry `start_otp: null` by design — the code only ever comes back from the
+ * single-booking read below.
+ */
+export function listBookings(): Promise<ListBookingsResponse> {
+  return request<ListBookingsResponse>(`${ROLE_PREFIX}/bookings`, {
     token: getAccessToken() ?? undefined,
   });
 }

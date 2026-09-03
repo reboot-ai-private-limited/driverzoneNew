@@ -1,6 +1,7 @@
 import type { Router } from 'express';
 import { logger } from '../../shared/logging/logger.js';
 import type { LedgerWriteContract } from '../ledger/ledger.public.js';
+import type { WalletPublicContract } from '../wallet/wallet.public.js';
 import type { NotificationsContract } from '../notifications/notifications.public.js';
 import type { PaymentsContract } from '../payments/payments.public.js';
 import type { QuoteConsumptionContract } from '../quotes/quotes.public.js';
@@ -38,6 +39,8 @@ export interface BookingsDependencies {
   payments: PaymentsContract;
   settings: SettingsReadContract;
   ledger: LedgerWriteContract;
+  /** The CUSTOMER wallet: credit off a fare, debt onto it, and where a fee becomes a debt. */
+  wallet: WalletPublicContract;
   notifications: NotificationsContract;
   /**
    * Enqueues the dispatch job for a confirmed booking.
@@ -71,13 +74,14 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     deps.payments,
     deps.settings,
     charges,
+    deps.wallet,
     deps.scheduleDispatch,
   );
   const confirm = new ConfirmBookingPaymentUseCase(
     repo,
     deps.notifications,
     deps.scheduleDispatch,
-    charges,
+    deps.wallet,
   );
   const failPayment = new FailBookingPaymentUseCase(repo, deps.notifications);
 
@@ -86,6 +90,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     charges,
     deps.settings,
     deps.payments,
+    deps.wallet,
     deps.notifications,
   );
   const cancelByDriver = new CancelBookingByDriverUseCase(
@@ -178,7 +183,8 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     buildCustomerRouter: () =>
       buildCustomerRouter({
         create: controllers.makeCreateBookingController(create),
-        dues: controllers.makeGetDuesController(charges),
+        list: controllers.makeListCustomerBookingsController(repo, charges),
+        dues: controllers.makeGetDuesController(deps.wallet),
         get: controllers.makeGetCustomerBookingController(repo, charges),
         cancel: controllers.makeCancelByCustomerController(cancelByCustomer),
       }),

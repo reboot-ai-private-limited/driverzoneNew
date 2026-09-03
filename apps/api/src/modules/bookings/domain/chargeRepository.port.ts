@@ -59,16 +59,15 @@ export interface ChargeRepositoryPort {
 
   findCancellationCharge(bookingId: string): Promise<CancellationCharge | null>;
 
-  /**
-   * What this customer still owes, from fees charged on bookings that held none of their money.
+  /*
+   * `outstandingDues` and `settleDues` USED TO LIVE HERE and were removed on 2026-09-02, when the
+   * customer wallet took over as the single source of what somebody owes.
    *
-   * Only ever non-zero after a CASH cancellation: a prepaid booking's fee is kept out of its own
-   * refund, so it is settled the instant it is charged.
+   * Deleted rather than deprecated on purpose. Left in place they would have kept answering — with
+   * a number that no longer moves, because nothing settles these rows any more — and a stale
+   * second answer to "what does this customer owe" is worse than no answer. `charges` still
+   * records that a fee was LEVIED, with its status and reason; the balance is `wallet`.
    */
-  outstandingDues(customerId: string): Promise<number>;
-
-  /** Marks every unpaid due as collected by this payment. Called when its capture lands. */
-  settleDues(customerId: string, paymentId: string): Promise<void>;
 
   recordPinReport(input: {
     bookingId: string;

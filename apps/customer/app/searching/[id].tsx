@@ -129,7 +129,7 @@ export default function SearchingScreen(): ReactElement {
               accessibilityRole="button"
               style={({ pressed }) => [styles.cancelLink, pressed && styles.cancelLinkPressed]}
             >
-              <Feather name="x" size={14} color={colors.muted} />
+              <Feather name="x" size={14} color={colors.danger} />
               <Text style={styles.cancelLinkLabel}>Cancel this search</Text>
             </Pressable>
           </Animated.View>
@@ -339,6 +339,12 @@ const styles = StyleSheet.create({
   routeLine: { width: 1, height: 12, backgroundColor: colors.border },
   routeText: { ...text.caption, color: colors.fg, flex: 1 },
 
+  /*
+   * OUTLINED IN RED, not filled. This is the only affordance on a screen that is otherwise pure
+   * waiting, so it has to be findable at a glance — but it is also the destructive one, and a
+   * solid red bar under a radar animation reads as the search having failed rather than as
+   * something the customer may optionally do.
+   */
   cancelLink: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -349,8 +355,8 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.danger,
   },
-  cancelLinkPressed: { backgroundColor: colors.bgSunken },
-  cancelLinkLabel: { ...text.label, color: colors.muted, fontFamily: fontFamily.semibold },
+  cancelLinkPressed: { backgroundColor: colors.dangerSoft },
+  cancelLinkLabel: { ...text.label, color: colors.danger, fontFamily: fontFamily.semibold },
 });

@@ -10,6 +10,7 @@ import { buildPaymentsContainer } from '@/modules/payments/payments.container.js
 import { buildQuotesContainer } from '@/modules/quotes/quotes.container.js';
 import { buildReviewsContainer } from '@/modules/reviews/reviews.container.js';
 import { buildSettingsContainer } from '@/modules/settings/settings.container.js';
+import { buildWalletContainer } from '@/modules/wallet/wallet.container.js';
 import { buildZonesContainer } from '@/modules/zones/zones.container.js';
 
 /**
@@ -33,6 +34,7 @@ export interface AppContainers {
   notifications: ReturnType<typeof buildNotificationsContainer>;
   ledger: ReturnType<typeof buildLedgerContainer>;
   payments: ReturnType<typeof buildPaymentsContainer>;
+  wallet: ReturnType<typeof buildWalletContainer>;
   zones: ReturnType<typeof buildZonesContainer>;
   packages: ReturnType<typeof buildPackagesContainer>;
   quotes: ReturnType<typeof buildQuotesContainer>;
@@ -59,6 +61,8 @@ export function buildContainers(): AppContainers {
   const notifications = buildNotificationsContainer();
   const ledger = buildLedgerContainer({ settings: settings.contract });
   const payments = buildPaymentsContainer();
+  /* Also tier 2. A CUSTOMER ledger where `ledger` above is a driver one; the two never speak. */
+  const wallet = buildWalletContainer();
 
   // tier 3 — polygons, resolution, the invariant write guard
   const zones = buildZonesContainer();
@@ -90,6 +94,7 @@ export function buildContainers(): AppContainers {
     payments: payments.contract,
     settings: settings.contract,
     ledger: ledger.contract,
+    wallet: wallet.contract,
     notifications: notifications.contract,
     scheduleDispatch: (booking) => enqueueDispatch(booking.id, booking.dispatchAt),
   });
@@ -120,6 +125,7 @@ export function buildContainers(): AppContainers {
     notifications,
     ledger,
     payments,
+    wallet,
     zones,
     packages,
     quotes,

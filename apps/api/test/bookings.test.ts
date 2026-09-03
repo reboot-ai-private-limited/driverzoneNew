@@ -33,6 +33,11 @@ import {
 import { buildSnapshot } from '../src/modules/settings/domain/setting.entity.js';
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../src/modules/ledger/ledger.public.js';
+import {
+  applyWalletToFare,
+  type NewWalletEntry,
+  type WalletPublicContract,
+} from '../src/modules/wallet/wallet.public.js';
 import type { NotificationsContract } from '../src/modules/notifications/notifications.public.js';
 import type { PaymentsContract, Payment } from '../src/modules/payments/payments.public.js';
 
@@ -95,6 +100,8 @@ function booking(over: Partial<Booking> = {}): Booking {
     direction: null,
     distanceKm: null,
     quoteId: 'qot_1',
+    walletCreditPaise: 0,
+    walletDebtPaise: 0,
     fareSnapshot: fareSnapshot(),
     paymentMode: 'UPI',
     paymentId: 'pay_1',
@@ -213,19 +220,6 @@ function fakeCharges() {
       return cancellation;
     }),
     findCancellationCharge: vi.fn(async () => cancellation),
-    /** Unsettled CUSTOMER charges only — a driver penalty is never a customer's debt. */
-    outstandingDues: vi.fn(async () =>
-      cancellation !== null &&
-      cancellation.chargedTo === 'CUSTOMER' &&
-      cancellation.settledByPaymentId === null
-        ? cancellation.amountPaise
-        : 0,
-    ),
-    settleDues: vi.fn(async (_customerId: string, paymentId: string) => {
-      if (cancellation !== null && cancellation.settledByPaymentId === null) {
-        cancellation = { ...cancellation, settledByPaymentId: paymentId };
-      }
-    }),
     recordPinReport: vi.fn(async (input) => {
       pinReports.push(input);
     }),
@@ -244,6 +238,28 @@ function fakeLedger() {
     }),
   };
   return ledger;
+}
+
+/**
+ * The customer wallet, as a running balance over appended rows — the same arithmetic the real one
+ * does, so a test can assert on what a customer ends up owing rather than on which rows were
+ * written.
+ */
+function fakeWallet(openingPaise = 0) {
+  const rows: NewWalletEntry[] = [];
+  const wallet: WalletPublicContract & { rows: () => NewWalletEntry[] } = {
+    rows: () => rows,
+    append: vi.fn(async (batch: readonly NewWalletEntry[]) => {
+      rows.push(...batch);
+      return [];
+    }),
+    balance: vi.fn(async () => rows.reduce((sum, r) => sum + r.amountPaise, openingPaise)),
+    planFor: vi.fn(async (_customerId: string, farePaise: number) =>
+      applyWalletToFare(rows.reduce((sum, r) => sum + r.amountPaise, openingPaise), farePaise),
+    ),
+    entriesForBooking: vi.fn(async () => []),
+  };
+  return wallet;
 }
 
 function fakeNotifications(): NotificationsContract {
@@ -658,15 +674,18 @@ describe('CancelBookingByCustomerUseCase — the ladder', () => {
     const repo = fakeRepo(seed);
     const charges = fakeCharges();
     const payments = fakePayments();
+    const wallet = fakeWallet();
     return {
       repo,
       charges,
       payments,
+      wallet,
       useCase: new CancelBookingByCustomerUseCase(
         repo,
         charges,
         settings,
         payments,
+        wallet,
         fakeNotifications(),
       ),
     };
@@ -893,14 +912,17 @@ describe('cancelling a CASH booking', () => {
     const repo = fakeRepo(seed);
     const charges = fakeCharges();
     const payments = fakePayments();
+    const wallet = fakeWallet();
     return {
       charges,
       payments,
+      wallet,
       useCase: new CancelBookingByCustomerUseCase(
         repo,
         charges,
         settings,
         payments,
+        wallet,
         fakeNotifications(),
       ),
     };
@@ -923,24 +945,28 @@ describe('cancelling a CASH booking', () => {
     expect(payments.refund).not.toHaveBeenCalled();
   });
 
-  it('leaves the fee UNSETTLED, so it becomes a debt', async () => {
-    const { charges, useCase } = build(cashArrived());
+  it('leaves the fee UNSETTLED, so it becomes a wallet debt', async () => {
+    const { charges, wallet, useCase } = build(cashArrived());
 
     await useCase.execute({ bookingId: 'bkg_1', actorId: 'cus_1', reason: 'Changed my mind' });
 
     expect(charges.cancellation()?.settledByPaymentId).toBeNull();
-    expect(await charges.outstandingDues('cus_1')).toBe(10_000);
+    // The charge row is the audit; the WALLET is what the next booking actually collects.
+    expect(await wallet.balance('cus_1')).toBe(-10_000);
+    expect(wallet.rows()[0]?.entryType).toBe('CANCELLATION_FEE');
   });
 
   it('settles a prepaid booking’s fee immediately — it was kept out of the refund', async () => {
-    const { charges, useCase } = build(
+    const { charges, wallet, useCase } = build(
       booking({ status: 'ARRIVED', paymentMode: 'UPI', assignedAt: new Date() }),
     );
 
     await useCase.execute({ bookingId: 'bkg_1', actorId: 'cus_1', reason: 'Changed my mind' });
 
     expect(charges.cancellation()?.settledByPaymentId).toBe('pay_1');
-    expect(await charges.outstandingDues('cus_1')).toBe(0);
+    // Collected out of its own refund, so it never becomes a debt the next trip carries.
+    expect(await wallet.balance('cus_1')).toBe(0);
+    expect(wallet.rows()).toHaveLength(0);
   });
 });
 

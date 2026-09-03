@@ -213,12 +213,24 @@ export class CompleteTripUseCase {
 }
 
 /**
- * What a cash trip should have collected: the frozen fare plus whatever waiting accrued.
+ * What a cash trip should have collected: the frozen fare, plus whatever waiting accrued, LESS
+ * whatever the customer's wallet credit already covered.
  *
- * A fallback for a driver app that completes a trip without reporting a figure. It is the
- * EXPECTED amount, not an observed one — which is why the reported number wins when there is one,
- * and why a mismatch between them is worth surfacing to ops rather than smoothing over here.
+ * THE CREDIT COMES OFF THE DOOR, and that is the whole reason a cash trip can use a wallet at
+ * all. The driver is told the reduced figure and hands over the reduced figure, so this is what
+ * the `CASH_COLLECTED` row must say — a driver who collected ₹450 on a ₹500 fare and is recorded
+ * as holding ₹500 owes the company ₹50 they never took.
+ *
+ * `walletCreditPaise` is read off the BOOKING rather than from the wallet, because the balance
+ * has moved on since and only the frozen figure describes this trip.
+ *
+ * A fallback for a driver app that completes without reporting a figure. It is the EXPECTED
+ * amount, not an observed one — which is why the reported number wins when there is one, and why
+ * a mismatch is worth surfacing to ops rather than smoothing over here.
  */
 function expectedCashPaise(booking: Booking, waitingPaise: number): number {
-  return booking.fareSnapshot.fare.totalPaise + waitingPaise;
+  return Math.max(
+    0,
+    booking.fareSnapshot.fare.totalPaise + waitingPaise - booking.walletCreditPaise,
+  );
 }

@@ -59,6 +59,22 @@ export class MongoDriverPool implements DriverPoolPort {
      */
     if (query.requireHillVerified) match['canDriveHillVerified'] = true;
 
+    /*
+     * THE COMPETENCY GATE — the `dcc.car_category_id = $carCategory` join in
+     * docs/LLD/dispatch-and-assignment.md, finally wired up.
+     *
+     * EXACT MATCH ON BOTH, and no fallback. A driver who has not declared the category is not
+     * quietly treated as able to drive it: `$eq` against an array field matches when the array
+     * CONTAINS the value, so an empty preference matches nothing and that driver is simply not
+     * offered the trip. That is the intended reading of an unset preference — the alternative,
+     * "unset means anything", sends an SUV to whoever happens to be nearest.
+     *
+     * Skipped entirely when the booking states no requirement, which only happens on rows written
+     * before 2026-09-02. Those keep dispatching exactly as they did.
+     */
+    if (query.carCategory !== null) match['vehicleCategoryPreference'] = query.carCategory;
+    if (query.vehicleType !== null) match['vehicleTypePreferences'] = query.vehicleType;
+
     const rows = await model.aggregate<DriverRow>([
       {
         $geoNear: {

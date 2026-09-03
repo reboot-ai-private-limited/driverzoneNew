@@ -46,6 +46,8 @@ export const colors = {
 
   success: '#1A7F37',
   danger: '#CF222E',
+  /** A danger tint light enough to sit under 13sp text — the pressed state of a red outline. */
+  dangerSoft: '#FDEEF0',
   link: '#1F5FD0',
 } as const;
 

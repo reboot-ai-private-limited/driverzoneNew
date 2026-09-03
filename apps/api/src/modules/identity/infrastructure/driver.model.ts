@@ -1,4 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
+import { CAR_CATEGORIES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
 
 /**
  * INFRASTRUCTURE — the `drivers` collection (docs/LLD/database-schema.md).
@@ -38,7 +39,7 @@ export interface DriverDoc {
   emergencyContact?: { name?: string; phone?: string } | null;
   address?: string | null;
 
-  vehicleTypePreference?: string | null;
+  vehicleTypePreferences?: string[];
   vehicleCategoryPreference?: string[];
 
   canDriveHill: boolean;
@@ -92,9 +93,19 @@ const driverSchema = new Schema<DriverDoc>(
     },
     address: { type: String, default: null },
 
-    // What this driver is COMPETENT to drive, not what they own (docs/LLD/open-questions.md Q5).
-    vehicleTypePreference: { type: String, enum: ['AUTO', 'MANUAL', 'EV', null], default: null },
-    vehicleCategoryPreference: { type: [String], default: [] },
+    /*
+     * What this driver is COMPETENT to drive, not what they own (docs/LLD/open-questions.md Q5),
+     * and the two gates `MongoDriverPool` matches a booking against.
+     *
+     * BOTH DEFAULT TO EMPTY, AND EMPTY MEANS NO OFFERS. A driver who has declared nothing is not
+     * dispatchable — see the eligibility query for why that is deliberate rather than an
+     * oversight. Existing drivers therefore need their preferences set before they ring again.
+     *
+     * `vehicleTypePreferences` was a single `String` until 2026-09-02. Drivers hold several: one
+     * value per driver plus exact matching left three disjoint pools and starved every wave.
+     */
+    vehicleTypePreferences: { type: [String], enum: VEHICLE_TYPE_PREFERENCES, default: [] },
+    vehicleCategoryPreference: { type: [String], enum: CAR_CATEGORIES, default: [] },
 
     // Self-declared; gates nothing on its own. Hill dispatch checks the *Verified* flag, which
     // only an admin sets — hill driving is a safety matter (docs/LLD/open-questions.md Q6).
@@ -121,8 +132,23 @@ const driverSchema = new Schema<DriverDoc>(
 );
 
 driverSchema.index({ lastLocation: '2dsphere' });
-// The dispatch eligibility query, in one index scan.
-driverSchema.index({ isOnDuty: 1, isVerified: 1, isBlocked: 1, carCategoryIds: 1 });
+/*
+ * The dispatch eligibility query, in one index scan.
+ *
+ * `vehicleCategoryPreference` replaces `carCategoryIds` here: that was the legacy ObjectId ref,
+ * nothing has ever populated it, so the old index keyed an empty array on every document.
+ *
+ * ONLY ONE OF THE TWO COMPETENCY ARRAYS IS IN IT. Mongo refuses a compound index that would be
+ * multikey on more than one field, and category is the more selective of the pair — type has
+ * three possible values and most drivers will hold two of them. Type is filtered from the
+ * documents this index already narrowed to.
+ */
+driverSchema.index({
+  isOnDuty: 1,
+  isVerified: 1,
+  isBlocked: 1,
+  vehicleCategoryPreference: 1,
+});
 
 export const DriverModel =
   (mongoose.models['Driver'] as mongoose.Model<DriverDoc> | undefined) ??

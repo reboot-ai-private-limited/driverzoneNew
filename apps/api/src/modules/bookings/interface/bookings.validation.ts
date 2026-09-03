@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PAYMENT_MODES } from '@driverzone/contracts';
+import { CAR_CATEGORIES, PAYMENT_MODES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
 
 const latLng = z.object({
   lat: z.number().min(-90).max(90),
@@ -13,6 +13,13 @@ export const createBookingSchema = z
     dropAddress: z.string().min(1).max(500),
     /** Required, with no default: which way a customer pays is their choice, not ours. */
     paymentMode: z.enum(PAYMENT_MODES),
+    /*
+     * REQUIRED, and deliberately without a default. These decide which drivers are rung, so a
+     * defaulted SEDAN would quietly send a customer with an SUV a driver who never agreed to
+     * drive one — the kind of wrong answer that looks like the system working.
+     */
+    carCategory: z.enum(CAR_CATEGORIES),
+    vehicleType: z.enum(VEHICLE_TYPE_PREFERENCES),
   })
   .strict();
 

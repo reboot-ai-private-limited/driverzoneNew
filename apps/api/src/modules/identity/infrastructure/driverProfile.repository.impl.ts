@@ -1,5 +1,10 @@
 import mongoose from 'mongoose';
-import type { Gender, OnboardingStatus, VehicleTypePreference } from '@driverzone/contracts';
+import type {
+  CarCategory,
+  Gender,
+  OnboardingStatus,
+  VehicleTypePreference,
+} from '@driverzone/contracts';
 import type {
   DriverProfile,
   DriverProfilePatch,
@@ -20,7 +25,7 @@ interface RawDriver {
   alternatePhone?: string | null;
   emergencyContact?: { name?: string; phone?: string } | null;
   address?: string | null;
-  vehicleTypePreference?: string | null;
+  vehicleTypePreferences?: string[];
   vehicleCategoryPreference?: string[];
   canDriveHill?: boolean;
   canDriveHillVerified?: boolean;
@@ -45,8 +50,8 @@ function toDomain(doc: RawDriver): DriverProfile {
         ? { name: contact.name, phone: contact.phone }
         : null,
     address: doc.address ?? null,
-    vehicleTypePreference: (doc.vehicleTypePreference as VehicleTypePreference | null) ?? null,
-    vehicleCategoryPreference: doc.vehicleCategoryPreference ?? [],
+    vehicleTypePreferences: (doc.vehicleTypePreferences as VehicleTypePreference[] | undefined) ?? [],
+    vehicleCategoryPreference: (doc.vehicleCategoryPreference as CarCategory[] | undefined) ?? [],
     canDriveHill: doc.canDriveHill ?? false,
     canDriveHillVerified: doc.canDriveHillVerified ?? false,
     onboardingStatus: (doc.onboardingStatus as OnboardingStatus | undefined) ?? 'INCOMPLETE',
@@ -66,7 +71,9 @@ function toSet(patch: DriverProfilePatch): Record<string, unknown> {
   if (patch.alternatePhone !== undefined) set['alternatePhone'] = patch.alternatePhone;
   if (patch.emergencyContact !== undefined) set['emergencyContact'] = patch.emergencyContact;
   if (patch.address !== undefined) set['address'] = patch.address;
-  if (patch.vehicleTypePreference !== undefined) set['vehicleTypePreference'] = patch.vehicleTypePreference;
+  if (patch.vehicleTypePreferences !== undefined) {
+    set['vehicleTypePreferences'] = patch.vehicleTypePreferences;
+  }
   if (patch.vehicleCategoryPreference !== undefined) {
     set['vehicleCategoryPreference'] = patch.vehicleCategoryPreference;
   }

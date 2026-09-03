@@ -24,6 +24,7 @@ import { CancelBookingSheet } from '@/components/CancelBookingSheet';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { formatTime } from '@/features/booking/schedule';
 import {
+  hasDriverAssigned,
   isCustomerCancellable,
   isLiveStatus,
   isTerminalStatus,
@@ -266,6 +267,7 @@ export default function TripScreen(): ReactElement {
       <CancelBookingSheet
         visible={cancelling}
         bookingId={id}
+        driverAssigned={data !== undefined && hasDriverAssigned(data.status)}
         onClose={() => setCancelling(false)}
         onCancelled={(result) => {
           setCancelling(false);

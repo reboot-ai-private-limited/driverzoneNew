@@ -12,6 +12,10 @@ export interface NewBooking {
   dropAddress: string;
   direction: Booking['direction'];
   distanceKm: number | null;
+  carCategory: Booking['carCategory'];
+  vehicleType: Booking['vehicleType'];
+  walletCreditPaise: number;
+  walletDebtPaise: number;
   fareSnapshot: FareSnapshot;
   paymentMode: Booking['paymentMode'];
   isScheduled: boolean;

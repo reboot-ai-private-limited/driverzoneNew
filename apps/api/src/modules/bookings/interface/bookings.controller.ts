@@ -5,6 +5,7 @@ import { AppError } from '../../../shared/errors/AppError.js';
 import { toMoney } from '../../../shared/money/format.js';
 import type { BookingRepositoryPort } from '../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../domain/chargeRepository.port.js';
+import type { WalletReadContract } from '../../wallet/wallet.public.js';
 import { BookingNotFoundError } from '../domain/booking.errors.js';
 import type { CreateBookingUseCase } from '../application/useCases/createBooking.usecase.js';
 import type {
@@ -30,6 +31,16 @@ import {
   reportPinSchema,
   startTripSchema,
 } from './bookings.validation.js';
+
+/**
+ * How far back the history endpoint reaches.
+ *
+ * A cap rather than pagination, because the screen reading this filters and searches CLIENT-side
+ * over whatever it is given — paging under a client-side filter would silently hide matches on
+ * page two. When history outgrows one response, the filters move to the server in the same change
+ * that adds the cursor, not before.
+ */
+const HISTORY_LIMIT = 100;
 
 function principalOf(req: Request): string {
   const sub = req.principal?.sub;
@@ -66,6 +77,8 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       pickupAddress: body.pickupAddress,
       dropAddress: body.dropAddress,
       paymentMode: body.paymentMode,
+      carCategory: body.carCategory,
+      vehicleType: body.vehicleType,
       idempotencyKey: idempotencyKeyOf(req),
     });
 
@@ -105,6 +118,37 @@ export function makeGetCustomerBookingController(
     ]);
 
     sendSuccess(req, res, toBookingDto({ booking, adjustments, startOtp }), 'Booking');
+  });
+}
+
+/**
+ * `GET /customer/bookings` — the caller's own ride history, newest first.
+ *
+ * SCOPED BY THE TOKEN, never by a query parameter. There is no `?customerId=`, so there is no
+ * shape of this request that reads somebody else's history.
+ *
+ * NO TRIP CODES. `startOtp` is deliberately not passed to the mapper, so every row comes back
+ * with `start_otp: null` — the single-booking read is the one place that code is handed out, and
+ * a list would put every code a customer has ever had into one response.
+ *
+ * Adjustments are fetched per booking rather than in one query, which is `HISTORY_LIMIT` round
+ * trips. That is fine at a customer's own history size and is the honest thing to fix with a
+ * batched `listAdjustmentsFor(bookingIds)` on the port the day a customer has hundreds.
+ */
+export function makeListCustomerBookingsController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const bookings = await repo.listForCustomer(principalOf(req), HISTORY_LIMIT);
+
+    const dtos = await Promise.all(
+      bookings.map(async (booking) =>
+        toBookingDto({ booking, adjustments: await charges.listAdjustments(booking.id) }),
+      ),
+    );
+
+    sendSuccess(req, res, { bookings: dtos }, 'Your rides');
   });
 }
 
@@ -253,15 +297,26 @@ export function makeCompleteTripController(
  *
  * Registered BEFORE `/:id`, or `dues` is read as a booking id and answers 404.
  */
-export function makeGetDuesController(charges: ChargeRepositoryPort): RequestHandler {
+/**
+ * `GET /customer/bookings/dues` — what this customer owes, and therefore how they may pay.
+ *
+ * READS THE WALLET, not the charge rows. The wallet is the single source of an outstanding
+ * balance since it took over from `outstandingDues`, and it answers a question the charges cannot:
+ * a customer holding granted credit owes nothing even with an unsettled fee, because the two net
+ * against each other.
+ */
+export function makeGetDuesController(wallet: WalletReadContract): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const outstandingPaise = await charges.outstandingDues(principalOf(req));
+    const balancePaise = await wallet.balance(principalOf(req));
+    const outstandingPaise = Math.max(0, -balancePaise);
 
     sendSuccess(
       req,
       res,
       {
         outstanding: toMoney(outstandingPaise),
+        /** Credit, where there is any — the same figure the fare sheet takes off the total. */
+        credit: toMoney(Math.max(0, balancePaise)),
         // Cash cannot clear a debt, so it is withheld until there is none.
         payment_modes: outstandingPaise > 0 ? ['UPI'] : ['UPI', 'CASH'],
       },

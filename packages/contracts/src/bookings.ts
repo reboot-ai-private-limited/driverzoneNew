@@ -1,3 +1,4 @@
+import type { CarCategory, VehicleTypePreference } from './identity.js';
 import type { Money } from './http.js';
 
 /**
@@ -68,6 +69,14 @@ export interface CreateBookingRequest {
   pickupAddress: string;
   dropAddress: string;
   paymentMode: PaymentMode;
+  /**
+   * The car the driver will be driving — the CUSTOMER's own car, since that is the whole service
+   * (docs/LLD/open-questions.md Q5). Chosen at booking rather than at quote time because neither
+   * field prices anything: an SUV and a hatchback pay the same fare for the same trip (retired as
+   * a pricing dimension on 2026-08-28, docs/decision-log.md). What they decide is WHO RINGS.
+   */
+  carCategory: CarCategory;
+  vehicleType: VehicleTypePreference;
 }
 
 export interface CreateBookingResponse {
@@ -99,6 +108,16 @@ export interface BookingDto {
   is_scheduled: boolean;
 
   /**
+   * What the customer said they would be putting the driver in, and what dispatch matched on.
+   *
+   * NULL ON BOOKINGS MADE BEFORE 2026-09-02, when the choice did not exist. A null is not "any" —
+   * it is "never asked", and dispatch treats it that way: an old booking skips the competency
+   * filter rather than matching every driver or none.
+   */
+  car_category: CarCategory | null;
+  vehicle_type: VehicleTypePreference | null;
+
+  /**
    * Incity only, frozen at booking time. Outstation is null — a package there is a package
    * however long it takes, there is no minutes figure to freeze (see the same field on
    * `QuoteOptionDto`). Lets the trip screen say when an incity rental is due back without
@@ -127,6 +146,18 @@ export interface BookingDto {
   /** Charges decided after the quote — waiting time so far. Never edits `fare`. */
   adjustments: Array<{ type: string; label: string; amount: Money }>;
 
+  /**
+   * What the customer's wallet did to this trip, frozen when it was booked.
+   *
+   * `wallet_credit` came OFF the fare and `wallet_debt` (an older unpaid cancellation fee) was
+   * added to it — so what was actually payable is `fare.total − wallet_credit + wallet_debt`,
+   * before any adjustment. Never both non-zero: a balance is either credit or debt.
+   *
+   * Zero on bookings made before wallets existed, which is the truthful answer for them.
+   */
+  wallet_credit: Money;
+  wallet_debt: Money;
+
   timestamps: {
     assigned_at: string | null;
     en_route_at: string | null;
@@ -137,6 +168,19 @@ export interface BookingDto {
   };
 
   cancellation_reason: string | null;
+}
+
+/**
+ * `GET /customer/bookings` — the signed-in customer's own ride history, newest first.
+ *
+ * THE SAME `BookingDto` AS THE SINGLE READ, not a trimmed list row. A history list and a booking
+ * detail are the same object seen at two distances, and giving the list its own narrower shape
+ * would mean every field the detail screen later wants is a second endpoint change. The one
+ * difference is enforced in the mapper rather than the type: `start_otp` is null on every row
+ * here, because a list of trip codes is not something a history screen has any business holding.
+ */
+export interface ListBookingsResponse {
+  bookings: BookingDto[];
 }
 
 /** One row of the booking's history. Rendered verbatim in the admin panel's detail view. */

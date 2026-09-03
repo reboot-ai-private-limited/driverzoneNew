@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import type { AuthUserDto, OtpVerifyResponse } from '@driverzone/contracts';
 import * as authApi from '../api/endpoints/auth';
 import { clearRefreshToken, readRefreshToken, writeRefreshToken } from './tokenStore';
@@ -14,6 +15,13 @@ import { clearRefreshToken, readRefreshToken, writeRefreshToken } from './tokenS
  *     credential for nothing in return.
  *   - Renewal is PROACTIVE, on a timer at 80% of the 15-minute TTL, not reactive on a 401. A
  *     customer tapping "Confirm booking" must not be the one who discovers the token expired.
+ *   - AND ON RESUME, because a timer alone is not enough on a phone. JS timers are throttled or
+ *     suspended while an app is backgrounded, so the 12-minute one does not reliably fire in a
+ *     backgrounded app — a customer who checks their trip, locks the phone for twenty minutes and
+ *     comes back would otherwise return to an expired token, and the trip screen's very first poll
+ *     would 401. Since renewal is deliberately not reactive, nothing would recover it and the
+ *     screen would show an error for a trip that is fine. Resuming is simply another moment to be
+ *     proactive at.
  *   - Renewal is SINGLE-FLIGHT. This is the dangerous part: refresh tokens ROTATE, and auth.md
  *     defines presenting a spent one as theft — it revokes the entire session family. Two
  *     screens refreshing concurrently would log the customer out mid-trip, by their own app,
@@ -36,6 +44,15 @@ let accessToken: string | null = null;
 let state: SessionState = { status: 'booting', user: null, isNewUser: false };
 let renewTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlightRenewal: Promise<string | null> | null = null;
+
+/**
+ * When the current access token was issued, so a resume can tell a fresh token from a stale one.
+ *
+ * `Date.now()` rather than a decoded `exp`: this only decides whether to renew EARLY, and being
+ * wrong costs one extra refresh rather than a wrong session.
+ */
+let accessTokenIssuedAt: number | null = null;
+let appStateSubscription: { remove: () => void } | null = null;
 
 const listeners = new Set<(next: SessionState) => void>();
 
@@ -68,14 +85,38 @@ function scheduleRenewal(): void {
 function stopRenewal(): void {
   if (renewTimer !== null) clearTimeout(renewTimer);
   renewTimer = null;
+  accessTokenIssuedAt = null;
+
+  appStateSubscription?.remove();
+  appStateSubscription = null;
+}
+
+/**
+ * Renew now if the token is old enough that the timer should already have fired.
+ *
+ * Called when the app comes back to the foreground. It goes through `renew()` like everything
+ * else, so it shares the single-flight promise and cannot race the timer into presenting a spent
+ * refresh token — which auth.md defines as theft and answers by revoking the whole family.
+ */
+function watchAppState(): void {
+  if (appStateSubscription !== null) return;
+
+  appStateSubscription = AppState.addEventListener('change', (next) => {
+    if (next !== 'active' || accessTokenIssuedAt === null) return;
+
+    const age = Date.now() - accessTokenIssuedAt;
+    if (age >= ACCESS_TOKEN_TTL_MS * RENEW_AT_FRACTION) void renew();
+  });
 }
 
 async function applyTokens(access: string, refresh: string | undefined): Promise<void> {
   accessToken = access;
+  accessTokenIssuedAt = Date.now();
   // The server rotates on every refresh, so an absent `refresh_token` means "keep the one you
   // have" — overwriting the stored value with nothing would strand the next launch.
   if (refresh !== undefined) await writeRefreshToken(refresh);
   scheduleRenewal();
+  watchAppState();
 }
 
 /**

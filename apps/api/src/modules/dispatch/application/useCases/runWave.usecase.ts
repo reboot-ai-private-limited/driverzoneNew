@@ -66,6 +66,8 @@ export class RunDispatchWaveUseCase {
         pickup: current.pickup,
         radiusMetres,
         requireHillVerified: current.fareSnapshot.source.terrain === 'HILL',
+        carCategory: current.carCategory,
+        vehicleType: current.vehicleType,
         excludeDriverIds: alreadyOffered,
         maxNegativeBalancePaise: rupeesToPaise(snapshot['driver.max_negative_balance']),
         now: new Date(),

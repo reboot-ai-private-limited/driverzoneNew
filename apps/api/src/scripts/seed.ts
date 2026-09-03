@@ -140,8 +140,13 @@ async function seedDriver(): Promise<void> {
         gender: 'MALE',
         experienceYears: 6,
         address: 'Matigara, Siliguri',
-        vehicleTypePreference: 'MANUAL',
-        vehicleCategoryPreference: ['SEDAN', 'SUV'],
+        /*
+         * Broad on purpose. An empty preference means NO OFFERS, so a narrowly-declared dev
+         * driver would silently fail to ring for most test bookings and look like broken
+         * dispatch. Every category and every transmission keeps the seeded driver a constant.
+         */
+        vehicleTypePreferences: ['AUTO', 'MANUAL', 'EV'],
+        vehicleCategoryPreference: ['HATCHBACK', 'SEDAN', 'SUV', 'LUXURY', 'EV'],
 
         // Approved and verified, so a developer can go on duty immediately rather than walking
         // the onboarding flow every time the database is reset. `verifiedBy` points at the

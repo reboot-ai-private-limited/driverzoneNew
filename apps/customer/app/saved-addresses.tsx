@@ -50,6 +50,19 @@ export default function SavedAddressesScreen(): ReactElement {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/*
+          A DELETE THAT FAILED HAS TO SAY SO. Without this the row simply stays put — which looks
+          identical to not having tapped it, so the customer taps again, and the only feedback
+          either attempt gives is a spinner that stops.
+        */}
+        {forget.isError ? (
+          <Text style={styles.error} accessibilityLiveRegion="polite">
+            {forget.error instanceof Error
+              ? forget.error.message
+              : 'We could not remove that address.'}
+          </Text>
+        ) : null}
+
         {addresses.length === 0 ? (
           <Text style={styles.emptyBody}>
             Nothing saved yet. Save a place from the map and it will show up here.
@@ -94,6 +107,7 @@ const styles = StyleSheet.create({
 
   content: { padding: space.lg },
   emptyBody: { ...text.body, color: colors.muted },
+  error: { ...text.caption, color: colors.danger, marginBottom: space.sm },
 
   hint: {
     flexDirection: 'row',

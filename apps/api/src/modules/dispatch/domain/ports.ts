@@ -1,4 +1,4 @@
-import type { DeliveryChannel } from '@driverzone/contracts';
+import type { CarCategory, DeliveryChannel, VehicleTypePreference } from '@driverzone/contracts';
 import type { DispatchOffer, DriverCandidate, OfferStatus } from './offer.entity.js';
 
 export interface NewOffer {
@@ -54,6 +54,16 @@ export interface DriverPoolQuery {
   radiusMetres: number;
   /** A hill destination needs a driver verified for hills, not merely one who says they can. */
   requireHillVerified: boolean;
+  /**
+   * The competencies this trip demands, from the booking.
+   *
+   * NULL MEANS THE BOOKING NEVER STATED ONE — only true of rows predating the choice — and the
+   * filter is skipped for it. That is not the same as an empty driver preference, which means the
+   * DRIVER never stated one and is excluded: a trip with no stated requirement can be met by
+   * anyone, a driver with no stated competency can meet nothing.
+   */
+  carCategory: CarCategory | null;
+  vehicleType: VehicleTypePreference | null;
   /** Drivers already rung for this booking. */
   excludeDriverIds: readonly string[];
   /** A driver owing more than this is not offered work until they settle. */

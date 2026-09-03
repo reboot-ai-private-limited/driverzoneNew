@@ -124,3 +124,15 @@ export function showsStartOtp(status: BookingStatus): boolean {
 export function isCustomerCancellable(status: BookingStatus): boolean {
   return status !== 'STARTED' && !isTerminalStatus(status);
 }
+
+/**
+ * Whether a driver is already attached to this booking.
+ *
+ * The cancel sheet is the only caller, and it needs this to offer reasons that are not nonsense:
+ * "Driver is taking too long" while dispatch is still ringing phones names a driver who does not
+ * exist, and "Taking too long to find a driver" once one has accepted blames the search for
+ * something the driver is doing.
+ */
+export function hasDriverAssigned(status: BookingStatus): boolean {
+  return status === 'ASSIGNED' || status === 'DRIVER_EN_ROUTE' || status === 'ARRIVED';
+}

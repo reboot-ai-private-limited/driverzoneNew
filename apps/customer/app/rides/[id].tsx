@@ -1,147 +1,236 @@
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { type ReactElement, type ReactNode } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import {
-  type DemoInvoiceLine,
-  type DemoRide,
-  findDemoRide,
-  formatDemoPaise,
-} from '@/features/rides/demoRides';
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {
+  CAR_CATEGORY_LABELS,
+  VEHICLE_TYPE_LABELS,
+  type BookingDto,
+  type Money,
+} from '@driverzone/contracts';
+import {
+  rideHappenedAt,
+  rideTotalPaise,
+  toRideStatus,
+  type RideStatus,
+} from '@/features/rides/rideHistory';
+import { getBooking } from '@/lib/api/endpoints/bookings';
+import { formatPaise } from '@/lib/money';
+import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /**
- * Ride detail — reached only from the demo Ride History list.
+ * Ride detail — one past booking, read from the API.
  *
- * ALL DEMO, for the same reason the list above it is: there is no `GET /customer/bookings/:id`
- * for a booking this app didn't just make, and no endpoint at all for a driver's photo, rating,
- * phone, experience or vehicle list, a payment transaction id, or an invoice discount line — none
- * of these exist anywhere in `@driverzone/contracts` today.
+ * WAS ALL DEMO until `GET /customer/bookings` gave the history list real rows to link to. It reads
+ * `GET /customer/bookings/:id`, the same endpoint the live trip screen uses.
  *
- * This is a DIFFERENT screen from `app/trip/[id].tsx`, which is real, reads the actual booking
- * API, and is what a customer sees for a trip they just booked. That screen intentionally omits
- * everything this one shows, because it has nothing honest to show it with.
+ * FOUR SECTIONS LOST THEIR INVENTED PARTS, and none of them was replaced with a plausible
+ * constant: the driver's rating, years of experience and vehicle list; the payment transaction id;
+ * the invoice discount line; and "Your rating". None exists in `@driverzone/contracts`. The
+ * timeline and the invoice, by contrast, turned out to be the parts the API models best — the
+ * timeline is `timestamps`, the invoice is `fare.lines` plus `adjustments`.
+ *
+ * STILL A DIFFERENT SCREEN FROM `app/trip/[id].tsx`, which polls a trip that is happening now and
+ * carries the start OTP, the cancel bar and the live status. This one is a receipt: no polling, no
+ * actions, and it is reached from history rather than from booking.
  */
 export default function RideDetailScreen(): ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const ride = findDemoRide(id);
 
-  if (ride === null) {
+  /*
+   * Shares `keys.bookings.detail(id)` with the trip screen deliberately — it is the same booking
+   * from the same endpoint, so opening a recent trip from history reads the cache the trip screen
+   * already filled instead of a second request.
+   */
+  const booking = useQuery({
+    queryKey: keys.bookings.detail(id),
+    queryFn: () => getBooking(id),
+  });
+
+  const ride = booking.data;
+
+  if (booking.isPending) {
     return (
       <View style={styles.root}>
         <Header />
         <View style={styles.centre}>
-          <Text style={styles.notFound}>This ride could not be found.</Text>
+          <ActivityIndicator color={colors.muted} />
         </View>
       </View>
     );
   }
 
-  const when = new Date(ride.at);
-  const total = ride.invoice.reduce((sum, line) => sum + line.amount, 0) - ride.discountPaise;
+  if (booking.isError || ride === undefined) {
+    return (
+      <View style={styles.root}>
+        <Header />
+        <View style={styles.centre}>
+          <Text style={styles.notFound}>
+            {booking.error instanceof Error
+              ? booking.error.message
+              : 'This ride could not be found.'}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  const status = toRideStatus(ride.status);
+  const when = new Date(rideHappenedAt(ride));
+  const totalPaise = rideTotalPaise(ride);
+  const steps = timelineOf(ride);
+  const paidAt = ride.timestamps.completed_at;
 
   return (
     <View style={styles.root}>
       <Header onDownload={() => void shareInvoice(ride)} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.demoBadge}>
-          <Feather name="info" size={12} color={colors.muted} />
-          <Text style={styles.demoBadgeText}>Demo data — not a real ride.</Text>
-        </View>
-
         <View style={styles.summaryCard}>
-          <SummaryRow label="Booking ID" value={ride.id} />
+          <SummaryRow label="Booking ID" value={ride.reference} />
           <SummaryRow label="Date & Time" value={formatDateTime(when)} />
           <SummaryRow
             label="Status"
-            value={STATUS_LABEL[ride.status]}
-            valueColor={STATUS_COLOR[ride.status]}
+            value={STATUS_LABEL[status]}
+            valueColor={STATUS_COLOR[status]}
           />
-          <SummaryRow label="Trip Type" value={ride.tripType} />
+          <SummaryRow label="Trip Type" value={SERVICE_LABEL[ride.service_type]} />
+          {/* Only on bookings placed since the car choice existed — older rows have no answer,
+              and a dash there would read as "no car" rather than "never asked". */}
+          {ride.car_category === null ? null : (
+            <SummaryRow
+              label="Car"
+              value={
+                ride.vehicle_type === null
+                  ? CAR_CATEGORY_LABELS[ride.car_category]
+                  : `${CAR_CATEGORY_LABELS[ride.car_category]} · ${VEHICLE_TYPE_LABELS[ride.vehicle_type]}`
+              }
+            />
+          )}
         </View>
 
-        <SectionCard title="Driver details">
-          <View style={styles.driverRow}>
-            <View style={styles.avatar}>
-              <Feather name="user" size={22} color={colors.fg} />
-            </View>
-            <View style={styles.flex}>
-              <View style={styles.driverNameRow}>
-                <Text style={styles.driverName}>{ride.driverName}</Text>
-                <Feather name="star" size={13} color={colors.brand} style={styles.starIcon} />
-                <Text style={styles.driverRating}>{ride.driverRating.toFixed(1)}</Text>
+        {/* No card at all rather than an empty one: a trip that never found a driver has nothing
+            to say here, and "Driver details: —" is a worse answer than the absence. */}
+        {ride.driver === null ? null : (
+          <SectionCard title="Driver details">
+            <View style={styles.driverRow}>
+              <View style={styles.avatar}>
+                <Feather name="user" size={22} color={colors.fg} />
               </View>
-              <View style={styles.driverMetaRow}>
-                <Feather name="shield" size={12} color={colors.muted} style={styles.metaIcon} />
-                <Text style={styles.driverMeta}>
-                  {ride.driverExperienceYears}+ Years Experience
-                </Text>
-              </View>
-              <View style={styles.driverMetaRow}>
-                <Feather name="truck" size={12} color={colors.muted} style={styles.metaIcon} />
-                <Text style={styles.driverMeta}>{ride.driverVehicles}</Text>
+              <View style={styles.flex}>
+                <Text style={styles.driverName}>{ride.driver.name ?? 'Your driver'}</Text>
               </View>
             </View>
-          </View>
-        </SectionCard>
+          </SectionCard>
+        )}
 
-        <SectionCard title="Trip timeline">
-          {ride.timeline.map((step, index) => (
-            <View key={step.label} style={styles.timelineRow}>
-              <View style={styles.timelineMarkerCol}>
-                <View
-                  style={[
-                    styles.timelineDot,
-                    { borderColor: TIMELINE_COLORS[index % TIMELINE_COLORS.length] },
-                  ]}
-                />
-                {index === ride.timeline.length - 1 ? null : <View style={styles.timelineLine} />}
-              </View>
-              <View style={styles.timelineText}>
-                <View style={styles.timelineTopRow}>
-                  <Text style={styles.timelineLabel}>{step.label}</Text>
-                  <Text style={styles.timelineTime}>{formatClock(new Date(step.at))}</Text>
+        {steps.length === 0 ? null : (
+          <SectionCard title="Trip timeline">
+            {steps.map((step, index) => (
+              <View key={step.label} style={styles.timelineRow}>
+                <View style={styles.timelineMarkerCol}>
+                  <View
+                    style={[
+                      styles.timelineDot,
+                      { borderColor: TIMELINE_COLORS[index % TIMELINE_COLORS.length] },
+                    ]}
+                  />
+                  {index === steps.length - 1 ? null : <View style={styles.timelineLine} />}
                 </View>
-                <Text style={styles.timelineNote}>{step.note}</Text>
+                <View style={styles.timelineText}>
+                  <View style={styles.timelineTopRow}>
+                    <Text style={styles.timelineLabel}>{step.label}</Text>
+                    <Text style={styles.timelineTime}>{formatClock(new Date(step.at))}</Text>
+                  </View>
+                  {step.note === null ? null : (
+                    <Text style={styles.timelineNote}>{step.note}</Text>
+                  )}
+                </View>
               </View>
-            </View>
-          ))}
-        </SectionCard>
+            ))}
+          </SectionCard>
+        )}
 
         <View style={styles.twoCol}>
           <SectionCard title="Invoice summary" style={styles.colCard}>
-            {ride.invoice.map((line) => (
-              <InvoiceRow key={line.label} line={line} />
+            {ride.fare.lines.map((line) => (
+              <InvoiceRow key={line.code} label={line.label} amount={line.amount} />
             ))}
-            {ride.discountPaise > 0 ? (
-              <InvoiceRow line={{ label: 'Discount', amount: -ride.discountPaise }} tone="good" />
+            {/*
+              ADJUSTMENTS ARE LISTED, NOT FOLDED IN. Waiting time and a late fine are decided
+              after the quote and never edit the fare (invariant B-1) — a customer looking at a
+              bill bigger than the price they agreed to is owed the line that explains it.
+            */}
+            {ride.adjustments.map((adjustment) => (
+              <InvoiceRow
+                key={adjustment.type}
+                label={adjustment.label}
+                amount={adjustment.amount}
+              />
+            ))}
+            {/*
+              WHAT THE WALLET DID, as its own lines below the fare. Neither edits `fare.total` —
+              the credit came off what was payable and the debt was an older fee collected with
+              this trip — so folding them into the total would make the receipt disagree with the
+              fare the customer agreed to.
+            */}
+            {ride.wallet_credit.amount_paise > 0 ? (
+              <InvoiceRow label="Wallet credit" amount={negated(ride.wallet_credit)} />
             ) : null}
+            {ride.wallet_debt.amount_paise > 0 ? (
+              <InvoiceRow label="Earlier cancellation fee" amount={ride.wallet_debt} />
+            ) : null}
+
             <View style={styles.rule} />
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total Amount</Text>
-              <Text style={styles.totalValue}>{formatDemoPaise(total)}</Text>
+              <Text style={styles.totalValue}>{formatPaise(totalPaise)}</Text>
             </View>
+            {ride.wallet_credit.amount_paise > 0 || ride.wallet_debt.amount_paise > 0 ? (
+              <Text style={styles.paidNote}>
+                You paid{' '}
+                {formatPaise(
+                  totalPaise - ride.wallet_credit.amount_paise + ride.wallet_debt.amount_paise,
+                )}{' '}
+                for this trip.
+              </Text>
+            ) : null}
           </SectionCard>
 
           <SectionCard title="Payment status" style={styles.colCard}>
-            {ride.status === 'CANCELLED' ? (
-              <Text style={styles.paymentNone}>No payment was collected.</Text>
+            {status === 'CANCELLED' ? (
+              /*
+               * Says nothing about a cancellation FEE, which is a charge row against the customer
+               * and not this booking's payment. Claiming "no payment was collected" where a fee
+               * was is exactly the kind of thing a customer would screenshot.
+               */
+              <Text style={styles.paymentNone}>This trip was not completed.</Text>
             ) : (
               <>
-                <View style={styles.paidChip}>
-                  <Text style={styles.paidChipText}>Paid</Text>
-                </View>
+                {/* "Paid" only once the trip is done. A cash trip is settled with the driver at
+                    the end, so a running trip showing Paid would be wrong on the common path. */}
+                {paidAt === null ? null : (
+                  <View style={styles.paidChip}>
+                    <Text style={styles.paidChipText}>Paid</Text>
+                  </View>
+                )}
                 <Text style={styles.paymentLabel}>Payment method</Text>
-                <Text style={styles.paymentValue}>{ride.paymentMethod}</Text>
-                <Text style={styles.paymentLabel}>Paid on</Text>
-                <Text style={styles.paymentValue}>{formatDateTime(when)}</Text>
-                {ride.transactionId === null ? null : (
+                <Text style={styles.paymentValue}>{ride.payment_mode}</Text>
+                {paidAt === null ? null : (
                   <>
-                    <Text style={styles.paymentLabel}>Transaction ID</Text>
-                    <Text style={styles.paymentValue} numberOfLines={1}>
-                      {ride.transactionId}
-                    </Text>
+                    <Text style={styles.paymentLabel}>Paid on</Text>
+                    <Text style={styles.paymentValue}>{formatDateTime(new Date(paidAt))}</Text>
                   </>
                 )}
               </>
@@ -149,27 +238,42 @@ export default function RideDetailScreen(): ReactElement {
           </SectionCard>
         </View>
 
-        {ride.yourRating === null ? null : (
-          <SectionCard title="Your rating">
-            <View style={styles.ratingRow}>
-              <View style={styles.starsRow}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Feather
-                    key={n}
-                    name="star"
-                    size={18}
-                    color={n <= (ride.yourRating ?? 0) ? colors.brand : colors.border}
-                    style={styles.starSpacing}
-                  />
-                ))}
-              </View>
-              <Text style={styles.ratedOn}>Rated on {formatDate(when)}</Text>
-            </View>
+        {ride.cancellation_reason === null ? null : (
+          <SectionCard title="Why it was cancelled">
+            <Text style={styles.paymentValue}>{ride.cancellation_reason}</Text>
           </SectionCard>
         )}
       </ScrollView>
     </View>
   );
+}
+
+interface TimelineStep {
+  label: string;
+  at: string;
+  note: string | null;
+}
+
+/**
+ * The trip's own timestamps, in the order they can only ever happen in.
+ *
+ * BUILT BY FILTERING, not by assuming. A cancelled trip has no `started_at`, a trip that ended
+ * early has no `arrived_at`, and every one of the six is independently nullable — so each step is
+ * included only if its timestamp exists, and a booking with none renders no card at all.
+ */
+function timelineOf(booking: BookingDto): TimelineStep[] {
+  const { timestamps } = booking;
+
+  const candidates: Array<{ label: string; at: string | null; note: string | null }> = [
+    { label: 'Driver assigned', at: timestamps.assigned_at, note: booking.driver?.name ?? null },
+    { label: 'On the way', at: timestamps.en_route_at, note: null },
+    { label: 'Arrived at pickup', at: timestamps.arrived_at, note: booking.pickup.address },
+    { label: 'Trip started', at: timestamps.started_at, note: null },
+    { label: 'Trip completed', at: timestamps.completed_at, note: booking.drop.address },
+    { label: 'Cancelled', at: timestamps.cancelled_at, note: booking.cancellation_reason },
+  ];
+
+  return candidates.filter((step): step is TimelineStep => step.at !== null);
 }
 
 function Header({ onDownload }: { onDownload?: () => void }): ReactElement {
@@ -239,29 +343,55 @@ function SectionCard({
   );
 }
 
-function InvoiceRow({ line, tone }: { line: DemoInvoiceLine; tone?: 'good' }): ReactElement {
+/**
+ * Renders the server's own `amount_display` rather than reformatting the paise — the API is the
+ * one place fare formatting is decided, so all four clients show a line identically. A negative
+ * line (a discount, if one ever ships) keeps the green treatment.
+ */
+function InvoiceRow({ label, amount }: { label: string; amount: Money }): ReactElement {
+  const negative = amount.amount_paise < 0;
+
   return (
     <View style={styles.invoiceRow}>
       <Text style={styles.invoiceLabel} numberOfLines={1}>
-        {line.label}
+        {label}
       </Text>
-      <Text style={[styles.invoiceValue, tone === 'good' && styles.invoiceValueGood]}>
-        {line.amount < 0 ? '-' : ''}
-        {formatDemoPaise(Math.abs(line.amount))}
+      <Text style={[styles.invoiceValue, negative && styles.invoiceValueGood]}>
+        {amount.amount_display}
       </Text>
     </View>
   );
 }
 
-const STATUS_LABEL: Record<DemoRide['status'], string> = {
+/**
+ * Flips a Money's sign for display, keeping the server's formatting.
+ *
+ * Wallet credit comes down as a POSITIVE figure — it is credit, and the wallet screen reads it
+ * that way — but on an invoice it is a deduction, so it has to render with a minus without this
+ * screen reformatting the rupees itself.
+ */
+function negated(amount: Money): Money {
+  return {
+    amount_paise: -amount.amount_paise,
+    amount_display: `-${amount.amount_display}`,
+  };
+}
+
+const STATUS_LABEL: Record<RideStatus, string> = {
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
   RUNNING: 'Running',
 };
-const STATUS_COLOR: Record<DemoRide['status'], string> = {
+const STATUS_COLOR: Record<RideStatus, string> = {
   COMPLETED: colors.success,
   CANCELLED: colors.danger,
   RUNNING: colors.link,
+};
+
+/** `ServiceType` reads as an enum on the wire; this is what a customer calls it. */
+const SERVICE_LABEL: Record<BookingDto['service_type'], string> = {
+  INCITY: 'In city',
+  OUTSTATION: 'Outstation',
 };
 const TIMELINE_COLORS = [colors.success, colors.brand, colors.danger];
 
@@ -288,17 +418,18 @@ function formatDateTime(at: Date): string {
  * customer actually save or send it (to Files, WhatsApp, email — whatever the sheet offers) rather
  * than pressing a button that does nothing.
  */
-async function shareInvoice(ride: DemoRide): Promise<void> {
-  const total = ride.invoice.reduce((sum, line) => sum + line.amount, 0) - ride.discountPaise;
+async function shareInvoice(ride: BookingDto): Promise<void> {
   const lines = [
     `DriverZone — Invoice`,
-    `Booking ID: ${ride.id}`,
-    `Date: ${formatDateTime(new Date(ride.at))}`,
+    `Booking ID: ${ride.reference}`,
+    `Date: ${formatDateTime(new Date(rideHappenedAt(ride)))}`,
+    `From: ${ride.pickup.address}`,
+    `To: ${ride.drop.address}`,
     '',
-    ...ride.invoice.map((line) => `${line.label}: ${formatDemoPaise(line.amount)}`),
-    ...(ride.discountPaise > 0 ? [`Discount: -${formatDemoPaise(ride.discountPaise)}`] : []),
+    ...ride.fare.lines.map((line) => `${line.label}: ${line.amount.amount_display}`),
+    ...ride.adjustments.map((a) => `${a.label}: ${a.amount.amount_display}`),
     '',
-    `Total: ${formatDemoPaise(total)}`,
+    `Total: ${formatPaise(rideTotalPaise(ride))}`,
   ];
 
   try {
@@ -413,6 +544,7 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
   totalLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 13 },
   totalValue: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 13 },
+  paidNote: { ...text.caption, color: colors.muted, marginTop: space.xs },
 
   paidChip: {
     alignSelf: 'flex-start',

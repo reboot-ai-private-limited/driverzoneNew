@@ -1,10 +1,12 @@
 import type {
   BookingActorType,
   BookingStatus,
+  CarCategory,
   Direction,
   PaymentMode,
   ServiceType,
   Terrain,
+  VehicleTypePreference,
 } from '@driverzone/contracts';
 import type { FareBreakdown } from '../../pricing/pricing.public.js';
 
@@ -143,6 +145,28 @@ export interface Booking {
   dropAddress: string;
   direction: Direction | null;
   distanceKm: number | null;
+
+  /**
+   * The car this trip is for, and how it is driven — the two competencies dispatch matches a
+   * driver against. Null only on bookings placed before the choice existed (2026-09-02), which
+   * the eligibility query reads as "no requirement", never as "a requirement no one meets".
+   */
+  carCategory: CarCategory | null;
+  vehicleType: VehicleTypePreference | null;
+
+  /**
+   * What the customer's wallet did to this trip's price, frozen at creation.
+   *
+   * STORED, NOT RECOMPUTED. The balance moves — a later fine, a later grant — so asking the wallet
+   * again at completion would produce a different answer from the one the customer agreed to and
+   * the one the payment intent was raised for. These two are what actually happened to THIS
+   * booking, and `expectedCashPaise` and the invoice both read them.
+   *
+   * Both are non-negative. `walletCreditPaise` came off the fare; `walletDebtPaise` was added to
+   * it. They are never both positive: a balance is either a credit or a debt.
+   */
+  walletCreditPaise: number;
+  walletDebtPaise: number;
 
   quoteId: string;
   fareSnapshot: FareSnapshot;

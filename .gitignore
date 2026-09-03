@@ -32,3 +32,6 @@ coverage/
 # docs/engineering/mobile-in-monorepo.md.
 apps/*/android/
 apps/*/ios/
+apps/api/firebaseServiceAccount.json
+apps/api/**/firebase*serviceaccount*.json
+apps/api/secrets/

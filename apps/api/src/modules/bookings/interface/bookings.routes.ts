@@ -3,6 +3,7 @@ import { requireAuth } from '../../../shared/http/auth.middleware.js';
 
 export interface CustomerControllers {
   create: RequestHandler;
+  list: RequestHandler;
   dues: RequestHandler;
   get: RequestHandler;
   cancel: RequestHandler;
@@ -29,6 +30,7 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
   router.use(requireAuth('CUSTOMER'));
 
   router.post('/', handlers.create);
+  router.get('/', handlers.list);
   // BEFORE `/:id`, or Express reads `dues` as a booking id and answers 404.
   router.get('/dues', handlers.dues);
   router.get('/:id', handlers.get);

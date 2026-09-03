@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CAR_CATEGORIES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
 import { OTP_LENGTH } from '../domain/otpChallenge.entity.js';
 
 /**
@@ -151,8 +152,16 @@ export const updateDriverProfileSchema = z.object({
   alternate_number: mobileNumber.nullable().optional(),
   emergency_contact: emergencyContact.nullable().optional(),
   address: freeText.nullable().optional(),
-  vehicle_type_preference: z.enum(['AUTO', 'MANUAL', 'EV']).nullable().optional(),
-  vehicle_category_preference: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+  /*
+   * The two competency gates dispatch matches on, so both are closed enums rather than free
+   * strings: a typo'd 'suv' used to be accepted and stored, and would then have silently matched
+   * no booking forever. Empty arrays are legal and mean "not dispatchable yet".
+   */
+  vehicle_type_preferences: z.array(z.enum(VEHICLE_TYPE_PREFERENCES)).max(3).optional(),
+  vehicle_category_preference: z
+    .array(z.enum(CAR_CATEGORIES))
+    .max(CAR_CATEGORIES.length)
+    .optional(),
   // Self-declaration only. `can_drive_hill_verified` is absent by design — only an admin sets it.
   can_drive_hill: z.boolean().optional(),
 });

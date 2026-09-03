@@ -112,7 +112,7 @@ function driverProfile(over: Partial<DriverProfile> = {}): DriverProfile {
     alternatePhone: null,
     emergencyContact: null,
     address: 'Matigara, Siliguri',
-    vehicleTypePreference: null,
+    vehicleTypePreferences: [],
     vehicleCategoryPreference: [],
     canDriveHill: false,
     canDriveHillVerified: false,

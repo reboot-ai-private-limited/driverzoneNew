@@ -117,6 +117,9 @@ export default function AccountScreen(): ReactElement {
             label="Saved Addresses"
             onPress={() => router.push('/saved-addresses')}
           />
+          {/* Above the payment method on purpose: the wallet is what a trip is paid from FIRST,
+              and the payment mode only settles whatever is left. */}
+          <MenuRow icon="gift" label="Wallet" onPress={() => router.push('/wallet')} />
           <MenuRow
             icon="credit-card"
             label="Preferred Payment Method"

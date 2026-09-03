@@ -1,13 +1,18 @@
 import { Feather } from '@expo/vector-icons';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
-import type { CreateBookingResponse } from '@driverzone/contracts';
+import type {
+  CarCategory,
+  CreateBookingResponse,
+  VehicleTypePreference,
+} from '@driverzone/contracts';
 import { BottomSheet } from '@/components/BottomSheet';
+import { CarChoice } from '@/components/CarChoice';
 import { Checkbox } from '@/components/Checkbox';
 import { FareOptionCard } from '@/components/FareOptionCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -21,6 +26,9 @@ import type { TripPoint } from '@/features/booking/tripPoint';
 import type { TripQuote } from '@/features/booking/useTripQuote';
 import { ApiError } from '@/lib/api/ApiError';
 import { createBooking } from '@/lib/api/endpoints/bookings';
+import { getWallet } from '@/lib/api/endpoints/wallet';
+import { formatPaise } from '@/lib/money';
+import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 interface FareSheetProps {
@@ -80,12 +88,39 @@ export function FareSheet({
   const [agreed, setAgreed] = useState(false);
 
   /**
+   * WHICH CAR THE DRIVER IS BEING BOOKED FOR, and the only two answers on this sheet that are not
+   * about money. Unlike `agreed`, they deliberately SURVIVE a change of fare option and a
+   * re-quote: the car in the customer's driveway does not change because they switched from the
+   * 3-hour package to the 6-hour one, and clearing it would make them answer twice for one trip.
+   */
+  const [carCategory, setCarCategory] = useState<CarCategory | null>(null);
+  const [vehicleType, setVehicleType] = useState<VehicleTypePreference | null>(null);
+  const carChosen = carCategory !== null && vehicleType !== null;
+
+  /**
+   * The wallet, read only to SHOW what it will do — the server applies it, this never sends it.
+   *
+   * That split matters: a client that computed its own discount would be a client that could
+   * disagree with the charge. What is rendered here is a preview of arithmetic that happens again,
+   * authoritatively, in `createBooking`.
+   */
+  const wallet = useQuery({ queryKey: keys.wallet.me(), queryFn: getWallet });
+
+  const creditPaise = wallet.data?.spendable_credit.amount_paise ?? 0;
+  const owedPaise = wallet.data?.amount_owed.amount_paise ?? 0;
+  const farePaise = selected?.fare.total.amount_paise ?? 0;
+  // Capped at the fare, exactly as `applyWalletToFare` does on the server.
+  const creditAppliedPaise = Math.min(creditPaise, farePaise);
+  const payablePaise = farePaise - creditAppliedPaise + owedPaise;
+
+  /**
    * ONE KEY PER ATTEMPT, held in a ref so it survives re-renders but not a change of mind. It
    * covers every RETRY of confirming THIS option — a flaky connection resending the same tap must
    * charge or book once — which is exactly why it must NOT be regenerated on every render, only
    * when what is being confirmed actually changes.
    */
   const idempotencyKey = useRef(Crypto.randomUUID());
+  const queryClient = useQueryClient();
 
   /**
    * RE-CONSENT ON EVERY SELECTION CHANGE, not just when the warning appears or disappears. A tick
@@ -112,17 +147,27 @@ export function FareSheet({
       if (selected === null || pickup === null || drop === null) {
         return Promise.reject(new Error('This trip is missing a pickup or a destination.'));
       }
+      if (carCategory === null || vehicleType === null) {
+        // Unreachable through the button, which is disabled until both are chosen. Here because
+        // the request type demands them and a narrowed `null` is not a value to send.
+        return Promise.reject(new Error('Choose your car type before confirming.'));
+      }
       return createBooking(
         {
           quoteId: selected.quote_id,
           pickupAddress: pickup.address,
           dropAddress: drop.address,
           paymentMode: 'CASH',
+          carCategory,
+          vehicleType,
         },
         idempotencyKey.current,
       );
     },
     onSuccess: (result) => {
+      // The booking just spent credit (or collected a debt), so the cached balance is now a lie —
+      // and the wallet screen is two taps away.
+      void queryClient.invalidateQueries({ queryKey: keys.wallet.me() });
       onClose();
       // The SEARCHING screen, not the trip screen directly — dispatch has not run yet at this
       // instant (CASH confirms synchronously; the wave that finds a driver is a separate queued
@@ -231,6 +276,63 @@ export function FareSheet({
       )}
 
       {/*
+        OUTSIDE the fare list's scroll view, and pinned above the button.
+
+        It went in there first, under the prices, on the theory that it is part of the same "what
+        am I booking" decision. In practice the list is capped at a few hundred points with its
+        indicator hidden, so on any trip with more than one fare option these chips were below the
+        fold of a region that does not look scrollable — an invisible required input holding the
+        Confirm button down. The fares gave up the height instead.
+
+        Hidden while there is nothing to confirm: an error, an unavailable trip or an expired
+        quote all replace the button with a different action, and asking about the car under a
+        "we could not get a price" notice is asking about a booking that cannot happen.
+      */}
+      {/*
+        WHAT THE WALLET DOES TO THIS TRIP, shown before the button rather than discovered on the
+        receipt. A customer with credit should see the number that made the total smaller, and one
+        carrying a fee should learn about it here rather than by having Confirm refuse them.
+      */}
+      {card !== null && unavailable === null && (creditAppliedPaise > 0 || owedPaise > 0) ? (
+        <Animated.View entering={FadeIn.duration(180)} style={styles.wallet}>
+          {creditAppliedPaise > 0 ? (
+            <View style={styles.walletRow}>
+              <Feather name="gift" size={14} color={colors.success} />
+              {/*
+                THE APPLIED FIGURE, not the balance. Credit is capped at the fare, so a customer
+                holding ₹500 against a ₹300 trip spends ₹300 — showing "−₹500" beside a Confirm
+                button reading ₹0 would be two numbers on one screen that do not add up.
+              */}
+              <Text style={styles.walletLabel}>
+                {creditPaise > farePaise
+                  ? `Wallet credit (${formatPaise(creditPaise - creditAppliedPaise)} left over)`
+                  : 'Wallet credit'}
+              </Text>
+              <Text style={styles.walletGood}>−{formatPaise(creditAppliedPaise)}</Text>
+            </View>
+          ) : null}
+          {owedPaise > 0 ? (
+            <View style={styles.walletRow}>
+              <Feather name="alert-circle" size={14} color={colors.danger} />
+              <Text style={styles.walletLabel}>Unpaid cancellation fee</Text>
+              <Text style={styles.walletBad}>
+                +{wallet.data?.amount_owed.amount_display ?? ''}
+              </Text>
+            </View>
+          ) : null}
+        </Animated.View>
+      ) : null}
+
+      {card !== null && unavailable === null && !query.isError && !countdown.expired ? (
+        <CarChoice
+          category={carCategory}
+          vehicleType={vehicleType}
+          onCategory={setCarCategory}
+          onVehicleType={setVehicleType}
+        />
+      ) : null}
+
+      {/*
         THE ONE WARNING EVERY TRIP CARRIES EXCEPT THE INCITY 3-HOUR PACKAGE — this app's price
         never includes what the driver eats, or where they stay if the trip runs that long. Placed
         between the list and the button rather than folded into the breakdown: it is not a fare
@@ -287,7 +389,9 @@ export function FareSheet({
                 ? 'Get a new price'
                 : selected === null
                   ? 'Confirm booking'
-                  : `Confirm booking · ${selected.fare.total.amount_display}`
+                  : // The PAYABLE figure, not the fare — the button must not promise a price the
+                    // wallet is about to change.
+                    `Confirm booking · ${formatPaise(payablePaise)}`
             }
             onPress={() => {
               if (quoteExpired) {
@@ -302,10 +406,10 @@ export function FareSheet({
               confirmBooking.mutate();
             }}
             loading={quoteExpired ? query.isFetching : confirmBooking.isPending}
-            // The agreement gate does not apply to "get a new price" — that tap is not the one
-            // the checkbox is about, and blocking it would trap a customer who has not yet
-            // agreed behind a stale price they cannot even refresh.
-            disabled={quoteExpired ? false : needsAgreement && !agreed}
+            // Neither gate applies to "get a new price" — that tap is not the one the checkbox
+            // or the car chips are about, and blocking it would trap a customer who has not yet
+            // answered behind a stale price they cannot even refresh.
+            disabled={quoteExpired ? false : !carChosen || (needsAgreement && !agreed)}
             showArrow={false}
           />
           <Text
@@ -318,9 +422,11 @@ export function FareSheet({
                 ? confirmBooking.error instanceof Error
                   ? confirmBooking.error.message
                   : 'Could not confirm your booking.'
-                : needsAgreement && !agreed
-                  ? 'Agree to the note above to confirm.'
-                  : 'Pay the driver in cash at the end of your trip.'}
+                : !carChosen
+                  ? 'Tell us your car above, so we only ring drivers who can drive it.'
+                  : needsAgreement && !agreed
+                    ? 'Agree to the note above to confirm.'
+                    : 'Pay the driver in cash at the end of your trip.'}
           </Text>
         </>
       )}
@@ -352,7 +458,26 @@ const styles = StyleSheet.create({
   centre: { paddingVertical: space.xl, alignItems: 'center' },
   centreText: { ...text.body, color: colors.muted, marginTop: space.sm },
 
-  list: { maxHeight: 340, marginBottom: space.sm },
+  // Lowered from 340 when the car chips moved out of this scroll view and became a fixed block
+  // below it — at the old cap a multi-option incity quote pushed the confirm button off-screen.
+  /*
+   * The wallet's effect on this trip, between the fares and the car chips. A bordered strip
+   * rather than another card: it is an amendment to the price above it, not a new subject.
+   */
+  wallet: {
+    gap: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSunken,
+    marginBottom: space.sm,
+  },
+  walletRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  walletLabel: { ...text.caption, color: colors.muted, flex: 1 },
+  walletGood: { ...text.label, color: colors.success, fontFamily: fontFamily.semibold },
+  walletBad: { ...text.label, color: colors.danger, fontFamily: fontFamily.semibold },
+
+  list: { maxHeight: 240, marginBottom: space.sm },
   listContent: { paddingBottom: 2 },
   stale: { opacity: 0.45 },
 

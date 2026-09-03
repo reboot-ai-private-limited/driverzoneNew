@@ -60,7 +60,7 @@ function profileToDto(p: DriverProfile): DriverProfileDto {
         ? null
         : { name: p.emergencyContact.name, number: p.emergencyContact.phone },
     address: p.address,
-    vehicle_type_preference: p.vehicleTypePreference,
+    vehicle_type_preferences: p.vehicleTypePreferences,
     vehicle_category_preference: p.vehicleCategoryPreference,
     can_drive_hill: p.canDriveHill,
     can_drive_hill_verified: p.canDriveHillVerified,
@@ -138,9 +138,9 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
                   : { name: input.emergency_contact.name, phone: input.emergency_contact.number },
             }),
         ...(input.address === undefined ? {} : { address: input.address }),
-        ...(input.vehicle_type_preference === undefined
+        ...(input.vehicle_type_preferences === undefined
           ? {}
-          : { vehicleTypePreference: input.vehicle_type_preference }),
+          : { vehicleTypePreferences: input.vehicle_type_preferences }),
         ...(input.vehicle_category_preference === undefined
           ? {}
           : { vehicleCategoryPreference: input.vehicle_category_preference }),

@@ -237,8 +237,24 @@ export interface UpdateVehicleRequest {
 export const ONBOARDING_STATUSES = ['INCOMPLETE', 'SUBMITTED', 'APPROVED', 'REJECTED'] as const;
 export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
 
+/**
+ * How a car is driven, as opposed to what shape it is (`CAR_CATEGORIES` above).
+ *
+ * A SET PER DRIVER, NOT ONE VALUE. Someone who drives a manual almost always drives an automatic
+ * too, and an EV is a third thing again — so a driver declares every type they can take and
+ * dispatch matches the booking's type against that set. It was a single value until 2026-09-02;
+ * with exact matching (a MANUAL booking rings only MANUAL-competent drivers) one value per driver
+ * split the pool three ways and starved every wave.
+ */
 export const VEHICLE_TYPE_PREFERENCES = ['AUTO', 'MANUAL', 'EV'] as const;
 export type VehicleTypePreference = (typeof VEHICLE_TYPE_PREFERENCES)[number];
+
+/** Display names for the type a customer picks. `AUTO` is a gearbox, never an auto-rickshaw. */
+export const VEHICLE_TYPE_LABELS: Record<VehicleTypePreference, string> = {
+  AUTO: 'Automatic',
+  MANUAL: 'Manual',
+  EV: 'Electric',
+};
 
 export interface DriverProfileDto {
   id: string;
@@ -252,9 +268,14 @@ export interface DriverProfileDto {
   emergency_contact: EmergencyContactDto | null;
   address: string | null;
 
-  /** What this driver is COMPETENT to drive, not what they own. */
-  vehicle_type_preference: VehicleTypePreference | null;
-  vehicle_category_preference: string[];
+  /**
+   * What this driver is COMPETENT to drive, not what they own — and the two gates dispatch
+   * matches a booking against. EMPTY MEANS NO OFFERS, not "anything": a driver who has declared
+   * nothing has not told us they can take an SUV, and guessing that they can is how a customer
+   * ends up with a driver who cannot drive their car.
+   */
+  vehicle_type_preferences: VehicleTypePreference[];
+  vehicle_category_preference: CarCategory[];
 
   /** Self-declared. Gates nothing on its own — hill dispatch reads the `_verified` flag. */
   can_drive_hill: boolean;
@@ -284,8 +305,8 @@ export interface UpdateDriverProfileRequest {
   alternate_number?: string | null | undefined;
   emergency_contact?: EmergencyContactDto | null | undefined;
   address?: string | null | undefined;
-  vehicle_type_preference?: VehicleTypePreference | null | undefined;
-  vehicle_category_preference?: string[] | undefined;
+  vehicle_type_preferences?: VehicleTypePreference[] | undefined;
+  vehicle_category_preference?: CarCategory[] | undefined;
   can_drive_hill?: boolean | undefined;
 }
 

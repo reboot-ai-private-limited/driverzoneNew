@@ -45,7 +45,10 @@ const MODULE_TIERS = [
   // payments sits beside them rather than above: it collects from CUSTOMERS, while ledger records
   // what is owed to DRIVERS. Neither reads the other, and the booking that ties the two together
   // is four tiers up.
-  ['notifications', 'ledger', 'payments'], // push/socket fan-out; earnings; customer money
+  // `wallet` joins them for the same reason: it is rows and their sum, depends on nothing, and
+  // everything that moves money needs it. It is a CUSTOMER ledger where `ledger` is a driver one,
+  // and the two never speak — same tier is what keeps it that way.
+  ['notifications', 'ledger', 'payments', 'wallet'], // push/socket fan-out; earnings; customer money
   ['zones'], //                        polygons, resolution, the invariant write guard
   ['packages'], //                     packages, variants, prices
   ['quotes'], //                       zones + packages + pricing

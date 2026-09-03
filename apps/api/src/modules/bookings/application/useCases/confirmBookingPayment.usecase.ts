@@ -2,7 +2,7 @@ import { logger } from '../../../../shared/logging/logger.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
-import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
+import type { NewWalletEntry, WalletPublicContract } from '../../../wallet/wallet.public.js';
 
 /** Enqueues the dispatch job. Injected so `bookings` need not depend on `dispatch`, which is above it. */
 export type DispatchScheduler = (booking: Booking) => Promise<void>;
@@ -23,7 +23,15 @@ export class ConfirmBookingPaymentUseCase {
     private readonly repo: BookingRepositoryPort,
     private readonly notifications: NotificationsContract,
     private readonly scheduleDispatch: DispatchScheduler,
-    private readonly charges: ChargeRepositoryPort,
+    /**
+     * Where the credit spent and the debt collected by this payment are recorded.
+     *
+     * Replaced `ChargeRepositoryPort` here when the wallet became the single source of what a
+     * customer owes. `charges` still records that a cancellation fee was LEVIED — with its status,
+     * its reason and who it was charged to — but the outstanding balance is these rows now, and
+     * having both answer "what is owed" was two numbers that could disagree.
+     */
+    private readonly wallet: WalletPublicContract,
   ) {}
 
   async execute(bookingId: string): Promise<Booking | null> {
@@ -50,20 +58,49 @@ export class ConfirmBookingPaymentUseCase {
     if (confirmed === null) return this.repo.findById(bookingId);
 
     /*
-     * The order that just captured included any unpaid dues, so they are collected now.
+     * THE WALLET MOVES WHEN THE MONEY DOES, and not a moment earlier.
      *
-     * Settled HERE rather than when the order was created, because this is when the money actually
-     * arrived — clearing a debt at creation would wipe it for a customer who then abandoned
-     * checkout, and they would have got the cancellation fee waived by not paying.
+     * The order that just captured was raised for `fare − credit + debt`, so this is the point at
+     * which both are real: the credit has been consumed and the debt has been collected. Doing it
+     * at creation instead would spend the credit of a customer who then abandoned checkout, and
+     * would waive the cancellation fee of anyone who simply never paid.
+     *
+     * Both rows are once-per-booking (`ONCE_PER_BOOKING_WALLET_TYPES`), so a redelivered webhook
+     * writes nothing the second time rather than spending the credit twice.
+     *
+     * Logged rather than thrown: the payment has captured and the booking is confirmed: failing
+     * this request would tell a gateway the webhook failed for a trip that is going ahead.
      */
-    if (confirmed.paymentId !== null) {
+    const walletRows: NewWalletEntry[] = [
+      ...(confirmed.walletCreditPaise > 0
+        ? [
+            {
+              customerId: confirmed.customerId,
+              bookingId: confirmed.id,
+              entryType: 'SPENT_ON_RIDE' as const,
+              amountPaise: -confirmed.walletCreditPaise,
+              note: `Used on trip ${confirmed.reference}`,
+            },
+          ]
+        : []),
+      ...(confirmed.walletDebtPaise > 0
+        ? [
+            {
+              customerId: confirmed.customerId,
+              bookingId: confirmed.id,
+              entryType: 'DEBT_COLLECTED' as const,
+              amountPaise: confirmed.walletDebtPaise,
+              note: `Collected with trip ${confirmed.reference}`,
+            },
+          ]
+        : []),
+    ];
+
+    if (walletRows.length > 0) {
       try {
-        await this.charges.settleDues(confirmed.customerId, confirmed.paymentId);
+        await this.wallet.append(walletRows);
       } catch (error) {
-        logger.error(
-          { err: error, bookingId },
-          'could not settle outstanding dues against the captured payment',
-        );
+        logger.error({ err: error, bookingId }, 'could not settle the wallet against the payment');
       }
     }
 

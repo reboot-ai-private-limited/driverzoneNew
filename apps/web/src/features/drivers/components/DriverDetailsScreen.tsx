@@ -271,13 +271,17 @@ export function DriverDetailsScreen() {
           <Panel title="Driving Preferences">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12">
               <DefinitionList>
+                {/* Empty means excluded from dispatch, never "will take anything" — see the
+                    same wording in the drivers table. */}
                 <FieldRow label="Vehicle Categories">
                   {profile.vehicle_category_preference.length > 0
                     ? profile.vehicle_category_preference.join(', ')
-                    : 'Any'}
+                    : 'Not set — no offers'}
                 </FieldRow>
                 <FieldRow label="Transmission">
-                  {profile.vehicle_type_preference || 'Any'}
+                  {profile.vehicle_type_preferences.length > 0
+                    ? profile.vehicle_type_preferences.join(', ')
+                    : 'Not set — no offers'}
                 </FieldRow>
               </DefinitionList>
 

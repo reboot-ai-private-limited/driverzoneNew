@@ -1,7 +1,7 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome5, MaterialCommunityIcons, Octicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import type { ReactElement } from 'react';
-import { colors, fontFamily, radius, text } from '@/theme/theme';
+import { TabBar } from '@/components/TabBar';
 
 /**
  * The signed-in shell.
@@ -18,39 +18,26 @@ import { colors, fontFamily, radius, text } from '@/theme/theme';
 export default function TabsLayout(): ReactElement {
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.fg,
-        tabBarInactiveTintColor: colors.faint,
-        tabBarStyle: {
-          backgroundColor: colors.bg,
-          borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 6,
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: { ...text.caption, fontWeight: '600', fontFamily: fontFamily.semibold },
-        // MaterialCommunityIcons, in filled/outline pairs.
-        //
-        // The PAIR is the point: an active tab that differs only in colour is one grey against
-        // one black in this palette, which is not enough at a glance. A solid glyph reads as
-        // selected across the room, which is a tab bar's whole job. Every name below was checked
-        // against the shipped glyph map — a missing one renders as a blank box, silently.
-        tabBarItemStyle: { borderRadius: radius.sm },
-      }}
+      // `tabBar` replaces the stock bar entirely — colours, spacing and the selected state all
+      // live in `TabBar`, which is why no `tabBar*` style option is set here any more. The icons
+      // below are still read from these options: `TabBar` calls each `tabBarIcon` twice, once per
+      // `focused` value, and cross-fades the two.
+      //
+      // Icons are drawn from whichever @expo/vector-icons set has the right glyph for the tab —
+      // not one set throughout — in filled/outline pairs where the set has one. The PAIR is the
+      // point: an active tab that differs only in colour is one grey against one black in this
+      // palette, which is not enough at a glance. A solid glyph reads as selected across the
+      // room, which is a tab bar's whole job. Every name below was checked against its set's
+      // shipped glyph map — a missing one renders as a blank box, silently.
+      tabBar={(props) => <TabBar {...props} />}
+      screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen
         name="home"
         options={{
-          title: 'Book',
-          // A steering wheel, not a map pin or a car. DriverZone sends a DRIVER to a customer's
-          // own vehicle (docs/LLD/open-questions.md Q5) — a car icon would promise the wrong
-          // product, and a pin describes the map rather than the thing being booked. One fixed
-          // glyph rather than a pair: "steering" has no filled counterpart in the shipped set,
-          // and a control that renders blank on the active tab is worse than one that never
-          // changes.
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="steering" size={size + 2} color={color} />
+          title: 'Home',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Octicons name={focused ? 'home-fill' : 'home'} size={size} color={color} />
           ),
         }}
       />
@@ -59,24 +46,19 @@ export default function TabsLayout(): ReactElement {
         options={{
           title: 'Rides',
           tabBarIcon: ({ color, size, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? 'clipboard-text-clock' : 'clipboard-text-clock-outline'}
-              size={size}
-              color={color}
-            />
+            <MaterialCommunityIcons name={focused ? 'map' : 'map-outline'} size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Account',
-          tabBarIcon: ({ color, size, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? 'account-circle' : 'account-circle-outline'}
-              size={size + 2}
-              color={color}
-            />
+          title: 'Profile',
+          // FontAwesome5's free tier ships `user-alt` in the solid style only — there is no
+          // regular-weight counterpart to cross-fade into, so this stays one fixed glyph, same as
+          // every icon here that has no outline/filled pair.
+          tabBarIcon: ({ color, size }) => (
+            <FontAwesome5 name="user-alt" solid size={size} color={color} />
           ),
         }}
       />

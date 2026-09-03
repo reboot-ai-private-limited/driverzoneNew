@@ -40,8 +40,23 @@ export const keys = {
       insurance: boolean,
     ) => ['quotes', pickup, drop, direction, scheduledAt, insurance] as const,
   },
+  /**
+   * The wallet balance, which the fare sheet and the wallet screen both read.
+   *
+   * ONE KEY FOR BOTH, so confirming a booking invalidates the figure the wallet screen shows just
+   * as surely as the one the fare sheet quoted.
+   */
+  wallet: {
+    me: () => ['wallet'] as const,
+  },
+
   bookings: {
     all: () => ['bookings'] as const,
+    /**
+     * Ride history. A sibling of `all()` rather than a child, so invalidating one booking's detail
+     * does not drop the whole list and make the history screen flash a spinner after a cancel.
+     */
+    list: () => ['bookings', 'list'] as const,
     detail: (id: string) => ['bookings', id] as const,
   },
 } as const;

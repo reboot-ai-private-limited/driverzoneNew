@@ -70,7 +70,7 @@ function mapDriverProfileToDto(driver: DriverProfile, profilePictureUrl: string 
       ? { name: driver.emergencyContact.name, number: driver.emergencyContact.phone }
       : null,
     address: driver.address,
-    vehicle_type_preference: driver.vehicleTypePreference,
+    vehicle_type_preferences: driver.vehicleTypePreferences,
     vehicle_category_preference: driver.vehicleCategoryPreference,
     can_drive_hill: driver.canDriveHill,
     can_drive_hill_verified: driver.canDriveHillVerified,

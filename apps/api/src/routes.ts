@@ -59,6 +59,8 @@ export function buildApiRouter(c: AppContainers): Router {
    * here — the module that owns the ledger rows answers for them.
    */
   router.use('/admin/drivers', c.ledger.buildAdminRouter());
+  /** `/admin/customers/:id/wallet`, by the same fall-through past identity's admin router. */
+  router.use('/admin/customers', c.wallet.buildAdminRouter());
   router.use('/admin/reviews', c.reviews.buildAdminRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
@@ -73,6 +75,7 @@ export function buildApiRouter(c: AppContainers): Router {
 
   /** Same fall-through again: these miss identity's role routers and land here. */
   router.use('/customer/quotes', c.quotes.buildCustomerRouter());
+  router.use('/customer/wallet', c.wallet.buildCustomerRouter());
   router.use('/customer/bookings', c.bookings.buildCustomerRouter());
   router.use('/driver/bookings', c.bookings.buildDriverRouter());
   router.use('/admin/bookings', c.bookings.buildAdminRouter());

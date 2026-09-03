@@ -2,9 +2,11 @@ import mongoose, { Schema } from 'mongoose';
 import {
   BOOKING_ACTOR_TYPES,
   BOOKING_STATUSES,
+  CAR_CATEGORIES,
   DIRECTIONS,
   PAYMENT_MODES,
   SERVICE_TYPES,
+  VEHICLE_TYPE_PREFERENCES,
 } from '@driverzone/contracts';
 
 /**
@@ -24,6 +26,10 @@ export interface BookingDoc {
   dropAddress: string;
   direction?: string | null;
   distanceKm?: number | null;
+  carCategory?: string | null;
+  vehicleType?: string | null;
+  walletCreditPaise?: number;
+  walletDebtPaise?: number;
   quoteId: mongoose.Types.ObjectId;
   fareSnapshot: unknown;
   paymentMode: string;
@@ -66,6 +72,25 @@ const bookingSchema = new Schema<BookingDoc>(
     dropAddress: { type: String, required: true },
     direction: { type: String, enum: [...DIRECTIONS, null], default: null },
     distanceKm: { type: Number, default: null },
+
+    /*
+     * What the customer is putting the driver in. Not priced — an SUV and a hatchback pay the same
+     * fare for the same trip — it is purely who dispatch may ring (`MongoDriverPool`).
+     *
+     * NULLABLE ONLY FOR HISTORY. Every booking made since 2026-09-02 carries both; the nulls are
+     * rows that predate the choice, and `null` there means "never asked", which the eligibility
+     * query treats as no requirement rather than as a requirement nobody meets.
+     */
+    carCategory: { type: String, enum: [...CAR_CATEGORIES, null], default: null },
+    vehicleType: { type: String, enum: [...VEHICLE_TYPE_PREFERENCES, null], default: null },
+
+    /*
+     * What the wallet did to this trip's price, frozen at creation. Never both non-zero — a
+     * balance is either credit or debt. Default 0 covers every booking written before wallets
+     * existed, for which the honest answer is 'the wallet did nothing'.
+     */
+    walletCreditPaise: { type: Number, default: 0, min: 0 },
+    walletDebtPaise: { type: Number, default: 0, min: 0 },
 
     quoteId: { type: Schema.Types.ObjectId, ref: 'Quote', required: true },
 

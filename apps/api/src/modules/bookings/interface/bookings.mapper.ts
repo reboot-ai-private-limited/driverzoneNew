@@ -35,6 +35,12 @@ export function toBookingDto(view: BookingView): BookingDto {
     scheduled_at: booking.scheduledAt.toISOString(),
     is_scheduled: booking.isScheduled,
 
+    car_category: booking.carCategory,
+    vehicle_type: booking.vehicleType,
+
+    wallet_credit: toMoney(booking.walletCreditPaise),
+    wallet_debt: toMoney(booking.walletDebtPaise),
+
     included_minutes: booking.fareSnapshot.included.minutes,
 
     start_otp: view.startOtp ?? null,

@@ -1,4 +1,9 @@
-import type { Gender, OnboardingStatus, VehicleTypePreference } from '@driverzone/contracts';
+import type {
+  CarCategory,
+  Gender,
+  OnboardingStatus,
+  VehicleTypePreference,
+} from '@driverzone/contracts';
 
 /** PORT — a driver's profile and their onboarding/verification state. */
 
@@ -13,8 +18,8 @@ export interface DriverProfile {
   alternatePhone: string | null;
   emergencyContact: { name: string; phone: string } | null;
   address: string | null;
-  vehicleTypePreference: VehicleTypePreference | null;
-  vehicleCategoryPreference: string[];
+  vehicleTypePreferences: VehicleTypePreference[];
+  vehicleCategoryPreference: CarCategory[];
   canDriveHill: boolean;
   canDriveHillVerified: boolean;
   onboardingStatus: OnboardingStatus;
@@ -33,8 +38,8 @@ export interface DriverProfilePatch {
   alternatePhone?: string | null;
   emergencyContact?: { name: string; phone: string } | null;
   address?: string | null;
-  vehicleTypePreference?: VehicleTypePreference | null;
-  vehicleCategoryPreference?: string[];
+  vehicleTypePreferences?: VehicleTypePreference[];
+  vehicleCategoryPreference?: CarCategory[];
   /**
    * Self-declaration only. A driver may set this; it gates nothing until an admin sets
    * `canDriveHillVerified`, which is not reachable through this patch at all — hill driving in

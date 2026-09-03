@@ -103,40 +103,6 @@ export class MongoChargeRepository implements ChargeRepositoryPort {
     return toCancellationCharge(doc.toObject() as CancellationChargeDoc);
   }
 
-  /**
-   * `chargedTo: 'CUSTOMER'` in the match, because a driver's penalty is a ledger debit against
-   * their earnings and is never a customer's debt.
-   */
-  async outstandingDues(customerId: string): Promise<number> {
-    if (!mongoose.isValidObjectId(customerId)) return 0;
-
-    const [row] = await CancellationChargeModel.aggregate<{ total: number }>([
-      {
-        $match: {
-          customerId: new mongoose.Types.ObjectId(customerId),
-          chargedTo: 'CUSTOMER',
-          settledByPaymentId: null,
-        },
-      },
-      { $group: { _id: null, total: { $sum: '$amountPaise' } } },
-    ]);
-
-    return row?.total ?? 0;
-  }
-
-  async settleDues(customerId: string, paymentId: string): Promise<void> {
-    if (!mongoose.isValidObjectId(customerId)) return;
-
-    await CancellationChargeModel.updateMany(
-      {
-        customerId: new mongoose.Types.ObjectId(customerId),
-        chargedTo: 'CUSTOMER',
-        settledByPaymentId: null,
-      },
-      { $set: { settledByPaymentId: new mongoose.Types.ObjectId(paymentId) } },
-    );
-  }
-
   async findCancellationCharge(bookingId: string): Promise<CancellationCharge | null> {
     if (!mongoose.isValidObjectId(bookingId)) return null;
     const doc = await CancellationChargeModel.findOne({ bookingId });

@@ -37,4 +37,39 @@ config.resolver.nodeModulesPaths = [
 // build, so Metro must read the exports map to find them.
 config.resolver.unstable_enablePackageExports = true;
 
+/**
+ * `./http.js` inside `packages/contracts/src/index.ts` means `./http.ts`, and only Metro needs
+ * telling.
+ *
+ * The shared packages are TypeScript compiled under NodeNext, where a relative import MUST carry
+ * the `.js` extension it will have after a build even though the file on disk is `.ts`. `tsc` and
+ * `tsx` both understand that; Metro takes the specifier literally, finds no `http.js`, and fails
+ * with "Unable to resolve ./http.js from packages/contracts/src/index.ts".
+ *
+ * IT ONLY BITES ON A RUNTIME IMPORT. Every `import type` from a workspace package is erased
+ * before Metro sees it, so the app bundled for months while importing contracts purely for
+ * types — the first `import { CAR_CATEGORIES }` is what makes Metro actually read the file.
+ *
+ * SCOPED TO THE WORKSPACE PACKAGES on purpose: inside the app, a `.js` specifier means a real
+ * `.js` file and rewriting it would be wrong.
+ */
+const packagesRoot = path.resolve(workspaceRoot, 'packages');
+
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const fromPackage = context.originModulePath?.startsWith(packagesRoot) ?? false;
+  const isRelative = moduleName.startsWith('./') || moduleName.startsWith('../');
+
+  if (fromPackage && isRelative && moduleName.endsWith('.js')) {
+    // Extensionless, so Metro applies its own `sourceExts` and finds the `.ts`. Falls through to
+    // the untouched specifier if that misses, which is what a genuine `.js` file there needs.
+    try {
+      return context.resolveRequest(context, moduleName.slice(0, -'.js'.length), platform);
+    } catch {
+      // Intentionally ignored — resolve the original specifier below.
+    }
+  }
+
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 module.exports = config;

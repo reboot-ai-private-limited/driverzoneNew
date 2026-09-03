@@ -18,6 +18,18 @@ export interface RequestUploadResult {
   document: DriverDocument;
   uploadUrl: string;
   expiresInSeconds: number;
+  /**
+   * The provider's required form fields, passed straight through to the client.
+   *
+   * This has to reach the caller or the upload cannot happen at all. Cloudinary signs
+   * `api_key`/`timestamp`/`public_id`/`type` with the API secret, which exists only on this
+   * side — a client cannot derive the signature, so dropping the fields here leaves it holding a
+   * URL it can only ever get a 401 from. That was the bug; this field is the fix.
+   *
+   * Optional because the port is provider-agnostic: an S3 presigned URL carries its
+   * authorisation in the query string and needs no fields (see `StoragePort.PresignedUpload`).
+   */
+  uploadFields?: Record<string, string> | undefined;
 }
 
 /**
@@ -71,6 +83,11 @@ export class ManageDriverDocumentsUseCase {
       document,
       uploadUrl: presigned.uploadUrl,
       expiresInSeconds: presigned.expiresInSeconds,
+      // Spread rather than `uploadFields: presigned.uploadFields`: the app compiles under
+      // `exactOptionalPropertyTypes`, which refuses an explicitly-passed `undefined` for an
+      // optional property. Omitting the key entirely is the difference between "no fields
+      // needed" and a type error.
+      ...(presigned.uploadFields === undefined ? {} : { uploadFields: presigned.uploadFields }),
     };
   }
 

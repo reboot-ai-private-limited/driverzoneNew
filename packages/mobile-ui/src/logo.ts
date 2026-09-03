@@ -1,13 +1,21 @@
 /**
- * The DriverZone mark, inlined as SVG source.
+ * The DriverZone mark, inlined as SVG source. Shared by apps/customer and apps/driver.
  *
- * Copied verbatim from apps/web/public/logo.svg so the app and the admin panel cannot drift.
+ * Copied verbatim from apps/web/public/logo.svg so the apps and the admin panel cannot drift.
+ * It lives HERE, in the shared package, rather than inside one app: it was already duplicated
+ * once (web → customer), and the driver app needing it too would have made a third copy of
+ * artwork that must stay identical. One home, two consumers.
+ *
+ * Reached through its own subpath — `@driverzone/mobile-ui/logo`, not the package barrel —
+ * because it is ~67KB of string. Every screen in both apps imports the barrel for design tokens,
+ * and Metro does not tree-shake a re-export, so putting it in `index.ts` would put the whole mark
+ * in the bundle for a screen that only wanted `space.md`.
  *
  * Embedded as a string rather than imported as a file because importing a .svg into a React
  * Native bundle needs react-native-svg-transformer plus a Metro resolver change, whereas
- * SvgXml from react-native-svg — already a dependency — renders the same markup with neither.
+ * SvgXml from react-native-svg renders the same markup with neither.
  *
- * GENERATED. To update: replace assets/logo.svg and regenerate. Do not hand-edit the string.
+ * GENERATED. To update: replace apps/web/public/logo.svg and regenerate. Do not hand-edit.
  */
 export const LOGO_SVG = `
 <svg width="236" height="126" viewBox="0 0 236 126" fill="none" xmlns="http://www.w3.org/2000/svg">

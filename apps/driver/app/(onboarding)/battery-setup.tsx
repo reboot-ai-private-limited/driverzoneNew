@@ -1,0 +1,237 @@
+import { Feather } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { type ReactElement, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import {
+  markBatterySetupConfirmed,
+  markBatterySetupSeen,
+} from '@/features/onboarding/batteryOptimisation';
+import {
+  detectOemFamily,
+  guideFor,
+  openAutostartSettings,
+  openBatterySettings,
+} from '@/features/onboarding/oemIntents';
+import { colors, radius, shadow, space, text } from '@/theme/theme';
+
+/**
+ * S-12 — the OEM battery-optimisation walkthrough.
+ *
+ * `mobile-in-monorepo.md`: "the highest-leverage screen in the driver app… the difference
+ * between a driver app that receives offers and one that doesn't." On the OEM skins that make up
+ * most of the Indian market, a backgrounded app is killed and its notifications dropped unless
+ * the driver lifts a restriction the manufacturer buried. Nothing the app can do at runtime
+ * substitutes for that setting.
+ *
+ * The screen is reached three ways: forced once out of `/gate` after the first approval, from
+ * the Home banner while it is still unconfirmed, and from Account any time after. So the
+ * navigation adapts — a back arrow when there is somewhere to go back to, "Do this later"
+ * otherwise.
+ *
+ * **The written steps are the payload; the buttons are shortcuts.** Every deep link in
+ * `oemIntents.ts` is best-effort and silently falls back to this app's settings page, because
+ * the OEM activity names it targets get renamed between skin versions.
+ */
+export default function BatterySetupScreen(): ReactElement {
+  const family = useMemo(detectOemFamily, []);
+  const guide = guideFor(family);
+  const [busy, setBusy] = useState<'battery' | 'autostart' | null>(null);
+
+  const canGoBack = router.canGoBack();
+
+  async function open(which: 'battery' | 'autostart'): Promise<void> {
+    setBusy(which);
+    try {
+      // Seeing the settings page counts as "seen" — the driver has been shown the door even if
+      // they do not walk through it, so the forced redirect should not fire again.
+      await markBatterySetupSeen();
+      if (which === 'battery') await openBatterySettings();
+      else await openAutostartSettings(family);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function done(): void {
+    void markBatterySetupConfirmed().then(() => leave());
+  }
+
+  function later(): void {
+    void markBatterySetupSeen().then(() => leave());
+  }
+
+  function leave(): void {
+    if (canGoBack) router.back();
+    else router.replace('/home');
+  }
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.header}>
+        {canGoBack ? (
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Feather name="arrow-left" size={22} color={colors.fg} />
+          </Pressable>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
+        <Text style={styles.headerTitle}>Keep alerts working</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.leadIcon}>
+          <Feather name="bell" size={26} color={colors.warning} />
+        </View>
+
+        <Text style={styles.title}>Your phone can silence trip offers</Text>
+        <Text style={styles.lead}>
+          On {guide.skinLabel} phones, the battery manager can stop DriverZone in the background —
+          which means an offer that never rings. Two minutes of setup fixes it for good.
+        </Text>
+
+        <View style={styles.card}>
+          <Text style={styles.cardHeading}>On your phone</Text>
+          {guide.steps.map((step, index) => (
+            <View key={step} style={styles.step}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>{index + 1}</Text>
+              </View>
+              <Text style={styles.stepText}>{step}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.actions}>
+          <PrimaryButton
+            label="Open battery settings"
+            onPress={() => void open('battery')}
+            loading={busy === 'battery'}
+            showArrow={false}
+          />
+
+          {family !== 'samsung' && family !== 'generic' ? (
+            <Pressable
+              onPress={() => void open('autostart')}
+              disabled={busy !== null}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+            >
+              <Feather name="rotate-cw" size={16} color={colors.fg} style={styles.secondaryIcon} />
+              <Text style={styles.secondaryText}>Open autostart settings</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Text style={styles.hint}>
+          If a button opens the wrong screen, use the app’s Settings page — every phone has a
+          Battery entry there.
+        </Text>
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <Pressable onPress={done} accessibilityRole="button" style={styles.doneButton}>
+          <Feather name="check" size={18} color={colors.dutyOn} />
+          <Text style={styles.doneText}>I’ve set this up</Text>
+        </Pressable>
+        <Pressable onPress={later} accessibilityRole="button" style={styles.laterButton}>
+          <Text style={styles.laterText}>Do this later</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.brand,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+  },
+  headerTitle: { ...text.heading, color: colors.fg },
+  headerSpacer: { width: 22 },
+
+  scroll: { padding: space.lg, paddingBottom: space.xl },
+
+  leadIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.pill,
+    backgroundColor: '#FFF6E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space.md,
+  },
+  title: { ...text.title, color: colors.fg },
+  lead: { ...text.body, color: colors.muted, marginTop: space.sm, marginBottom: space.lg },
+
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: space.lg,
+    ...shadow.soft,
+  },
+  cardHeading: { ...text.label, color: colors.muted, marginBottom: space.md },
+  step: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: space.md },
+  stepNumber: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.pill,
+    backgroundColor: colors.fg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: space.sm,
+  },
+  stepNumberText: { color: colors.brandOnFg, fontSize: 12, fontWeight: '700' },
+  stepText: { ...text.body, color: colors.fg, flex: 1 },
+
+  actions: { marginTop: space.lg, gap: space.sm },
+  secondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 50,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  secondaryPressed: { backgroundColor: colors.bgSunken },
+  secondaryIcon: { marginRight: space.sm },
+  secondaryText: { ...text.label, color: colors.fg },
+
+  hint: { ...text.caption, color: colors.muted, marginTop: space.lg },
+
+  footer: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.lg,
+  },
+  doneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    height: 52,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.dutyOn,
+  },
+  doneText: { ...text.heading, color: colors.dutyOn },
+  laterButton: { alignItems: 'center', paddingVertical: space.md },
+  laterText: { ...text.body, color: colors.muted },
+});

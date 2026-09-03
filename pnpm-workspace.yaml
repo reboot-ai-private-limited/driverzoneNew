@@ -9,6 +9,11 @@ allowBuilds:
   # A telemetry ping to scarf.sh, pulled in transitively by swagger-ui-express. Not needed for
   # anything to function — unlike the four below, it compiles nothing and downloads nothing.
   '@scarf/scarf': false
+  # Pulled in by firebase-admin. Neither postinstall is needed for LIBRARY use: protobufjs's
+  # patches its CLI, and @firebase/util's is a build step for its own sources. firebase-admin
+  # ships prebuilt and resolves protobuf at runtime through @grpc/proto-loader.
+  '@firebase/util': false
+  protobufjs: false
   esbuild: true
   msgpackr-extract: true
   sharp: true

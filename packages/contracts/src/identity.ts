@@ -285,6 +285,15 @@ export interface DriverProfileDto {
   onboarding_rejection_reason: string | null;
   /** The single flag dispatch and `POST /driver/duty` gate on. */
   is_verified: boolean;
+
+  /**
+   * Whether the driver is currently on duty.
+   *
+   * SERVER STATE, not a client toggle. Dispatch reads `isOnDuty` off the driver record to decide
+   * who to ring, so a driver "on duty" only in their app's memory would be offered nothing and
+   * would not know it. The app renders this and changes it through `POST /driver/duty`.
+   */
+  is_on_duty: boolean;
 }
 
 export interface UpdateDriverProfileRequest {
@@ -331,19 +340,42 @@ export interface RequestDocumentUploadRequest {
 }
 
 /**
- * Two-step upload: the client `PUT`s the file straight to `upload_url`, never through the API
+ * Two-step upload: the client sends the file straight to `upload_url`, never through the API
  * (docs/LLD/architecture.md). The row exists as `PENDING` from the moment this returns.
+ *
+ * **How to send depends on `upload_fields`, and the client must branch on it:**
+ *
+ *   - **present** — the provider needs a signed `multipart/form-data` **POST**. Send every
+ *     key/value in `upload_fields` as a form field, plus the binary under `file`. Cloudinary
+ *     works this way: its `api_key`/`timestamp`/`signature` are HMAC'd with the API secret
+ *     server-side, so a client cannot construct them and an unsigned request is rejected 401.
+ *   - **absent** — a plain **PUT** of the raw bytes to `upload_url`. This is the S3 presigned-URL
+ *     shape, where the authorisation is baked into the query string.
+ *
+ * Do not send the fields as JSON, and do not add unsigned extras: the provider signs an exact
+ * parameter set and rejects the upload if it does not match.
  */
 export interface RequestDocumentUploadResponse {
   document_id: string;
   upload_url: string;
   expires_in_seconds: number;
+  /** Form fields the provider requires. See above — present means POST multipart, absent means PUT. */
+  upload_fields?: Record<string, string> | undefined;
 }
 
+/**
+ * Same two-shape rule as `RequestDocumentUploadResponse` above — `upload_fields` present means a
+ * signed multipart POST, absent means a plain PUT.
+ *
+ * Unlike a document, an avatar is uploaded PUBLIC (`isPrivate: false`), because it is shown to a
+ * customer while their trip is running. `storage_key` is what the client then sends back as
+ * `profile_picture` on `PATCH /driver/profile`.
+ */
 export interface RequestProfilePictureUploadResponse {
   upload_url: string;
   expires_in_seconds: number;
   storage_key: string;
+  upload_fields?: Record<string, string> | undefined;
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────────────────────────────

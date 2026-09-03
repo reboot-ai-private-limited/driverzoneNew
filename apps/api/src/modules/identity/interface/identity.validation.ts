@@ -269,3 +269,40 @@ export type RequestDocumentUploadInput = z.infer<typeof requestDocumentUploadSch
 export type UpdateAdminProfileInput = z.infer<typeof updateAdminProfileSchema>;
 export type RejectDriverInput = z.infer<typeof rejectDriverSchema>;
 export type ReviewDocumentInput = z.infer<typeof reviewDocumentSchema>;
+
+/** `POST /driver/duty` — the driver going on or off duty. */
+export const setDutyStatusSchema = z.object({
+  status: z.enum(['ONLINE', 'OFFLINE']),
+});
+export type SetDutyStatusInput = z.infer<typeof setDutyStatusSchema>;
+
+/**
+ * `POST /driver/location` — a batch of GPS fixes.
+ *
+ * Capped at 50: the app sends 5–10 per request, so anything far above that is a bug or an abuse,
+ * and only the newest is stored anyway.
+ */
+export const sendLocationPingsSchema = z.object({
+  pings: z
+    .array(
+      z.object({
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+        recorded_at: z.string().datetime(),
+        accuracy_m: z.number().nonnegative().optional(),
+        heading: z.number().optional(),
+        speed_mps: z.number().optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+export type SendLocationPingsInput = z.infer<typeof sendLocationPingsSchema>;
+
+/** `POST /driver/devices` — register this handset's FCM token for push. */
+export const registerDeviceSchema = z.object({
+  fcm_token: z.string().trim().min(10).max(4096),
+  platform: z.enum(['android', 'ios']),
+  app_version: z.string().trim().max(32).optional(),
+});
+export type RegisterDeviceInput = z.infer<typeof registerDeviceSchema>;

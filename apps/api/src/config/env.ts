@@ -92,6 +92,13 @@ const schema = z.object({
   /**
    * Cloudinary credentials for media storage (driver documents, profile pictures).
    */
+  /**
+   * Path to the Firebase Admin service-account JSON. UNSET is a supported state: the app falls
+   * back to `MockPushSender`, which logs every ring instead of delivering it — so a developer
+   * without credentials still gets a working booking flow.
+   */
+  FCM_SERVICE_ACCOUNT_PATH: z.string().optional(),
+
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'CLOUDINARY_CLOUD_NAME is required'),
   CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),
   CLOUDINARY_API_SECRET: z.string().min(1, 'CLOUDINARY_API_SECRET is required'),

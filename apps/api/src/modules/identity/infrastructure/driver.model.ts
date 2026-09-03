@@ -52,6 +52,15 @@ export interface DriverDoc {
   lastLocation?: { type: 'Point'; coordinates: number[] } | null;
   lastLocationAt?: Date | null;
 
+  /**
+   * FCM registration tokens, one per handset the driver has signed in on.
+   *
+   * An ARRAY because a driver may carry a spare phone, and because a token that FCM has rotated
+   * is not removed until a send fails against it — dropping the old one eagerly would lose the
+   * ring on a device that is still working.
+   */
+  fcmTokens?: string[];
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -127,6 +136,7 @@ const driverSchema = new Schema<DriverDoc>(
       default: null,
     },
     lastLocationAt: { type: Date, default: null },
+    fcmTokens: { type: [String], default: [] },
   },
   { timestamps: true },
 );

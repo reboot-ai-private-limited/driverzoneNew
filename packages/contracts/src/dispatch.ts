@@ -1,3 +1,5 @@
+import type { LatLngDto, Money } from './http.js';
+
 /**
  * Dispatch — the realtime surface between the server and the driver app.
  *
@@ -43,3 +45,58 @@ export const DRIVER_SOCKET_EMITS = {
  */
 export const DELIVERY_CHANNELS = ['SOCKET', 'FCM', 'BOTH', 'NONE'] as const;
 export type DeliveryChannel = (typeof DELIVERY_CHANNELS)[number];
+
+/**
+ * The ringing offer as the DRIVER APP receives it — `GET /driver/offers/current`, and the same
+ * shape an FCM data message carries when one arrives while the app is closed.
+ *
+ * Distinct from `DriverOfferPush` on the server side: that is the domain's way of describing an
+ * intent to ring someone; this is the wire shape, snake_case and pre-formatted, that a client
+ * renders without arithmetic.
+ */
+export interface DriverOfferDto {
+  offer_id: string;
+  booking_id: string;
+  /** The human reference, `DZ-8F3K2M`. Shown to the driver and quoted to support. */
+  reference: string;
+  /** ISO-8601. The client counts down from this rather than polling for expiry. */
+  expires_at: string;
+  /** What the driver earns if they take it — the single most decision-relevant number. */
+  earning: Money;
+  pickup: LatLngDto & { address: string };
+  scheduled_at: string;
+  service_type: 'INCITY' | 'OUTSTATION';
+}
+
+/** `GET /driver/offers/current` — `null` when nothing is ringing. */
+export interface CurrentOfferResponse {
+  offer: DriverOfferDto | null;
+}
+
+/**
+ * `POST /driver/offers/:id/accept`.
+ *
+ * LOSING THE RACE IS A 200, not an error. Four of five drivers lose every wave and every one of
+ * them did exactly what was asked; reporting that as a failure would bury genuine dispatch faults
+ * under normal behaviour. Clients branch on `claimed`, never on the HTTP status.
+ */
+export type AcceptOfferResponse =
+  | {
+      claimed: true;
+      booking_id: string;
+      reference: string;
+      pickup: LatLngDto & { address: string };
+      drop: LatLngDto & { address: string };
+      scheduled_at: string;
+      earning: Money;
+    }
+  | {
+      claimed: false;
+      reason: string;
+      /** Customer-safe copy, displayable verbatim. Never build this from `reason`. */
+      message: string;
+    };
+
+export interface DeclineOfferResponse {
+  declined: true;
+}

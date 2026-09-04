@@ -169,6 +169,73 @@ export function makeGetDriverBookingController(
   });
 }
 
+/**
+ * `GET /customer/bookings/current` — the booking happening to this customer now, or `null`.
+ *
+ * CARRIES THE START OTP, like the single-booking read and unlike the history list. That is the
+ * point of the endpoint rather than a detail of it: the code lives on the live trip screen only,
+ * so a customer whose app was killed at the pickup had no route back to the four digits their
+ * driver is standing there waiting for.
+ *
+ * Scoped by the token, and `null` rather than 404 when nothing is live — the app asks on launch.
+ */
+export function makeGetCurrentCustomerBookingController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const booking = await repo.findActiveForCustomer(principalOf(req));
+
+    if (booking === null) {
+      sendSuccess(req, res, { booking: null }, 'No booking in progress');
+      return;
+    }
+
+    const [adjustments, startOtp] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      repo.readStartOtp(booking.id),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments, startOtp }) },
+      'Booking in progress',
+    );
+  });
+}
+
+/**
+ * `GET /driver/bookings/current` — the trip this driver is in the middle of, or `null`.
+ *
+ * THE TRIP EQUIVALENT OF `GET /driver/offers/current`, and it exists for the same reason: the app
+ * is killed mid-job by an OEM battery manager, and the booking id it needs to get back only ever
+ * lived in navigation state. Without this the driver reopens to the duty screen with a customer
+ * waiting and no route to arrive, start or complete.
+ *
+ * SCOPED BY THE TOKEN. There is no id in the path, so there is no shape of this request that
+ * reads somebody else's trip.
+ *
+ * `null` rather than a 404 when nothing is live — "you are not on a trip" is a normal answer to
+ * this question, and the app asks it on every launch.
+ */
+export function makeGetCurrentDriverTripController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const booking = await repo.findActiveForDriver(principalOf(req));
+
+    if (booking === null) {
+      sendSuccess(req, res, { booking: null }, 'No trip in progress');
+      return;
+    }
+
+    const adjustments = await charges.listAdjustments(booking.id);
+    sendSuccess(req, res, { booking: toBookingDto({ booking, adjustments }) }, 'Trip in progress');
+  });
+}
+
 export function makeCancelByCustomerController(
   useCase: CancelBookingByCustomerUseCase,
 ): RequestHandler {

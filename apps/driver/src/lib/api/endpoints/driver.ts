@@ -9,6 +9,7 @@ import type {
   SetDutyStatusRequest,
   DriverDocumentDto,
   DriverProfileDto,
+  DriverWalletDetailsDto,
   RequestDocumentUploadRequest,
   RequestDocumentUploadResponse,
   RequestProfilePictureUploadResponse,
@@ -128,6 +129,20 @@ export function registerDevice(body: RegisterDeviceRequest): Promise<RegisterDev
   return request<RegisterDeviceResponse>(`${ROLE_PREFIX}/devices`, {
     method: 'POST',
     body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `GET /driver/wallet` — the earnings screen's one call.
+ *
+ * Returns the balance, lifetime earnings and a page of the ledger rows behind them. There is no
+ * driver id in the path: the server reads it off the bearer, so this cannot be pointed at anyone
+ * else's earnings.
+ */
+export function getEarnings(page = 1, limit = 20): Promise<DriverWalletDetailsDto> {
+  return request<DriverWalletDetailsDto>(`${ROLE_PREFIX}/wallet`, {
+    query: { page, limit },
     token: getAccessToken() ?? undefined,
   });
 }

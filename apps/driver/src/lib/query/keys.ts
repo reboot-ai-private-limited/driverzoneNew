@@ -16,4 +16,20 @@ export const keys = {
     all: () => ['documents'] as const,
     list: () => ['documents', 'list'] as const,
   },
+  trip: {
+    all: () => ['trip'] as const,
+    detail: (bookingId: string) => ['trip', bookingId] as const,
+    /** The recovery read — "am I in the middle of a trip?", asked on every launch. */
+    current: () => ['trip', 'current'] as const,
+  },
+  earnings: {
+    all: () => ['earnings'] as const,
+    /**
+     * The statement. ONE key for every page, not a key per page: `useInfiniteQuery` accumulates
+     * the pages under this single entry, so "load more" extends the cached list instead of
+     * replacing it, and a refetch re-reads every page already on screen rather than silently
+     * leaving older ones stale against a balance that has since moved.
+     */
+    statement: () => ['earnings', 'statement'] as const,
+  },
 } as const;

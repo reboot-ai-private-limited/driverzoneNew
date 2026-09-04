@@ -186,11 +186,13 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         list: controllers.makeListCustomerBookingsController(repo, charges),
         dues: controllers.makeGetDuesController(deps.wallet),
         get: controllers.makeGetCustomerBookingController(repo, charges),
+        current: controllers.makeGetCurrentCustomerBookingController(repo, charges),
         cancel: controllers.makeCancelByCustomerController(cancelByCustomer),
       }),
 
     buildDriverRouter: () =>
       buildDriverRouter({
+        current: controllers.makeGetCurrentDriverTripController(repo, charges),
         get: controllers.makeGetDriverBookingController(repo, charges),
         enRoute: controllers.makeEnRouteController(enRoute),
         arrived: controllers.makeArrivedController(arrived),

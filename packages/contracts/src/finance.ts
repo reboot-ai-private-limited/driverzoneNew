@@ -68,7 +68,16 @@ export interface LedgerEntryDto {
   created_at: string;
 }
 
-export interface AdminDriverWalletDetailsDto {
+/**
+ * A driver's wallet with a page of the rows behind it.
+ *
+ * ONE SHAPE, TWO READERS — the admin looking at a driver (`GET /admin/drivers/:id/wallet`) and
+ * the driver looking at themselves (`GET /driver/wallet`). They are the same question asked from
+ * two sides, so they share a mapper on the server and a type here; two shapes would be two
+ * running-balance derivations to keep in agreement, and a driver whose app disagrees with the
+ * admin screen about what they are owed is the exact argument neither side can win.
+ */
+export interface WalletDetailsDto {
   wallet: WalletBalanceDto;
   ledger: LedgerEntryDto[];
   pagination: {
@@ -78,3 +87,14 @@ export interface AdminDriverWalletDetailsDto {
     total_pages: number;
   };
 }
+
+export type AdminDriverWalletDetailsDto = WalletDetailsDto;
+
+/**
+ * `GET /driver/wallet` — the driver's own earnings screen.
+ *
+ * Identical to what an admin sees for this driver, deliberately. A driver is entitled to the
+ * ledger that decides their payout, and showing them a reduced version invites the belief that
+ * something is being kept from them.
+ */
+export type DriverWalletDetailsDto = WalletDetailsDto;

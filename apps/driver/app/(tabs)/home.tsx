@@ -6,10 +6,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
 import { hasConfirmedBatterySetup } from '@/features/onboarding/batteryOptimisation';
+import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { isPinging, startLocationPings, stopLocationPings } from '@/duty/locationPings';
 import { registerForPush, stopPushRegistration } from '@/notifications/registerDevice';
 import { getProfile, setDuty } from '@/lib/api/endpoints/driver';
 import { getCurrentOffer } from '@/lib/api/endpoints/offers';
+import { getCurrentTrip } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
@@ -45,14 +47,22 @@ export default function HomeScreen(): ReactElement {
        * Duty and the location loop start and stop together, because duty alone does not make a
        * driver dispatchable: `MongoDriverPool` also requires a `lastLocationAt` inside a
        * two-minute window. On duty with no pings is invisible to every wave.
+       *
+       * NOT awaited. TanStack Query keeps `duty.isPending` true until this whole callback
+       * settles, so awaiting either call here would leave the toggle spinning for as long as
+       * THEY take — and `registerForPush` reaches Firebase's `getToken()`, a network call with no
+       * timeout of its own, so a flaky connection would spin the button forever. The duty change
+       * itself already succeeded server-side by the time we get here; these are follow-on setup
+       * that report their own failures through `setDutyError` whenever they finish.
        */
       if (state.is_on_duty) {
-        const started = await startLocationPings();
-        if (!started) {
-          setDutyError(
-            'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
-          );
-        }
+        void startLocationPings().then((started) => {
+          if (!started) {
+            setDutyError(
+              'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
+            );
+          }
+        });
         /**
          * Register for push in the same breath.
          *
@@ -61,12 +71,13 @@ export default function HomeScreen(): ReactElement {
          * work, but only with the app open, so it is worth saying so rather than leaving them to
          * wonder why trips stopped.
          */
-        const pushable = await registerForPush();
-        if (!pushable) {
-          setDutyError(
-            'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
-          );
-        }
+        void registerForPush().then((pushable) => {
+          if (!pushable) {
+            setDutyError(
+              'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
+            );
+          }
+        });
       } else {
         stopLocationPings();
         stopPushRegistration();
@@ -105,13 +116,18 @@ export default function HomeScreen(): ReactElement {
   /**
    * Open the ring screen the moment one appears.
    *
-   * `router.push`, so declining or losing the race returns here rather than unwinding to a blank
-   * stack. The offer id is in the path, but the screen re-reads the offer itself — see its
-   * header for why.
+   * Through `openOffer`, NOT `router.push` directly. This poll is not the only thing that routes
+   * to an offer — the FCM bridge in the root layout does too, and for a foreground push both
+   * fire for the same offer. Pushing twice stacked two ring screens, and the second one surfaced
+   * after a successful accept reading "This trip is no longer available." See `openOffer`.
+   *
+   * Still a push underneath, so declining or losing the race returns here rather than unwinding
+   * to a blank stack. The offer id is in the path, but the screen re-reads the offer itself —
+   * see its header for why.
    */
   const ringingOfferId = offer.data?.offer?.offer_id ?? null;
   useEffect(() => {
-    if (ringingOfferId !== null) router.push(`/offer/${ringingOfferId}`);
+    if (ringingOfferId !== null) openOffer(offerHref(ringingOfferId));
   }, [ringingOfferId]);
 
   /**
@@ -142,6 +158,17 @@ export default function HomeScreen(): ReactElement {
    * `undefined` while the first read is in flight, so the banner does not flash in and out on a
    * cold start.
    */
+  /**
+   * The trip this driver is already on, if any — the banner's source.
+   *
+   * `refetchOnMount` plus the focus refetch below keep it honest: completing a trip navigates
+   * back here, and a stale cache would leave a banner pointing at a finished job.
+   */
+  const activeTrip = useQuery({
+    queryKey: keys.trip.current(),
+    queryFn: ({ signal }) => getCurrentTrip(signal),
+  });
+
   const [batteryConfirmed, setBatteryConfirmed] = useState<boolean | undefined>(undefined);
   useFocusEffect(
     useCallback(() => {
@@ -149,10 +176,13 @@ export default function HomeScreen(): ReactElement {
       void hasConfirmedBatterySetup().then((value) => {
         if (active) setBatteryConfirmed(value);
       });
+      // Re-read the live trip on every focus too: completing one lands back here, and a banner
+      // still offering to resume a finished trip is worse than no banner at all.
+      void queryClient.invalidateQueries({ queryKey: keys.trip.current() });
       return () => {
         active = false;
       };
-    }, []),
+    }, [queryClient]),
   );
 
   return (
@@ -171,6 +201,34 @@ export default function HomeScreen(): ReactElement {
         <Text style={styles.greetingSub}>
           {onDuty ? 'You are online. Trip offers will ring on this phone.' : 'Go online to start receiving trips.'}
         </Text>
+
+        {/*
+          THE SECOND WAY BACK INTO A TRIP. `gate.tsx` routes a killed app straight into one on
+          launch; this catches the driver who is already in the app and navigated out of the trip
+          screen — back button, a tab tap — and would otherwise have no route back to a job the
+          customer is still waiting on. Re-read on focus, so ending a trip clears it immediately.
+
+          Above the battery banner deliberately: a live trip outranks a setup nudge.
+        */}
+        {activeTrip.data?.booking != null ? (
+          <Pressable
+            onPress={() => router.push(`/trip/${activeTrip.data?.booking?.id ?? ''}`)}
+            accessibilityRole="button"
+            accessibilityLabel="Resume your trip in progress"
+            style={({ pressed }) => [styles.tripBanner, pressed && styles.tripBannerPressed]}
+          >
+            <View style={styles.tripBannerIcon}>
+              <Feather name="navigation" size={16} color={colors.dutyOn} />
+            </View>
+            <View style={styles.batteryText}>
+              <Text style={styles.tripBannerTitle}>Trip in progress</Text>
+              <Text style={styles.batteryBody}>
+                {activeTrip.data.booking.reference} · tap to carry on
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.dutyOn} />
+          </Pressable>
+        ) : null}
 
         {batteryConfirmed === false ? (
           <Pressable
@@ -254,6 +312,26 @@ export default function HomeScreen(): ReactElement {
 }
 
 const styles = StyleSheet.create({
+  tripBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.dutyOnBg,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.dutyOn,
+    padding: space.md,
+    marginBottom: space.md,
+  },
+  tripBannerPressed: { opacity: 0.85 },
+  tripBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tripBannerTitle: { ...text.label, color: colors.dutyOn },
   scroll: { flexGrow: 1, backgroundColor: colors.bg },
 
   header: {

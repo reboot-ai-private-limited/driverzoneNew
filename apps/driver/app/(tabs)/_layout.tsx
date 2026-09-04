@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import type { ReactElement } from 'react';
-import { colors, fontFamily, radius, text } from '@/theme/theme';
+import { TabBar } from '@/components/TabBar';
 
 /**
  * The approved-driver shell.
@@ -20,20 +20,12 @@ import { colors, fontFamily, radius, text } from '@/theme/theme';
 export default function TabsLayout(): ReactElement {
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.fg,
-        tabBarInactiveTintColor: colors.faint,
-        tabBarStyle: {
-          backgroundColor: colors.bg,
-          borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 6,
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: { ...text.caption, fontWeight: '600', fontFamily: fontFamily.semibold },
-        tabBarItemStyle: { borderRadius: radius.sm },
-      }}
+      // `tabBar` replaces the stock bar entirely — the same component the customer app uses, so
+      // colours, spacing and the selected state all live in `TabBar` and no `tabBar*` style
+      // option is set here any more. The icons below are still read from these options: `TabBar`
+      // calls each `tabBarIcon` twice, once per `focused` value, and cross-fades the two.
+      tabBar={(props) => <TabBar {...props} />}
+      screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen
         name="home"

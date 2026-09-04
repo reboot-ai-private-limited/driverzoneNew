@@ -4,7 +4,10 @@ import type {
   CancelBookingResponse,
   CreateBookingRequest,
   CreateBookingResponse,
+  CurrentCustomerBookingResponse,
   ListBookingsResponse,
+  RateTripRequest,
+  RateTripResponse,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { request } from '../client';
@@ -64,6 +67,25 @@ export function getBooking(id: string): Promise<BookingDto> {
 }
 
 /**
+ * `GET /customer/bookings/current` — THE RECOVERY READ.
+ *
+ * Android kills a backgrounded app whenever it wants memory, and the booking id lived only in
+ * this app's navigation state. Reopening therefore landed on the booking map with a driver
+ * already on the way and no route back — and the history screen is deliberately a receipt, so
+ * finding the ride there reached neither the live status nor `start_otp`, the four digits the
+ * customer has to read out before their trip can begin.
+ *
+ * Carries the OTP for that reason. `null` most of the time, which is a normal answer to a
+ * question asked on every launch, not an error.
+ */
+export function getCurrentBooking(signal?: AbortSignal): Promise<CurrentCustomerBookingResponse> {
+  return request<CurrentCustomerBookingResponse>(`${ROLE_PREFIX}/bookings/current`, {
+    token: getAccessToken() ?? undefined,
+    signal,
+  });
+}
+
+/**
  * A REASON IS MANDATORY — the API rejects a bare `{}`. `fee`/`refunded` on the response are the
  * only honest source for what a cancellation actually cost; nothing computes the fee ladder on
  * this side, both because the ladder is a settings-driven policy this app does not carry a copy
@@ -84,24 +106,11 @@ export function cancelBooking(id: string, reason: string): Promise<CancelBooking
  * app's side it is one more thing you do to a booking id, and a customer reading this file has no
  * reason to know the server drew its own module boundary somewhere the URL does not show.
  *
- * NO SHARED CONTRACT TYPE EXISTS for this endpoint yet — `RateTripInput`/`RateTripResponse` are
- * only ever a zod schema inside `rateTrip.usecase.ts`, never re-exported through
- * `@driverzone/contracts`. The two interfaces below are this file's own reading of that schema
- * and of `RateTripUseCase.execute`'s return type, not something either side is contractually held
- * to — a real interface migrating this to `@driverzone/contracts` is worth doing once a second
- * client (the driver app) needs the same shape.
+ * The request and response types now live in `@driverzone/contracts`, where the note that used to
+ * sit here said they should go "once a second client needs the same shape". The driver app is
+ * that second client: it rates the customer through the same endpoint mounted on `/driver`, and
+ * two hand-written copies of one wire format is how they drift.
  */
-export interface RateTripRequest {
-  rating: number;
-  tags?: string[] | undefined;
-  comment?: string | undefined;
-}
-
-export interface RateTripResponse {
-  id: string;
-  rating: number;
-}
-
 export function rateTrip(bookingId: string, body: RateTripRequest): Promise<RateTripResponse> {
   return request<RateTripResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/rate`, {
     method: 'POST',

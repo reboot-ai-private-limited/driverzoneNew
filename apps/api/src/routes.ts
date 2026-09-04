@@ -80,6 +80,8 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/driver/bookings', c.bookings.buildDriverRouter());
   router.use('/admin/bookings', c.bookings.buildAdminRouter());
   router.use('/driver/offers', c.dispatch.buildDriverRouter());
+  /** The driver's own earnings. Same rows, same mapper as `/admin/drivers/:id/wallet` above. */
+  router.use('/driver/wallet', c.ledger.buildDriverRouter());
 
   /*
    * `/{customer,driver}/bookings/:id/rate`, and the fall-through one level deeper than the mounts

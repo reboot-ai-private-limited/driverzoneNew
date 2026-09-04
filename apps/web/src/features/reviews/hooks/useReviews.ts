@@ -1,37 +1,62 @@
 import { useQuery } from '@tanstack/react-query';
+import type { AdminReviewDto, AdminReviewsQuery, ReviewParty } from '@driverzone/contracts';
 import { request } from '@/lib/api/client';
 import { authedQueryOptions } from '@/lib/query/factory';
 import { useApiMutation } from '@/lib/query/mutation';
 
-export type Review = {
-  id: string;
-  booking_id: string;
-  reviewer: { id: string; role: 'CUSTOMER' | 'DRIVER'; name: string };
-  reviewee: { id: string; role: 'CUSTOMER' | 'DRIVER'; name: string };
-  rating: number;
-  tags: string[];
-  comment: string | null;
-  created_at: string;
-  admin_flagged: boolean;
-};
+/**
+ * `/admin/reviews` — the ops moderation queue.
+ *
+ * THE ROW TYPE COMES FROM CONTRACTS, not from a copy declared here. This hook used to define its
+ * own `Review` while the API returned `unknown[]`, so the two shapes were held together by
+ * nothing — the same way the driver app kept sending `vehicle_type_preference` for weeks after
+ * the field became plural. Both ends now import `AdminReviewDto`.
+ */
 
-// Based on how `request` works in client.ts, the payload.data is returned directly.
-// The data returned by our controller is an array of reviews.
-export type ReviewsResponse = Review[];
+export type Review = AdminReviewDto;
 
-export function useReviews(revieweeRole: 'CUSTOMER' | 'DRIVER') {
+/**
+ * Filters the SERVER applies, not the browser.
+ *
+ * `listForAdmin` is capped at 200 rows, so a screen that fetched everything and filtered locally
+ * would quietly stop finding old one-star reviews the moment the table outgrew that cap — and
+ * "find what went wrong" is the entire job of this screen. Every filter here rides in the query
+ * string; only the free-text name search is client-side, because there is no server field for it.
+ */
+export interface ReviewFilters {
+  revieweeRole: ReviewParty;
+  /** Ratings at or below this. `2` matches the auto-flagging threshold. */
+  ratingLte?: number | undefined;
+  flaggedOnly?: boolean | undefined;
+}
+
+export function useReviews(filters: ReviewFilters) {
+  const { revieweeRole, ratingLte, flaggedOnly } = filters;
+
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'reviews', { revieweeRole }],
+      // Every filter is part of the key, or switching one serves the previous one's rows.
+      queryKey: ['admin', 'reviews', { revieweeRole, ratingLte, flaggedOnly }],
       fetch: async (token, signal) => {
-        return request<ReviewsResponse>('/admin/reviews', {
+        const query: AdminReviewsQuery = { reviewee_role: revieweeRole };
+        if (ratingLte !== undefined) query.rating_lte = ratingLte;
+        // Only sent when ON. `flagged=false` would mean "show me unflagged ones", which is not
+        // what an unticked box is asking for — it is asking for no filter at all.
+        if (flaggedOnly === true) query.flagged = true;
+
+        return request<AdminReviewDto[]>('/admin/reviews', {
           token,
           signal,
-          query: { reviewee_role: revieweeRole },
+          query: query as Record<string, string | number | boolean | undefined>,
         });
       },
-      staleTime: 1000 * 60 * 5, // 5 minutes
-    })
+      /*
+       * Short, unlike the five minutes this used to hold. A moderation queue is worked by more
+       * than one person at a time, and a row someone else already actioned should not sit there
+       * looking untouched for five minutes.
+       */
+      staleTime: 1000 * 30,
+    }),
   );
 }
 

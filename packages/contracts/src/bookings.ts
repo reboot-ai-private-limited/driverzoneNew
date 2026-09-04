@@ -221,6 +221,33 @@ export interface StartTripRequest {
   location?: { lat: number; lng: number } | undefined;
 }
 
+/**
+ * `GET /driver/bookings/current` — the trip the signed-in driver is in the middle of.
+ *
+ * `null` is a normal answer, not an error: the app asks this on every launch precisely because it
+ * usually has nothing to resume. It exists because a driver's app is killed mid-trip by the OEM
+ * battery managers `battery-setup` warns about, taking the booking id in its navigation state with
+ * it — leaving no way to arrive, start or complete a trip a customer is waiting on.
+ */
+export interface CurrentDriverTripResponse {
+  booking: BookingDto | null;
+}
+
+/**
+ * `GET /customer/bookings/current` — the booking happening to this customer right now.
+ *
+ * CARRIES `start_otp`, unlike the history list. That is the reason it exists rather than a
+ * detail of it: the trip code is shown on the live trip screen only, so a customer whose app was
+ * killed at the pickup had no way back to the four digits their driver was waiting for — the
+ * history screen is a receipt and holds neither the code nor the cancel action.
+ *
+ * A scheduled booking sitting at `CONFIRMED` is NOT "current": it would otherwise pull a customer
+ * into a trip booked for next week every time they opened the app.
+ */
+export interface CurrentCustomerBookingResponse {
+  booking: BookingDto | null;
+}
+
 export interface CompleteTripRequest {
   actualDistanceM?: number | undefined;
 }

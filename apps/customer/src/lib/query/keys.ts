@@ -58,5 +58,7 @@ export const keys = {
      */
     list: () => ['bookings', 'list'] as const,
     detail: (id: string) => ['bookings', id] as const,
+    /** "Am I in the middle of a booking?" — asked on launch, and on Home regaining focus. */
+    current: () => ['bookings', 'current'] as const,
   },
 } as const;

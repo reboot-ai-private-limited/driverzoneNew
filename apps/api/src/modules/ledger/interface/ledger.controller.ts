@@ -30,3 +30,27 @@ export function makeDriverWalletController(useCase: GetDriverWalletUseCase): Req
     sendSuccess(req, res, toWalletDto(id, wallet, page, limit), 'Driver wallet retrieved');
   });
 }
+
+/**
+ * `GET /driver/wallet` — the same read, for the driver themselves.
+ *
+ * THE ID COMES FROM THE TOKEN, never from the path or the query. A driver-supplied id would make
+ * this an authorisation decision on every request, and the one it has to get right is the one it
+ * would be easiest to get wrong: reading another driver's earnings. There is no id to tamper
+ * with here, so there is no check to forget.
+ *
+ * Shares `toWalletDto` with the admin controller above, so the running balance a driver sees is
+ * derived by the same code as the one an admin quotes back to them.
+ */
+export function makeMyWalletController(useCase: GetDriverWalletUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    // `requireAuth('DRIVER')` runs before this and rejects an absent principal, so by here it is
+    // set — the fallback keeps TypeScript honest rather than describing a reachable state.
+    const driverId = req.principal?.sub ?? '';
+    const { page, limit } = walletQuerySchema.parse(req.query);
+
+    const wallet = await useCase.execute(driverId, page, limit);
+
+    sendSuccess(req, res, toWalletDto(driverId, wallet, page, limit), 'Earnings retrieved');
+  });
+}

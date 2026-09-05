@@ -9,13 +9,16 @@ import { TabBar } from '@/components/TabBar';
  * A route GROUP — the parentheses keep `(tabs)` out of the URL, so the duty screen stays at
  * `/home` and `/gate` can route to it by that name.
  *
- * **Three tabs, and Earnings is here even though the endpoint is not.** `GET /driver/earnings`
- * arrives in Phase 8; the tab ships now with an honest empty state rather than appearing later
- * and moving everything else along by one. A driver learns a bar's shape in the first week.
+ * **Four tabs: Duty, Trips, Earnings, Account.** Trips and Earnings sit side by side because they
+ * answer two different questions off two different sources — "what did I drive?" reads the
+ * bookings, "what am I owed?" reads the ledger — and a driver checking a payout against a shift
+ * needs both without either pretending to be the other.
  *
- * The ringing offer and the trip screens are deliberately NOT tabs — they are full-screen routes
- * outside this group (docs/LLD/driver-app.md S-5). A trip offer that shows a tab bar invites the
- * driver to navigate away from the one thing that is time-limited.
+ * The ringing offer and the LIVE trip screen are deliberately NOT tabs — they are full-screen
+ * routes outside this group (docs/LLD/driver-app.md S-5). A trip offer that shows a tab bar
+ * invites the driver to navigate away from the one thing that is time-limited. `/trips/[id]`, the
+ * read-only receipt, is a plain route outside the group too: it is pushed from this tab and comes
+ * back to it.
  */
 export default function TabsLayout(): ReactElement {
   return (
@@ -38,6 +41,21 @@ export default function TabsLayout(): ReactElement {
           // than one that never changes.
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="steering" size={size + 2} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="trips"
+        options={{
+          title: 'Trips',
+          // A receipt-shaped glyph rather than a car: this tab is the RECORD of work done, and
+          // the steering wheel next door already stands for the driving itself.
+          tabBarIcon: ({ color, size, focused }) => (
+            <MaterialCommunityIcons
+              name={focused ? 'clipboard-text' : 'clipboard-text-outline'}
+              size={size}
+              color={color}
+            />
           ),
         }}
       />

@@ -312,8 +312,55 @@ export interface UpdateDriverProfileRequest {
 
 // ─── Driver documents ───────────────────────────────────────────────────────────────────────
 
-export const DOCUMENT_TYPES = ['LICENCE', 'AADHAAR', 'POLICE_VERIFICATION', 'VEHICLE_RC', 'INSURANCE'] as const;
+/**
+ * What a driver uploads.
+ *
+ * `VEHICLE_RC` and `INSURANCE` were removed on 2026-09-04: the driver does not supply the vehicle
+ * — the customer does (docs/LLD/open-questions.md Q5) — so asking a driver for the registration
+ * and insurance of a car they will never own was asking for documents that do not exist. `AADHAAR`
+ * became `GOVERNMENT_ID`, which carries WHICH id it is in `sub_type`, because a driver without an
+ * Aadhaar card had no way to prove identity at all.
+ */
+export const DOCUMENT_TYPES = [
+  'LICENCE',
+  'GOVERNMENT_ID',
+  'POLICE_VERIFICATION',
+  'OTHER',
+] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+
+/**
+ * Which face of the document a file is.
+ *
+ * A licence and a government id are TWO ROWS, one per side, each uploaded and reviewed on its own.
+ * An admin who can only reject "the licence" when the back is unreadable makes the driver
+ * re-photograph both; per-side review says exactly which picture to take again.
+ *
+ * A single-sided document (a police verification letter, a free-form extra) is one `FRONT` row and
+ * no `BACK`. There is no `SINGLE` member: it would mean the same thing as `FRONT` while forcing
+ * every consumer to handle a third case.
+ */
+export const DOCUMENT_SIDES = ['FRONT', 'BACK'] as const;
+export type DocumentSide = (typeof DOCUMENT_SIDES)[number];
+
+/**
+ * Which government id a `GOVERNMENT_ID` document is, stored in `sub_type`.
+ *
+ * Offered as choices rather than free text for the reason every enum here exists: three spellings
+ * of "voter id" is an admin's problem forever, and `sub_type` is capped server-side anyway.
+ */
+export const GOVERNMENT_ID_KINDS = ['AADHAAR', 'PAN', 'VOTER_ID', 'PASSPORT'] as const;
+export type GovernmentIdKind = (typeof GOVERNMENT_ID_KINDS)[number];
+
+/**
+ * Licence classes as issued in India, for `LICENCE.sub_type`.
+ *
+ * MULTI-VALUED, comma-joined — a real licence commonly carries several (LMV + MCWG), and forcing
+ * one would make a driver misdeclare what they hold. Shared from contracts rather than kept in the
+ * driver app so the admin panel renders the same set it is sent.
+ */
+export const LICENCE_CLASSES = ['LMV', 'LMV-NT', 'MCWG', 'HMV', 'HGMV', 'PSV'] as const;
+export type LicenceClass = (typeof LICENCE_CLASSES)[number];
 
 export const DOCUMENT_STATUSES = ['PENDING', 'VERIFIED', 'REJECTED'] as const;
 export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
@@ -321,10 +368,24 @@ export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 export interface DriverDocumentDto {
   id: string;
   doc_type: DocumentType;
+  /** Which face this file is. See `DOCUMENT_SIDES`. */
+  side: DocumentSide;
   status: DocumentStatus;
   /** Why an admin rejected it, so the driver knows what to re-upload. */
   rejection_reason: string | null;
   number: string | null;
+  /**
+   * The type-specific qualifier, one string for four different jobs:
+   *
+   *   - `LICENCE` — the classes held, comma-joined: `"LMV,MCWG"`
+   *   - `GOVERNMENT_ID` — which id it is, a `GovernmentIdKind`
+   *   - `POLICE_VERIFICATION` — the issuing police station
+   *   - `OTHER` — what the driver called the document
+   *
+   * One field rather than four nullable ones because every use is "the thing that qualifies this
+   * document type", and three permanently-null columns per row is a schema describing its own
+   * exceptions. What it means is read off `doc_type`, which is always present.
+   */
   sub_type: string | null;
   issued_on: string | null;
   expires_on: string | null;
@@ -333,7 +394,10 @@ export interface DriverDocumentDto {
 
 export interface RequestDocumentUploadRequest {
   doc_type: DocumentType;
+  /** Omit for `FRONT`. A single-sided document never sends `BACK`. */
+  side?: DocumentSide | undefined;
   number?: string | undefined;
+  /** See `DriverDocumentDto.sub_type` — what this carries depends on `doc_type`. */
   sub_type?: string | undefined;
   issued_on?: string | undefined;
   expires_on?: string | undefined;

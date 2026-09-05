@@ -14,10 +14,12 @@ import { sendLocationPings } from '@/lib/api/endpoints/driver';
  * scale, costs a driver base (docs/LLD/api-contracts.md). Fixes accumulate in `buffer` and go up
  * every `FLUSH_INTERVAL_MS`.
  *
- * Foreground-only for now: `expo-location`'s background task needs the Android foreground
- * service from S-8, which is not built. So pings stop when the app is backgrounded, the driver
- * ages out of the pool within two minutes, and offers stop reaching them — which is honest,
- * because without the service the offer could not have rung anyway.
+ * **These are JS timers, and they only survive a locked screen because the S-8 foreground service
+ * holds the process open.** `dutyForegroundService.ts` is started before this loop and stopped
+ * after it, deliberately: without it Android freezes the process seconds after the screen goes
+ * off, the intervals stop firing, and the driver ages out of the pool's two-minute window while
+ * their app still says "online". The service is what makes this loop a shift-long loop rather
+ * than a foreground-only one.
  */
 
 /** How often the buffer is sent. Well inside the server's two-minute freshness window. */

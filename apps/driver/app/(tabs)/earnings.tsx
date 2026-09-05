@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import type { LedgerEntryDto, TransactionType } from '@driverzone/contracts';
-import { type ComponentProps, type ReactElement } from 'react';
+import { TRANSACTION_TYPES, type LedgerEntryDto, type TransactionType } from '@driverzone/contracts';
+import { type ComponentProps, type ReactElement, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -11,7 +11,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { getEarnings } from '@/lib/api/endpoints/driver';
+import Animated, { FadeIn } from 'react-native-reanimated';
+import { BottomSheet } from '@/components/BottomSheet';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import { getEarnings, type EarningsFilter } from '@/lib/api/endpoints/driver';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
@@ -40,10 +43,105 @@ type FeatherName = ComponentProps<typeof Feather>['name'];
 /** Enough that the first screen is full on any handset, small enough to stay one quick request. */
 const PAGE_SIZE = 20;
 
+/**
+ * The periods worth offering, as the questions a driver actually asks.
+ *
+ * `null` is "all time" and is the default — a statement with a period silently pre-applied is one
+ * where a missing row looks like a missing payment.
+ */
+type Period = 'TODAY' | 'THIS_WEEK' | 'THIS_MONTH';
+
+const PERIODS: ReadonlyArray<{ value: Period; label: string }> = [
+  { value: 'TODAY', label: 'Today' },
+  { value: 'THIS_WEEK', label: 'This week' },
+  { value: 'THIS_MONTH', label: 'This month' },
+];
+
+/**
+ * The type chips, grouped the way a driver thinks about money rather than the way the ledger
+ * stores it: what came in, what was taken off, what was paid out.
+ *
+ * Each preset maps to several `TransactionType`s, so one tap answers "what did I actually earn"
+ * without asking a driver to know that waiting time is its own row type.
+ */
+const TYPE_PRESETS: ReadonlyArray<{
+  key: string;
+  label: string;
+  icon: FeatherName;
+  types: readonly TransactionType[];
+}> = [
+  {
+    key: 'EARNINGS',
+    label: 'Earnings',
+    icon: 'trending-up',
+    types: ['TRIP_EARNING', 'WAITING_EARNING', 'BONUS'],
+  },
+  {
+    key: 'DEDUCTIONS',
+    label: 'Deductions',
+    icon: 'trending-down',
+    types: ['COMMISSION_DEBIT', 'CASH_COLLECTED', 'PENALTY'],
+  },
+  { key: 'PAYOUTS', label: 'Payouts', icon: 'arrow-up-right', types: ['PAYOUT'] },
+];
+
+/** `Date` → `YYYY-MM-DD` in LOCAL time — see the same note in `documentFields.ts`. */
+function toIsoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * A period as the inclusive `from`/`to` days the server expects.
+ *
+ * The week starts MONDAY, which is what a driver's week is here — `getDay()` returns 0 for Sunday,
+ * so it is shifted before subtracting.
+ */
+function periodRange(period: Period): { from: string; to: string } {
+  const now = new Date();
+  const to = toIsoDate(now);
+
+  if (period === 'TODAY') return { from: to, to };
+
+  const start = new Date(now);
+  if (period === 'THIS_WEEK') {
+    const dayFromMonday = (now.getDay() + 6) % 7;
+    start.setDate(now.getDate() - dayFromMonday);
+  } else {
+    start.setDate(1);
+  }
+
+  return { from: toIsoDate(start), to };
+}
+
 export default function EarningsScreen(): ReactElement {
+  const [period, setPeriod] = useState<Period | null>(null);
+  const [types, setTypes] = useState<readonly TransactionType[]>([]);
+  const [typeSheet, setTypeSheet] = useState(false);
+
+  /**
+   * The filter, and the query key with it.
+   *
+   * Built by OMISSION so an unfiltered screen sends exactly the request it always did — an empty
+   * `type=` would fail the server's own `min(1)`, and a `from` of "all time" does not exist.
+   */
+  const filter = useMemo<EarningsFilter>(() => {
+    const range = period === null ? null : periodRange(period);
+    return {
+      ...(types.length === 0 ? {} : { types }),
+      ...(range === null ? {} : { from: range.from, to: range.to }),
+    };
+  }, [period, types]);
+
+  const isFiltered = period !== null || types.length > 0;
+
   const earnings = useInfiniteQuery({
-    queryKey: keys.earnings.statement(),
-    queryFn: ({ pageParam }) => getEarnings(pageParam, PAGE_SIZE),
+    // Serialised into the key: filtering happens on the server, so a different filter is a
+    // different response and must not share a cache entry — see `keys.earnings.statement`.
+    queryKey: keys.earnings.statement({ period, types }),
+    queryFn: ({ pageParam }) => getEarnings(pageParam, PAGE_SIZE, filter),
     initialPageParam: 1,
     getNextPageParam: (last) =>
       last.pagination.page < last.pagination.total_pages ? last.pagination.page + 1 : undefined,
@@ -56,9 +154,17 @@ export default function EarningsScreen(): ReactElement {
    * while "load more" is appending older history beneath it.
    */
   const wallet = pages[0]?.wallet ?? null;
+  const summary = pages[0]?.summary ?? null;
   const rows = pages.flatMap((page) => page.ledger);
 
-  if (earnings.isPending) {
+  /*
+   * THE FIRST LOAD ONLY, and the distinction matters now that filters exist. Every chip tap is a
+   * new query key and therefore `isPending` again — returning a bare full-screen spinner here
+   * would tear the filter row off the screen mid-tap and put it back a moment later, which reads
+   * as the app restarting. Once there is a balance to show, the chrome stays and only the
+   * statement below waits.
+   */
+  if (earnings.isPending && !isFiltered) {
     return (
       <View style={styles.centred}>
         <ActivityIndicator size="large" color={colors.fg} />
@@ -66,7 +172,7 @@ export default function EarningsScreen(): ReactElement {
     );
   }
 
-  if (earnings.isError) {
+  if (earnings.isError && !isFiltered) {
     return (
       <View style={styles.centred}>
         <Feather name="wifi-off" size={28} color={colors.muted} />
@@ -88,6 +194,7 @@ export default function EarningsScreen(): ReactElement {
   }
 
   const owed = (wallet?.balance_paise ?? 0) < 0;
+  const activeTypeLabel = describeTypes(types);
 
   return (
     <View style={styles.root}>
@@ -151,15 +258,141 @@ export default function EarningsScreen(): ReactElement {
 
         <Text style={styles.sectionHeading}>Statement</Text>
 
-        {rows.length === 0 ? (
+        {/* ── The filters ──────────────────────────────────────────────────────────────── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+        >
+          {PERIODS.map((option) => {
+            const active = period === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                // Tapping the active chip clears it — "all time" has no chip of its own, so this
+                // is the only way back to the whole statement.
+                onPress={() => setPeriod(active ? null : option.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={({ pressed }) => [
+                  styles.chip,
+                  active && styles.chipActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          <View style={styles.chipDivider} />
+
+          <Pressable
+            onPress={() => setTypeSheet(true)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: types.length > 0 }}
+            style={({ pressed }) => [
+              styles.chip,
+              types.length > 0 && styles.chipActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.chipInner}>
+              <Feather
+                name="sliders"
+                size={13}
+                color={types.length > 0 ? colors.fg : colors.muted}
+              />
+              <Text style={[styles.chipLabel, types.length > 0 && styles.chipLabelActive]}>
+                {activeTypeLabel ?? 'Type'}
+              </Text>
+            </View>
+          </Pressable>
+
+          {isFiltered ? (
+            <Pressable
+              onPress={() => {
+                setPeriod(null);
+                setTypes([]);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear filters"
+              style={({ pressed }) => [styles.clearChip, pressed && styles.pressed]}
+            >
+              <Feather name="x" size={13} color={colors.danger} />
+              <Text style={styles.clearChipLabel}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </ScrollView>
+
+        {/*
+          THE SELECTION'S OWN TOTALS, straight from the server and across every page of the
+          filter — not a sum of the rows on screen, which would grow as "Show older" was tapped
+          and quietly disagree with itself. This is what makes a filter an answer rather than a
+          shorter list.
+        */}
+        {summary !== null && summary.count > 0 ? (
+          <Animated.View entering={FadeIn.duration(180)} style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <SummaryCell label="In" value={formatPaise(summary.credited_paise)} tone="good" />
+              <View style={styles.summaryDivider} />
+              <SummaryCell label="Out" value={formatPaise(summary.debited_paise)} tone="bad" />
+              <View style={styles.summaryDivider} />
+              <SummaryCell
+                label="Net"
+                value={`${summary.net_paise < 0 ? '−' : ''}${formatPaise(Math.abs(summary.net_paise))}`}
+              />
+            </View>
+            <Text style={styles.summaryCaption}>
+              {summary.count} {summary.count === 1 ? 'entry' : 'entries'}
+              {isFiltered ? ' in this filter' : ' in your statement'}
+            </Text>
+          </Animated.View>
+        ) : null}
+
+        {earnings.isPending ? (
+          <View style={styles.empty}>
+            <ActivityIndicator color={colors.fg} />
+          </View>
+        ) : earnings.isError ? (
+          <View style={styles.empty}>
+            <View style={styles.emptyIcon}>
+              <Feather name="wifi-off" size={26} color={colors.muted} />
+            </View>
+            <Text style={styles.emptyTitle}>Could not load this</Text>
+            <Text style={styles.emptyBody}>
+              {earnings.error instanceof Error
+                ? earnings.error.message
+                : 'Check your connection and try again.'}
+            </Text>
+            <Pressable
+              onPress={() => void earnings.refetch()}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+            >
+              <Text style={styles.retryLabel}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : rows.length === 0 ? (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <Feather name="bar-chart-2" size={26} color={colors.muted} />
             </View>
-            <Text style={styles.emptyTitle}>No earnings yet</Text>
+            {/*
+              TWO DIFFERENT EMPTIES, and on a screen about money the difference is the whole
+              message: "nothing matched your filter" is a control the driver can undo, while
+              "no earnings yet" told to someone who has been driving all week would be alarming
+              and wrong.
+            */}
+            <Text style={styles.emptyTitle}>
+              {isFiltered ? 'Nothing in this filter' : 'No earnings yet'}
+            </Text>
             <Text style={styles.emptyBody}>
-              Once you complete a trip, every fare, commission and cash collection appears here —
-              with the balance after each one.
+              {isFiltered
+                ? 'Try a wider period, or clear the filter to see your whole statement.'
+                : 'Once you complete a trip, every fare, commission and cash collection appears here — with the balance after each one.'}
             </Text>
           </View>
         ) : (
@@ -189,6 +422,150 @@ export default function EarningsScreen(): ReactElement {
           </Pressable>
         ) : null}
       </ScrollView>
+
+      {/*
+        THE TYPE PICKER. Presets first because they are the questions drivers actually ask, then
+        every individual row type underneath for the driver chasing one specific entry — a
+        commission they disagree with, a penalty they want to find. Selecting is immediate: there
+        is no Apply, so the sheet is a filter being adjusted rather than a form being submitted.
+      */}
+      <BottomSheet visible={typeSheet} onClose={() => setTypeSheet(false)}>
+        <Text style={styles.sheetTitle}>Show only</Text>
+
+        <View style={styles.presetRow}>
+          {TYPE_PRESETS.map((preset) => {
+            const active = sameTypes(types, preset.types);
+            return (
+              <Pressable
+                key={preset.key}
+                onPress={() => setTypes(active ? [] : preset.types)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={({ pressed }) => [
+                  styles.preset,
+                  active && styles.presetActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Feather
+                  name={preset.icon}
+                  size={16}
+                  color={active ? colors.brandOnFg : colors.fg}
+                />
+                <Text style={[styles.presetLabel, active && styles.presetLabelActive]}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.sheetSubheading}>Or pick exactly</Text>
+
+        <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
+          {TRANSACTION_TYPES.map((type) => {
+            const checked = types.includes(type);
+            return (
+              <Pressable
+                key={type}
+                onPress={() =>
+                  setTypes((current) =>
+                    current.includes(type)
+                      ? current.filter((value) => value !== type)
+                      : [...current, type],
+                  )
+                }
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked }}
+                style={({ pressed }) => [styles.typeRow, pressed && styles.pressed]}
+              >
+                <View style={[styles.typeIcon, { backgroundColor: ENTRY_STYLES[type].bg }]}>
+                  <Feather
+                    name={ENTRY_STYLES[type].icon}
+                    size={14}
+                    color={ENTRY_STYLES[type].fg}
+                  />
+                </View>
+                <Text style={styles.typeLabel}>{TYPE_LABELS[type]}</Text>
+                <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+                  {checked ? <Feather name="check" size={13} color={colors.brandOnFg} /> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        <View style={styles.sheetActions}>
+          <PrimaryButton label="Done" onPress={() => setTypeSheet(false)} showArrow={false} />
+          {types.length > 0 ? (
+            <Pressable
+              onPress={() => setTypes([])}
+              accessibilityRole="button"
+              style={styles.sheetClear}
+            >
+              <Text style={styles.sheetClearLabel}>Clear selection</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </BottomSheet>
+    </View>
+  );
+}
+
+/** Human names for the wire enum — `TRIP_EARNING` is not a phrase anybody says out loud. */
+const TYPE_LABELS: Record<TransactionType, string> = {
+  TRIP_EARNING: 'Trip earnings',
+  WAITING_EARNING: 'Waiting time',
+  COMMISSION_DEBIT: 'Commission',
+  CASH_COLLECTED: 'Cash collected',
+  PAYOUT: 'Payouts',
+  ADJUSTMENT: 'Adjustments',
+  PENALTY: 'Penalties',
+  BONUS: 'Bonuses',
+};
+
+/** Set equality, order-insensitive — a preset stays "on" however its types were selected. */
+function sameTypes(a: readonly TransactionType[], b: readonly TransactionType[]): boolean {
+  return a.length === b.length && a.every((type) => b.includes(type));
+}
+
+/**
+ * What the Type chip says. A preset by its own name, one type by its name, anything else by a
+ * count — three labels is wider than the chip and reads as noise.
+ */
+function describeTypes(types: readonly TransactionType[]): string | null {
+  if (types.length === 0) return null;
+
+  const preset = TYPE_PRESETS.find((candidate) => sameTypes(types, candidate.types));
+  if (preset !== undefined) return preset.label;
+
+  const first = types[0];
+  if (types.length === 1 && first !== undefined) return TYPE_LABELS[first];
+  return `${String(types.length)} types`;
+}
+
+function SummaryCell({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  tone?: 'default' | 'good' | 'bad';
+}): ReactElement {
+  return (
+    <View style={styles.summaryCell}>
+      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.summaryValue,
+          tone === 'good' && styles.summaryValueGood,
+          tone === 'bad' && styles.summaryValueBad,
+        ]}
+        numberOfLines={1}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -374,6 +751,108 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
     marginBottom: space.sm,
   },
+
+  chipsRow: { gap: space.sm, paddingVertical: space.xs, alignItems: 'center' },
+  chip: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  chipInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  // A dark edge on the active chip, not just the yellow: yellow alone is ~1.1:1 against white.
+  chipActive: { backgroundColor: colors.brand, borderColor: colors.fg },
+  chipLabel: { ...text.label, color: colors.muted },
+  chipLabelActive: { color: colors.fg },
+  chipDivider: { width: 1, height: 22, backgroundColor: colors.border },
+  clearChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  clearChipLabel: { ...text.label, color: colors.danger },
+
+  summaryCard: {
+    backgroundColor: colors.bgSunken,
+    borderRadius: radius.lg,
+    padding: space.md,
+    marginTop: space.md,
+    marginBottom: space.sm,
+  },
+  summaryRow: { flexDirection: 'row', alignItems: 'center' },
+  summaryCell: { flex: 1, alignItems: 'center' },
+  summaryDivider: { width: 1, height: 30, backgroundColor: colors.border },
+  summaryLabel: { ...text.caption, color: colors.muted },
+  summaryValue: { ...text.label, color: colors.fg, marginTop: 2 },
+  summaryValueGood: { color: colors.dutyOn },
+  summaryValueBad: { color: colors.warning },
+  summaryCaption: {
+    ...text.caption,
+    color: colors.faint,
+    textAlign: 'center',
+    marginTop: space.sm,
+  },
+
+  sheetTitle: { ...text.heading, color: colors.fg },
+  sheetSubheading: {
+    ...text.caption,
+    color: colors.faint,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: space.lg,
+    marginBottom: space.xs,
+  },
+  sheetScroll: { flexShrink: 1 },
+  presetRow: { flexDirection: 'row', gap: space.sm, marginTop: space.md },
+  preset: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: space.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bgSunken,
+  },
+  presetActive: { backgroundColor: colors.fg, borderColor: colors.fg },
+  presetLabel: { ...text.caption, color: colors.fg },
+  presetLabelActive: { color: colors.brandOnFg },
+
+  typeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.sm,
+  },
+  typeIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  typeLabel: { ...text.body, color: colors.fg, flex: 1 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: colors.fg, borderColor: colors.fg },
+
+  sheetActions: { marginTop: space.md },
+  sheetClear: { alignItems: 'center', paddingVertical: space.md },
+  sheetClearLabel: { ...text.body, color: colors.muted },
 
   statement: {
     backgroundColor: colors.card,

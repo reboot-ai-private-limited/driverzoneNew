@@ -1,11 +1,16 @@
-import type { DocumentType } from '@driverzone/contracts';
+import {
+  GOVERNMENT_ID_KINDS,
+  LICENCE_CLASSES,
+  type DocumentSide,
+  type DocumentType,
+} from '@driverzone/contracts';
 
 /**
  * Which metadata each document type actually has.
  *
  * The API accepts `number`, `sub_type`, `issued_on` and `expires_on` on every document type
  * (`requestDocumentUploadSchema` — all optional). Asking for all four every time would be the
- * easy build and a bad form: an Aadhaar card has no expiry date and no class, so a driver either
+ * easy build and a bad form: a government id has no expiry date and no class, so a driver either
  * invents one or stalls. `mobile-in-monorepo.md` is blunt that drivers abandoning onboarding is
  * a supply problem, and a form that asks for facts a document does not have is how that happens.
  *
@@ -15,58 +20,100 @@ import type { DocumentType } from '@driverzone/contracts';
  * tracking; expired documents block going on duty."* That rule is unenforceable unless the app
  * actually collects an expiry — which until now it never did, so every document looked
  * perpetually valid. The types below marked `expires` are the ones that make FR-D6 real.
+ *
+ * **Two-sided documents (2026-09-04).** A licence and a government id are photographed front and
+ * back, as two separate uploads that an admin reviews separately. `sides` below says which faces
+ * a type has; the metadata is asked ONCE, on the first upload, and rides on both — re-typing a
+ * licence number to photograph its back is the sort of thing that ends an onboarding.
  */
 
 export interface DocumentFieldSpec {
   /** The identifying number printed on the document. */
   number?: { label: string; placeholder: string; keyboard: 'default' | 'number-pad' };
-  /** A class or variant — only the licence has one in practice. */
-  subType?: { label: string; placeholder: string; options: readonly string[] };
+  /**
+   * The type-specific qualifier, sent as `sub_type`. `multi` means the driver may tick several
+   * and the values are comma-joined — a real licence commonly carries LMV *and* MCWG.
+   */
+  subType?: {
+    label: string;
+    hint?: string;
+    options: readonly string[];
+    /** Prettier text for an option whose wire value is an enum member (`VOTER_ID` → `Voter ID`). */
+    labels?: Readonly<Record<string, string>>;
+    multi: boolean;
+  };
+  /** A free-text qualifier, also sent as `sub_type`. Mutually exclusive with `subType`. */
+  subTypeText?: { label: string; placeholder: string };
   issued?: { label: string };
   expires?: { label: string };
+  /** Which faces this document has. One entry means a single photo. */
+  sides: readonly DocumentSide[];
 }
 
-/**
- * Licence classes as issued in India. Offered as choices rather than free text because a driver
- * typing "lmv" / "LMV " / "L.M.V." gives an admin three spellings of one class to reconcile, and
- * `sub_type` is capped at 20 characters server-side anyway.
- */
-const LICENCE_CLASSES = ['LMV', 'LMV-NT', 'MCWG', 'HMV', 'HGMV', 'PSV'] as const;
+const TWO_SIDED: readonly DocumentSide[] = ['FRONT', 'BACK'];
+const ONE_SIDED: readonly DocumentSide[] = ['FRONT'];
+
+const GOVERNMENT_ID_LABELS: Record<string, string> = {
+  AADHAAR: 'Aadhaar',
+  PAN: 'PAN',
+  VOTER_ID: 'Voter ID',
+  PASSPORT: 'Passport',
+};
 
 export const DOCUMENT_FIELDS: Record<DocumentType, DocumentFieldSpec> = {
   LICENCE: {
     number: { label: 'Licence number', placeholder: 'WB-1420110012345', keyboard: 'default' },
-    subType: { label: 'Class', placeholder: 'Select a class', options: LICENCE_CLASSES },
+    subType: {
+      label: 'Class',
+      hint: '(tick every one on your licence)',
+      options: LICENCE_CLASSES,
+      multi: true,
+    },
     issued: { label: 'Issued on' },
     expires: { label: 'Valid until' },
+    sides: TWO_SIDED,
   },
-  AADHAAR: {
-    // 12 digits, no expiry, no class. The whole reason this file is per-type.
-    number: { label: 'Aadhaar number', placeholder: '0000 0000 0000', keyboard: 'number-pad' },
-  },
-  VEHICLE_RC: {
-    number: { label: 'Registration number', placeholder: 'WB74AB1234', keyboard: 'default' },
-    issued: { label: 'Registered on' },
-    expires: { label: 'Valid until' },
-  },
-  INSURANCE: {
-    number: { label: 'Policy number', placeholder: 'Policy number', keyboard: 'default' },
-    issued: { label: 'Issued on' },
-    expires: { label: 'Valid until' },
+  GOVERNMENT_ID: {
+    subType: { label: 'Which ID is this?', options: GOVERNMENT_ID_KINDS, labels: GOVERNMENT_ID_LABELS, multi: false },
+    // No expiry: an Aadhaar or PAN card has none, and asking would be the invented field this
+    // whole file exists to avoid. A passport does, but not enough of them to ask everybody.
+    number: { label: 'ID number', placeholder: 'As printed on the ID', keyboard: 'default' },
+    sides: TWO_SIDED,
   },
   POLICE_VERIFICATION: {
-    number: { label: 'Certificate number', placeholder: 'Certificate number', keyboard: 'default' },
+    // Station and date only. The certificate number was dropped on 2026-09-04: what an admin
+    // actually checks is which station issued it and how recently.
+    subTypeText: { label: 'Police station', placeholder: 'Which station issued it' },
     issued: { label: 'Issued on' },
-    expires: { label: 'Valid until' },
+    sides: ONE_SIDED,
+  },
+  OTHER: {
+    subTypeText: { label: 'What is this document?', placeholder: 'Badge, PSV permit…' },
+    sides: ONE_SIDED,
   },
 };
 
-/** True when a type has nothing to ask, so the screen can skip straight to the photo picker. */
+/** How a `sub_type` value should read on screen — `VOTER_ID` → `Voter ID`, `LMV,MCWG` unchanged. */
+export function describeSubType(type: DocumentType, value: string): string {
+  return DOCUMENT_FIELDS[type].subType?.labels?.[value] ?? value;
+}
+
+/** The faces a type is photographed from. */
+export function sidesOf(type: DocumentType): readonly DocumentSide[] {
+  return DOCUMENT_FIELDS[type].sides;
+}
+
+export function sideLabel(side: DocumentSide): string {
+  return side === 'FRONT' ? 'Front' : 'Back';
+}
+
+/** True when a type has something to ask, so the screen knows whether to open the form at all. */
 export function hasFields(type: DocumentType): boolean {
   const spec = DOCUMENT_FIELDS[type];
   return (
     spec.number !== undefined ||
     spec.subType !== undefined ||
+    spec.subTypeText !== undefined ||
     spec.issued !== undefined ||
     spec.expires !== undefined
   );

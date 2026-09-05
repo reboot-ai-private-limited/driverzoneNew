@@ -1,7 +1,9 @@
 import type {
   BookingDto,
+  CancelBookingResponse,
   CompleteTripResponse,
   CurrentDriverTripResponse,
+  ListDriverTripsResponse,
   RateTripRequest,
   RateTripResponse,
 } from '@driverzone/contracts';
@@ -25,6 +27,21 @@ import { request } from '../client';
 
 export function getTrip(bookingId: string, signal?: AbortSignal): Promise<BookingDto> {
   return request<BookingDto>(`${ROLE_PREFIX}/bookings/${bookingId}`, {
+    token: getAccessToken() ?? undefined,
+    signal,
+  });
+}
+
+/**
+ * `GET /driver/bookings` — every trip this driver has been assigned, newest first.
+ *
+ * SERVER-CAPPED, NOT PAGED (`HISTORY_LIMIT` on the API side), which is what lets the Trips screen
+ * filter and search over the whole list client-side. Paging under a client-side filter would
+ * silently hide matches on page two — the same trade the customer app's ride history makes, and
+ * the same note applies: filters move server-side in the change that adds a cursor, not before.
+ */
+export function listTrips(signal?: AbortSignal): Promise<ListDriverTripsResponse> {
+  return request<ListDriverTripsResponse>(`${ROLE_PREFIX}/bookings`, {
     token: getAccessToken() ?? undefined,
     signal,
   });
@@ -122,7 +139,7 @@ export function reportPickupPin(
 /**
  * `GET /driver/bookings/current` — the trip this driver is in the middle of, or `null`.
  *
- * THE RECOVERY READ, and the counterpart to `getCurrentOffer`. A driver's app is killed mid-trip
+ * THE RECOVERY READ, and the counterpart to `listOffers`. A driver's app is killed mid-trip
  * by the OEM battery managers `battery-setup` exists to fight, and the booking id needed to get
  * back only ever lived in navigation state, which dies with the process. Asked on every launch;
  * `null` most of the time, and that is a normal answer rather than an error.
@@ -131,6 +148,30 @@ export function getCurrentTrip(signal?: AbortSignal): Promise<CurrentDriverTripR
   return request<CurrentDriverTripResponse>(`${ROLE_PREFIX}/bookings/current`, {
     token: getAccessToken() ?? undefined,
     signal,
+  });
+}
+
+/**
+ * `POST /driver/bookings/:id/cancel` — the driver drops a trip they had accepted.
+ *
+ * ALLOWED FROM ASSIGNED, DRIVER_EN_ROUTE AND ARRIVED, and from nowhere else: once the trip has
+ * STARTED the customer is in the car, and the state machine (`TRANSITIONS`) offers a driver no
+ * cancellation from there — only an admin can end a running trip. The screen must not offer it
+ * either, or the button is one that can only produce an error.
+ *
+ * THERE IS NO FREE WINDOW on this side, unlike the customer's ladder. A driver who accepted has
+ * already taken the booking out of dispatch whatever the clock says, so the penalty depends only
+ * on how far along they were — nothing at ASSIGNED, `cancellation.driver_penalty_en_route` once
+ * they set off, `cancellation.driver_penalty_arrived` once they arrived. It lands as a `PENALTY`
+ * row on their ledger, which is why the sheet states the figure before they commit.
+ *
+ * `reason` is REQUIRED by the server (`requireReason`) — an empty one is a 400, not a default.
+ */
+export function cancelTrip(bookingId: string, reason: string): Promise<CancelBookingResponse> {
+  return request<CancelBookingResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/cancel`, {
+    method: 'POST',
+    body: { reason },
+    token: getAccessToken() ?? undefined,
   });
 }
 

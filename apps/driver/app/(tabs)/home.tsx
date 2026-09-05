@@ -8,9 +8,13 @@ import { Logo } from '@/components/Logo';
 import { hasConfirmedBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { isPinging, startLocationPings, stopLocationPings } from '@/duty/locationPings';
+import {
+  startDutyForegroundService,
+  stopDutyForegroundService,
+} from '@/duty/dutyForegroundService';
 import { registerForPush, stopPushRegistration } from '@/notifications/registerDevice';
 import { getProfile, setDuty } from '@/lib/api/endpoints/driver';
-import { getCurrentOffer } from '@/lib/api/endpoints/offers';
+import { listOffers } from '@/lib/api/endpoints/offers';
 import { getCurrentTrip } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
@@ -24,9 +28,10 @@ import { colors, radius, shadow, space, text } from '@/theme/theme';
  * from the profile's own `is_on_duty`. That is also why it survives closing the app — there is
  * nothing local to lose.
  *
- * Still to come with the offer system (docs/LLD/driver-app.md S-8/S-9): the Android foreground
- * service, FCM token registration, and the location pings that keep a driver eligible. Going on
- * duty will start all three; the marks are below.
+ * **Going on duty starts three things** (docs/LLD/driver-app.md S-8): the location ping loop, the
+ * Android foreground service, and FCM token registration. Pings before the service, because the
+ * service is typed `location` and Android refuses to start it without a runtime location grant.
+ * Going off duty reverses it.
  */
 export default function HomeScreen(): ReactElement {
   const queryClient = useQueryClient();
@@ -56,13 +61,37 @@ export default function HomeScreen(): ReactElement {
        * that report their own failures through `setDutyError` whenever they finish.
        */
       if (state.is_on_duty) {
-        void startLocationPings().then((started) => {
-          if (!started) {
+        /**
+         * LOCATION PERMISSION FIRST, THEN THE SERVICE — S-8 step 1 before step 3, and not a
+         * stylistic preference.
+         *
+         * The foreground service is typed `location`, which Android only starts if a runtime
+         * location grant is already held. Starting it first threw `SecurityException` natively
+         * inside `ForegroundService.onStartCommand` — uncatchable from JS — and crash-looped the
+         * app on the first "Go on duty" of a fresh install. Pings settle the grant first;
+         * `startDutyForegroundService` re-checks it anyway, because the dev fixed-coordinate
+         * override makes the ping loop skip the prompt entirely.
+         *
+         * Both failures are reported, not fatal: duty already succeeded server-side, and a driver
+         * working with the app open beats one bounced back off duty.
+         */
+        void (async () => {
+          const pinging = await startLocationPings();
+          if (!pinging) {
             setDutyError(
               'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
             );
+            // No grant means the location-typed service cannot legally start either.
+            return;
           }
-        });
+
+          const serviceUp = await startDutyForegroundService();
+          if (!serviceUp) {
+            setDutyError(
+              'We could not keep DriverZone running in the background. Offers may only reach you while the app is open — check notification and location permissions in Settings.',
+            );
+          }
+        })();
         /**
          * Register for push in the same breath.
          *
@@ -79,8 +108,11 @@ export default function HomeScreen(): ReactElement {
           }
         });
       } else {
+        // The reverse order of going on duty: stop what the service was protecting, then release
+        // the service itself, so the process is never kept alive for a loop that has already gone.
         stopLocationPings();
         stopPushRegistration();
+        void stopDutyForegroundService();
       }
     },
     onError: (cause) => {
@@ -95,7 +127,7 @@ export default function HomeScreen(): ReactElement {
   const firstName = profile.data?.full_name?.trim().split(' ')[0] ?? 'there';
 
   /**
-   * Polling for a ringing offer.
+   * Polling for ringing offers.
    *
    * A stand-in for the push that lands with S-9: polling only works while this screen is alive,
    * so it cannot ring a closed app — but it proves the whole chain (book → wave → offer →
@@ -103,10 +135,14 @@ export default function HomeScreen(): ReactElement {
    *
    * Only while ON DUTY. An off-duty driver has no offers by definition, and polling anyway would
    * burn battery to always be told no.
+   *
+   * PLURAL (2026-09-04): a driver can legitimately hold more than one live offer — see
+   * `ListDriverOffersResponse`. This screen only ever routes to the SOONEST-EXPIRING one; the ring
+   * screen itself is what shows "+N more waiting" for the rest, once it is open.
    */
-  const offer = useQuery({
-    queryKey: keys.offers.current(),
-    queryFn: ({ signal }) => getCurrentOffer(signal),
+  const offers = useQuery({
+    queryKey: keys.offers.list(),
+    queryFn: ({ signal }) => listOffers(signal),
     enabled: onDuty,
     refetchInterval: onDuty ? 4000 : false,
     // Never serve a cached answer: an offer that arrived a second ago is the whole point.
@@ -119,13 +155,15 @@ export default function HomeScreen(): ReactElement {
    * Through `openOffer`, NOT `router.push` directly. This poll is not the only thing that routes
    * to an offer — the FCM bridge in the root layout does too, and for a foreground push both
    * fire for the same offer. Pushing twice stacked two ring screens, and the second one surfaced
-   * after a successful accept reading "This trip is no longer available." See `openOffer`.
+   * after a successful accept reading "This trip is no longer available." `openOffer` also now
+   * refuses to stack a SECOND ring screen for a genuinely different offer while one is already
+   * open — see its header.
    *
    * Still a push underneath, so declining or losing the race returns here rather than unwinding
    * to a blank stack. The offer id is in the path, but the screen re-reads the offer itself —
    * see its header for why.
    */
-  const ringingOfferId = offer.data?.offer?.offer_id ?? null;
+  const ringingOfferId = offers.data?.offers[0]?.offer_id ?? null;
   useEffect(() => {
     if (ringingOfferId !== null) openOffer(offerHref(ringingOfferId));
   }, [ringingOfferId]);
@@ -143,10 +181,20 @@ export default function HomeScreen(): ReactElement {
    * registered device", and every offer lapses in silence while the app looks perfectly healthy.
    * Both calls are idempotent — `isPinging()` guards one and the server's `$addToSet` guards the
    * other — so this is safe on every render pass.
+   *
+   * The foreground service is restarted here for the same reason and is idempotent too: it is
+   * keyed on one notification id, so a second `displayNotification` replaces the notice rather
+   * than stacking a second service. Without this line a driver who reopened the app on a shift
+   * they never ended would be back on duty with nothing keeping the process alive.
    */
   useEffect(() => {
     if (!onDuty) return;
-    if (!isPinging()) void startLocationPings();
+    void (async () => {
+      // Same ordering rule as the toggle above: the location grant has to exist before a
+      // `location`-typed foreground service may be started, or Android kills the process.
+      if (!isPinging()) await startLocationPings();
+      await startDutyForegroundService();
+    })();
     void registerForPush();
   }, [onDuty]);
 

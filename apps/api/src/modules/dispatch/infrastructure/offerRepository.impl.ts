@@ -54,14 +54,15 @@ export class MongoOfferRepository implements OfferRepositoryPort {
     return doc === null ? null : toEntity(doc.toObject() as DispatchOfferDoc);
   }
 
-  async findLiveForDriver(driverId: string): Promise<DispatchOffer | null> {
-    if (!mongoose.isValidObjectId(driverId)) return null;
-    const doc = await DispatchOfferModel.findOne({
+  /** Sorted soonest-expiring first — see the port for why this matters now that it can be several. */
+  async findAllLiveForDriver(driverId: string): Promise<DispatchOffer[]> {
+    if (!mongoose.isValidObjectId(driverId)) return [];
+    const docs = await DispatchOfferModel.find({
       driverId,
       status: 'SENT',
       expiresAt: { $gt: new Date() },
-    });
-    return doc === null ? null : toEntity(doc.toObject() as DispatchOfferDoc);
+    }).sort({ expiresAt: 1 });
+    return docs.map((doc) => toEntity(doc.toObject() as DispatchOfferDoc));
   }
 
   async listForBooking(bookingId: string): Promise<DispatchOffer[]> {

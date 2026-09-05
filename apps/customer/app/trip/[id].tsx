@@ -21,6 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { BookingDto, BookingStatus, CancelBookingResponse } from '@driverzone/contracts';
 import { CancelBookingSheet } from '@/components/CancelBookingSheet';
+import { DriverCard } from '@/components/DriverCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { formatTime } from '@/features/booking/schedule';
 import {
@@ -50,11 +51,13 @@ type FeatherName = ComponentProps<typeof Feather>['name'];
  * for the customer app yet — so `GET /customer/bookings/:id` is asked again on an interval, and
  * the interval stops itself once the trip reaches a status nothing follows.
  *
- * EVERY NUMBER HERE IS THE SERVER'S OWN. There is no driver photo, star rating or vehicle list on
- * this screen, and no in-app calling — `BookingDto.driver` carries only an id and a name, and
- * nothing in this API exposes a phone number to a customer's device. A richer driver card is a
- * real thing to build once the identity module has something behind it to show; inventing the
- * rest here would be a nicer-looking lie.
+ * EVERY NUMBER HERE IS THE SERVER'S OWN. That once ruled out the driver card entirely — the DTO
+ * carried an id and a name and nothing else. It now carries the photo, the rating and, WHILE THE
+ * TRIP IS LIVE, the driver's phone number, so `DriverCard` renders all three and offers a call.
+ *
+ * The rule that replaced the old note is the server's, not this screen's: `driver.phone` is null
+ * on a finished trip, so the call button disappears on its own when the trip ends. There is still
+ * no vehicle list, because there is still nothing behind it to show.
  */
 export default function TripScreen(): ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -172,17 +175,8 @@ export default function TripScreen(): ReactElement {
             {data.driver === null ? null : (
               <Stagger index={2}>
                 <View style={styles.card}>
-                  <View style={styles.driverRow}>
-                    <View style={styles.avatar}>
-                      <Feather name="user" size={20} color={colors.fg} />
-                    </View>
-                    <View style={styles.flex}>
-                      <Text style={styles.driverName} numberOfLines={1}>
-                        {data.driver.name ?? 'Your driver'}
-                      </Text>
-                      <Text style={styles.driverSub}>Assigned to your trip</Text>
-                    </View>
-                  </View>
+                  <Text style={styles.cardTitle}>Your driver</Text>
+                  <DriverCard driver={data.driver} />
                 </View>
               </Stagger>
             )}
@@ -662,19 +656,6 @@ const styles = StyleSheet.create({
     ...shadow.soft,
   },
   cardTitle: { ...text.label, color: colors.fg, marginBottom: space.sm },
-
-  driverRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bgSunken,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: space.sm,
-  },
-  driverName: { ...text.body, color: colors.fg, fontFamily: fontFamily.semibold },
-  driverSub: { ...text.caption, color: colors.muted, marginTop: 1 },
 
   detailRow: {
     flexDirection: 'row',

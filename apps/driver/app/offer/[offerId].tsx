@@ -1,10 +1,16 @@
 import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { OtherOffersSheet } from '@/components/OtherOffersSheet';
+import {
+  markOfferScreenClosed,
+  markOfferScreenOpen,
+  offerHref,
+} from '@/features/offer/openOffer';
 import { useOfferRing } from '@/features/offer/useOfferRing';
-import { acceptOffer, declineOffer, getCurrentOffer } from '@/lib/api/endpoints/offers';
+import { acceptOffer, declineOffer, listOffers } from '@/lib/api/endpoints/offers';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, space, text } from '@/theme/theme';
 
@@ -25,30 +31,62 @@ import { colors, radius, space, text } from '@/theme/theme';
  * not a fresh 45 seconds — the server will lapse it on schedule regardless of what this screen
  * believes.
  *
- * **WHAT IS NOT HERE, deliberately: the drop address.** `DriverOfferDto` carries no destination —
- * only `AcceptOfferResponse` does — so there is nothing to render and nothing to invent. That is
- * the dispatch design, not an omission to patch on the client.
+ * **The drop address IS here now (2026-09-04).** `DriverOfferDto` carries `drop` alongside
+ * `pickup`, because "where does this trip go" changes the accept decision as much as the earning
+ * does — an outstation drop 200 km out and one two streets over read identically without it.
+ *
+ * **A driver can hold more than one live offer at once (2026-09-04).** Two customers booking
+ * near-simultaneously can both dispatch to the same driver, and dispatch's matching does not
+ * exclude that — deliberately, so this screen is what actually handles it. It fetches the FULL
+ * live list (`GET /driver/offers`, soonest-expiring first) rather than a single "current" offer,
+ * shows and acts on THIS SCREEN'S OWN `offerId` from that list — never an arbitrary other one —
+ * and surfaces every other live offer as a "+N more waiting" banner. Resolving this one advances
+ * straight to the next queued offer if any remain, rather than dropping back to Home and making
+ * the driver wait for the next poll to be told about a request that was already ringing.
  */
 export default function OfferScreen(): ReactElement {
   const { offerId } = useLocalSearchParams<{ offerId: string }>();
   const queryClient = useQueryClient();
 
   /**
-   * The offer is re-read rather than passed in through params.
+   * The whole live list is re-read rather than a single offer passed in through params.
    *
    * It can arrive three ways — a poll on Home, an FCM tap while closed, a cold start into a live
-   * offer — and only one of those could carry the payload. Reading it here means one code path
-   * and no chance of rendering a stale copy of something the server has already superseded.
+   * offer — and only one of those could carry a payload, and even that payload would only ever be
+   * for the ONE offer that triggered it. Reading the full list here is what lets this screen also
+   * answer "what else is ringing right now," which a single passed-in offer never could.
    */
-  const current = useQuery({
-    queryKey: keys.offers.current(),
-    queryFn: ({ signal }) => getCurrentOffer(signal),
+  const list = useQuery({
+    queryKey: keys.offers.list(),
+    queryFn: ({ signal }) => listOffers(signal),
     // It is either ringing or it is not; a cached answer is worthless here.
     staleTime: 0,
+    refetchInterval: 4000,
   });
 
-  const offer = current.data?.offer ?? null;
+  /*
+   * THE FIX FOR THE ORIGINAL MISMATCH BUG: found by THIS SCREEN'S OWN `offerId`, never by
+   * picking an arbitrary entry. Accept and Decline below act on this exact object's id, so what
+   * is on screen and what a tap submits can no longer be two different offers.
+   */
+  const offer = list.data?.offers.find((candidate) => candidate.offer_id === offerId) ?? null;
+  const others = useMemo(
+    () => list.data?.offers.filter((candidate) => candidate.offer_id !== offerId) ?? [],
+    [list.data, offerId],
+  );
+
   const [outcome, setOutcome] = useState<string | null>(null);
+  const [showingOthers, setShowingOthers] = useState(false);
+
+  /*
+   * This screen counts as "open" from the moment it mounts, however it was reached — including
+   * by replacing another offer screen, which `openOffer()` itself never sees. See the header on
+   * `openOffer.ts` for why both the explicit call here AND the one inside `openOffer()` exist.
+   */
+  useEffect(() => {
+    markOfferScreenOpen();
+    return () => markOfferScreenClosed();
+  }, []);
 
   const accept = useMutation({
     mutationFn: () => acceptOffer(offerId),
@@ -62,7 +100,7 @@ export default function OfferScreen(): ReactElement {
          * driver left staring at a dead offer learns to distrust the ring.
          */
         setOutcome(result.message);
-        setTimeout(() => close(), 1800);
+        setTimeout(() => closeOrAdvance(), 1800);
         return;
       }
 
@@ -73,6 +111,9 @@ export default function OfferScreen(): ReactElement {
        * The success line still shows for a beat first. Cutting instantly to the next screen makes
        * the tap feel like it did something other than what the driver asked for, and this is the
        * moment they most want confirmation that the trip is actually theirs.
+       *
+       * Any OTHER live offer is left exactly as it was — winning this one does not touch it. If
+       * the driver wants it next, Home's own poll will surface it the moment they get there.
        */
       setOutcome(`Trip ${result.reference} is yours.`);
       setTimeout(() => router.replace(`/trip/${result.booking_id}`), 1200);
@@ -86,30 +127,49 @@ export default function OfferScreen(): ReactElement {
     mutationFn: () => declineOffer(offerId),
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: keys.offers.all() });
-      close();
+      closeOrAdvance();
     },
   });
 
-  function close(): void {
+  /**
+   * Leaving this offer — declined, lost the race, or lapsed. If another live offer is already
+   * known about, go straight to it rather than back to Home: it was ringing the whole time this
+   * one was being decided, and making the driver wait for Home's next poll to be told about a
+   * request that has been waiting on them is the exact "proper format" this screen exists for.
+   *
+   * `router.replace`, not `openOffer()` — this is the screen's own intentional next step, not an
+   * external trigger to be deduped against. Its destination's mount effect re-arms
+   * `markOfferScreenOpen()` regardless.
+   */
+  const closeOrAdvance = useCallback(() => {
+    const next = others[0];
+    if (next !== undefined) {
+      router.replace(offerHref(next.offer_id));
+      return;
+    }
     if (router.canGoBack()) router.back();
     else router.replace('/home');
-  }
+  }, [others]);
 
   /**
    * The offer vanished from under us — another driver won, the customer cancelled, or it lapsed.
-   * Closing beats leaving a dead countdown on screen.
+   * Advancing to the next queued offer (or closing, if none) beats leaving a dead countdown up.
    *
-   * GUARDED on `acted`. Both mutations below refetch `current` as their first step
-   * (`invalidateQueries`), and that refetch naturally resolves with `offer: null` the instant
-   * OUR OWN accept or decline has gone through — the offer really has vanished, just because we
-   * are the one who resolved it. Without this guard that refetch fires THIS effect's `close()`
-   * while the mutation's own `onSuccess`/`onSettled` is still mid-flight, and it closes again a
-   * moment later — two competing navigations off the same screen for one tap.
+   * GUARDED ON `list.isSuccess`, not merely on `offer === null` — `data` is `undefined` before the
+   * first response ever lands, which would otherwise make `offer` look "gone" on the very first
+   * render and fire this before the real answer has even arrived.
+   *
+   * ALSO GUARDED on `acted`. Both mutations above refetch `list` as their first step
+   * (`invalidateQueries`), and that refetch naturally resolves with this offer no longer present
+   * the instant OUR OWN accept or decline has gone through — it really has vanished, just because
+   * we are the one who resolved it. Without this guard that refetch fires THIS effect's
+   * `closeOrAdvance()` while the mutation's own `onSuccess`/`onSettled` is still mid-flight, and it
+   * navigates again a moment later — two competing navigations off the same screen for one tap.
    */
   const acted = accept.isPending || accept.isSuccess || decline.isPending || decline.isSuccess;
   useEffect(() => {
-    if (current.isSuccess && offer === null && outcome === null && !acted) close();
-  }, [current.isSuccess, offer, outcome, acted]);
+    if (list.isSuccess && offer === null && outcome === null && !acted) closeOrAdvance();
+  }, [list.isSuccess, offer, outcome, acted, closeOrAdvance]);
 
   /**
    * Ring while a live offer is on screen and unanswered.
@@ -128,7 +188,7 @@ export default function OfferScreen(): ReactElement {
    */
   useOfferRing(offer !== null && outcome === null);
 
-  if (current.isPending) {
+  if (list.isPending) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.brandOnFg} />
@@ -165,7 +225,7 @@ export default function OfferScreen(): ReactElement {
         <Text style={styles.reference}>{offer.reference}</Text>
       </View>
 
-      <Countdown expiresAt={offer.expires_at} onExpire={close} paused={answered} />
+      <Countdown expiresAt={offer.expires_at} onExpire={closeOrAdvance} paused={answered} />
 
       {/*
         THE EARNING IS THE DECISION, so it is the largest thing here by a wide margin.
@@ -186,8 +246,30 @@ export default function OfferScreen(): ReactElement {
       <View style={styles.card}>
         <DetailRow icon="map-pin" label="Pick up" value={offer.pickup.address} pickup lines={3} />
         <View style={styles.divider} />
+        <DetailRow icon="flag" label="Drop" value={offer.drop.address} lines={3} />
+        <View style={styles.divider} />
         <DetailRow icon="clock" label="When" value={formatWhen(offer.scheduled_at)} />
       </View>
+
+      {/*
+        THE BANNER — the point of this whole rewrite. Hidden once answered, same as every other
+        transient control here: a driver who has just accepted or declined has nothing left to
+        switch to on this screen.
+      */}
+      {others.length > 0 && !answered ? (
+        <Pressable
+          onPress={() => setShowingOthers(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${String(others.length)} more requests waiting, view them`}
+          style={({ pressed }) => [styles.othersBanner, pressed && styles.othersBannerPressed]}
+        >
+          <Feather name="layers" size={15} color={colors.onFg} />
+          <Text style={styles.othersBannerText}>
+            +{others.length} more {others.length === 1 ? 'request' : 'requests'} waiting
+          </Text>
+          <Feather name="chevron-right" size={16} color={colors.onFg} />
+        </Pressable>
+      ) : null}
 
       {answered ? (
         <Text style={styles.outcome} accessibilityLiveRegion="assertive">
@@ -232,6 +314,18 @@ export default function OfferScreen(): ReactElement {
           )}
         </Pressable>
       </View>
+
+      <OtherOffersSheet
+        visible={showingOthers}
+        offers={others}
+        onClose={() => setShowingOthers(false)}
+        onSelect={(otherId) => {
+          setShowingOthers(false);
+          // Direct, intentional navigation — not `openOffer()`. See its header and the note on
+          // `closeOrAdvance` above.
+          router.replace(offerHref(otherId));
+        }}
+      />
     </View>
   );
 }
@@ -243,7 +337,7 @@ function DetailRow({
   pickup = false,
   lines = 2,
 }: {
-  icon: 'map-pin' | 'clock';
+  icon: 'map-pin' | 'flag' | 'clock';
   label: string;
   value: string;
   /** The pickup gets the on-duty green, so the eye lands on the address first. */
@@ -452,6 +546,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
     marginVertical: space.sm,
   },
+
+  othersBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    marginTop: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  othersBannerPressed: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  othersBannerText: { ...text.label, color: colors.onFg },
 
   outcome: { ...text.body, color: colors.onFg, textAlign: 'center', marginTop: space.md },
 

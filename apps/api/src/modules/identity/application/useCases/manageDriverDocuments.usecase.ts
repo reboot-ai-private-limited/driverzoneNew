@@ -1,4 +1,4 @@
-import type { DocumentType } from '@driverzone/contracts';
+import type { DocumentSide, DocumentType } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { StoragePort } from '@/shared/storage/storage.port.js';
 import type {
@@ -8,6 +8,7 @@ import type {
 
 export interface RequestUploadInput {
   docType: DocumentType;
+  side: DocumentSide;
   number?: string | undefined;
   subType?: string | undefined;
   issuedOn?: Date | undefined;
@@ -60,18 +61,21 @@ export class ManageDriverDocumentsUseCase {
       });
     }
 
-    const storageKey = `driver-documents/${driverId}/${input.docType}-${Date.now()}`;
+    // The side is IN THE KEY, or the two faces of one licence would race for the same object name
+    // within the same millisecond and the second upload would silently replace the first.
+    const storageKey = `driver-documents/${driverId}/${input.docType}-${input.side}-${Date.now()}`;
     const presigned = await this.storage.presignUpload(storageKey, true, {
       maxSizeBytes: this.maxSizeBytes,
       allowedFormats: this.allowedFormats,
     });
 
-    // Upsert: one document per type per driver. Re-uploading replaces, and the replacement is
-    // PENDING again — inheriting a previous VERIFIED would let a driver swap an approved
-    // document for anything at all.
+    // Upsert: one document per type per side per driver. Re-uploading replaces that side, and the
+    // replacement is PENDING again — inheriting a previous VERIFIED would let a driver swap an
+    // approved document for anything at all.
     const document = await this.documents.upsert({
       driverId,
       docType: input.docType,
+      side: input.side,
       fileUrl: presigned.storageKey,
       number: input.number,
       subType: input.subType,

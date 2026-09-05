@@ -194,7 +194,7 @@ routes it has.
 |--------|------|-------|
 | `POST` | `/driver/duty` | `{ on_duty: true }` — 409 if not yet admin-verified, documents expired, or wallet blocked |
 | `POST` | `/driver/location` | Batched pings; see below |
-| `GET` | `/driver/offers/current` | Recovery path after an app restart mid-offer |
+| `GET` | `/driver/offers` | Recovery path after an app restart mid-offer |
 | `POST` | `/driver/offers/:id/accept` | The atomic claim |
 | `POST` | `/driver/offers/:id/decline` | `{ reason? }` |
 | `POST` | `/driver/bookings/:id/arrived` | |

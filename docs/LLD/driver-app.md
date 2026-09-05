@@ -406,7 +406,7 @@ pickup → drop; `serviceLabel`. **Accept** and **Decline**.
 - Every exit path: stop the sound, cancel the notification, release keep-awake, clear the
   dedupe key.
 - **Recovery.** If the app is killed mid-offer, on the next foreground call
-  `GET /driver/offers/current`; if a live offer comes back, re-present this screen with the
+  `GET /driver/offers`; if a live offer comes back, re-present this screen with the
   time that's left.
 
 ### 9.7 What happens when the app is force-stopped
@@ -503,7 +503,7 @@ this document introduces (specced in S-16).
 | POST | `/driver/onboarding/submit` | S-7 |
 | POST | `/driver/duty` | S-8 |
 | POST | `/driver/location` | S-10 |
-| GET | `/driver/offers/current` | S-9.6 |
+| GET | `/driver/offers` | S-9.6 |
 | POST | `/driver/offers/:id/accept`, `/decline` | S-9.6 |
 | POST | `/driver/offers/:id/seen` | **NEW** — delivery/seen tracking |
 | POST | `/driver/bookings/:id/arrived`, `/start`, `/complete` | S-17 |
@@ -616,7 +616,7 @@ advanced by `booking.updated` socket events.
 
 ## S-19. Reliability & edge behaviour
 
-- **Socket reconnect** — exponential backoff. On every reconnect, `GET /driver/offers/current`
+- **Socket reconnect** — exponential backoff. On every reconnect, `GET /driver/offers`
   to catch an offer that arrived during the gap.
 - **Watchdog** (`duty/watchdog.ts`) — while on duty, a periodic (~15 min) check that the socket
   is connected and the foreground notification is still posted; repair if not. It cannot run if

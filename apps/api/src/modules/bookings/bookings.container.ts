@@ -3,6 +3,11 @@ import { logger } from '../../shared/logging/logger.js';
 import type { LedgerWriteContract } from '../ledger/ledger.public.js';
 import type { WalletPublicContract } from '../wallet/wallet.public.js';
 import type { NotificationsContract } from '../notifications/notifications.public.js';
+import type {
+  AccountDirectoryContract,
+  CustomerContactContract,
+  DriverCardContract,
+} from '../identity/identity.public.js';
 import type { PaymentsContract } from '../payments/payments.public.js';
 import type { QuoteConsumptionContract } from '../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../settings/settings.public.js';
@@ -42,6 +47,13 @@ export interface BookingsDependencies {
   /** The CUSTOMER wallet: credit off a fare, debt onto it, and where a fee becomes a debt. */
   wallet: WalletPublicContract;
   notifications: NotificationsContract;
+  /**
+   * Naming a person, and describing a driver to the customer they are driving.
+   *
+   * The READ halves of identity's contract only — this module renders names and driver cards, and
+   * has no business being handed the methods that write a customer's saved addresses.
+   */
+  identity: AccountDirectoryContract & DriverCardContract & CustomerContactContract;
   /**
    * Enqueues the dispatch job for a confirmed booking.
    *
@@ -183,17 +195,18 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     buildCustomerRouter: () =>
       buildCustomerRouter({
         create: controllers.makeCreateBookingController(create),
-        list: controllers.makeListCustomerBookingsController(repo, charges),
+        list: controllers.makeListCustomerBookingsController(repo, charges, deps.identity),
         dues: controllers.makeGetDuesController(deps.wallet),
-        get: controllers.makeGetCustomerBookingController(repo, charges),
-        current: controllers.makeGetCurrentCustomerBookingController(repo, charges),
+        get: controllers.makeGetCustomerBookingController(repo, charges, deps.identity),
+        current: controllers.makeGetCurrentCustomerBookingController(repo, charges, deps.identity),
         cancel: controllers.makeCancelByCustomerController(cancelByCustomer),
       }),
 
     buildDriverRouter: () =>
       buildDriverRouter({
-        current: controllers.makeGetCurrentDriverTripController(repo, charges),
-        get: controllers.makeGetDriverBookingController(repo, charges),
+        list: controllers.makeListDriverTripsController(repo, charges, deps.identity),
+        current: controllers.makeGetCurrentDriverTripController(repo, charges, deps.identity),
+        get: controllers.makeGetDriverBookingController(repo, charges, deps.identity),
         enRoute: controllers.makeEnRouteController(enRoute),
         arrived: controllers.makeArrivedController(arrived),
         reportPin: controllers.makeReportPinController(reportPin),

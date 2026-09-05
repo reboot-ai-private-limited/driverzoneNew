@@ -109,6 +109,7 @@ export class RunDispatchWaveUseCase {
               expiresAt,
               earningPaise: current.fareSnapshot.fare.split.driverPaise,
               pickupAddress: current.pickupAddress,
+              dropAddress: current.dropAddress,
               scheduledAt: current.scheduledAt,
               serviceType: current.serviceType,
             });

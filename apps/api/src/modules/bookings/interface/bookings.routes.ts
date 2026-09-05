@@ -12,6 +12,8 @@ export interface CustomerControllers {
 }
 
 export interface DriverControllers {
+  /** `GET /driver/bookings` — this driver's own trip history. */
+  list: RequestHandler;
   /** `GET /driver/bookings/current` — the trip-recovery read. */
   current: RequestHandler;
   get: RequestHandler;
@@ -58,6 +60,7 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
    * BEFORE `/:id`, or `current` is read as a booking id and answers 404 — the same ordering trap
    * the customer router's `/dues` and the dispatch router's `/current` both carry a note about.
    */
+  router.get('/', handlers.list);
   router.get('/current', handlers.current);
   router.get('/:id', handlers.get);
   router.post('/:id/en-route', handlers.enRoute);

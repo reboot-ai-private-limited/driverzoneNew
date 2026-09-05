@@ -62,6 +62,16 @@ export interface BookingRepositoryPort {
   listForCustomer(customerId: string, limit: number): Promise<Booking[]>;
 
   /**
+   * Every booking this driver was assigned, newest first — their trip history.
+   *
+   * FILTERED ON `driverId`, which is set exactly once and only by dispatch's claim (invariant
+   * B-2). That is what makes this list honest without a status filter: a booking a driver was rung
+   * for and lost never had their id written to it, so it cannot appear here, and a trip that was
+   * cancelled after they accepted it correctly does.
+   */
+  listForDriver(driverId: string, limit: number): Promise<Booking[]>;
+
+  /**
    * Reads the OTP, which every other read deliberately cannot see (`select: false` on the field).
    * Separate method so that reaching for it is a visible act at the call site.
    */
@@ -114,7 +124,7 @@ export interface BookingRepositoryPort {
    * Xiaomi, Oppo, Vivo and Realme are what `battery-setup` exists to fight — and the booking id
    * lived only in the app's navigation state, which dies with the process. Without this read there
    * is no question the app can ask to find its way back, and the driver is left unable to arrive,
-   * start or complete a trip the customer is waiting on. `GET /driver/offers/current` is the same
+   * start or complete a trip the customer is waiting on. `GET /driver/offers` is the same
    * idea for a ringing offer; this is its equivalent for a trip already won.
    *
    * NEWEST FIRST, AND THAT IS LOAD-BEARING — a driver really can hold several live bookings at

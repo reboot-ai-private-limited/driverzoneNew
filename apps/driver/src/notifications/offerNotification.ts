@@ -20,6 +20,7 @@ export interface OfferPushData {
   expiresAt?: string;
   earningPaise?: string;
   pickupAddress?: string;
+  dropAddress?: string;
   serviceType?: string;
 }
 
@@ -58,10 +59,17 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
 
   const earning = rupees(data.earningPaise);
 
+  // Pickup → drop when both are known, so the driver reads the trip's shape off the ring itself
+  // rather than only after it opens.
+  const route =
+    data.pickupAddress !== undefined && data.dropAddress !== undefined
+      ? `${data.pickupAddress} → ${data.dropAddress}`
+      : (data.pickupAddress ?? 'Tap to see the trip');
+
   await notifee.displayNotification({
     id: notificationId(offerId),
     title: earning === '' ? 'New trip offer' : `New trip · ${earning}`,
-    body: data.pickupAddress ?? 'Tap to see the trip',
+    body: route,
 
     // Deep link into the ring screen, so tapping the notification lands on the same screen the
     // full-screen intent opens.

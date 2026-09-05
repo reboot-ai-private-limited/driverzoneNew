@@ -96,6 +96,8 @@ export function buildContainers(): AppContainers {
     ledger: ledger.contract,
     wallet: wallet.contract,
     notifications: notifications.contract,
+    // Tier 1, built well above — the read side, so the driver's trip list can name its customers.
+    identity: identity.contract,
     scheduleDispatch: (booking) => enqueueDispatch(booking.id, booking.dispatchAt),
   });
 

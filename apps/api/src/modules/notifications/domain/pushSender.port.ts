@@ -27,6 +27,7 @@ export interface DriverOfferPush {
   /** What the driver earns if they take it — the single most decision-relevant number. */
   earningPaise: number;
   pickupAddress: string;
+  dropAddress: string;
   scheduledAt: Date;
   serviceType: 'INCITY' | 'OUTSTATION';
 }

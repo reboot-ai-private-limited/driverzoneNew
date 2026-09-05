@@ -144,6 +144,13 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
   }
 
+  /** Every trip assigned to this driver, newest first. See the port on why no status filter. */
+  async listForDriver(driverId: string, limit: number): Promise<Booking[]> {
+    if (!mongoose.isValidObjectId(driverId)) return [];
+    const docs = await BookingModel.find({ driverId }).sort({ createdAt: -1 }).limit(limit);
+    return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
   /**
    * The trip this driver is currently on. See the port for why this read exists at all.
    *

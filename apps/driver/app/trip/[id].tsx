@@ -23,12 +23,15 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { CancelTripSheet } from '@/components/CancelTripSheet';
 import { OtpInput } from '@/components/OtpInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { RateCustomer } from '@/components/RateCustomer';
 import { SlideToConfirm } from '@/components/SlideToConfirm';
 import { currentFix } from '@/duty/locationPings';
+import { isDriverCancellable } from '@/features/trip/cancellation';
 import { ApiError } from '@/lib/api/ApiError';
+import { getDriverSettings } from '@/lib/api/endpoints/driver';
 import {
   completeTrip,
   getTrip,
@@ -105,6 +108,18 @@ export default function TripScreen(): ReactElement {
   const [pinReported, setPinReported] = useState(false);
   /** Set once the customer has been rated, so the form does not reappear on this screen. */
   const [rated, setRated] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  /**
+   * The penalty figures, so the cancel sheet can state what dropping this trip costs BEFORE the
+   * driver commits. Long-lived: these are admin settings that change perhaps twice a year, and a
+   * refetch on every trip screen would be a request per trip for an answer that never moves.
+   */
+  const settings = useQuery({
+    queryKey: keys.settings.mine(),
+    queryFn: ({ signal }) => getDriverSettings(signal),
+    staleTime: 60 * 60 * 1000,
+  });
 
   /** Every action writes the returned booking straight back — see the header. */
   function adopt(next: BookingDto): void {
@@ -181,6 +196,9 @@ export default function TripScreen(): ReactElement {
     onSuccess: (result) => {
       adopt(result.booking);
       void queryClient.invalidateQueries({ queryKey: keys.earnings.all() });
+      // The trip has just joined the history. Without this the Trips tab still shows it as live
+      // until its next focus refetch, which is the one moment a driver is most likely to look.
+      void queryClient.invalidateQueries({ queryKey: keys.trip.list() });
     },
     onError: (cause) => fail(cause, 'Could not complete the trip.'),
   });
@@ -272,6 +290,37 @@ export default function TripScreen(): ReactElement {
             value={cash ? 'Cash' : 'Prepaid'}
           />
         </View>
+
+        {/*
+          Who the driver is picking up, and how to reach them. `customer.phone` is sent by the
+          server ONLY while the trip is live — see `PHONE_VISIBLE_STATUSES` in the API — so the
+          Call button appears with ASSIGNED and is gone the moment the trip ends. Nothing to hide
+          client-side: a finished trip's response never carries the number.
+        */}
+        {booking.customer !== null ? (
+          <Animated.View entering={FadeInDown.duration(260)} style={styles.riderCard}>
+            <View style={styles.riderAvatar}>
+              <Feather name="user" size={18} color={colors.fg} />
+            </View>
+            <View style={styles.riderText}>
+              <Text style={styles.riderLabel}>Your rider</Text>
+              <Text style={styles.riderName} numberOfLines={1}>
+                {booking.customer.name ?? 'Rider'}
+              </Text>
+            </View>
+            {booking.customer.phone !== null ? (
+              <Pressable
+                onPress={() => callCustomer(booking.customer!.phone!)}
+                accessibilityRole="button"
+                accessibilityLabel={`Call ${booking.customer.name ?? 'the rider'}`}
+                style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
+              >
+                <Feather name="phone" size={16} color={colors.onFg} />
+                <Text style={styles.callButtonText}>Call</Text>
+              </Pressable>
+            ) : null}
+          </Animated.View>
+        ) : null}
 
         {/*
           The cash reminder, and only on a cash trip. A driver who forgets to collect is holding a
@@ -444,6 +493,28 @@ export default function TripScreen(): ReactElement {
           </Animated.View>
         ) : null}
 
+        {/*
+          CANCELLING — last on the screen, and quiet.
+
+          Below every action the trip actually wants, because it is the one control here that lets
+          a customer down: a driver reaching for "I've arrived" must never find this under their
+          thumb. Text on plain background rather than a button, for the same reason. It disappears
+          entirely once the trip has STARTED — the state machine offers a driver no cancellation
+          from there, so a control would only be able to produce an error.
+        */}
+        {isDriverCancellable(booking.status) ? (
+          <Animated.View entering={FadeIn} style={styles.cancelWrap}>
+            <Pressable
+              onPress={() => setCancelling(true)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.cancelAction, pressed && styles.cancelActionPressed]}
+            >
+              <Feather name="x-circle" size={15} color={colors.danger} />
+              <Text style={styles.cancelLabel}>I can’t do this trip</Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
+
         {status !== null && TERMINAL.has(status) && status !== 'COMPLETED' ? (
           <Animated.View entering={FadeInDown} style={styles.done}>
             <View style={[styles.doneIcon, styles.doneIconEnded]}>
@@ -463,6 +534,29 @@ export default function TripScreen(): ReactElement {
           </Animated.View>
         ) : null}
       </ScrollView>
+
+      <CancelTripSheet
+        visible={cancelling}
+        bookingId={id}
+        // Read at render, not captured when the sheet opened: the trip can move underneath it —
+        // the poll may bring back ARRIVED while the driver is choosing a reason — and the penalty
+        // is decided by the status the SERVER acts on, not the one that was showing a moment ago.
+        status={booking.status}
+        settings={settings.data?.settings}
+        onClose={() => setCancelling(false)}
+        onCancelled={(result) => {
+          setCancelling(false);
+          adopt(result.booking);
+          /*
+           * The penalty is a ledger row and the trip has left the driver's hands, so both of the
+           * screens that show those are now stale. Invalidated rather than patched: what was
+           * actually debited is the server's answer, in `result.fee`, and re-reading is how the
+           * earnings screen stays the one place that number comes from.
+           */
+          void queryClient.invalidateQueries({ queryKey: keys.earnings.all() });
+          void queryClient.invalidateQueries({ queryKey: keys.trip.list() });
+        }}
+      />
     </View>
   );
 }
@@ -632,6 +726,17 @@ function formatDistance(metres: number): string {
   return metres < 1000 ? `${metres} m` : `${(metres / 1000).toFixed(1)} km`;
 }
 
+/**
+ * Hand the number to the dialler — `tel:` opens the phone app with it entered, one tap from a
+ * call. Not `ACTION_CALL`: placing the call itself would need the CALL_PHONE permission for a
+ * saving of exactly one tap, and a misfire there is a call the driver did not mean to make.
+ */
+function callCustomer(phone: string): void {
+  void Linking.openURL(`tel:${phone}`).catch(() => {
+    /* No dialler (a tablet, mostly). Nothing useful to say — the number is on screen to read. */
+  });
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   centred: {
@@ -747,9 +852,60 @@ const styles = StyleSheet.create({
   },
   cashNoteText: { ...text.caption, color: colors.fg, marginLeft: space.xs, flex: 1 },
 
+  riderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: space.md,
+    marginTop: space.md,
+    ...shadow.soft,
+  },
+  riderAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bgSunken,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  riderText: { flex: 1, marginHorizontal: space.sm },
+  riderLabel: {
+    ...text.caption,
+    color: colors.faint,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  riderName: { ...text.body, color: colors.fg, fontWeight: '600' },
+  callButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.dutyOn,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  callButtonPressed: { opacity: 0.85 },
+  callButtonText: { ...text.label, color: colors.onFg, fontWeight: '700' },
+
   error: { ...text.body, color: colors.danger, marginTop: space.md },
 
   actions: { marginTop: space.lg },
+
+  cancelWrap: { alignItems: 'center', marginTop: space.xl },
+  cancelAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.pill,
+  },
+  cancelActionPressed: { backgroundColor: '#FDEEF0' },
+  cancelLabel: { ...text.label, color: colors.danger },
 
   gate: {
     marginTop: space.md,

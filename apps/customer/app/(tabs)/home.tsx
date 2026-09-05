@@ -594,6 +594,7 @@ export default function HomeScreen(): ReactElement {
         initialCentre={location.point}
         markers={markers}
         showCentrePin={picking && mapPick}
+        centrePinKind={mode === 'pick-drop' ? 'drop' : 'pickup'}
         userLocation={location.isReal ? { lat: location.point.lat, lng: location.point.lng } : null}
         bottomInset={sheetHeight}
         onRegionSettled={picking && mapPick ? handleRegionSettled : undefined}

@@ -35,6 +35,56 @@ export interface AccountDirectoryContract {
 }
 
 /**
+ * A driver as a CUSTOMER sees them: the card on the trip screen.
+ *
+ * Separate from `namesByIds` rather than an expansion of it, per Interface Segregation — the
+ * admin review ledger wants a name and has no business being handed a phone number. It is also
+ * why this contract exists at all instead of `bookings` reading the driver collection: the phone
+ * number is the driver's login credential, and exactly one module should decide who may see it.
+ *
+ * `phone` is returned here unconditionally. WHEN it reaches a customer is the caller's decision
+ * and `bookings` makes it — the trip must be live — because only that module knows what a booking
+ * is doing. This contract's job is to answer "who is this driver", not to police the trip.
+ */
+export interface DriverCard {
+  id: string;
+  fullName: string | null;
+  /** The driver's real number. See the note above on who is allowed to pass it on. */
+  phone: string | null;
+  /** A fetchable URL, already resolved from the storage key — never the key itself. */
+  photoUrl: string | null;
+  /** Null until `ratingCount` is above zero: the account row defaults to 5.0 unrated. */
+  rating: number | null;
+  ratingCount: number;
+}
+
+export interface DriverCardContract {
+  /** Batched, like `namesByIds` — a list of bookings must not be a query per row. */
+  driverCardsByIds(ids: string[]): Promise<Map<string, DriverCard>>;
+}
+
+/**
+ * A customer as the DRIVER on their trip sees them: name, and the number to call at the kerb.
+ *
+ * The mirror of `DriverCard`, and separate from `namesByIds` for the same Interface Segregation
+ * reason — the admin ledger and the driver's ride history want a name and have no business being
+ * handed a phone number. `phone` is returned here unconditionally; WHEN it reaches the driver is
+ * `bookings`' decision (the trip must be live), because only that module knows what a booking is
+ * doing.
+ */
+export interface CustomerContact {
+  id: string;
+  fullName: string | null;
+  /** The customer's real number. See the note above on who is allowed to pass it on. */
+  phone: string | null;
+}
+
+export interface CustomerContactContract {
+  /** Batched, like `driverCardsByIds` — a list of trips must not be a query per row. */
+  customerContactsByIds(ids: string[]): Promise<Map<string, CustomerContact>>;
+}
+
+/**
  * Write-side, for `bookings` only.
  *
  * Split from the read contract per Interface Segregation: a module that only needs to display a
@@ -87,4 +137,6 @@ export interface RatingCacheContract {
  */
 export type IdentityPublicContract = CustomerBookingProfileContract &
   AccountDirectoryContract &
+  DriverCardContract &
+  CustomerContactContract &
   RatingCacheContract;

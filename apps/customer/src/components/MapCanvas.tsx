@@ -44,6 +44,8 @@ interface MapCanvasProps {
   markers?: MapMarker[];
   /** The fixed crosshair used while the customer is positioning a point. */
   showCentrePin?: boolean;
+  /** Whether the centre pin is picking pickup or drop/destination. */
+  centrePinKind?: 'pickup' | 'drop';
   /** The customer's own position, when known. Drawn as the familiar blue dot. */
   userLocation?: { lat: number; lng: number } | null;
   /**
@@ -73,6 +75,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     initialCentre,
     markers = [],
     showCentrePin = false,
+    centrePinKind = 'pickup',
     userLocation = null,
     bottomInset = 0,
     onRegionSettled,
@@ -156,8 +159,18 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         // middle of what the customer can actually SEE. The pin stays still and the map moves
         // under it — dragging a marker instead means fighting the pan gesture for the same finger.
         <View style={[styles.centrePin, { bottom: bottomInset }]} pointerEvents="none">
-          <View style={styles.centrePinHead} />
-          <View style={styles.centrePinStem} />
+          <View
+            style={[
+              styles.centrePinHead,
+              centrePinKind === 'drop' && styles.centrePinHeadDrop,
+            ]}
+          />
+          <View
+            style={[
+              styles.centrePinStem,
+              centrePinKind === 'drop' && styles.centrePinStemDrop,
+            ]}
+          />
           <View style={styles.centrePinShadow} />
         </View>
       ) : null}
@@ -215,16 +228,91 @@ function buildHtml(lat: number, lng: number): string {
        bottom edge — the default bottom-right position would hide it. Moved below the top row. */
     .leaflet-control-attribution { font-size: 9px; background: rgba(255,255,255,0.75); }
     .leaflet-top.leaflet-right { margin-top: 76px; }
+
+    /* PICKUP — a live pulse dot, not a static ring. On-brand (ink + yellow) rather than a
+       generic green/red map pin, and animated because "this is where you are, right now" is a
+       LIVE fact — a still marker undersells it. */
+    .dz-pickup-marker-wrap { background: transparent; border: none; }
+    .dz-pickup-pin-box {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: dz-pin-in 0.22s cubic-bezier(0.34, 1.2, 0.64, 1);
+    }
+    .dz-pickup-pulse {
+      position: absolute;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: ${colors.brand};
+      animation: dz-pulse 2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+    }
+    .dz-pickup-core {
+      position: relative;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: ${colors.fg};
+      border: 2.5px solid ${colors.brand};
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    @keyframes dz-pulse {
+      0% { transform: scale(0.45); opacity: 0.55; }
+      70% { opacity: 0; }
+      100% { transform: scale(1); opacity: 0; }
+    }
+
+    /* DESTINATION — a flat, branded pin (ink body, yellow core) rather than a stock Google-style
+       red teardrop with a glossy gradient. Softer entrance too: a quick scale/fade, not a bounce
+       — a bounce is a 2015-era Maps mannerism this redesign is moving away from. */
+    .dz-drop-marker-wrap { background: transparent; border: none; }
+    .dz-drop-pin-box {
+      position: relative;
+      width: 28px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: dz-pin-in 0.2s cubic-bezier(0.2, 0.8, 0.4, 1);
+      transform-origin: bottom center;
+    }
+    @keyframes dz-pin-in {
+      0% { transform: scale(0.5) translateY(-6px); opacity: 0; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+    .dz-pin-ground-shadow {
+      position: absolute;
+      bottom: 0px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 12px;
+      height: 4px;
+      background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0) 72%);
+      border-radius: 50%;
+    }
+    .dz-drop-svg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 28px;
+      height: 34px;
+      filter: drop-shadow(0 3px 3px rgba(0,0,0,0.22));
+    }
+
+    /* User GPS dot */
     .dz-pin { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
-    .dz-pickup { background: ${colors.fg}; }
-    .dz-drop { background: ${colors.fg}; border-radius: 3px; }
     .dz-user { background: #1A73E8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,0.20); }
-    /* The dashes MARCH toward the destination — a static dashed line reads as a border, a moving
-       one reads as direction, which is the one thing a straight line between two pins otherwise
-       cannot say on its own. The distance and duration are one full dash-pair, so the loop has no
-       visible seam. */
-    @keyframes dz-flow { to { stroke-dashoffset: -24; } }
-    .dz-route-dash { animation: dz-flow 1.1s linear infinite; }
+
+    /* ROUTE — a slim glowing line, not a thick glossy tube. The blur is a real CSS filter on the
+       line itself (Leaflet's default renderer is SVG, so a CSS filter just works on the path)
+       rather than a second offset copy standing in for a shadow — that offset trick is what read
+       as a toy-like 3D pop-up rather than a soft, modern glow. */
+    .dz-route-glow { filter: blur(3px); }
+    @keyframes dz-flow { to { stroke-dashoffset: -32; } }
+    .dz-route-dash { animation: dz-flow 1s linear infinite; }
   </style>
 </head>
 <body>
@@ -297,13 +385,93 @@ function buildHtml(lat: number, lng: number): string {
       });
 
       function icon(kind) {
-        var size = kind === 'user' ? 14 : 16;
+        if (kind === 'drop') {
+          // A flat, branded pin — ink body, a yellow ring and core, a single white hairline
+          // stroke for contrast against any tile colour. No gradient: gradients on a small glyph
+          // read as glossy/dated at this size, and this app's brand yellow is used as a flat
+          // surface everywhere else in the app, never as a gradient fill.
+          return L.divIcon({
+            className: 'dz-drop-marker-wrap',
+            html: '<div class="dz-drop-pin-box">' +
+              '<div class="dz-pin-ground-shadow"></div>' +
+              '<svg class="dz-drop-svg" viewBox="0 0 28 34" width="28" height="34" fill="none">' +
+              '  <path d="M14 33 C13.3 30.4 3 19.7 3 13 A11 11 0 1 1 25 13 C25 19.7 14.7 30.4 14 33 Z" fill="${colors.fg}" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>' +
+              '  <circle cx="14" cy="13" r="5" fill="${colors.brand}"/>' +
+              '</svg>' +
+              '</div>',
+            iconSize: [28, 38],
+            iconAnchor: [14, 35]
+          });
+        }
+
+        if (kind === 'pickup') {
+          // A pulsing dot rather than a static ring — pickup is a LIVE fact, and the animation is
+          // what says so. The pulse ring shares the pin box's own centre, so it never drifts off
+          // the coordinate the way an independently-positioned glow layer could.
+          return L.divIcon({
+            className: 'dz-pickup-marker-wrap',
+            html: '<div class="dz-pickup-pin-box">' +
+              '<div class="dz-pickup-pulse"></div>' +
+              '<div class="dz-pickup-core"></div>' +
+              '</div>',
+            iconSize: [34, 34],
+            iconAnchor: [17, 17]
+          });
+        }
+
+        var size = 14;
         return L.divIcon({
           className: '',
-          html: '<div class="dz-pin dz-' + kind + '" style="width:' + size + 'px;height:' + size + 'px"></div>',
+          html: '<div class="dz-pin dz-user" style="width:' + size + 'px;height:' + size + 'px"></div>',
           iconSize: [size, size],
           iconAnchor: [size / 2, size / 2]
         });
+      }
+
+      function getCurvedPath(p1, p2) {
+        var lat1 = p1.lat, lng1 = p1.lng;
+        var lat2 = p2.lat, lng2 = p2.lng;
+
+        var midLat = (lat1 + lat2) / 2;
+        var midLng = (lng1 + lng2) / 2;
+
+        var cosLat = Math.cos(midLat * Math.PI / 180);
+        var dx = (lng2 - lng1) * cosLat;
+        var dy = lat2 - lat1;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 0.00001) {
+          return [[lat1, lng1], [lat2, lng2]];
+        }
+
+        var nx = -dy / dist;
+        var ny = dx / dist;
+
+        if (ny < -0.05 || (Math.abs(ny) <= 0.05 && nx < 0)) {
+          nx = -nx;
+          ny = -ny;
+        }
+
+        // A softer bulge than before (was 0.22) — enough to read as a deliberate curve rather
+        // than a straight line, subtle enough not to look like an exaggerated cartoon arc.
+        var arcHeight = dist * 0.14;
+        var ctrlLat = midLat + (ny * arcHeight);
+        var ctrlLng = midLng + ((nx * arcHeight) / cosLat);
+
+        var points = [];
+        var steps = 45;
+        for (var i = 0; i <= steps; i++) {
+          var t = i / steps;
+          var oneMinusT = 1 - t;
+          var b0 = oneMinusT * oneMinusT;
+          var b1 = 2 * oneMinusT * t;
+          var b2 = t * t;
+
+          var lat = b0 * lat1 + b1 * ctrlLat + b2 * lat2;
+          var lng = b0 * lng1 + b1 * ctrlLng + b2 * lng2;
+          points.push([lat, lng]);
+        }
+        return points;
       }
 
       window.dz = {
@@ -329,58 +497,58 @@ function buildHtml(lat: number, lng: number): string {
             L.marker([user.lat, user.lng], { icon: icon('user'), interactive: false }).addTo(userLayer);
           }
 
-          // A STRAIGHT DASHED LINE, THE inDrive READING, NOT A ROUTE. This map has no routing
-          // engine behind it — the road distance that decides the fare comes from the server,
-          // never from anything drawn here — so a solid line implying "this is the way you will
-          // drive" would be a claim this screen cannot back up. Dashed reads as "these two points
-          // are linked" without claiming to be the path between them.
+          // THE ROUTE, drawn as a slim glowing line — not the thick glossy tube this replaced.
+          // Three layers, each doing one job: a soft blurred glow for lift, a slim solid line
+          // for the actual path, and a thin animated dash on top for direction. No offset
+          // "shadow copy" of the path — that was what made the old version look like a raised
+          // toy tube rather than a modern line with a soft shadow under it.
           routeLayer.clearLayers();
           var pickup = markers.filter(function (m) { return m.kind === 'pickup'; })[0];
           var drop = markers.filter(function (m) { return m.kind === 'drop'; })[0];
           if (pickup && drop) {
-            var path = [[pickup.lat, pickup.lng], [drop.lat, drop.lng]];
+            var curvedPath = getCurvedPath(pickup, drop);
 
-            // TWO LINES, NOT ONE — the CASING first, underneath. A single dashed stroke sits flush
-            // against whatever the tile happens to be doing at that pixel and disappears over a
-            // pale road or a park; a wider white line behind it guarantees contrast against any
-            // tile colour, the same trick Google's and Apple's own route rendering uses.
-            L.polyline(path, {
-              color: '#FFFFFF',
-              weight: 6,
-              opacity: 0.9,
+            // 1. Soft glow — a wide, low-opacity, blurred stroke sitting under everything. This
+            // is the depth cue; a real CSS blur reads as a soft shadow, not a hard duplicate line.
+            L.polyline(curvedPath, {
+              color: '${colors.fg}',
+              weight: 9,
+              opacity: 0.16,
+              lineCap: 'round',
+              interactive: false,
+              className: 'dz-route-glow'
+            }).addTo(routeLayer);
+
+            // 2. The line itself — slim, ink-coloured, rounded caps. This alone reads as "modern
+            // minimal route" without any casing or tube layering.
+            L.polyline(curvedPath, {
+              color: '${colors.fg}',
+              weight: 3,
+              opacity: 0.92,
               lineCap: 'round',
               interactive: false
             }).addTo(routeLayer);
 
-            L.polyline(path, {
-              color: '${colors.fg}',
+            // 3. The animated accent — brand yellow, thin, marching toward the destination. The
+            // one piece of colour on the whole line, and the one thing that moves.
+            L.polyline(curvedPath, {
+              color: '${colors.brand}',
               weight: 3,
-              opacity: 0.85,
-              dashArray: '1, 12',
+              opacity: 0.95,
+              dashArray: '2, 12',
               lineCap: 'round',
               interactive: false,
               className: 'dz-route-dash'
             }).addTo(routeLayer);
 
-            // ZOOM TO FIT BOTH PINS — the request this whole block exists for. A route only two
-            // streets long and one that spans a hill drive need very different zoom levels, and
-            // neither is knowable in advance, so this asks Leaflet to solve for "smallest zoom
-            // that still shows both" rather than guessing one.
+            // Fit map bounds to frame both pins and the full apex of the curve
             var routeKey = pickup.lat + ',' + pickup.lng + '|' + drop.lat + ',' + drop.lng;
             if (routeKey !== lastRoute) {
               lastRoute = routeKey;
-              var bounds = L.latLngBounds([
-                [pickup.lat, pickup.lng],
-                [drop.lat, drop.lng]
-              ]);
+              var bounds = L.latLngBounds(curvedPath);
               map.fitBounds(bounds, {
-                // Padding is asymmetric because the OCCLUSION is: the sheet covers the bottom, so
-                // that side needs the inset on top of its own margin, or the fitted view would
-                // place a pin exactly where the sheet is about to hide it.
-                paddingTopLeft: [36, 80],
-                paddingBottomRight: [36, inset + 36],
-                // Capped so two pins ten metres apart do not zoom all the way into street level —
-                // past this, "smallest zoom that fits both" stops being a useful reading of the trip.
+                paddingTopLeft: [40, 80],
+                paddingBottomRight: [40, inset + 40],
                 maxZoom: 16,
                 animate: true,
                 duration: 0.6
@@ -424,7 +592,16 @@ const styles = StyleSheet.create({
     borderColor: colors.brand,
     marginBottom: -2,
   },
+  // Inverted, not recoloured to red — pickup is ink-with-yellow-border, drop is the same two
+  // brand colours the other way round. Distinguishable at a glance without reaching for a
+  // generic red/green that has nothing to do with this app's own palette.
+  centrePinHeadDrop: {
+    backgroundColor: colors.brand,
+    borderColor: colors.fg,
+    borderWidth: 4,
+  },
   centrePinStem: { width: 2, height: 16, backgroundColor: colors.fg },
+  centrePinStemDrop: { backgroundColor: colors.fg },
   centrePinShadow: {
     width: 10,
     height: 4,

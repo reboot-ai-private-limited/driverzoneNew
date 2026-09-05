@@ -13,7 +13,13 @@ import { Platform } from 'react-native';
 /** The ringing trip offer. Everything about it exists to be impossible to miss. */
 export const OFFER_CHANNEL_ID = 'offer-ring-v1';
 
-/** The quiet "you're online" notice that will accompany the foreground service (S-8). */
+/**
+ * The quiet "you're online" notice that anchors the foreground service (S-8).
+ *
+ * LOW importance on purpose: it is on screen for the whole shift, so it must never make a sound
+ * or a heads-up banner. It is not decoration — Android requires a visible notification for a
+ * foreground service, and dismissing it kills the service. See `duty/dutyForegroundService.ts`.
+ */
 export const DUTY_CHANNEL_ID = 'duty-status';
 
 export async function ensureNotificationChannels(): Promise<void> {

@@ -7,10 +7,19 @@
     "userInterfaceStyle": "light",
     "scheme": "driverzone",
     "backgroundColor": "#F2F200",
+    "icon": "./assets/icon.png",
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#F2F200"
+        }
+      ],
       "expo-status-bar",
       [
         "expo-location",
@@ -23,6 +32,10 @@
     "android": {
       "package": "in.driverzone.customer",
       "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F2F200"
+      },
       "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
     "ios": {

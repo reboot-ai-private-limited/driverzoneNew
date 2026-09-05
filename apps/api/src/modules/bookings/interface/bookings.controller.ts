@@ -6,6 +6,12 @@ import { toMoney } from '../../../shared/money/format.js';
 import type { BookingRepositoryPort } from '../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../domain/chargeRepository.port.js';
 import type { WalletReadContract } from '../../wallet/wallet.public.js';
+import type {
+  AccountDirectoryContract,
+  CustomerContactContract,
+  DriverCard,
+  DriverCardContract,
+} from '../../identity/identity.public.js';
 import { BookingNotFoundError } from '../domain/booking.errors.js';
 import type { CreateBookingUseCase } from '../application/useCases/createBooking.usecase.js';
 import type {
@@ -99,10 +105,26 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
   });
 }
 
+/**
+ * One driver card, or null — the customer-facing lookup, used by every read below.
+ *
+ * A booking with no driver skips the query entirely rather than asking for an empty set, because
+ * most reads of a searching booking would otherwise pay for a lookup that can only return nothing.
+ */
+async function cardFor(
+  directory: DriverCardContract,
+  driverId: string | null,
+): Promise<DriverCard | null> {
+  if (driverId === null) return null;
+  const cards = await directory.driverCardsByIds([driverId]);
+  return cards.get(driverId) ?? null;
+}
+
 /** The customer's own booking, which is the only view that carries the trip code. */
 export function makeGetCustomerBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
+  directory: DriverCardContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -111,13 +133,14 @@ export function makeGetCustomerBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.customerId !== customerId) throw new BookingNotFoundError(id);
 
-    const [adjustments, startOtp] = await Promise.all([
+    const [adjustments, startOtp, driverCard] = await Promise.all([
       charges.listAdjustments(booking.id),
       // Shown to the customer so they can read it out — and only ever from here.
       repo.readStartOtp(booking.id),
+      cardFor(directory, booking.driverId),
     ]);
 
-    sendSuccess(req, res, toBookingDto({ booking, adjustments, startOtp }), 'Booking');
+    sendSuccess(req, res, toBookingDto({ booking, adjustments, startOtp, driverCard }), 'Booking');
   });
 }
 
@@ -138,13 +161,28 @@ export function makeGetCustomerBookingController(
 export function makeListCustomerBookingsController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
+  directory: DriverCardContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const bookings = await repo.listForCustomer(principalOf(req), HISTORY_LIMIT);
 
+    /*
+     * ONE LOOKUP FOR THE WHOLE PAGE, deduped — a customer with forty rides from the same regular
+     * driver is one row in this query, not forty. The phone number is still gated per booking by
+     * the mapper, so a history full of finished trips carries none of them.
+     */
+    const driverIds = bookings
+      .map((booking) => booking.driverId)
+      .filter((id): id is string => id !== null);
+    const cards = await directory.driverCardsByIds(driverIds);
+
     const dtos = await Promise.all(
       bookings.map(async (booking) =>
-        toBookingDto({ booking, adjustments: await charges.listAdjustments(booking.id) }),
+        toBookingDto({
+          booking,
+          adjustments: await charges.listAdjustments(booking.id),
+          driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
+        }),
       ),
     );
 
@@ -152,10 +190,18 @@ export function makeListCustomerBookingsController(
   });
 }
 
-/** The driver's view of the same booking. No trip code, deliberately. */
+/**
+ * The driver's view of the same booking. No trip code, deliberately.
+ *
+ * CARRIES THE CUSTOMER CARD — name, and the number to call while the trip is live. The customer's
+ * own read of this booking gets neither; this is the mirror of the driver card a customer sees.
+ * `customerContactsByIds` resolves it in one lookup, and `toBookingDto` gates the phone on the
+ * trip still being live (`PHONE_VISIBLE_STATUSES`).
+ */
 export function makeGetDriverBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
+  directory: AccountDirectoryContract & CustomerContactContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -164,8 +210,147 @@ export function makeGetDriverBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.driverId !== driverId) throw new BookingNotFoundError(id);
 
-    const adjustments = await charges.listAdjustments(booking.id);
-    sendSuccess(req, res, toBookingDto({ booking, adjustments }), 'Booking');
+    const [adjustments, contacts] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      directory.customerContactsByIds([booking.customerId]),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      toBookingDto({
+        booking,
+        adjustments,
+        customerCard: contacts.get(booking.customerId) ?? null,
+      }),
+      'Booking',
+    );
+  });
+}
+
+/**
+ * `GET /driver/bookings` — this driver's own trip history, newest first.
+ *
+ * SCOPED BY THE TOKEN, like the customer's list: no `?driverId=`, so no shape of this request
+ * reads somebody else's trips.
+ *
+ * NAMES IN ONE QUERY, not one per row. `namesByIds` exists precisely for this — the "batch, don't
+ * invite N+1" rule in docs/engineering/module-anatomy.md — and a history of `HISTORY_LIMIT` rows
+ * would otherwise be a hundred lookups to render a hundred names.
+ *
+ * Adjustments are still fetched per booking, matching the customer list, and carry the same note:
+ * the honest fix is a batched `listAdjustmentsFor(bookingIds)` on the port the day this hurts.
+ */
+export function makeListDriverTripsController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: AccountDirectoryContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const bookings = await repo.listForDriver(principalOf(req), HISTORY_LIMIT);
+
+    const names = await directory.namesByIds(
+      'CUSTOMER',
+      // Deduped: a repeat customer must not be looked up once per trip they took.
+      [...new Set(bookings.map((booking) => booking.customerId))],
+    );
+
+    const dtos = await Promise.all(
+      bookings.map(async (booking) =>
+        toBookingDto({
+          booking,
+          adjustments: await charges.listAdjustments(booking.id),
+          customerName: names.get(booking.customerId) ?? null,
+        }),
+      ),
+    );
+
+    sendSuccess(req, res, { bookings: dtos }, 'Your trips');
+  });
+}
+
+/**
+ * `GET /customer/bookings/current` — the booking happening to this customer now, or `null`.
+ *
+ * CARRIES THE START OTP, like the single-booking read and unlike the history list. That is the
+ * point of the endpoint rather than a detail of it: the code lives on the live trip screen only,
+ * so a customer whose app was killed at the pickup had no route back to the four digits their
+ * driver is standing there waiting for.
+ *
+ * Scoped by the token, and `null` rather than 404 when nothing is live — the app asks on launch.
+ */
+export function makeGetCurrentCustomerBookingController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: DriverCardContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const booking = await repo.findActiveForCustomer(principalOf(req));
+
+    if (booking === null) {
+      sendSuccess(req, res, { booking: null }, 'No booking in progress');
+      return;
+    }
+
+    const [adjustments, startOtp, driverCard] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      repo.readStartOtp(booking.id),
+      cardFor(directory, booking.driverId),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments, startOtp, driverCard }) },
+      'Booking in progress',
+    );
+  });
+}
+
+/**
+ * `GET /driver/bookings/current` — the trip this driver is in the middle of, or `null`.
+ *
+ * THE TRIP EQUIVALENT OF `GET /driver/offers`, and it exists for the same reason: the app
+ * is killed mid-job by an OEM battery manager, and the booking id it needs to get back only ever
+ * lived in navigation state. Without this the driver reopens to the duty screen with a customer
+ * waiting and no route to arrive, start or complete.
+ *
+ * SCOPED BY THE TOKEN. There is no id in the path, so there is no shape of this request that
+ * reads somebody else's trip.
+ *
+ * `null` rather than a 404 when nothing is live — "you are not on a trip" is a normal answer to
+ * this question, and the app asks it on every launch.
+ */
+export function makeGetCurrentDriverTripController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: CustomerContactContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const booking = await repo.findActiveForDriver(principalOf(req));
+
+    if (booking === null) {
+      sendSuccess(req, res, { booking: null }, 'No trip in progress');
+      return;
+    }
+
+    const [adjustments, contacts] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      directory.customerContactsByIds([booking.customerId]),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking: toBookingDto({
+          booking,
+          adjustments,
+          customerCard: contacts.get(booking.customerId) ?? null,
+        }),
+      },
+      'Trip in progress',
+    );
   });
 }
 

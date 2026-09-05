@@ -11,6 +11,8 @@ import {
   type FareSnapshot,
 } from '../src/modules/bookings/domain/booking.entity.js';
 import { distanceMetres, isFixStale } from '../src/modules/bookings/domain/distance.js';
+import { toBookingDto } from '../src/modules/bookings/interface/bookings.mapper.js';
+import type { CustomerContact, DriverCard } from '../src/modules/identity/identity.public.js';
 import type {
   BookingEvent,
   BookingRepositoryPort,
@@ -1006,5 +1008,150 @@ describe('a failed payment never expires the booking', () => {
     ).execute('bkg_1');
 
     expect(confirmed?.status).toBe('CONFIRMED');
+  });
+});
+
+// ─── The driver card a customer sees ────────────────────────────────────────────────────────
+
+/**
+ * `toBookingDto`'s driver block, and specifically WHEN THE PHONE NUMBER IS PRESENT.
+ *
+ * This is the one field on a booking that is withheld by status rather than by role, and the
+ * reason it is tested rather than merely commented: the number is the driver's login credential,
+ * so a regression here does not look like a bug on any screen — it looks like a slightly more
+ * helpful ride history, right up until a driver is rung by a stranger about a trip from March.
+ */
+const CARD: DriverCard = {
+  id: 'drv_1',
+  fullName: 'Bimal Rai',
+  phone: '+919800000001',
+  photoUrl: 'https://cdn.example/avatars/drv_1.jpg',
+  rating: 4.8,
+  ratingCount: 26,
+};
+
+describe('toBookingDto — the driver card', () => {
+  const withStatus = (status: BookingStatus): ReturnType<typeof toBookingDto> =>
+    toBookingDto({
+      booking: booking({ status, driverId: 'drv_1' }),
+      adjustments: [],
+      driverCard: CARD,
+    });
+
+  it.each(['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] as const)(
+    'gives the customer the phone number while the trip is live (%s)',
+    (status) => {
+      expect(withStatus(status).driver?.phone).toBe('+919800000001');
+    },
+  );
+
+  it.each(['COMPLETED', 'CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_DRIVER', 'EXPIRED'] as const)(
+    'withholds the phone number once the trip is over (%s)',
+    (status) => {
+      expect(withStatus(status).driver?.phone).toBeNull();
+    },
+  );
+
+  it('still shows who drove, on a finished trip', () => {
+    const driver = withStatus('COMPLETED').driver;
+
+    // The card is not suppressed wholesale — only the number is. A customer looking at their
+    // history should still recognise the person who drove them.
+    expect(driver?.name).toBe('Bimal Rai');
+    expect(driver?.photo_url).toBe('https://cdn.example/avatars/drv_1.jpg');
+    expect(driver?.rating).toBe(4.8);
+  });
+
+  it('carries no card at all on a driver-facing read', () => {
+    // No `driverCard` passed — every driver-facing and admin read. The shape stays what it was
+    // before customer cards existed rather than becoming null.
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', driverId: 'drv_1' }),
+      adjustments: [],
+      driverName: 'Bimal Rai',
+    });
+
+    expect(dto.driver).toEqual({
+      id: 'drv_1',
+      name: 'Bimal Rai',
+      photo_url: null,
+      rating: null,
+      rating_count: 0,
+      phone: null,
+    });
+  });
+
+  it('is null when no driver has been assigned', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'SEARCHING', driverId: null }),
+      adjustments: [],
+      driverCard: null,
+    });
+
+    expect(dto.driver).toBeNull();
+  });
+});
+
+// ─── The customer contact a driver sees ─────────────────────────────────────────────────────
+
+/**
+ * `toBookingDto`'s customer block — the mirror of the driver-card tests above, and gated by the
+ * same statuses. The number is the customer's login credential, so a regression that leaks it
+ * onto a finished trip looks like nothing on any screen until a stranger rings a customer about
+ * a ride from March.
+ */
+const CONTACT: CustomerContact = {
+  id: 'cus_1',
+  fullName: 'Anita Sharma',
+  phone: '+919820000002',
+};
+
+describe('toBookingDto — the customer contact', () => {
+  const withStatus = (status: BookingStatus): ReturnType<typeof toBookingDto> =>
+    toBookingDto({
+      booking: booking({ status, driverId: 'drv_1' }),
+      adjustments: [],
+      customerCard: CONTACT,
+    });
+
+  it.each(['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] as const)(
+    'gives the driver the number while the trip is live (%s)',
+    (status) => {
+      expect(withStatus(status).customer?.phone).toBe('+919820000002');
+    },
+  );
+
+  it.each(['COMPLETED', 'CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_DRIVER', 'EXPIRED'] as const)(
+    'withholds the number once the trip is over (%s)',
+    (status) => {
+      expect(withStatus(status).customer?.phone).toBeNull();
+    },
+  );
+
+  it('still shows who the trip was for, on a finished trip', () => {
+    expect(withStatus('COMPLETED').customer).toEqual({
+      id: 'cus_1',
+      name: 'Anita Sharma',
+      phone: null,
+    });
+  });
+
+  it('carries name only, never a number, when just a name was resolved', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', driverId: 'drv_1' }),
+      adjustments: [],
+      customerName: 'Anita Sharma',
+    });
+
+    expect(dto.customer).toEqual({ id: 'cus_1', name: 'Anita Sharma', phone: null });
+  });
+
+  it('is null when the caller resolved no customer at all', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', driverId: 'drv_1' }),
+      adjustments: [],
+    });
+
+    expect(dto.customer).toBeNull();
   });
 });

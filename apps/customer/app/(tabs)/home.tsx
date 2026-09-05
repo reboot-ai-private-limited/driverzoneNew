@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { DateTimeChooser } from '@/components/DateTimeChooser';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -52,6 +52,7 @@ import { forwardGeocode, reverseGeocode } from '@/features/location/geocoding';
 import { useCurrentLocation } from '@/features/location/useCurrentLocation';
 import { checkCoverage } from '@/lib/api/endpoints/coverage';
 import { addAddress, getProfile, removeAddress } from '@/lib/api/endpoints/customer';
+import { getCurrentBooking } from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
 
@@ -189,6 +190,50 @@ export default function HomeScreen(): ReactElement {
     queryKey: keys.profile.me(),
     queryFn: getProfile,
   });
+
+  /**
+   * THE BOOKING RECOVERY READ.
+   *
+   * Android kills a backgrounded app whenever it wants memory, and the booking id lived only in
+   * navigation state. Reopening landed here — the booking map — with a driver already on the way
+   * and no route back to the trip: the Rides tab reaches `app/rides/[id].tsx`, which is a
+   * receipt with no live status, no cancel bar and, worst of all, no `start_otp`. A customer
+   * whose app restarted at the pickup could not get to the four digits their driver was standing
+   * there waiting for.
+   */
+  const activeBooking = useQuery({
+    queryKey: keys.bookings.current(),
+    queryFn: ({ signal }) => getCurrentBooking(signal),
+  });
+
+  const live = activeBooking.data?.booking ?? null;
+
+  /**
+   * Land the customer on their live booking ONCE per app launch, then never again.
+   *
+   * The ref is the whole design. Redirecting whenever `live` is non-null would make Home
+   * unusable: a customer who deliberately backs out of a trip to look at the map — to book a
+   * second car, or just to look — would be thrown straight back, with no way to stay. So the
+   * automatic route fires on the first resolve after launch, and every visit after that is the
+   * banner's job, which invites rather than forces.
+   */
+  const recovered = useRef(false);
+  useEffect(() => {
+    if (recovered.current || live === null) return;
+    recovered.current = true;
+    // SEARCHING has a screen of its own — the wait for a driver is not the trip screen's job.
+    router.push(live.status === 'SEARCHING' ? `/searching/${live.id}` : `/trip/${live.id}`);
+  }, [live]);
+
+  /*
+   * Re-read whenever Home regains focus, so a trip that ended elsewhere stops offering to be
+   * resumed. Without this the banner would outlive the booking it points at.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      void queryClient.invalidateQueries({ queryKey: keys.bookings.current() });
+    }, [queryClient]),
+  );
 
   /**
    * Coordinates are rounded into the KEY, not just the request: a float that differs in its
@@ -549,6 +594,7 @@ export default function HomeScreen(): ReactElement {
         initialCentre={location.point}
         markers={markers}
         showCentrePin={picking && mapPick}
+        centrePinKind={mode === 'pick-drop' ? 'drop' : 'pickup'}
         userLocation={location.isReal ? { lat: location.point.lat, lng: location.point.lng } : null}
         bottomInset={sheetHeight}
         onRegionSettled={picking && mapPick ? handleRegionSettled : undefined}
@@ -667,6 +713,43 @@ export default function HomeScreen(): ReactElement {
           >
             {savedNotice}
           </Animated.Text>
+        ) : null}
+
+        {/*
+          THE SECOND WAY BACK INTO A LIVE BOOKING. The effect above already sent the customer here
+          once, automatically, on launch — this is for the visit after that: someone who backed out
+          on purpose to glance at the map, or who dismissed the auto-redirect's timing, still needs
+          a way back that does not force them there. Not shown while `picking`, which already
+          covers the whole screen with the search field.
+        */}
+        {live !== null && !picking ? (
+          <Animated.View
+            entering={FadeInDown.duration(220)}
+            exiting={FadeOut.duration(140)}
+            layout={LinearTransition.duration(200)}
+          >
+            <GlassPanel rounded="card" style={styles.resumeBanner}>
+              <Pressable
+                onPress={() =>
+                  router.push(live.status === 'SEARCHING' ? `/searching/${live.id}` : `/trip/${live.id}`)
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Resume your trip in progress"
+                style={({ pressed }) => [styles.resumeRow, pressed && styles.pressedDim]}
+              >
+                <View style={styles.resumeIcon}>
+                  <Feather name="navigation" size={16} color={colors.fg} />
+                </View>
+                <View style={styles.resumeText}>
+                  <Text style={styles.resumeTitle}>
+                    {live.status === 'SEARCHING' ? 'Finding your driver' : 'Trip in progress'}
+                  </Text>
+                  <Text style={styles.resumeSub}>{live.reference} · tap to carry on</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={colors.fg} />
+              </Pressable>
+            </GlassPanel>
+          </Animated.View>
         ) : null}
       </View>
 
@@ -1167,6 +1250,19 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     overflow: 'hidden',
   },
+  resumeBanner: { marginTop: space.sm, overflow: 'hidden' },
+  resumeRow: { flexDirection: 'row', alignItems: 'center', padding: space.sm },
+  resumeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resumeText: { flex: 1, marginLeft: space.sm },
+  resumeTitle: { ...text.label, color: colors.fg },
+  resumeSub: { ...text.caption, color: colors.muted, marginTop: 1 },
 
   // Everything that floats above the map bottom-up. `box-none` so map gestures still reach the
   // map everywhere this layer is transparent.

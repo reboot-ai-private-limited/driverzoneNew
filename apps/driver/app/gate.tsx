@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Logo } from '@/components/Logo';
 import { hasSeenBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { getProfile } from '@/lib/api/endpoints/driver';
+ import { getCurrentTrip } from '@/lib/api/endpoints/trip';
 import * as session from '@/lib/auth/session';
 import { keys } from '@/lib/query/keys';
 import { colors, space, text } from '@/theme/theme';
@@ -31,6 +32,24 @@ export default function GateScreen(): ReactElement {
 
   const status = profile.data?.onboarding_status;
 
+  /**
+   * THE TRIP RECOVERY READ, and the reason a killed app finds its way back.
+   *
+   * A driver's app is killed mid-trip constantly — the OEM battery managers `battery-setup` warns
+   * about are the whole reason that screen exists — and the booking id lived only in navigation
+   * state, which dies with the process. Before this, reopening landed on the duty screen with a
+   * customer waiting and no route to arrive, start or complete.
+   *
+   * Asked HERE rather than on Home because this is the screen that already decides where a
+   * signed-in driver belongs, and "in the middle of a trip" outranks "on duty" as an answer.
+   * Only for an approved driver: nobody else can hold a booking.
+   */
+  const activeTrip = useQuery({
+    queryKey: keys.trip.current(),
+    queryFn: ({ signal }) => getCurrentTrip(signal),
+    enabled: status === 'APPROVED',
+  });
+
   useEffect(() => {
     if (status === undefined) return;
 
@@ -39,6 +58,20 @@ export default function GateScreen(): ReactElement {
     void (async () => {
       if (status !== 'APPROVED') {
         if (!cancelled) router.replace('/onboarding-status');
+        return;
+      }
+
+      /*
+       * Wait for the recovery read before routing anywhere. Racing it would land the driver on
+       * Home for a moment and then yank them to the trip, which reads as the app malfunctioning
+       * — and if the read failed we would rather send them to Home than block the launch, so a
+       * failure falls through to the normal path rather than stranding them here.
+       */
+      if (activeTrip.isPending) return;
+
+      const live = activeTrip.data?.booking ?? null;
+      if (live !== null) {
+        if (!cancelled) router.replace(`/trip/${live.id}`);
         return;
       }
 
@@ -58,7 +91,9 @@ export default function GateScreen(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [status]);
+    // `activeTrip` is read above, so the effect must re-run when the recovery read settles —
+    // without these it would bail on `isPending` once and never route anywhere.
+  }, [status, activeTrip.isPending, activeTrip.data]);
 
   if (profile.isError) {
     return (

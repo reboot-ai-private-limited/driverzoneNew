@@ -152,6 +152,7 @@ function doc(over: Partial<DriverDocument> = {}): DriverDocument {
     id: 'doc_1',
     driverId: 'drv_1',
     docType: 'LICENCE',
+    side: 'FRONT',
     status: 'PENDING',
     rejectionReason: null,
     fileUrl: 'drivers/drv_1/licence/abc',
@@ -161,6 +162,16 @@ function doc(over: Partial<DriverDocument> = {}): DriverDocument {
     expiresOn: null,
     ...over,
   };
+}
+
+/** Both faces of both required documents — what a submittable driver actually holds. */
+function allRequiredDocs(): DriverDocument[] {
+  return [
+    doc(),
+    doc({ id: 'doc_2', side: 'BACK' }),
+    doc({ id: 'doc_3', docType: 'GOVERNMENT_ID', side: 'FRONT' }),
+    doc({ id: 'doc_4', docType: 'GOVERNMENT_ID', side: 'BACK' }),
+  ];
 }
 
 function fakeDocuments(list: DriverDocument[] = []): DriverDocumentRepositoryPort & { list: DriverDocument[] } {
@@ -424,32 +435,59 @@ describe('UpsertFromBookingUseCase', () => {
 describe('missingForSubmission', () => {
   const complete = { fullName: 'Bimal Rai', dob: new Date('1988-07-04'), gender: 'MALE', address: 'Matigara' };
 
+  /** Both faces of both required documents — see `REQUIRED_DOCUMENTS`. */
+  const allSides = [
+    { docType: 'LICENCE', side: 'FRONT' },
+    { docType: 'LICENCE', side: 'BACK' },
+    { docType: 'GOVERNMENT_ID', side: 'FRONT' },
+    { docType: 'GOVERNMENT_ID', side: 'BACK' },
+  ] as const;
+
   it('is empty when everything is present', () => {
-    expect(missingForSubmission(complete, ['LICENCE', 'AADHAAR'])).toEqual([]);
+    expect(missingForSubmission(complete, allSides)).toEqual([]);
   });
 
   /** The list is the response body: "complete your profile" sends a driver hunting blindly. */
   it('names each missing field and document by path', () => {
-    const missing = missingForSubmission({ ...complete, dob: null }, ['LICENCE']);
+    const missing = missingForSubmission({ ...complete, dob: null }, [
+      { docType: 'LICENCE', side: 'FRONT' },
+      { docType: 'LICENCE', side: 'BACK' },
+      { docType: 'GOVERNMENT_ID', side: 'FRONT' },
+    ]);
 
-    expect(missing).toEqual(['dob', 'documents.AADHAAR']);
+    expect(missing).toEqual(['dob', 'documents.GOVERNMENT_ID.BACK']);
+  });
+
+  /**
+   * THE POINT OF PER-SIDE PATHS. A driver whose licence front is fine and whose back never
+   * uploaded must be sent to re-photograph the back alone — naming the whole document would make
+   * them retake both, and the retake is the step they abandon.
+   */
+  it('names only the missing side, not the whole document', () => {
+    expect(
+      missingForSubmission(complete, [
+        { docType: 'LICENCE', side: 'FRONT' },
+        { docType: 'GOVERNMENT_ID', side: 'FRONT' },
+        { docType: 'GOVERNMENT_ID', side: 'BACK' },
+      ]),
+    ).toEqual(['documents.LICENCE.BACK']);
   });
 
   it('treats a whitespace-only name as missing', () => {
-    expect(missingForSubmission({ ...complete, fullName: '   ' }, ['LICENCE', 'AADHAAR'])).toEqual([
-      'full_name',
-    ]);
+    expect(missingForSubmission({ ...complete, fullName: '   ' }, allSides)).toEqual(['full_name']);
   });
 
   /** Presence, not verification — an admin verifies content at the next step. */
   it('accepts documents that are still PENDING', () => {
-    expect(missingForSubmission(complete, ['AADHAAR', 'LICENCE'])).toEqual([]);
+    expect(missingForSubmission(complete, allSides)).toEqual([]);
   });
 
   it('ignores documents that are not required', () => {
-    expect(missingForSubmission(complete, ['INSURANCE'])).toEqual([
-      'documents.LICENCE',
-      'documents.AADHAAR',
+    expect(missingForSubmission(complete, [{ docType: 'OTHER', side: 'FRONT' }])).toEqual([
+      'documents.LICENCE.FRONT',
+      'documents.LICENCE.BACK',
+      'documents.GOVERNMENT_ID.FRONT',
+      'documents.GOVERNMENT_ID.BACK',
     ]);
   });
 });
@@ -481,12 +519,19 @@ describe('SubmitOnboardingUseCase', () => {
     const err = await useCase.execute('drv_1').catch((e: unknown) => e as AppError);
 
     expect((err as AppError).code).toBe('VALIDATION_FAILED');
-    expect((err as AppError).publicDetails).toEqual({ missing: ['dob', 'documents.AADHAAR'] });
+    expect((err as AppError).publicDetails).toEqual({
+      missing: [
+        'dob',
+        'documents.LICENCE.BACK',
+        'documents.GOVERNMENT_ID.FRONT',
+        'documents.GOVERNMENT_ID.BACK',
+      ],
+    });
   });
 
   it('moves a complete profile to SUBMITTED', async () => {
     const drivers = fakeDrivers(driverProfile());
-    const documents = fakeDocuments([doc(), doc({ id: 'doc_2', docType: 'AADHAAR' })]);
+    const documents = fakeDocuments(allRequiredDocs());
 
     const result = await new SubmitOnboardingUseCase(drivers, documents).execute('drv_1');
 
@@ -499,7 +544,7 @@ describe('SubmitOnboardingUseCase', () => {
     const drivers = fakeDrivers(
       driverProfile({ onboardingStatus: 'REJECTED', onboardingRejectionReason: 'Blurry licence' }),
     );
-    const documents = fakeDocuments([doc(), doc({ id: 'doc_2', docType: 'AADHAAR' })]);
+    const documents = fakeDocuments(allRequiredDocs());
 
     await new SubmitOnboardingUseCase(drivers, documents).execute('drv_1');
 
@@ -508,7 +553,7 @@ describe('SubmitOnboardingUseCase', () => {
 
   it('refuses to resubmit an application already under review', async () => {
     const drivers = fakeDrivers(driverProfile({ onboardingStatus: 'SUBMITTED' }));
-    const documents = fakeDocuments([doc(), doc({ id: 'doc_2', docType: 'AADHAAR' })]);
+    const documents = fakeDocuments(allRequiredDocs());
 
     expect(await codeOfRejection(new SubmitOnboardingUseCase(drivers, documents).execute('drv_1'))).toBe(
       'CONFLICT',

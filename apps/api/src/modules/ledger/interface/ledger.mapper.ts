@@ -27,14 +27,13 @@ const FALLBACK_DESCRIPTION: Record<TransactionType, string> = {
 };
 
 /**
- * Builds the wallet DTO, deriving `balance_after_paise` for the page.
+ * Builds the wallet DTO.
  *
- * THE RUNNING BALANCE IS COMPUTED, NOT STORED. Entries arrive newest-first from an anchor the use
- * case worked out — the current balance on page 1, and that minus everything newer on later pages
- * — and each older row's balance is the previous one with that row's own amount removed. Exact for
- * the rows returned, and it cannot drift from `SUM()`, which a per-row stored total eventually
- * would: several entries are appended together at trip completion and would race on reading the
- * previous balance.
+ * THE RUNNING BALANCE IS COMPUTED, NOT STORED — and it is computed in the repository's query
+ * rather than here. This function used to walk it back from an anchor, subtracting each row's
+ * amount from the one before it; that is only correct while a page is a consecutive run of the
+ * statement, which a filter breaks. The window sum arrives already attached to each row, so this
+ * mapper now just renames fields, which is all a mapper should have been doing with money anyway.
  */
 export function toWalletDto(
   driverId: string,
@@ -42,13 +41,9 @@ export function toWalletDto(
   page: number,
   limit: number,
 ): AdminDriverWalletDetailsDto {
-  let running = wallet.anchorBalancePaise;
-
-  const entries: LedgerEntryDto[] = wallet.entries.map((entry) => {
-    const balanceAfter = running;
-    running -= entry.amountPaise;
-    return toEntryDto(driverId, entry, balanceAfter);
-  });
+  const entries: LedgerEntryDto[] = wallet.entries.map((row) =>
+    toEntryDto(driverId, row.entry, row.balanceAfterPaise),
+  );
 
   return {
     wallet: {
@@ -57,6 +52,12 @@ export function toWalletDto(
       lifetime_earnings_paise: wallet.lifetimeEarningsPaise,
     },
     ledger: entries,
+    summary: {
+      credited_paise: wallet.totals.creditedPaise,
+      debited_paise: wallet.totals.debitedPaise,
+      net_paise: wallet.totals.creditedPaise - wallet.totals.debitedPaise,
+      count: wallet.totals.count,
+    },
     pagination: {
       page,
       limit,

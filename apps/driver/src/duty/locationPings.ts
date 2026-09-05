@@ -14,10 +14,12 @@ import { sendLocationPings } from '@/lib/api/endpoints/driver';
  * scale, costs a driver base (docs/LLD/api-contracts.md). Fixes accumulate in `buffer` and go up
  * every `FLUSH_INTERVAL_MS`.
  *
- * Foreground-only for now: `expo-location`'s background task needs the Android foreground
- * service from S-8, which is not built. So pings stop when the app is backgrounded, the driver
- * ages out of the pool within two minutes, and offers stop reaching them — which is honest,
- * because without the service the offer could not have rung anyway.
+ * **These are JS timers, and they only survive a locked screen because the S-8 foreground service
+ * holds the process open.** `dutyForegroundService.ts` is started before this loop and stopped
+ * after it, deliberately: without it Android freezes the process seconds after the screen goes
+ * off, the intervals stop firing, and the driver ages out of the pool's two-minute window while
+ * their app still says "online". The service is what makes this loop a shift-long loop rather
+ * than a foreground-only one.
  */
 
 /** How often the buffer is sent. Well inside the server's two-minute freshness window. */
@@ -152,4 +154,44 @@ export function stopLocationPings(): void {
 
 export function isPinging(): boolean {
   return fixTimer !== null;
+}
+
+/**
+ * ONE fix, for a request that has to prove where the driver is standing right now.
+ *
+ * The trip screen's `arrived` call needs this: the server refuses arrival beyond
+ * `dispatch.arrival_radius_m` and rejects a stale fix outright, so it cannot reuse whatever the
+ * ping buffer happens to hold — that could be minutes old, and the ping loop only runs while on
+ * duty anyway.
+ *
+ * Shares `devOverride()` with the loop above on purpose. A developer whose
+ * `EXPO_PUBLIC_DEV_FIXED_*` coordinates put them inside a seeded pickup zone would otherwise
+ * report the override to dispatch and their real GPS to the arrival gate, and be refused arrival
+ * on the one trip the override exists to let them run.
+ *
+ * `takenAt` is CLIENT time and the server compares it against its own to reject stale fixes —
+ * which is exactly the check a phone with a badly wrong clock will fail. That is the intended
+ * behaviour: a fix whose age cannot be trusted is not proof of anything.
+ */
+export async function currentFix(): Promise<{ lat: number; lng: number; takenAt: string } | null> {
+  const takenAt = new Date().toISOString();
+
+  const override = devOverride();
+  if (override !== null) return { ...override, takenAt };
+
+  try {
+    const position = await Location.getCurrentPositionAsync({
+      // Higher than the loop's `Balanced`: this one decides whether a driver can start earning.
+      accuracy: Location.Accuracy.High,
+    });
+    return {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      takenAt: new Date().toISOString(),
+    };
+  } catch {
+    // The caller turns this into "we could not confirm where you are", which is honest — unlike
+    // sending a guessed coordinate to a gate that exists to stop exactly that.
+    return null;
+  }
 }

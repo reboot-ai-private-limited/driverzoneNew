@@ -57,8 +57,14 @@ export interface LedgerEntryDto {
    *
    * DERIVED, NOT STORED. The ledger is append-only signed amounts and the balance is their sum;
    * a running total written per row would need serialised appends per driver and could drift from
-   * `SUM()`, which the LLD is explicit must never happen. The server computes this per page by
-   * taking the true balance and walking newest-to-oldest, so it is exact for the rows returned.
+   * `SUM()`, which the LLD is explicit must never happen.
+   *
+   * It is a cumulative sum over the driver's WHOLE statement, computed in the same query that
+   * reads the page — not a walk back from the current balance, which is what it used to be. That
+   * changed when the statement gained filters (2026-09-04): a walk-back assumes the page holds
+   * consecutive rows, so under a filter it would skip everything the filter excluded and quietly
+   * report balances that never existed. This number is the real balance after this row whether or
+   * not a filter is on.
    */
   balance_after_paise: number;
   /** Optional reference to the entity that caused this (e.g., Booking ID or Payout Batch ID) */
@@ -68,9 +74,20 @@ export interface LedgerEntryDto {
   created_at: string;
 }
 
-export interface AdminDriverWalletDetailsDto {
+/**
+ * A driver's wallet with a page of the rows behind it.
+ *
+ * ONE SHAPE, TWO READERS — the admin looking at a driver (`GET /admin/drivers/:id/wallet`) and
+ * the driver looking at themselves (`GET /driver/wallet`). They are the same question asked from
+ * two sides, so they share a mapper on the server and a type here; two shapes would be two
+ * running-balance derivations to keep in agreement, and a driver whose app disagrees with the
+ * admin screen about what they are owed is the exact argument neither side can win.
+ */
+export interface WalletDetailsDto {
   wallet: WalletBalanceDto;
   ledger: LedgerEntryDto[];
+  /** What the current filter selects, across every page of it — see `LedgerSummaryDto`. */
+  summary: LedgerSummaryDto;
   pagination: {
     page: number;
     limit: number;
@@ -78,3 +95,57 @@ export interface AdminDriverWalletDetailsDto {
     total_pages: number;
   };
 }
+
+/**
+ * The totals for the rows a statement query SELECTS — every page of them, not the page returned.
+ *
+ * This is what makes a filter worth having. "Trip earnings, this month" is a question about a
+ * number, and a driver who has to add up three pages of rows to answer it has been given a list
+ * rather than an answer. Unfiltered, it describes the whole statement.
+ *
+ * `credited` and `debited` are kept apart rather than netted because they answer different
+ * questions — what came in, what went out — and `net` is the one figure that would otherwise be
+ * derived twice, differently, on two clients.
+ */
+export interface LedgerSummaryDto {
+  /** Sum of the POSITIVE matching rows. Always ≥ 0. */
+  credited_paise: number;
+  /** Sum of the NEGATIVE matching rows, as a POSITIVE magnitude. Always ≥ 0. */
+  debited_paise: number;
+  /** `credited − debited`. Signed. */
+  net_paise: number;
+  /** How many rows matched, which is also `pagination.total_items`. */
+  count: number;
+}
+
+/**
+ * The filters `GET /driver/wallet` and `GET /admin/drivers/:id/wallet` accept, as query params.
+ *
+ * SERVER-SIDE, and that is the point rather than a detail. The statement is paginated, so a
+ * filter applied in the client would only ever search the pages already loaded and would silently
+ * miss matches on page two — the same trap `apps/customer`'s ride history documents avoiding by
+ * not paginating at all. Here the rows genuinely do page, so the filter has to run where they do.
+ *
+ * Every field is optional; omitting all of them returns the whole statement, exactly as before.
+ */
+export interface LedgerQueryParams {
+  page?: number | undefined;
+  limit?: number | undefined;
+  /** Comma-separated `TransactionType`s on the wire: `?type=TRIP_EARNING,BONUS`. */
+  type?: string | undefined;
+  /** `YYYY-MM-DD`, inclusive, in IST — the day the driver means when they say "from the 1st". */
+  from?: string | undefined;
+  /** `YYYY-MM-DD`, INCLUSIVE of the whole day named. */
+  to?: string | undefined;
+}
+
+export type AdminDriverWalletDetailsDto = WalletDetailsDto;
+
+/**
+ * `GET /driver/wallet` — the driver's own earnings screen.
+ *
+ * Identical to what an admin sees for this driver, deliberately. A driver is entitled to the
+ * ledger that decides their payout, and showing them a reduced version invites the belief that
+ * something is being kept from them.
+ */
+export type DriverWalletDetailsDto = WalletDetailsDto;

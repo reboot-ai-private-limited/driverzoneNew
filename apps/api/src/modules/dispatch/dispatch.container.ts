@@ -15,8 +15,8 @@ import {
 } from './application/useCases/respondToOffer.usecase.js';
 import {
   makeAcceptOfferController,
-  makeCurrentOfferController,
   makeDeclineOfferController,
+  makeListOffersController,
 } from './interface/dispatch.controller.js';
 import { buildDriverRouter } from './interface/dispatch.routes.js';
 
@@ -61,7 +61,7 @@ export function buildDispatchContainer(deps: DispatchDependencies): DispatchCont
     expireWave: (bookingId, wave) => expireWave.execute(bookingId, wave),
     buildDriverRouter: () =>
       buildDriverRouter({
-        current: makeCurrentOfferController(offers, deps.bookings),
+        list: makeListOffersController(offers, deps.bookings),
         accept: makeAcceptOfferController(accept),
         decline: makeDeclineOfferController(decline),
       }),

@@ -14,22 +14,22 @@ import type { DocumentType, DriverDocumentDto, DriverProfileDto } from '@driverz
  */
 
 /**
- * Identity documents required before an admin will look at an application.
+ * Identity documents required before an admin will look at an application — BOTH SIDES of each,
+ * which the server checks per side (`REQUIRED_DOCUMENTS` in `driverOnboarding.entity.ts`).
  *
  * PRESENCE, not verification: an admin verifies content at the next step, and a driver cannot be
- * asked to wait for approval before being allowed to ask for it. `VEHICLE_RC`, `INSURANCE` and
- * `POLICE_VERIFICATION` are optional because the driver does not supply the vehicle — the
- * customer does (docs/LLD/open-questions.md Q5).
+ * asked to wait for approval before being allowed to ask for it. `POLICE_VERIFICATION` and
+ * `OTHER` are optional — the first is a document many drivers do not hold yet, the second is by
+ * definition whatever support happened to ask for.
  */
-export const REQUIRED_DOCUMENT_TYPES: readonly DocumentType[] = ['LICENCE', 'AADHAAR'];
+export const REQUIRED_DOCUMENT_TYPES: readonly DocumentType[] = ['LICENCE', 'GOVERNMENT_ID'];
 
 /** Uploadable in onboarding, required ones first. */
 export const ONBOARDING_DOCUMENT_TYPES: readonly DocumentType[] = [
   'LICENCE',
-  'AADHAAR',
-  'VEHICLE_RC',
-  'INSURANCE',
+  'GOVERNMENT_ID',
   'POLICE_VERIFICATION',
+  'OTHER',
 ];
 
 /** The profile fields an admin needs in order to make a decision at all. */
@@ -37,10 +37,9 @@ export const REQUIRED_PROFILE_FIELDS = ['full_name', 'dob', 'gender', 'address']
 
 const DOCUMENT_LABELS: Record<DocumentType, string> = {
   LICENCE: 'Driving licence',
-  AADHAAR: 'Aadhaar card',
-  VEHICLE_RC: 'Vehicle RC',
-  INSURANCE: 'Insurance',
+  GOVERNMENT_ID: 'Government ID',
   POLICE_VERIFICATION: 'Police verification',
+  OTHER: 'Other document',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -59,18 +58,25 @@ export function isDocumentRequired(type: DocumentType): boolean {
 }
 
 /**
- * `documents.AADHAAR` → `Aadhaar card`, `dob` → `Date of birth`.
+ * `documents.LICENCE.BACK` → `Driving licence (back)`, `dob` → `Date of birth`.
+ *
+ * THE SIDE IS KEPT IN THE PROSE. The server names a missing face specifically so the driver
+ * re-photographs only that one; collapsing it back to "Driving licence" here would throw away the
+ * whole reason the path carries it.
  *
  * An unknown path falls back to the raw string rather than being dropped: a requirement added
  * server-side must still show as *something* on a build that predates it. Silently rendering
  * nothing would tell the driver their profile is complete while the server refuses it.
  */
 export function describeMissing(path: string): string {
-  if (path.startsWith('documents.')) {
-    const type = path.slice('documents.'.length) as DocumentType;
-    return DOCUMENT_LABELS[type] ?? path;
-  }
-  return FIELD_LABELS[path] ?? path;
+  if (!path.startsWith('documents.')) return FIELD_LABELS[path] ?? path;
+
+  const [type, side] = path.slice('documents.'.length).split('.');
+  const label = DOCUMENT_LABELS[type as DocumentType];
+  if (label === undefined) return path;
+
+  // A single-sided document arrives with no side segment, and reads better without one.
+  return side === undefined ? label : `${label} (${side.toLowerCase()})`;
 }
 
 /** Which screen a missing path lives on, so the review screen can send the driver straight there. */
@@ -96,9 +102,16 @@ export function missingLocally(
   if (profile.gender === null) missing.push('gender');
   if (profile.address === null || profile.address.trim() === '') missing.push('address');
 
-  const uploaded = new Set(documents.map((doc) => doc.doc_type));
+  /*
+   * PER SIDE, mirroring the server's `REQUIRED_DOCUMENTS`. A driver holding only the front of
+   * their licence is not done, and a check that only asked "is there a LICENCE row?" would enable
+   * Submit and then be contradicted by the 400 — the exact disagreement this file exists to avoid.
+   */
+  const held = new Set(documents.map((doc) => `${doc.doc_type}.${doc.side}`));
   for (const type of REQUIRED_DOCUMENT_TYPES) {
-    if (!uploaded.has(type)) missing.push(`documents.${type}`);
+    for (const side of ['FRONT', 'BACK'] as const) {
+      if (!held.has(`${type}.${side}`)) missing.push(`documents.${type}.${side}`);
+    }
   }
 
   return missing;

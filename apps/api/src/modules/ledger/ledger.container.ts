@@ -5,8 +5,8 @@ import { MongoLedgerRepository } from './infrastructure/ledgerRepository.impl.js
 import { AppendLedgerEntriesUseCase } from './application/useCases/appendEntries.usecase.js';
 import { GetWalletBalanceUseCase } from './application/useCases/getWalletBalance.usecase.js';
 import { GetDriverWalletUseCase } from './application/useCases/getDriverWallet.usecase.js';
-import { makeDriverWalletController } from './interface/ledger.controller.js';
-import { buildAdminRouter } from './interface/ledger.routes.js';
+import { makeDriverWalletController, makeMyWalletController } from './interface/ledger.controller.js';
+import { buildAdminRouter, buildDriverRouter } from './interface/ledger.routes.js';
 
 export interface LedgerDependencies {
   /** For `driver.max_negative_balance` — the same figure dispatch filters on. */
@@ -15,8 +15,16 @@ export interface LedgerDependencies {
 
 export interface LedgerContainer {
   contract: LedgerPublicContract;
-  /** Mounted at `/api/admin/drivers`. The driver's earnings screen is a mobile app, still absent. */
+  /** Mounted at `/api/admin/drivers`, for `/admin/drivers/:id/wallet`. */
   buildAdminRouter: () => Router;
+  /**
+   * Mounted at `/api/driver/wallet` — the driver's own earnings screen.
+   *
+   * The same `GetDriverWalletUseCase` instance as the admin router above, not a second one: one
+   * derivation of the running balance means the driver's app and the admin's screen cannot
+   * disagree about what a driver is owed.
+   */
+  buildDriverRouter: () => Router;
 }
 
 export function buildLedgerContainer(deps: LedgerDependencies): LedgerContainer {
@@ -35,5 +43,6 @@ export function buildLedgerContainer(deps: LedgerDependencies): LedgerContainer 
       recentEntriesForDriver: (driverId, limit) => repo.listForDriver(driverId, limit),
     },
     buildAdminRouter: () => buildAdminRouter({ driverWallet: makeDriverWalletController(wallet) }),
+    buildDriverRouter: () => buildDriverRouter({ myWallet: makeMyWalletController(wallet) }),
   };
 }

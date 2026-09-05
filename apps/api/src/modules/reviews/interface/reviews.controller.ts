@@ -1,5 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import { z } from 'zod';
+import type { AdminReviewDto } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
 import { asyncHandler } from '@/shared/http/asyncHandler.js';
 import { sendSuccess } from '@/shared/http/response.util.js';
@@ -101,7 +102,7 @@ export function makeRateTripController(
 async function withNames(
   reviews: Review[],
   directory: AccountDirectoryContract,
-): Promise<unknown[]> {
+): Promise<AdminReviewDto[]> {
   const customerIds: string[] = [];
   const driverIds: string[] = [];
   for (const r of reviews) {

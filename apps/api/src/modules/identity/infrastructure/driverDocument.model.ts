@@ -1,5 +1,11 @@
 import mongoose, { Schema } from 'mongoose';
-import type { DocumentStatus, DocumentType } from '@driverzone/contracts';
+import {
+  DOCUMENT_SIDES,
+  DOCUMENT_TYPES,
+  type DocumentSide,
+  type DocumentStatus,
+  type DocumentType,
+} from '@driverzone/contracts';
 
 /**
  * INFRASTRUCTURE — the `driverDocuments` collection (docs/LLD/database-schema.md).
@@ -14,6 +20,7 @@ export interface DriverDocumentDoc {
   _id: mongoose.Types.ObjectId;
   driverId: mongoose.Types.ObjectId;
   docType: DocumentType;
+  side: DocumentSide;
   status: DocumentStatus;
   rejectionReason?: string | null;
   fileUrl: string;
@@ -30,11 +37,16 @@ export interface DriverDocumentDoc {
 const driverDocumentSchema = new Schema<DriverDocumentDoc>(
   {
     driverId: { type: Schema.Types.ObjectId, ref: 'Driver', required: true },
-    docType: {
-      type: String,
-      required: true,
-      enum: ['LICENCE', 'AADHAAR', 'POLICE_VERIFICATION', 'VEHICLE_RC', 'INSURANCE'],
-    },
+    // Read from the contract rather than restated: a type added there and forgotten here would
+    // fail as a Mongoose validation error at upload time, which is a long way from its cause.
+    docType: { type: String, required: true, enum: DOCUMENT_TYPES },
+    /**
+     * Which face this file is.
+     *
+     * Defaulted to `FRONT`, which is also the migration: every row written before sides existed
+     * was the one and only file for its type, and reading it as the front is what it always was.
+     */
+    side: { type: String, required: true, default: 'FRONT', enum: DOCUMENT_SIDES },
     status: { type: String, default: 'PENDING', enum: ['PENDING', 'VERIFIED', 'REJECTED'] },
 
     // Why a rejected document says why: a driver told only "rejected" has nothing to act on and
@@ -53,9 +65,20 @@ const driverDocumentSchema = new Schema<DriverDocumentDoc>(
   { timestamps: true },
 );
 
-// One document per type per driver — re-uploading replaces rather than accumulating a pile an
-// admin has to sift through to find the current one.
-driverDocumentSchema.index({ driverId: 1, docType: 1 }, { unique: true });
+/**
+ * One document per type per SIDE per driver — re-uploading replaces rather than accumulating a
+ * pile an admin has to sift through to find the current one.
+ *
+ * `side` joined this key on 2026-09-04, when a licence became a front and a back. The old
+ * two-field index must be dropped for this one to be created — Mongo will not build a second
+ * unique index over a superset while the first still forbids the second row:
+ *
+ *   db.driverdocuments.dropIndex('driverId_1_docType_1')
+ *
+ * Existing rows need no data migration: `side` defaults to `FRONT`, which is what a
+ * pre-two-sided row always was.
+ */
+driverDocumentSchema.index({ driverId: 1, docType: 1, side: 1 }, { unique: true });
 
 // The expiry-warning job (docs/LLD/admin-panel.md: "documents expiring within 7 days").
 driverDocumentSchema.index({ expiresOn: 1 });

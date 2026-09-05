@@ -85,6 +85,7 @@ function mapDriverDocumentToDto(doc: DriverDocument, url: string = ''): DriverDo
   return {
     id: doc.id,
     doc_type: doc.docType,
+    side: doc.side,
     status: doc.status,
     rejection_reason: doc.rejectionReason,
     number: doc.number,

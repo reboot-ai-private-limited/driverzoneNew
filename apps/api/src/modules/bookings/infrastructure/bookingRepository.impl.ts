@@ -144,6 +144,49 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
   }
 
+  /** Every trip assigned to this driver, newest first. See the port on why no status filter. */
+  async listForDriver(driverId: string, limit: number): Promise<Booking[]> {
+    if (!mongoose.isValidObjectId(driverId)) return [];
+    const docs = await BookingModel.find({ driverId }).sort({ createdAt: -1 }).limit(limit);
+    return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  /**
+   * The trip this driver is currently on. See the port for why this read exists at all.
+   *
+   * The four statuses are listed rather than expressed as "not terminal": a status added to the
+   * machine later must be an explicit decision about whether a driver is still working it, not
+   * something a negation silently absorbs.
+   */
+  async findActiveForDriver(driverId: string): Promise<Booking | null> {
+    if (!mongoose.isValidObjectId(driverId)) return null;
+
+    const doc = await BookingModel.findOne({
+      driverId,
+      status: { $in: ['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] },
+    }).sort({ createdAt: -1 });
+
+    return doc === null ? null : toEntity(doc.toObject() as BookingDoc);
+  }
+
+  /**
+   * The booking happening to this customer now. See the port for why `CONFIRMED` is excluded.
+   *
+   * `SEARCHING` is IN, unlike the driver's equivalent: a customer watching for a driver to be
+   * found is mid-experience and has a screen of their own for it, whereas no driver holds a
+   * booking in that state.
+   */
+  async findActiveForCustomer(customerId: string): Promise<Booking | null> {
+    if (!mongoose.isValidObjectId(customerId)) return null;
+
+    const doc = await BookingModel.findOne({
+      customerId,
+      status: { $in: ['SEARCHING', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] },
+    }).sort({ createdAt: -1 });
+
+    return doc === null ? null : toEntity(doc.toObject() as BookingDoc);
+  }
+
   /** The only read that lifts `select: false` on the OTP, so reaching for it is visible. */
   async readStartOtp(id: string): Promise<string | null> {
     if (!mongoose.isValidObjectId(id)) return null;

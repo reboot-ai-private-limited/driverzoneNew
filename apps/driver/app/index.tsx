@@ -4,10 +4,11 @@ import { type ReactElement, useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Logo } from '@/components/Logo';
 import * as session from '@/lib/auth/session';
+import { getInitialOfferHref } from '@/notifications/offerNotification';
 import { colors, space, text } from '@/theme/theme';
 
 /**
- * The boot screen. Restores the session, then routes.
+ * The boot screen. Restores the session, checks for a tapped offer, then routes.
  *
  * It exists because restoring a session ALWAYS costs a round-trip: the access token is never
  * persisted, so the app cannot know whether it is signed in until `/driver/auth/refresh` answers
@@ -17,9 +18,12 @@ import { colors, space, text } from '@/theme/theme';
  * lands on the login screen, which is where the network error belongs, rather than stranding the
  * driver here.
  *
- * It routes only as far as `/gate`, which is the screen that knows about onboarding status. This
- * screen deliberately does not: it has no profile yet, and fetching one here would put a second
- * round-trip in front of the first frame.
+ * NORMALLY it routes only as far as `/gate`, which is the screen that knows about onboarding
+ * status — this screen deliberately does not, since fetching a profile here would put a second
+ * round-trip in front of the first frame. THE ONE EXCEPTION is a cold start from a tapped offer
+ * notification: that goes straight to the ring screen, checked and decided right here rather than
+ * in a separate effect elsewhere, which is what used to race this function's own `replace` and
+ * lose. See `getInitialOfferHref` for why the read has to happen in this one place.
  */
 
 /** A floor, not a delay: below this the wordmark flashes rather than appears. */
@@ -40,6 +44,13 @@ export default function BootScreen(): ReactElement {
     let cancelled = false;
 
     async function boot(): Promise<void> {
+      /*
+       * Started immediately, alongside the session restore — not awaited until the routing
+       * decision at the bottom, so checking for a tapped offer adds nothing on top of the delay
+       * already spent restoring the session and holding the wordmark up for its minimum.
+       */
+      const initialOffer = getInitialOfferHref();
+
       await Promise.race([
         session.restore(),
         new Promise((resolve) => setTimeout(resolve, RESTORE_TIMEOUT_MS)),
@@ -54,9 +65,30 @@ export default function BootScreen(): ReactElement {
       // nothing useful.
       if (cancelled) return;
 
-      // `replace`, never `push`: the hardware back button from the login screen must exit the
-      // app, not return to a boot screen that would immediately route forward again.
-      router.replace(session.getState().status === 'authenticated' ? '/gate' : '/phone');
+      if (session.getState().status !== 'authenticated') {
+        router.replace('/phone');
+        return;
+      }
+
+      /*
+       * THE OFFER WINS, by construction rather than by luck. This used to be checked in the root
+       * layout's push bridge instead, in an effect that runs on the very first render — before
+       * this function's own `replace` below, and with no knowledge of each other. The bridge
+       * would push the ring screen the moment the read resolved; a few hundred milliseconds
+       * later this function's unconditional `replace('/gate')` swapped it straight back out, and
+       * `gate.tsx`'s own trip-recovery redirect could then carry the driver somewhere else again.
+       * A driver who tapped a ringing offer to open a killed app landed on Duty having never
+       * seen what they tapped.
+       *
+       * Checked here, immediately before the ONE `replace` this function ever issues, there is
+       * nothing left downstream that can race it: `/gate` is only reached when there was nothing
+       * to recover.
+       */
+      const offerHref = await initialOffer;
+
+      // `replace`, never `push`: the hardware back button must exit the app or return to Duty,
+      // not reveal a boot screen that would immediately route forward again.
+      router.replace(offerHref ?? '/gate');
     }
 
     void boot();

@@ -15,8 +15,17 @@ export interface OfferRepositoryPort {
 
   findById(offerId: string): Promise<DispatchOffer | null>;
 
-  /** The driver's current ringing offer, for the recovery path after an app restart mid-offer. */
-  findLiveForDriver(driverId: string): Promise<DispatchOffer | null>;
+  /**
+   * Every offer currently ringing for this driver, SOONEST-EXPIRING FIRST — the recovery path
+   * after an app restart mid-offer, and the answer `GET /driver/offers` sends straight through.
+   *
+   * PLURAL (2026-09-04, was `findLiveForDriver`, singular). A driver can legitimately hold more
+   * than one live offer at once — nothing in `MongoDriverPool` excludes a driver who already has
+   * an open offer or is mid-trip, and that is deliberate. Returning only one, arbitrarily, is what
+   * let the driver app's ring screen show a different offer than the one it was about to act on.
+   * Sorted so every caller agrees on which offer is the more urgent one without re-deriving it.
+   */
+  findAllLiveForDriver(driverId: string): Promise<DispatchOffer[]>;
 
   listForBooking(bookingId: string): Promise<DispatchOffer[]>;
 

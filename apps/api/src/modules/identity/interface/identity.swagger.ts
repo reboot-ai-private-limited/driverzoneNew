@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { CAR_CATEGORIES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
+import {
+  CAR_CATEGORIES,
+  DOCUMENT_SIDES,
+  DOCUMENT_TYPES,
+  VEHICLE_TYPE_PREFERENCES,
+} from '@driverzone/contracts';
 import { bearerAuth, errorResponse, registry, successResponse } from '@/shared/http/swagger.util.js';
 import {
   createAddressSchema,
@@ -140,10 +145,12 @@ const adminDriverListResponseSchema = z.object({
 
 const driverDocumentDtoSchema = z.object({
   id: z.string(),
-  doc_type: z.enum(['LICENCE', 'AADHAAR', 'POLICE_VERIFICATION', 'VEHICLE_RC', 'INSURANCE']),
+  doc_type: z.enum(DOCUMENT_TYPES),
+  side: z.enum(DOCUMENT_SIDES),
   status: z.enum(['PENDING', 'VERIFIED', 'REJECTED']),
   rejection_reason: z.string().nullable(),
   number: z.string().nullable(),
+  /** Licence classes / government-id kind / police station / free-form label — see the contract. */
   sub_type: z.string().nullable(),
   issued_on: z.string().nullable(),
   expires_on: z.string().nullable(),

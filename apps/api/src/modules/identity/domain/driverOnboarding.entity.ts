@@ -1,4 +1,4 @@
-import type { DocumentType, OnboardingStatus } from '@driverzone/contracts';
+import type { DocumentSide, DocumentType, OnboardingStatus } from '@driverzone/contracts';
 
 /**
  * DOMAIN — the driver verification gate.
@@ -14,14 +14,22 @@ import type { DocumentType, OnboardingStatus } from '@driverzone/contracts';
  */
 
 /**
- * Identity documents required before an admin will look at an application.
+ * Identity documents required before an admin will look at an application, BOTH SIDES OF EACH.
  *
  * PRESENCE, not verification: an admin verifies content at the next step, and a driver cannot
- * be asked to wait for approval before being allowed to ask for it. The other document types
- * (`VEHICLE_RC`, `INSURANCE`, `POLICE_VERIFICATION`) are optional here because the driver does
- * not supply the vehicle — the customer does (docs/LLD/open-questions.md Q5).
+ * be asked to wait for approval before being allowed to ask for it. `POLICE_VERIFICATION` and
+ * `OTHER` stay optional — the first is a document many drivers do not hold yet, and the second is
+ * by definition whatever support happened to ask for.
+ *
+ * Both sides are required because half a licence proves nothing: the class and the expiry are
+ * printed on the back of an Indian licence, which is exactly what an admin is checking.
  */
-export const REQUIRED_DOCUMENT_TYPES: DocumentType[] = ['LICENCE', 'AADHAAR'];
+export const REQUIRED_DOCUMENTS: ReadonlyArray<{ docType: DocumentType; side: DocumentSide }> = [
+  { docType: 'LICENCE', side: 'FRONT' },
+  { docType: 'LICENCE', side: 'BACK' },
+  { docType: 'GOVERNMENT_ID', side: 'FRONT' },
+  { docType: 'GOVERNMENT_ID', side: 'BACK' },
+];
 
 /** The profile fields an admin needs in order to make a decision at all. */
 export const REQUIRED_PROFILE_FIELDS = ['full_name', 'dob', 'gender', 'address'] as const;
@@ -35,7 +43,10 @@ export interface OnboardingProfile {
 
 /**
  * What is still missing, as dot-paths the client can deep-link from — `dob`,
- * `documents.AADHAAR`.
+ * `documents.LICENCE.BACK`.
+ *
+ * THE SIDE IS IN THE PATH. Telling a driver "driving licence" when only the back is missing sends
+ * them to re-photograph a front that was already fine, and the retake is the step they abandon.
  *
  * An empty array means submittable. Returning the specific list rather than a boolean is
  * deliberate: "complete your profile" sends a driver hunting through every screen, and drivers
@@ -43,7 +54,7 @@ export interface OnboardingProfile {
  */
 export function missingForSubmission(
   profile: OnboardingProfile,
-  uploadedDocTypes: readonly DocumentType[],
+  uploaded: ReadonlyArray<{ docType: DocumentType; side: DocumentSide }>,
 ): string[] {
   const missing: string[] = [];
 
@@ -53,8 +64,10 @@ export function missingForSubmission(
   if (profile.gender === null || profile.gender === '') missing.push('gender');
   if (profile.address === null || profile.address.trim() === '') missing.push('address');
 
-  for (const docType of REQUIRED_DOCUMENT_TYPES) {
-    if (!uploadedDocTypes.includes(docType)) missing.push(`documents.${docType}`);
+  const held = new Set(uploaded.map((doc) => `${doc.docType}.${doc.side}`));
+  for (const required of REQUIRED_DOCUMENTS) {
+    const path = `${required.docType}.${required.side}`;
+    if (!held.has(path)) missing.push(`documents.${path}`);
   }
 
   return missing;

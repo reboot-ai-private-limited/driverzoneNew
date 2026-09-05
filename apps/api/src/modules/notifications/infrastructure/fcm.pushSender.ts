@@ -51,6 +51,7 @@ export class FcmPushSender implements PushSenderPort {
       expiresAt: offer.expiresAt.toISOString(),
       earningPaise: String(offer.earningPaise),
       pickupAddress: offer.pickupAddress,
+      dropAddress: offer.dropAddress,
       scheduledAt: offer.scheduledAt.toISOString(),
       serviceType: offer.serviceType,
     }, ttlMs);

@@ -1,4 +1,38 @@
-import type { LedgerEntry, NewLedgerEntry } from './ledgerEntry.entity.js';
+import type { LedgerEntry, LedgerEntryType, NewLedgerEntry } from './ledgerEntry.entity.js';
+
+/**
+ * Which rows a statement read selects. Every field absent means "the whole statement".
+ *
+ * `to` is an EXCLUSIVE instant even though the wire parameter names an inclusive day — the
+ * controller turns `2026-09-04` into midnight on the 5th, so the whole of the 4th is included
+ * without any row-level date arithmetic happening down here.
+ */
+export interface LedgerQuery {
+  types?: readonly LedgerEntryType[] | undefined;
+  from?: Date | undefined;
+  /** Exclusive. */
+  to?: Date | undefined;
+}
+
+/**
+ * One statement row plus the balance the driver stood at once it had been applied.
+ *
+ * The balance rides WITH the row because it is computed in the same query — see
+ * `pageForDriver`. Returning it separately would put the two out of step the moment a filter
+ * meant the page was no longer a consecutive run of the statement.
+ */
+export interface LedgerEntryWithBalance {
+  entry: LedgerEntry;
+  balanceAfterPaise: number;
+}
+
+/** The totals for every row a query selects, not just the page returned. */
+export interface LedgerTotals {
+  creditedPaise: number;
+  /** A positive magnitude, not a negative sum — see `LedgerSummaryDto`. */
+  debitedPaise: number;
+  count: number;
+}
 
 /**
  * DOMAIN — what the ledger needs from storage, described without naming Mongo.
@@ -32,21 +66,27 @@ export interface LedgerRepositoryPort {
 
   listForDriver(driverId: string, limit: number): Promise<LedgerEntry[]>;
 
-  /** One page of a driver's statement, newest first, with the total for the pager. */
+  /**
+   * One page of a driver's statement, newest first, each row carrying the balance after it, plus
+   * the total for the pager.
+   *
+   * THE BALANCE IS COMPUTED HERE, not walked back by the caller, and that is what makes `query`
+   * safe. A walk-back subtracts each row's amount from the one before it, which is only correct
+   * while the page is a consecutive run of the statement — precisely what a filter destroys. This
+   * returns the cumulative sum over ALL of the driver's rows up to and including each returned
+   * one, so a page of "payouts in March" still shows the real balance at each of those moments.
+   *
+   * `query` omitted means the whole statement.
+   */
   pageForDriver(
     driverId: string,
     page: number,
     limit: number,
-  ): Promise<{ entries: LedgerEntry[]; totalItems: number }>;
+    query?: LedgerQuery | undefined,
+  ): Promise<{ entries: LedgerEntryWithBalance[]; totalItems: number }>;
 
-  /**
-   * The sum of the `count` most recent entries.
-   *
-   * Exists so a page of the statement can be anchored: the running balance shown beside the newest
-   * row on page 3 is the current balance minus everything newer than it, and this is that
-   * "everything newer" without re-fetching the rows themselves.
-   */
-  sumMostRecentForDriver(driverId: string, count: number): Promise<number>;
+  /** Credited, debited and count for everything `query` selects — every page of it. */
+  totalsForDriver(driverId: string, query?: LedgerQuery | undefined): Promise<LedgerTotals>;
 
   listForBooking(bookingId: string): Promise<LedgerEntry[]>;
 }

@@ -79,6 +79,7 @@ function documentToDto(d: DriverDocumentWithUrl): DriverDocumentDto {
   return {
     id: d.id,
     doc_type: d.docType,
+    side: d.side,
     status: d.status,
     rejection_reason: d.rejectionReason,
     number: d.number,
@@ -172,6 +173,8 @@ export function makeDriverControllers(deps: DriverControllerDeps): DriverControl
 
       const result = await deps.documents.requestUpload(subjectId(req), {
         docType: input.doc_type,
+        // A document sent without a side is single-sided, and its one file is the front.
+        side: input.side ?? 'FRONT',
         number: input.number,
         subType: input.sub_type,
         ...(input.issued_on === undefined ? {} : { issuedOn: fromDateOnly(input.issued_on) }),

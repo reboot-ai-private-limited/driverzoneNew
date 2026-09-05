@@ -20,6 +20,7 @@ export interface OfferPushData {
   expiresAt?: string;
   earningPaise?: string;
   pickupAddress?: string;
+  dropAddress?: string;
   serviceType?: string;
 }
 
@@ -58,10 +59,17 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
 
   const earning = rupees(data.earningPaise);
 
+  // Pickup → drop when both are known, so the driver reads the trip's shape off the ring itself
+  // rather than only after it opens.
+  const route =
+    data.pickupAddress !== undefined && data.dropAddress !== undefined
+      ? `${data.pickupAddress} → ${data.dropAddress}`
+      : (data.pickupAddress ?? 'Tap to see the trip');
+
   await notifee.displayNotification({
     id: notificationId(offerId),
     title: earning === '' ? 'New trip offer' : `New trip · ${earning}`,
-    body: data.pickupAddress ?? 'Tap to see the trip',
+    body: route,
 
     // Deep link into the ring screen, so tapping the notification lands on the same screen the
     // full-screen intent opens.
@@ -99,4 +107,25 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
 export async function cancelOfferNotification(offerId: string): Promise<void> {
   if (Platform.OS !== 'android') return;
   await notifee.cancelNotification(notificationId(offerId));
+}
+
+/**
+ * The offer that launched this process, if the app was cold and the driver tapped one.
+ *
+ * READ FROM EXACTLY ONE PLACE: the boot screen, before it makes its own routing decision. This
+ * used to be read from the root layout's push bridge instead, in a `useEffect` that ran on the
+ * very first render — before `<Stack>` exists, while the boot screen's own effect is already
+ * running concurrently toward its unconditional `router.replace('/gate')`. Both calls go through
+ * expo-router's `routingQueue`, which is safe to push onto before a navigator has mounted — so
+ * the ring screen genuinely did get queued — but a REPLACE queued a few hundred milliseconds
+ * later swaps out whatever is on top regardless of how it got there. The offer was pushed, then
+ * immediately overwritten, and the ring the driver tapped never stayed on screen. Moving the read
+ * into the boot screen's own sequence — checked before its one `replace` — removes the race by
+ * removing the second, uncoordinated caller.
+ */
+export async function getInitialOfferHref(): Promise<string | null> {
+  if (Platform.OS !== 'android') return null;
+  const initial = await notifee.getInitialNotification();
+  const url = initial?.notification.data?.['url'];
+  return typeof url === 'string' ? url : null;
 }

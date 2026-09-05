@@ -121,7 +121,11 @@ function fakeOffers() {
     ),
 
     findById: vi.fn(async (id: string) => rows.get(id) ?? null),
-    findLiveForDriver: vi.fn(async () => null),
+    findAllLiveForDriver: vi.fn(async (driverId: string) =>
+      [...rows.values()]
+        .filter((r) => r.driverId === driverId && r.status === 'SENT' && r.expiresAt > new Date())
+        .sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime()),
+    ),
     listForBooking: vi.fn(async () => [...rows.values()]),
     driverIdsOffered: vi.fn(async () => [...rows.values()].map((r) => r.driverId)),
 
@@ -475,6 +479,78 @@ describe('AcceptOfferUseCase — the race', () => {
     await expect(useCase.execute(created[0]!.id, 'drv_impostor')).rejects.toMatchObject({
       code: 'OFFER_NOT_FOUND',
     });
+  });
+});
+
+/**
+ * The regression test for the actual bug this feature fixes: two customers booking
+ * near-simultaneously can legitimately ring the SAME driver for two DIFFERENT bookings at once.
+ * `findLiveForDriver` used to be a `findOne` — arbitrary the moment a second row existed, and the
+ * root cause of the ring screen showing one offer while acting on another's id.
+ */
+describe('findAllLiveForDriver — a driver with more than one live offer', () => {
+  it('returns every SENT, unexpired offer for that driver, soonest-expiring first', async () => {
+    const offers = fakeOffers();
+    const soon = new Date(Date.now() + 10_000);
+    const later = new Date(Date.now() + 40_000);
+
+    // Created in the OPPOSITE order to the expiry order, so a passing test cannot be an accident
+    // of insertion order rather than an actual sort.
+    const [a] = await offers.createMany([
+      { bookingId: 'bkg_later', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: later },
+    ]);
+    const [b] = await offers.createMany([
+      { bookingId: 'bkg_soon', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 300, expiresAt: soon },
+    ]);
+
+    const live = await offers.findAllLiveForDriver('drv_1');
+
+    expect(live.map((o) => o.id)).toEqual([b!.id, a!.id]);
+    expect(live.map((o) => o.bookingId)).toEqual(['bkg_soon', 'bkg_later']);
+  });
+
+  it('excludes another driver’s offers, and this driver’s own expired or already-answered ones', async () => {
+    const offers = fakeOffers();
+    const now = Date.now();
+
+    const [live] = await offers.createMany([
+      { bookingId: 'bkg_1', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: new Date(now + 30_000) },
+    ]);
+    await offers.createMany([
+      { bookingId: 'bkg_2', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: new Date(now - 1_000) }, // expired
+      { bookingId: 'bkg_3', driverId: 'drv_2', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: new Date(now + 30_000) }, // another driver
+    ]);
+    const [declined] = await offers.createMany([
+      { bookingId: 'bkg_4', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: new Date(now + 30_000) },
+    ]);
+    await offers.respond(declined!.id, 'DECLINED', new Date());
+
+    const result = await offers.findAllLiveForDriver('drv_1');
+
+    expect(result.map((o) => o.id)).toEqual([live!.id]);
+  });
+
+  it('accepting one offer never touches a different, still-live offer for the same driver', async () => {
+    // The two-booking case this whole feature is for: accepting booking A must not silently
+    // withdraw or supersede a simultaneously-ringing offer for booking B.
+    const offers = fakeOffers();
+    const now = Date.now();
+
+    const [offerA] = await offers.createMany([
+      { bookingId: 'bkg_a', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: new Date(now + 30_000) },
+    ]);
+    const [offerB] = await offers.createMany([
+      { bookingId: 'bkg_b', driverId: 'drv_1', wave: 1, score: 0.5, distanceMetres: 500, expiresAt: new Date(now + 30_000) },
+    ]);
+
+    const useCase = new AcceptOfferUseCase(offers, fakeBookings(booking({ id: 'bkg_a' })), fakeNotifications());
+    const result = await useCase.execute(offerA!.id, 'drv_1');
+
+    expect(result.claimed).toBe(true);
+    expect(offers.all().find((o) => o.id === offerB!.id)?.status).toBe('SENT');
+    expect(await offers.findAllLiveForDriver('drv_1')).toEqual([
+      offers.all().find((o) => o.id === offerB!.id),
+    ]);
   });
 });
 

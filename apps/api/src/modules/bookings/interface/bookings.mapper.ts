@@ -48,6 +48,21 @@ export interface BookingView {
    * carries a phone number.
    */
   driverCard?: DriverCard | null | undefined;
+  /**
+   * Lifts the live-trip gate on both phone numbers. ADMIN READS ONLY.
+   *
+   * `PHONE_VISIBLE_STATUSES` exists to stop the two PARTIES holding each other's numbers after
+   * the trip that justified it — a customer from three months ago has no business keeping their
+   * driver's login number. An admin is not a party to the trip and the reasoning does not
+   * transfer: the panel already renders `mobile_number` on the customer and driver directories
+   * (`CustomerDetailScreen`), so a booking table that hides it is not protecting anything, it is
+   * making support open a second screen to find a number they already have.
+   *
+   * An explicit flag rather than the mapper inferring it from the caller, because that is the
+   * rule this whole interface follows: who gets to see what is decided at the call site, where
+   * someone reviewing that endpoint can see the decision being made.
+   */
+  revealPhones?: boolean | undefined;
 }
 
 /**
@@ -70,6 +85,16 @@ const PHONE_VISIBLE_STATUSES: ReadonlySet<BookingStatus> = new Set<BookingStatus
   'STARTED',
 ]);
 
+/**
+ * Whether this read may carry a phone number: the trip is live, or an admin lifted the gate.
+ *
+ * One function so the customer's view of the driver and the driver's view of the customer cannot
+ * drift apart — the gate is symmetric by construction rather than by two call sites agreeing.
+ */
+function canSeePhone(view: BookingView): boolean {
+  return view.revealPhones === true || PHONE_VISIBLE_STATUSES.has(view.booking.status);
+}
+
 export function toBookingDto(view: BookingView): BookingDto {
   const { booking } = view;
   const { fare } = booking.fareSnapshot;
@@ -83,6 +108,8 @@ export function toBookingDto(view: BookingView): BookingDto {
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },
     drop: { ...booking.drop, address: booking.dropAddress },
+
+    distance_km: booking.distanceKm,
 
     scheduled_at: booking.scheduledAt.toISOString(),
     is_scheduled: booking.isScheduled,
@@ -167,7 +194,7 @@ function toDriverDto(view: BookingView): BookingDto['driver'] {
     rating: card.rating,
     rating_count: card.ratingCount,
     // The gate. See `PHONE_VISIBLE_STATUSES`.
-    phone: PHONE_VISIBLE_STATUSES.has(booking.status) ? card.phone : null,
+    phone: canSeePhone(view) ? card.phone : null,
   };
 }
 
@@ -190,7 +217,7 @@ function toCustomerDto(view: BookingView): BookingDto['customer'] {
       id: booking.customerId,
       name: card.fullName,
       // The gate. Symmetric with `toDriverDto` — see `PHONE_VISIBLE_STATUSES`.
-      phone: PHONE_VISIBLE_STATUSES.has(booking.status) ? card.phone : null,
+      phone: canSeePhone(view) ? card.phone : null,
     };
   }
 

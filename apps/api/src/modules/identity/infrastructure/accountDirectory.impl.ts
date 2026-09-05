@@ -57,6 +57,37 @@ export class MongoAccountDirectory {
   }
 
   /**
+   * Accounts whose name or mobile number matches `search`. See the contract for why this returns
+   * ids rather than rows.
+   *
+   * The term is ESCAPED before it becomes a regex. A search box is user input and `.*` or a
+   * nested quantifier reaching a regex engine is a denial of service, not a clever search — the
+   * admin who pastes a phone number with a `+` in it would otherwise get an error or, worse, a
+   * pattern that means something else entirely.
+   *
+   * Anchored `^` on neither field: an admin searching "9001" means the number contains it, and
+   * "rahul" should find "Rahul Sharma" wherever the word sits. That is a collection scan, which
+   * is why `limit` exists and why the caller passes a real one.
+   */
+  async idsMatching(role: Role, search: string, limit: number): Promise<string[]> {
+    const term = search.trim();
+    if (term === '') return [];
+
+    // `$&` is the whole match — every regex metacharacter is prefixed with a backslash.
+    const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const filter = { $or: [{ fullName: pattern }, { phone: pattern }] };
+
+    const docs =
+      role === 'ADMIN'
+        ? await AdminUserModel.find(filter).select('_id').limit(limit).lean().exec()
+        : role === 'CUSTOMER'
+          ? await CustomerModel.find(filter).select('_id').limit(limit).lean().exec()
+          : await DriverModel.find(filter).select('_id').limit(limit).lean().exec();
+
+    return docs.map((doc) => String(doc._id));
+  }
+
+  /**
    * The driver card a customer sees — name, photo, rating, and the phone number.
    *
    * `getPublicUrl`, NOT a presigned download. An avatar is uploaded to the public bucket

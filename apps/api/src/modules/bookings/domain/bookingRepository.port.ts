@@ -53,6 +53,29 @@ export interface TransitionPatch {
   paymentId?: string;
 }
 
+/**
+ * What the admin booking table filters on. Every field is optional; an empty filter is the whole
+ * collection, newest first.
+ */
+export interface AdminBookingFilter {
+  page: number;
+  limit: number;
+  /** Matched against the booking REFERENCE only. Names and numbers arrive as `accountIds`. */
+  search?: string | undefined;
+  /**
+   * Accounts — customers or drivers — that `identity` matched to the same search term. Present
+   * only when there was a term; an EMPTY ARRAY is meaningful and means "the term matched nobody",
+   * which must not widen the query back to everything.
+   */
+  accountIds?: readonly string[] | undefined;
+  statuses?: readonly BookingStatus[] | undefined;
+  /** Inclusive lower bound on `scheduledAt`. */
+  from?: Date | undefined;
+  /** EXCLUSIVE upper bound on `scheduledAt` — the caller passes the start of the following day,
+   * so that "to 18 May" includes everything that happened during the 18th. */
+  before?: Date | undefined;
+}
+
 export interface BookingRepositoryPort {
   create(data: NewBooking): Promise<Booking>;
 
@@ -70,6 +93,22 @@ export interface BookingRepositoryPort {
    * cancelled after they accepted it correctly does.
    */
   listForDriver(driverId: string, limit: number): Promise<Booking[]>;
+
+  /**
+   * The admin booking table: every booking, newest first, filtered and PAGED.
+   *
+   * The only list read here that returns a total, because it is the only one with pages to count.
+   * `listForCustomer` and `listForDriver` are one person's history behind a cap; this is the whole
+   * collection, and an admin filtering it needs to know whether they matched ten rows or ten
+   * thousand before they decide the filter was wrong.
+   *
+   * `accountIds` is how a name or mobile search arrives — already resolved to ids by `identity`,
+   * because this module cannot read the accounts collection (see `AccountDirectoryContract`).
+   * A booking matches if its reference matches the term OR either party is one of those ids, so
+   * the two halves union rather than intersect: searching "Rahul" must find bookings where Rahul
+   * is the driver as well as ones where he is the customer.
+   */
+  listForAdmin(filter: AdminBookingFilter): Promise<{ bookings: Booking[]; totalItems: number }>;
 
   /**
    * Reads the OTP, which every other read deliberately cannot see (`select: false` on the field).

@@ -10,6 +10,14 @@
 /** Free-text filters. Below ~200ms a fast typist still fires per keystroke; above ~350ms the input feels laggy. */
 export const SEARCH_DEBOUNCE_MS = 250;
 
+/**
+ * The bookings search box specifically — requested at 300ms rather than the panel's usual
+ * `SEARCH_DEBOUNCE_MS`. Kept as its own constant rather than raising the shared one: every other
+ * free-text filter (customers, drivers) was left at 250ms, and folding this into the shared
+ * value would have quietly changed their feel too for a request that named only bookings.
+ */
+export const BOOKING_SEARCH_DEBOUNCE_MS = 300;
+
 /** Live geometry validation. Fixed by docs/LLD/admin-panel.md §Live validation — do not re-guess it here. */
 export const VALIDATE_DEBOUNCE_MS = 400;
 

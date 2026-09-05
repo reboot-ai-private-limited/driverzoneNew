@@ -11,11 +11,19 @@ import { request } from '@/lib/api/client';
 import { authedQueryOptions } from '@/lib/query/factory';
 import { withAuth } from '@/lib/auth/session';
 
-export function useDriverDetails(id: string) {
+/**
+ * `enabled` defaults to `true` — the original signature, still exactly how `DriverDetailsScreen`
+ * calls it with an id straight off the route. It exists for a second caller
+ * (`BookingDetailsScreen`'s driver card) that only sometimes has a driver to look up: without it,
+ * an unassigned booking would still fire `GET /admin/drivers/` on every render, the same trap
+ * `useCustomer` documents avoiding with its own `id: string | undefined` signature.
+ */
+export function useDriverDetails(id: string, enabled = true) {
   return useQuery(
     authedQueryOptions({
       queryKey: ['admin', 'drivers', id],
       fetch: (token, signal) => request<AdminDriverDetailsDto>(`/admin/drivers/${id}`, { token, signal }),
+      enabled,
     })
   );
 }

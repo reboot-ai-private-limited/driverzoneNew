@@ -26,6 +26,8 @@ export interface DriverControllers {
 }
 
 export interface AdminControllers {
+  list: RequestHandler;
+  get: RequestHandler;
   events: RequestHandler;
   forceArrive: RequestHandler;
 }
@@ -78,6 +80,8 @@ export function buildAdminRouter(handlers: AdminControllers): Router {
   const router = Router();
   router.use(requireAuth('ADMIN'));
 
+  router.get('/', handlers.list);
+  router.get('/:id', handlers.get);
   router.get('/:id/events', handlers.events);
   router.post('/:id/force-arrive', handlers.forceArrive);
 

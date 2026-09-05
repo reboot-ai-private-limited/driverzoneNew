@@ -1,4 +1,5 @@
 import type {
+  AdminListBookingsQuery,
   ListIncityPackagesQuery,
   ListOutstationPackagesQuery,
   ListZonesQuery,
@@ -54,6 +55,16 @@ export const keys = {
     // of a search is a different resource from page 1, not the same one re-rendered.
     list: (query?: ListCustomersQuery) => ['customers', 'list', query ?? {}] as const,
     detail: (id: string) => ['customers', 'detail', id] as const,
+  },
+  bookings: {
+    all: () => ['bookings'] as const,
+    // The query is PART of the key, for the reason customers' is: the list is paged and filtered
+    // server-side, so page 2 of a date range is a different resource from page 1.
+    list: (query?: AdminListBookingsQuery) => ['bookings', 'list', query ?? {}] as const,
+    /** The details page — `GET /admin/bookings/:id`, not a row from the list. */
+    detail: (id: string) => ['bookings', 'detail', id] as const,
+    /** The timeline. Its own key because it is its own request, made only when the page loads. */
+    events: (id: string) => ['bookings', 'events', id] as const,
   },
   admin: {
     profile: () => ['admin', 'profile'] as const,

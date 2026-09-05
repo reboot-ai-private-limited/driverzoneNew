@@ -33,6 +33,7 @@ import {
   FailBookingPaymentUseCase,
 } from '../src/modules/bookings/application/useCases/confirmBookingPayment.usecase.js';
 import { buildSnapshot } from '../src/modules/settings/domain/setting.entity.js';
+import { adminBookingListQuerySchema } from '../src/modules/bookings/interface/bookings.validation.js';
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../src/modules/ledger/ledger.public.js';
 import {
@@ -1153,5 +1154,52 @@ describe('toBookingDto — the customer contact', () => {
     });
 
     expect(dto.customer).toBeNull();
+  });
+});
+
+describe('adminBookingListQuerySchema — the booking table filters', () => {
+  it('defaults to page 1 of 10 when nothing is asked for', () => {
+    expect(adminBookingListQuerySchema.parse({})).toMatchObject({ page: 1, limit: 10 });
+  });
+
+  it('splits a comma-separated status list', () => {
+    const parsed = adminBookingListQuerySchema.parse({ status: 'ASSIGNED,STARTED' });
+    expect(parsed.status).toEqual(['ASSIGNED', 'STARTED']);
+  });
+
+  /*
+   * The point of parsing statuses against the enum rather than passing them through: a typo has
+   * to be a 400, not a filter that matches nothing and reads to the admin as "there are no
+   * bookings" — which is the same answer a working filter gives on a quiet day.
+   */
+  it('rejects a status that is not in the state machine', () => {
+    expect(() => adminBookingListQuerySchema.parse({ status: 'ONGOING' })).toThrow();
+  });
+
+  it('rejects one bad status among good ones', () => {
+    expect(() => adminBookingListQuerySchema.parse({ status: 'ASSIGNED,NOPE' })).toThrow();
+  });
+
+  it('treats an empty status param as no filter at all', () => {
+    expect(adminBookingListQuerySchema.parse({ status: '' }).status).toBeUndefined();
+  });
+
+  it('refuses a limit past the cap, so a hand-written URL cannot ask for the whole table', () => {
+    expect(() => adminBookingListQuerySchema.parse({ limit: '5000' })).toThrow();
+  });
+
+  it('refuses page 0', () => {
+    expect(() => adminBookingListQuerySchema.parse({ page: '0' })).toThrow();
+  });
+
+  it.each(['18-05-2025', '2025-5-1', 'yesterday', '2025-02-30'])(
+    'refuses %s as a date',
+    (value) => {
+      expect(() => adminBookingListQuerySchema.parse({ from: value })).toThrow();
+    },
+  );
+
+  it('accepts a real YYYY-MM-DD', () => {
+    expect(adminBookingListQuerySchema.parse({ from: '2026-09-04' }).from).toBe('2026-09-04');
   });
 });

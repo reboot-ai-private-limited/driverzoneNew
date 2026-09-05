@@ -1,9 +1,10 @@
-import mongoose from 'mongoose';
+import mongoose, { type FilterQuery } from 'mongoose';
 import type { BookingStatus } from '@driverzone/contracts';
 import { logger } from '../../../shared/logging/logger.js';
 import type { Booking, FareSnapshot } from '../domain/booking.entity.js';
 import { TRANSITIONS } from '../domain/booking.entity.js';
 import type {
+  AdminBookingFilter,
   BookingEvent,
   BookingRepositoryPort,
   NewBooking,
@@ -149,6 +150,65 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     if (!mongoose.isValidObjectId(driverId)) return [];
     const docs = await BookingModel.find({ driverId }).sort({ createdAt: -1 }).limit(limit);
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  /**
+   * The admin booking table. See the port for the shape of the filter.
+   *
+   * TWO QUERIES, not one: the page of documents and a `countDocuments` for the total, issued
+   * together. An admin who filters to 128 rows needs the 128 to render "1 to 10 of 128", and a
+   * count derived from the page is only ever right on the last page.
+   *
+   * Sorted by `scheduledAt`, NOT `createdAt` as the two history reads are. This table is read as a
+   * diary — "what is happening on the 18th" — and a scheduled booking created last week belongs
+   * on the day it is for, not the day it was made.
+   */
+  async listForAdmin(
+    filter: AdminBookingFilter,
+  ): Promise<{ bookings: Booking[]; totalItems: number }> {
+    const query: FilterQuery<BookingDoc> = {};
+
+    if (filter.statuses !== undefined && filter.statuses.length > 0) {
+      query.status = { $in: filter.statuses };
+    }
+
+    if (filter.from !== undefined || filter.before !== undefined) {
+      query.scheduledAt = {
+        ...(filter.from === undefined ? {} : { $gte: filter.from }),
+        ...(filter.before === undefined ? {} : { $lt: filter.before }),
+      };
+    }
+
+    /*
+     * The search UNION: a reference this module owns, or an account id `identity` resolved.
+     *
+     * Built only when a term was given. `accountIds` being empty is not the same as absent — it
+     * means the term matched no person, and the `$or` must still be applied so the search can
+     * correctly return nothing rather than falling through to every booking.
+     */
+    if (filter.search !== undefined && filter.search.trim() !== '') {
+      const term = filter.search.trim();
+      const ids = (filter.accountIds ?? []).filter((id) => mongoose.isValidObjectId(id));
+
+      query.$or = [
+        // Anchored and escaped: a reference is a short opaque code, so an admin pasting one wants
+        // the row that starts with it, and metacharacters in the box must not reach the engine.
+        { reference: new RegExp(`^${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i') },
+        ...(ids.length === 0 ? [] : [{ customerId: { $in: ids } }, { driverId: { $in: ids } }]),
+      ];
+    }
+
+    const [docs, totalItems] = await Promise.all([
+      BookingModel.find(query)
+        .sort({ scheduledAt: -1 })
+        .skip((filter.page - 1) * filter.limit)
+        .limit(filter.limit)
+        .lean()
+        .exec(),
+      BookingModel.countDocuments(query).exec(),
+    ]);
+
+    return { bookings: docs.map((doc) => toEntity(doc as BookingDoc)), totalItems };
   }
 
   /**

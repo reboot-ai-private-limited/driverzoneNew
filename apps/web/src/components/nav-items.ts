@@ -30,7 +30,9 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, comingSoon: true },
-  { label: 'Bookings', href: '/bookings', icon: CalendarClock, comingSoon: true },
+  // Enabled: the screen is built and `GET /admin/bookings` exists in `apps/api`, alongside the
+  // single-booking read and the event timeline the detail view uses.
+  { label: 'Bookings', href: '/bookings', icon: CalendarClock },
   { label: 'Dispatch', href: '/dispatch', icon: Map, comingSoon: true },
   { label: 'Drivers', href: '/drivers', icon: Users },
   // Enabled: the screen is built. Its API (`GET/PATCH /admin/customers`) is not in `apps/api`

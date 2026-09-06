@@ -2,25 +2,11 @@ import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { TRANSACTION_TYPES } from '@driverzone/contracts';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
+import { isoDaySchema, istDayStart, istNextDayStart } from '../../../shared/http/istDay.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import type { GetDriverWalletUseCase } from '../application/useCases/getDriverWallet.usecase.js';
 import type { LedgerQuery } from '../domain/ledgerRepository.port.js';
 import { toWalletDto } from './ledger.mapper.js';
-
-/**
- * A `YYYY-MM-DD` day, read in the timezone the driver lives in.
- *
- * IST, NOT UTC. `new Date('2026-09-04')` is midnight UTC, which is 05:30 on the 4th in India —
- * so a driver filtering "today" would lose every row from before breakfast. The offset is applied
- * explicitly so the boundary falls where the person reading the screen thinks it does.
- */
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-function istDayStart(isoDate: string): Date {
-  return new Date(new Date(`${isoDate}T00:00:00.000Z`).getTime() - IST_OFFSET_MS);
-}
-
-const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 
 const walletQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -41,8 +27,8 @@ const walletQuerySchema = z.object({
             .filter((part) => part !== ''),
     )
     .pipe(z.array(z.enum(TRANSACTION_TYPES)).min(1).optional()),
-  from: isoDay.optional(),
-  to: isoDay.optional(),
+  from: isoDaySchema.optional(),
+  to: isoDaySchema.optional(),
 });
 
 /** Turns the parsed query into the repository's shape: an inclusive `to` day becomes exclusive. */
@@ -55,9 +41,7 @@ function toLedgerQuery(parsed: z.infer<typeof walletQuerySchema>): LedgerQuery |
     ...(parsed.type === undefined ? {} : { types: parsed.type }),
     ...(parsed.from === undefined ? {} : { from: istDayStart(parsed.from) }),
     // The day AFTER the one named, so `to=2026-09-04` includes everything that happened on the 4th.
-    ...(parsed.to === undefined
-      ? {}
-      : { to: new Date(istDayStart(parsed.to).getTime() + 24 * 60 * 60 * 1000) }),
+    ...(parsed.to === undefined ? {} : { to: istNextDayStart(parsed.to) }),
   };
 }
 

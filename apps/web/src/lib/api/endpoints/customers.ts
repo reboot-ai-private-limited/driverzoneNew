@@ -1,7 +1,9 @@
 import type {
   AdminCustomerDetailsDto,
   AdminCustomerListDto,
+  AdminCustomerWalletDetailsDto,
   AdminUpdateCustomerRequest,
+  CustomerWalletQueryParams,
 } from '@driverzone/contracts';
 import { request } from '../client';
 
@@ -55,6 +57,30 @@ export const customersApi = {
 
   get: (token: string, id: string, signal?: AbortSignal) =>
     request<AdminCustomerDetailsDto>(`/admin/customers/${id}`, { token, signal }),
+
+  /**
+   * One customer's wallet statement — filtered, paged, with totals over the whole selection.
+   *
+   * The mirror of `/admin/drivers/:id/wallet`, and deliberately the same query shape. The
+   * balance it returns is always the FULL balance, never the sum of the filtered rows: what the
+   * customer owes today does not change because someone narrowed the view to March.
+   */
+  wallet: (token: string, id: string, query?: CustomerWalletQueryParams, signal?: AbortSignal) =>
+    request<AdminCustomerWalletDetailsDto>(`/admin/customers/${id}/wallet`, {
+      token,
+      signal,
+      ...(query === undefined
+        ? {}
+        : {
+            query: {
+              page: query.page,
+              limit: query.limit,
+              type: query.type,
+              from: query.from,
+              to: query.to,
+            },
+          }),
+    }),
 
   /**
    * No idempotency key: this PATCH is idempotent by construction — the same body applied twice

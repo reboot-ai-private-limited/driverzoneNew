@@ -18,6 +18,7 @@ export interface DriverEarningDoc {
   amountPaise: number;
   note?: string | null;
   payoutId?: mongoose.Types.ObjectId | null;
+  idempotencyKey?: string | null;
   createdAt: Date;
 }
 
@@ -29,6 +30,7 @@ const driverEarningSchema = new Schema<DriverEarningDoc>(
     amountPaise: { type: Number, required: true },
     note: { type: String, default: null },
     payoutId: { type: Schema.Types.ObjectId, ref: 'Payout', default: null },
+    idempotencyKey: { type: String, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
@@ -56,6 +58,19 @@ driverEarningSchema.index(
       entryType: { $in: [...ONCE_PER_BOOKING_TYPES] },
     },
   },
+);
+
+/**
+ * One key, one row. What makes a double-tapped Settle button clear a balance once.
+ *
+ * PARTIAL, on `$type: 'string'` — almost every row in this collection has no key at all (a trip
+ * completion is deduplicated by the index above instead), and a plain unique index over all those
+ * nulls would refuse the second one ever written. The same shape, and the same reason, as the
+ * once-per-booking index above it.
+ */
+driverEarningSchema.index(
+  { idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
 );
 
 export const DriverEarningModel =

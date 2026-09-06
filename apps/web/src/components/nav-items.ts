@@ -44,7 +44,10 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Packages', href: '/packages', icon: Package },
   { label: 'Zones', href: '/zones', icon: Building2 },
   { label: 'Reviews', href: '/reviews', icon: Star },
-  { label: 'Finance', href: '/finance', icon: Coins, comingSoon: true },
+  // Enabled: all three tabs are built and `GET /admin/finance/{driver-balances,transactions,
+  // customer-wallets}` exist in `apps/api` (the tier-8 `admin` module), as does the settlement
+  // POST. Payout batching is a separate project and is deliberately not behind this item.
+  { label: 'Finance', href: '/finance', icon: Coins },
   { label: 'Reports', href: '/reports', icon: BarChart3, comingSoon: true },
   { label: 'Audit Log', href: '/audit', icon: ScrollText, comingSoon: true },
   // Enabled: the screen is built and `GET/PATCH /admin/settings` exists in `apps/api`.

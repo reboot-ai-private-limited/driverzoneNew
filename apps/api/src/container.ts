@@ -1,4 +1,5 @@
 import { enqueueDispatch, enqueueWaveTimeout } from '@/shared/queue/dispatchJobs.js';
+import { buildAdminContainer } from '@/modules/admin/admin.container.js';
 import { buildBookingsContainer } from '@/modules/bookings/bookings.container.js';
 import { buildDispatchContainer } from '@/modules/dispatch/dispatch.container.js';
 import { buildHealthContainer } from '@/modules/health/health.container.js';
@@ -41,6 +42,7 @@ export interface AppContainers {
   bookings: ReturnType<typeof buildBookingsContainer>;
   dispatch: ReturnType<typeof buildDispatchContainer>;
   reviews: ReturnType<typeof buildReviewsContainer>;
+  admin: ReturnType<typeof buildAdminContainer>;
 }
 
 export function buildContainers(): AppContainers {
@@ -120,6 +122,18 @@ export function buildContainers(): AppContainers {
     settings: settings.contract,
   });
 
+  /*
+   * LAST, and at the top of the tier list. It is the first module here that reads across four
+   * tiers at once — balances from `ledger` joined with names from `identity` — which is what a
+   * tier-8 module is for. Nothing below it may ever depend on it, which is precisely what makes
+   * it a safe place to put a screen that needs to see everything.
+   */
+  const admin = buildAdminContainer({
+    ledger: ledger.financeContract,
+    wallet: wallet.financeContract,
+    identity: identity.contract,
+  });
+
   return {
     health,
     settings,
@@ -134,5 +148,6 @@ export function buildContainers(): AppContainers {
     bookings,
     dispatch,
     reviews,
+    admin,
   };
 }

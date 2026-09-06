@@ -34,6 +34,76 @@ export interface LedgerTotals {
   count: number;
 }
 
+/** Where a driver's balance sits relative to zero. `SETTLED` is exactly zero. */
+export type DriverBalanceState = 'ALL' | 'OWED_TO_COMPANY' | 'OWED_TO_DRIVER' | 'SETTLED';
+
+export type DriverBalanceSort = 'BALANCE_ASC' | 'BALANCE_DESC' | 'LAST_ACTIVITY_DESC';
+
+/**
+ * Which drivers the collections screen selects.
+ *
+ * NO DATE RANGE, and that is deliberate rather than an omission: a balance is the sum of every
+ * row a driver has ever had. "What did this driver owe in March" is a different question with a
+ * different answer, and offering a date filter here would produce a number nobody could settle
+ * against.
+ */
+export interface DriverBalanceQuery {
+  /**
+   * Restricts to these drivers — the result of a name/mobile search resolved by `identity`.
+   *
+   * `undefined` and `[]` MEAN DIFFERENT THINGS. Undefined is "no search, every driver"; an empty
+   * array is "a search that matched nobody", which must return nothing rather than everybody.
+   */
+  driverIds?: readonly string[] | undefined;
+  state?: DriverBalanceState | undefined;
+  /** Applies to the OWED MAGNITUDE, so it only ever narrows drivers in debt. */
+  minOwedPaise?: number | undefined;
+  sort?: DriverBalanceSort | undefined;
+  /**
+   * A balance strictly below `-suspendedThresholdPaise` counts as suspended.
+   *
+   * A PLAIN NUMBER the caller supplies, not something this layer looks up. The threshold is a
+   * setting, and a repository that read settings to answer a query would be a repository with an
+   * opinion about policy. Passing it in keeps the count accurate across every page — which
+   * counting in the caller could not do, since the caller only ever sees one page.
+   */
+  suspendedThresholdPaise?: number | undefined;
+  /** Restrict to suspended drivers. Does nothing unless `suspendedThresholdPaise` is given. */
+  suspendedOnly?: boolean | undefined;
+}
+
+/** One driver's standing, computed from their rows rather than read from a cached column. */
+export interface DriverBalanceRow {
+  driverId: string;
+  balancePaise: number;
+  lifetimeEarningsPaise: number;
+  entryCount: number;
+  lastEntryAt: Date;
+}
+
+/** Totals across every driver a `DriverBalanceQuery` selects, not just the page returned. */
+export interface DriverBalanceAggregate {
+  driversInDebt: number;
+  totalOwedToCompanyPaise: number;
+  driversInCredit: number;
+  totalPayableToDriversPaise: number;
+  /** Zero unless `suspendedThresholdPaise` was supplied — there is no threshold to count against. */
+  suspendedCount: number;
+  drivers: number;
+}
+
+/**
+ * The feed filter — the same shape as `LedgerQuery` plus the ability to pin one driver.
+ *
+ * Separate from `LedgerQuery` because that one is always applied alongside a driver match the
+ * caller supplies positionally; here the driver is part of the filter or absent entirely.
+ */
+export interface LedgerFeedQuery extends LedgerQuery {
+  driverId?: string | undefined;
+  /** As with `DriverBalanceQuery.driverIds`: undefined is "everyone", `[]` is "nobody". */
+  driverIds?: readonly string[] | undefined;
+}
+
 /**
  * DOMAIN — what the ledger needs from storage, described without naming Mongo.
  *
@@ -89,4 +159,49 @@ export interface LedgerRepositoryPort {
   totalsForDriver(driverId: string, query?: LedgerQuery | undefined): Promise<LedgerTotals>;
 
   listForBooking(bookingId: string): Promise<LedgerEntry[]>;
+
+  /**
+   * The row a previous request with this key already wrote, if there is one.
+   *
+   * What turns a unique index from an error into idempotency: a replay finds the original and
+   * returns it, so a double-tapped Settle reports the same settlement rather than a conflict.
+   */
+  findByIdempotencyKey(key: string): Promise<LedgerEntry | null>;
+
+  /**
+   * One page of the collections screen: every driver with ledger activity, and what they stand at.
+   *
+   * COMPUTED, NOT CACHED. `drivers.walletBalancePaise` exists and looks like the cheap answer, but
+   * it has no writer anywhere in this codebase — a schema default of 0, one read in dispatch, and
+   * nothing that ever sets it. Reading it here would print a confident zero beside a driver
+   * holding several thousand rupees of company cash.
+   *
+   * A driver with NO rows does not appear. That is correct for a screen about who owes what —
+   * they have never been owed anything and have never held company money — but it means this is
+   * not a driver roster and must not be read as one.
+   *
+   * `totals` covers every driver the query selects, not the page, so the header figures do not
+   * change as somebody pages through.
+   */
+  pageDriverBalances(
+    query: DriverBalanceQuery,
+    page: number,
+    limit: number,
+  ): Promise<{ rows: DriverBalanceRow[]; totals: DriverBalanceAggregate; totalItems: number }>;
+
+  /**
+   * One page of the ledger ACROSS DRIVERS, newest first — the finance feed.
+   *
+   * No running balance, unlike `pageForDriver`. A cumulative balance is a per-driver idea; over a
+   * mixed feed it would be a number with no owner, and computing it would mean a window function
+   * over the entire collection rather than one driver's slice.
+   */
+  pageAll(
+    page: number,
+    limit: number,
+    query?: LedgerFeedQuery | undefined,
+  ): Promise<{ entries: LedgerEntry[]; totalItems: number }>;
+
+  /** Credited, debited and count for everything `pageAll` would select, every page of it. */
+  totalsAll(query?: LedgerFeedQuery | undefined): Promise<LedgerTotals>;
 }

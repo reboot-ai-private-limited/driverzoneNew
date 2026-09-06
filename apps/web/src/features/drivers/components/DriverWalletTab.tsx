@@ -1,23 +1,62 @@
 'use client';
 
-import { Wallet, IndianRupee, ArrowDownRight, ArrowUpRight } from 'lucide-react';
-import type { LedgerEntryDto, TransactionType } from '@driverzone/contracts';
+import { useMemo, useState } from 'react';
+import { ArrowDownRight, ArrowUpRight, IndianRupee, Scale, TrendingDown, Wallet } from 'lucide-react';
+import {
+  TRANSACTION_TYPES,
+  TRANSACTION_TYPE_LABELS,
+  type LedgerEntryDto,
+  type LedgerQueryParams,
+  type TransactionType,
+} from '@driverzone/contracts';
 import {
   Badge,
   DataState,
   DataTable,
+  FilterBar,
+  FilterField,
+  Input,
+  Pagination,
   Panel,
+  Select,
   SkeletonTable,
+  StatTile,
+  TopProgressBar,
   type Column,
 } from '@driverzone/design-system';
 import { toErrorState } from '@/lib/api/toErrorState';
-import { formatPaise, formatDate, formatTime } from '@/lib/format';
+import { formatDate, formatPaise, formatTime } from '@/lib/format';
 import { useDriverWallet } from '../hooks/useDriverDetails';
 
 const COLUMN_WIDTHS = ['w-32', 'w-48', 'w-64', 'w-32', 'w-32'];
+const PAGE_SIZE = 15;
+
 
 export function DriverWalletTab({ driverId }: { driverId: string }) {
-  const query = useDriverWallet(driverId);
+  /*
+   * Local state, not the URL, unlike every list screen in the panel. This tab is one of three
+   * inside a driver's detail page, and `DriverDetailsScreen` already keeps the active tab in
+   * `useState` — putting only this tab's filters in the URL would make a link restore the
+   * filters but not the tab they belong to, which is worse than restoring neither.
+   */
+  const [type, setType] = useState<TransactionType | 'ALL'>('ALL');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+
+  /** Memoised because it is a QUERY KEY — a fresh object every render is a refetch every render. */
+  const query = useMemo<LedgerQueryParams>(
+    () => ({
+      ...(type === 'ALL' ? {} : { type }),
+      ...(from === '' ? {} : { from }),
+      ...(to === '' ? {} : { to }),
+      page,
+      limit: PAGE_SIZE,
+    }),
+    [type, from, to, page],
+  );
+
+  const wallet = useDriverWallet(driverId, query);
 
   const columns: Column<LedgerEntryDto>[] = [
     {
@@ -27,7 +66,7 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
       render: (entry) => (
         <div className="flex flex-col">
           <span>{formatDate(entry.created_at)}</span>
-          <span className="text-xs text-text-subtle mt-0.5">{formatTime(entry.created_at)}</span>
+          <span className="mt-0.5 text-xs text-text-subtle">{formatTime(entry.created_at)}</span>
         </div>
       ),
     },
@@ -35,24 +74,9 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
       key: 'type',
       header: 'Transaction Type',
       width: COLUMN_WIDTHS[1] ?? '',
-      render: (entry) => {
-        /*
-         * One label per value of `TRANSACTION_TYPES`. `CASH_COLLECTED` is the one an admin opens
-         * this screen for: it is the money a driver is holding on the company's behalf, and it is
-         * why a balance can be negative at all.
-         */
-        const labels: Record<TransactionType, string> = {
-          TRIP_EARNING: 'Trip Earning',
-          WAITING_EARNING: 'Waiting Time',
-          COMMISSION_DEBIT: 'Commission',
-          CASH_COLLECTED: 'Cash Collected',
-          PAYOUT: 'Payout',
-          ADJUSTMENT: 'Adjustment',
-          PENALTY: 'Penalty',
-          BONUS: 'Bonus',
-        };
-        return <span className="font-medium">{labels[entry.type] || entry.type}</span>;
-      },
+      render: (entry) => (
+        <span className="font-medium">{TRANSACTION_TYPE_LABELS[entry.type] ?? entry.type}</span>
+      ),
     },
     {
       key: 'description',
@@ -61,8 +85,8 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
       render: (entry) => (
         <div className="flex flex-col">
           <span className="text-text">{entry.description}</span>
-          {entry.reference_id && (
-            <span className="text-xs text-text-subtle mt-0.5 tnum">Ref: {entry.reference_id}</span>
+          {entry.reference_id !== null && (
+            <span className="mt-0.5 text-xs tnum text-text-subtle">Ref: {entry.reference_id}</span>
           )}
         </div>
       ),
@@ -74,12 +98,16 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
       numeric: true,
       width: COLUMN_WIDTHS[3] ?? '',
       render: (entry) => {
-        const isPositive = entry.amount_paise > 0;
-        const isNegative = entry.amount_paise < 0;
+        const positive = entry.amount_paise > 0;
+        const negative = entry.amount_paise < 0;
         return (
-          <div className={`flex items-center justify-end gap-1 font-medium tnum ${isPositive ? 'text-success' : isNegative ? 'text-danger' : ''}`}>
-            {isPositive && <ArrowUpRight className="size-3" />}
-            {isNegative && <ArrowDownRight className="size-3" />}
+          <div
+            className={`flex items-center justify-end gap-1 font-medium tnum ${
+              positive ? 'text-success' : negative ? 'text-danger' : ''
+            }`}
+          >
+            {positive && <ArrowUpRight aria-hidden className="size-3" />}
+            {negative && <ArrowDownRight aria-hidden className="size-3" />}
             {formatPaise(Math.abs(entry.amount_paise))}
           </div>
         );
@@ -97,78 +125,129 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
     },
   ];
 
-  if (query.isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="h-24 bg-surface-sunken animate-pulse rounded-md border border-border" />
-          <div className="h-24 bg-surface-sunken animate-pulse rounded-md border border-border" />
-        </div>
-        <Panel title="Ledger History">
-          <SkeletonTable rows={5} columns={COLUMN_WIDTHS} />
-        </Panel>
-      </div>
-    );
-  }
+  const data = wallet.data;
+  const rows = data?.ledger ?? [];
+  const filtered = type !== 'ALL' || from !== '' || to !== '';
 
-  if (query.isError || !query.data) {
-    return (
-      <DataState
-        loading={false}
-        skeleton={<></>}
-        error={query.isError ? toErrorState(query.error, () => query.refetch()) : undefined}
-      >
-        <div />
-      </DataState>
-    );
+  function resetPage<T>(set: (value: T) => void) {
+    return (value: T) => {
+      set(value);
+      // A filter change resets the page: page 3 of the old result set is usually past the end of
+      // the new one, and an empty table reads as "no entries" rather than "you are past the end".
+      setPage(1);
+    };
   }
-
-  const { wallet, ledger } = query.data;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="flex flex-col p-5 rounded-md border border-border bg-surface">
-          <div className="flex items-center gap-2 text-text-subtle mb-3">
-            <Wallet className="size-4" />
-            <span className="text-sm font-medium">Current Balance</span>
-          </div>
-          <div className="flex items-end gap-3">
-            <span className={`text-3xl font-semibold tnum ${wallet.balance_paise < 0 ? 'text-danger' : 'text-text'}`}>
-              {formatPaise(wallet.balance_paise)}
-            </span>
-            {wallet.is_suspended_for_balance && (
-              <Badge tone="danger" className="mb-1">Suspended (Negative Balance)</Badge>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-col p-5 rounded-md border border-border bg-surface">
-          <div className="flex items-center gap-2 text-text-subtle mb-3">
-            <IndianRupee className="size-4" />
-            <span className="text-sm font-medium">Lifetime Earnings</span>
-          </div>
-          <span className="text-3xl font-semibold tnum text-text">
-            {formatPaise(wallet.lifetime_earnings_paise)}
-          </span>
-        </div>
+    <div className="flex flex-col gap-4">
+      {/*
+        Balance and lifetime earnings describe the WHOLE account and deliberately ignore the
+        filters below — a balance is not a period. The credited/debited/net tiles beside them are
+        the opposite: they describe exactly what the filter selected, across every page of it.
+      */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile
+          label="Current Balance"
+          icon={<Wallet aria-hidden className="size-4" />}
+          loading={wallet.isLoading}
+          tone={(data?.wallet.balance_paise ?? 0) < 0 ? 'danger' : 'default'}
+          value={formatPaise(data?.wallet.balance_paise ?? 0)}
+          badge={
+            data?.wallet.is_suspended_for_balance === true ? (
+              <Badge tone="danger">Suspended</Badge>
+            ) : undefined
+          }
+          hint={
+            (data?.wallet.balance_paise ?? 0) < 0 ? 'Owed to the company' : 'Payable to the driver'
+          }
+        />
+        <StatTile
+          label="Lifetime Earnings"
+          icon={<IndianRupee aria-hidden className="size-4" />}
+          loading={wallet.isLoading}
+          value={formatPaise(data?.wallet.lifetime_earnings_paise ?? 0)}
+        />
+        <StatTile
+          label="Credited"
+          icon={<ArrowUpRight aria-hidden className="size-4" />}
+          loading={wallet.isLoading}
+          tone="success"
+          value={formatPaise(data?.summary.credited_paise ?? 0)}
+          hint={filtered ? 'Matching the filter' : 'All time'}
+        />
+        <StatTile
+          label="Debited"
+          icon={<TrendingDown aria-hidden className="size-4" />}
+          loading={wallet.isLoading}
+          tone="danger"
+          value={formatPaise(data?.summary.debited_paise ?? 0)}
+          hint={
+            data === undefined
+              ? undefined
+              : `Net ${formatPaise(data.summary.net_paise)} over ${data.summary.count} entries`
+          }
+        />
       </div>
 
-      <Panel title="Ledger History">
+      <FilterBar>
+        <FilterField label="Type">
+          <Select
+            value={type}
+            onValueChange={(value) => resetPage(setType)(value as TransactionType | 'ALL')}
+            options={[
+              { value: 'ALL', label: 'All types' },
+              ...TRANSACTION_TYPES.map((value) => ({ value, label: TRANSACTION_TYPE_LABELS[value] })),
+            ]}
+          />
+        </FilterField>
+        <FilterField label="From">
+          <Input
+            type="date"
+            value={from}
+            max={to === '' ? undefined : to}
+            onChange={(e) => resetPage(setFrom)(e.target.value)}
+          />
+        </FilterField>
+        <FilterField label="To">
+          <Input
+            type="date"
+            value={to}
+            min={from === '' ? undefined : from}
+            onChange={(e) => resetPage(setTo)(e.target.value)}
+          />
+        </FilterField>
+      </FilterBar>
+
+      <Panel title="Ledger History" flush>
+        <TopProgressBar active={wallet.isFetching && !wallet.isLoading} />
+
         <DataState
-          loading={false}
-          skeleton={<></>}
-          empty={ledger.length === 0}
+          loading={wallet.isLoading}
+          error={
+            wallet.isError ? toErrorState(wallet.error, () => void wallet.refetch()) : undefined
+          }
+          empty={rows.length === 0}
           emptyState={{
-            icon: <Wallet aria-hidden className="size-6" />,
-            title: 'No transactions yet',
-            description: 'This driver has no ledger entries.',
+            icon: <Scale aria-hidden className="size-6" />,
+            title: filtered ? 'No entries match those filters' : 'No transactions yet',
+            description: filtered
+              ? 'Try a wider date range, or a different transaction type.'
+              : 'Entries appear here as the driver completes trips and collects cash.',
           }}
+          skeleton={<SkeletonTable rows={5} columns={COLUMN_WIDTHS} />}
         >
           <DataTable
             columns={columns}
-            rows={ledger}
+            rows={rows}
             rowKey={(entry) => entry.id}
+            refetching={wallet.isFetching && !wallet.isLoading}
+          />
+          <Pagination
+            page={page}
+            pageCount={Math.max(1, data?.pagination.total_pages ?? 1)}
+            total={data?.pagination.total_items ?? 0}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
           />
         </DataState>
       </Panel>

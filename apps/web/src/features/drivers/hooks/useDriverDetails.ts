@@ -4,11 +4,13 @@ import type {
   AdminDriverWalletDetailsDto,
   AdminDriverDutyHistoryDto,
   ApproveDriverResponse,
+  LedgerQueryParams,
   RejectDriverRequest,
   RejectDriverResponse,
 } from '@driverzone/contracts';
 import { request } from '@/lib/api/client';
 import { authedQueryOptions } from '@/lib/query/factory';
+import { keys, staleTime } from '@/lib/query/keys';
 import { withAuth } from '@/lib/auth/session';
 
 /**
@@ -28,11 +30,35 @@ export function useDriverDetails(id: string, enabled = true) {
   );
 }
 
-export function useDriverWallet(id: string) {
+/**
+ * One driver's statement.
+ *
+ * `GET /admin/drivers/:id/wallet` has accepted `page/limit/type/from/to` since 2026-09-04 and
+ * returns a `summary` and `pagination` alongside the rows. This hook passed none of them and the
+ * tab discarded both, so the screen silently showed the newest ten entries of an eighteen-entry
+ * statement with no pager and no way to narrow it. The query is threaded through now.
+ */
+export function useDriverWallet(id: string, query?: LedgerQueryParams) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', id, 'wallet'],
-      fetch: (token, signal) => request<AdminDriverWalletDetailsDto>(`/admin/drivers/${id}/wallet`, { token, signal }),
+      queryKey: keys.drivers.wallet(id, query),
+      fetch: (token, signal) =>
+        request<AdminDriverWalletDetailsDto>(`/admin/drivers/${id}/wallet`, {
+          token,
+          signal,
+          ...(query === undefined
+            ? {}
+            : {
+                query: {
+                  page: query.page,
+                  limit: query.limit,
+                  type: query.type,
+                  from: query.from,
+                  to: query.to,
+                },
+              }),
+        }),
+      staleTime: staleTime.directory,
     })
   );
 }

@@ -47,6 +47,16 @@ nodeLinker: hoisted
 # Expo pins react exactly and its native renderer expects that version, so alignment goes
 # downward: web and design-system follow the mobile apps, not the other way round. Bumping this
 # means bumping the `react`/`react-dom` specifiers in apps/web and packages/mobile-ui to match.
+#
+# uuid: same failure shape as react above, caught the hard way. apps/api depends on uuid@14.0.2
+# directly (for `v7`, used by src/shared/ids.ts), but google APIs deps (gaxios, teeny-request)
+# pull uuid@9.0.1 and xcode pulls uuid@7.0.3. `pnpm --filter @driverzone/api deploy --legacy`
+# resolves api's dependency subtree in isolation from the rest of the workspace, and its flat
+# hoist picked 9.0.1 for the top-level node_modules/uuid slot instead of 14.0.2 — v7 was added
+# after 9.0.1, so the deployed image crashed on the first import:
+#     SyntaxError: The requested module 'uuid' does not provide an export named 'v7'
+# Pinning removes the conflicting versions from the graph so hoisting has only one to pick.
 overrides:
   react: 19.2.3
   react-dom: 19.2.3
+  uuid: 14.0.2

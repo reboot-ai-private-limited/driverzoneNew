@@ -217,6 +217,8 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
 
     buildAdminRouter: () =>
       buildAdminRouter({
+        list: controllers.makeListAdminBookingsController(repo, charges, deps.identity),
+        get: controllers.makeGetAdminBookingController(repo, charges, deps.identity),
         events: controllers.makeListEventsController(repo),
         forceArrive: controllers.makeForceArriveController(forceArrive),
       }),

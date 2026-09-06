@@ -241,6 +241,12 @@ export function buildIdentityContainer(): IdentityContainer {
       // The read side and the rating cache. Consumed by `reviews`, which renders names in the
       // admin ledger and writes back the rolling average it computes.
       namesByIds: (role, ids) => directory.namesByIds(role, ids),
+
+      // Turns a search box's words into account ids, so a caller can filter its OWN rows by
+      // them. `bookings` is the first consumer: the admin booking table searches by customer and
+      // driver name, and cannot read this module's collections to do it.
+      idsMatching: (role, search, limit) => directory.idsMatching(role, search, limit),
+
       setRating: (role, id, average, count) => directory.setRating(role, id, average, count),
 
       // The driver card a customer sees on their trip. `bookings` decides whether the phone

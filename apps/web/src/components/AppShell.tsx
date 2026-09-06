@@ -33,12 +33,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-surface-sunken">
+    // `print:bg-white`: the sunken grey behind the rail is a screen affordance with nothing to
+    // set apart from once the rail itself is gone — printed, it is just ink a report does not
+    // need on every page.
+    <div className="min-h-screen bg-surface-sunken print:bg-white">
       <SideNav pinned={pinned} />
       <div
         className={cn(
           'flex flex-col min-h-screen transition-[padding] duration-200 ease-out',
           pinned ? 'pl-nav-open' : 'pl-rail',
+          // The left offset exists to clear the rail. With the rail `print:hidden`, the offset
+          // is a blank margin down the left edge of every printed page instead.
+          'print:pl-0',
         )}
       >
         <TopBar pinned={pinned} onTogglePin={togglePin} />
@@ -47,7 +53,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           and last cell too far apart to read as one row; the rail sits outside this, so the
           layout stays anchored left rather than floating in the middle of an ultrawide.
         */}
-        <main className="flex-1 w-full max-w-content-max p-6 flex flex-col gap-4">{children}</main>
+        {/*
+          `print:max-w-none print:p-0`: the on-screen cap and padding exist so a table does not
+          stretch across an ultrawide monitor, which is not a printed page's problem — a report
+          should use the full sheet, not whatever width the screen layout happened to pick.
+        */}
+        <main className="flex-1 w-full max-w-content-max p-6 flex flex-col gap-4 print:max-w-none print:p-0">
+          {children}
+        </main>
       </div>
     </div>
   );

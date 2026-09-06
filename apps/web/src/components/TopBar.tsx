@@ -14,7 +14,7 @@ export function TopBar({ pinned, onTogglePin }: TopBarProps) {
   const { admin } = useSession();
 
   return (
-    <header className="flex items-center justify-between gap-4 h-14 px-4 bg-surface border-b border-border">
+    <header className="flex items-center justify-between gap-4 h-14 px-4 bg-surface border-b border-border print:hidden">
       <Tooltip content={pinned ? 'Collapse navigation' : 'Keep navigation open'} side="bottom">
         <IconButton
           variant="ghost"

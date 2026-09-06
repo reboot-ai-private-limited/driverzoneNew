@@ -71,6 +71,8 @@ export function SideNav({ pinned }: SideNavProps) {
         pinned ? 'w-nav-open' : 'w-rail',
         // Harmless while pinned — the width is already open — so it does not need excluding.
         EXPANDED_WIDTH,
+        // Navigation chrome has no business on a printed page, on any screen in this app.
+        'print:hidden',
       )}
     >
       <div className="flex items-center h-14 px-3 shrink-0">

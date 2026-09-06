@@ -3,6 +3,7 @@ import {
   CAR_CATEGORIES,
   DOCUMENT_SIDES,
   DOCUMENT_TYPES,
+  TRANSACTION_TYPES,
   VEHICLE_TYPE_PREFERENCES,
 } from '@driverzone/contracts';
 import { bearerAuth, errorResponse, registry, successResponse } from '@/shared/http/swagger.util.js';
@@ -171,13 +172,28 @@ const adminDriverWalletDetailsResponseSchema = z.object({
   ledger: z.array(z.object({
     id: z.string(),
     driver_id: z.string(),
-    type: z.enum(['TRIP_EARNING', 'COMMISSION_DEDUCTION', 'PAYOUT', 'ADJUSTMENT', 'PENALTY']),
+    /*
+     * DERIVED FROM THE ENUM, not retyped. This was hand-written as
+     * `['TRIP_EARNING','COMMISSION_DEDUCTION','PAYOUT','ADJUSTMENT','PENALTY']`, which named a
+     * type that has never existed (`COMMISSION_DEDUCTION`; the real one is `COMMISSION_DEBIT`)
+     * and omitted three that do (`WAITING_EARNING`, `CASH_COLLECTED`, `BONUS`) — so the published
+     * OpenAPI doc promised a shape the API cannot produce and rejected rows it returns daily.
+     * Reading `TRANSACTION_TYPES` is what stops that from being possible again.
+     */
+    type: z.enum(TRANSACTION_TYPES),
     amount_paise: z.number(),
     balance_after_paise: z.number(),
     reference_id: z.string().nullable(),
     description: z.string(),
     created_at: z.string(),
   })),
+  /** Was missing entirely, though the endpoint has returned it since the statement gained filters. */
+  summary: z.object({
+    credited_paise: z.number(),
+    debited_paise: z.number(),
+    net_paise: z.number(),
+    count: z.number(),
+  }),
   pagination: z.object({
     page: z.number(),
     limit: z.number(),

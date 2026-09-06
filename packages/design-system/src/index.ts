@@ -37,6 +37,7 @@ export * from './ui/RequestId';
 export * from './ui/SegmentedControl';
 export * from './ui/Select';
 export * from './ui/Skeleton';
+export * from './ui/StatTile';
 export * from './ui/Toast';
 export * from './ui/Tooltip';
 export * from './ui/TopProgressBar';

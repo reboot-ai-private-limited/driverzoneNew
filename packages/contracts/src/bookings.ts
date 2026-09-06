@@ -104,6 +104,13 @@ export interface BookingDto {
   pickup: { lat: number; lng: number; address: string };
   drop: { lat: number; lng: number; address: string };
 
+  /**
+   * The trip distance the QUOTE was priced against, frozen at booking time — not a live
+   * recomputation from `pickup`/`drop`, and not the driver's actual GPS track, which this system
+   * does not retain. Null only on a booking whose quote predates this field.
+   */
+  distance_km: number | null;
+
   scheduled_at: string;
   is_scheduled: boolean;
 
@@ -239,6 +246,55 @@ export interface ListBookingsResponse {
  */
 export interface ListDriverTripsResponse {
   bookings: BookingDto[];
+}
+
+/**
+ * `GET /admin/bookings` — every booking in the system, newest first, filtered and paged.
+ *
+ * THE ONLY BOOKING LIST THAT IS PAGED. The customer's and the driver's are one person's own
+ * history capped at a limit; this one is the whole table and grows with the business, so a cap
+ * would silently hide rows from the person whose job is to find them.
+ *
+ * `BookingDto` unchanged, like the other two lists — a management row and a trip receipt are one
+ * object at two distances. Rows carry BOTH `customer` and `driver` as name-only, `phone: null`:
+ * an admin list resolves names in one batched lookup per role and never the phone numbers, which
+ * `PHONE_VISIBLE_STATUSES` reserves for the two people actually meeting at a kerb.
+ */
+export interface AdminBookingListDto {
+  bookings: BookingDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+/**
+ * The filters `GET /admin/bookings` accepts, as query params.
+ *
+ * SERVER-SIDE, and for the reason `LedgerQueryParams` gives: the list is paged, so a filter
+ * applied in the client would only search the rows already fetched and would miss every match on
+ * page two. Every field is optional; omitting all of them returns the whole table newest-first.
+ */
+export interface AdminListBookingsQuery {
+  page?: number | undefined;
+  limit?: number | undefined;
+  /**
+   * Matches a booking REFERENCE, or the name or mobile number of either party.
+   *
+   * The two halves are answered by different modules and unioned: `bookings` owns the reference,
+   * and `identity` resolves a name or number to the account ids this module then filters on. That
+   * indirection is the module boundary doing its job — `bookings` cannot read the accounts
+   * collection, and the alternative is this module learning what a phone number is.
+   */
+  search?: string | undefined;
+  /** Comma-separated `BookingStatus`es: `?status=ASSIGNED,STARTED`. */
+  status?: string | undefined;
+  /** `YYYY-MM-DD`, inclusive, IST — matched against `scheduled_at`. */
+  from?: string | undefined;
+  /** `YYYY-MM-DD`, INCLUSIVE of the whole day named. */
+  to?: string | undefined;
 }
 
 /** One row of the booking's history. Rendered verbatim in the admin panel's detail view. */

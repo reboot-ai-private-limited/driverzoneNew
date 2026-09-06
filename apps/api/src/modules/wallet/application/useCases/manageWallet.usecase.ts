@@ -6,7 +6,11 @@ import {
   type WalletApplication,
   type WalletEntry,
 } from '../../domain/walletEntry.entity.js';
-import type { WalletRepositoryPort } from '../../domain/walletRepository.port.js';
+import type {
+  WalletQuery,
+  WalletRepositoryPort,
+  WalletTotals,
+} from '../../domain/walletRepository.port.js';
 
 /** How much of a customer's statement one read returns. A wallet is not a paginated surface yet. */
 const STATEMENT_LIMIT = 100;
@@ -15,6 +19,17 @@ export interface CustomerWalletView {
   balancePaise: number;
   entries: WalletEntry[];
 }
+
+/** A filtered, paged statement — `view` plus what a pager and a totals row need. */
+export interface CustomerWalletStatement extends CustomerWalletView {
+  totals: WalletTotals;
+  page: number;
+  limit: number;
+  totalItems: number;
+}
+
+/** The pager's ceiling. Matches the driver ledger's, so the two statements behave identically. */
+const MAX_STATEMENT_LIMIT = 100;
 
 /**
  * Reading a wallet, and the only sanctioned way of writing to one.
@@ -54,6 +69,41 @@ export class ManageWalletUseCase {
     ]);
 
     return { balancePaise, entries };
+  }
+
+  /**
+   * One page of a customer's statement, filtered, with totals over the whole selection.
+   *
+   * THE BALANCE IS ALWAYS THE FULL BALANCE, never the sum of the filtered rows. Someone reading
+   * "March only" still needs to know what the customer owes today, and a balance that moved when
+   * a date filter changed would be read as the customer's money moving.
+   *
+   * `totals`, by contrast, describes exactly what was selected — that is what a totals row on a
+   * filtered table means, and the DTO says so.
+   */
+  async statement(
+    customerId: string,
+    page: number,
+    limit: number,
+    query?: WalletQuery | undefined,
+  ): Promise<CustomerWalletStatement> {
+    const safePage = Math.max(1, Math.trunc(page));
+    const safeLimit = Math.min(MAX_STATEMENT_LIMIT, Math.max(1, Math.trunc(limit)));
+
+    const [balancePaise, pageResult, totals] = await Promise.all([
+      this.repo.sumForCustomer(customerId),
+      this.repo.pageForCustomer(customerId, safePage, safeLimit, query),
+      this.repo.totalsForCustomer(customerId, query),
+    ]);
+
+    return {
+      balancePaise,
+      entries: pageResult.entries,
+      totals,
+      page: safePage,
+      limit: safeLimit,
+      totalItems: pageResult.totalItems,
+    };
   }
 
   /**

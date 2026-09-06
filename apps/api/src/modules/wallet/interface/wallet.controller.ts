@@ -3,8 +3,13 @@ import { AppError } from '../../../shared/errors/AppError.js';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import type { ManageWalletUseCase } from '../application/useCases/manageWallet.usecase.js';
-import { toCustomerWalletDto } from './wallet.mapper.js';
-import { customerIdParamSchema, grantWalletEntrySchema } from './wallet.validation.js';
+import { toAdminCustomerWalletDto, toCustomerWalletDto } from './wallet.mapper.js';
+import {
+  customerIdParamSchema,
+  customerWalletQuerySchema,
+  grantWalletEntrySchema,
+  toWalletQuery,
+} from './wallet.validation.js';
 
 function principalOf(req: Request): string {
   const sub = req.principal?.sub;
@@ -40,8 +45,16 @@ export function makeGetMyWalletController(useCase: ManageWalletUseCase): Request
 export function makeAdminGetWalletController(useCase: ManageWalletUseCase): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = customerIdParamSchema.parse(req.params);
+    const parsed = customerWalletQuerySchema.parse(req.query);
 
-    sendSuccess(req, res, toCustomerWalletDto(await useCase.view(id)), 'Customer wallet');
+    const statement = await useCase.statement(
+      id,
+      parsed.page,
+      parsed.limit,
+      toWalletQuery(parsed),
+    );
+
+    sendSuccess(req, res, toAdminCustomerWalletDto(statement), 'Customer wallet');
   });
 }
 

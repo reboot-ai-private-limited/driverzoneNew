@@ -32,6 +32,7 @@ import {
 import { toErrorState } from '@/lib/api/toErrorState';
 import { formatDate, formatMobile, formatTime } from '@/lib/format';
 import { useCustomer } from '../hooks/useCustomer';
+import { CustomerWalletSection } from './CustomerWalletSection';
 import { useUpdateCustomer } from '../hooks/useUpdateCustomer';
 import { CustomerEditDialog } from './CustomerEditDialog';
 
@@ -367,6 +368,12 @@ function CustomerBody({ customer }: { customer: AdminCustomerDetailsDto }) {
           </Rows>
         </Panel>
       </div>
+
+      {/*
+        Full width, below the panel grid: a wallet is a statement, not a fact that fits in a
+        six-panel row, and it is the one block on this page somebody acts on rather than reads.
+      */}
+      <CustomerWalletSection customerId={customer.id} customerName={customer.full_name} />
 
       <StatusFooter customer={customer} />
     </div>

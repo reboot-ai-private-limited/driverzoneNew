@@ -32,6 +32,24 @@ export interface IdentityAccount {
  */
 export interface AccountDirectoryContract {
   namesByIds(role: Role, ids: string[]): Promise<Map<string, string | null>>;
+
+  /**
+   * The ids of accounts whose name or mobile number matches `search`, for a caller that filters
+   * its OWN rows by them.
+   *
+   * IT RETURNS IDS, NOT ROWS, and that is the whole design. The admin booking list must find "every
+   * booking by Rahul", but `bookings` cannot read the accounts collection and has no business
+   * learning what a phone number looks like. So identity answers the only question it is
+   * competent to answer — which accounts are these words about — and the caller intersects that
+   * with its own table. The alternative is a join across a module boundary, or `bookings`
+   * reimplementing name search over a collection it does not own.
+   *
+   * `limit` is not optional politeness: a one-letter search matches most of the customer table,
+   * and an unbounded answer would be spliced into an `$in` with fifty thousand ids in it. A
+   * caller that hits the cap gets the first `limit` matches, which for a search box is what the
+   * person wanted anyway — they narrow the term rather than page through the ambiguity.
+   */
+  idsMatching(role: Role, search: string, limit: number): Promise<string[]>;
 }
 
 /**

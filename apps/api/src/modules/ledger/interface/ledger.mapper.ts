@@ -21,6 +21,7 @@ const FALLBACK_DESCRIPTION: Record<TransactionType, string> = {
   COMMISSION_DEBIT: 'Commission',
   CASH_COLLECTED: 'Cash collected from customer',
   PAYOUT: 'Payout',
+  DEBT_COLLECTED: 'Outstanding amount settled',
   ADJUSTMENT: 'Adjustment',
   PENALTY: 'Penalty',
   BONUS: 'Bonus',

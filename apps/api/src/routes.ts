@@ -62,6 +62,11 @@ export function buildApiRouter(c: AppContainers): Router {
   /** `/admin/customers/:id/wallet`, by the same fall-through past identity's admin router. */
   router.use('/admin/customers', c.wallet.buildAdminRouter());
   router.use('/admin/reviews', c.reviews.buildAdminRouter());
+  /*
+   * The finance surface. Same prefix fall-through as the mounts above it: identity's `/admin`
+   * role router has no `/finance` route, so it calls `next()` and the request lands here.
+   */
+  router.use('/admin/finance', c.admin.buildFinanceRouter());
   router.use('/coverage', c.zones.buildCoverageRouter());
 
   /**

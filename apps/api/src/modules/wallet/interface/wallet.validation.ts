@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { WALLET_ENTRY_TYPES } from '@driverzone/contracts';
+import { isoDaySchema, istDayStart, istNextDayStart } from '../../../shared/http/istDay.js';
+import type { WalletQuery } from '../domain/walletRepository.port.js';
 
 /**
  * INTERFACE — Zod at the boundary, per docs/engineering/coding-standards.md.
@@ -23,3 +26,46 @@ export const grantWalletEntrySchema = z
 export const customerIdParamSchema = z.object({ id: z.string().min(1) });
 
 export type GrantWalletEntryBody = z.input<typeof grantWalletEntrySchema>;
+
+/**
+ * The filters `GET /admin/customers/:id/wallet` accepts. Deliberately the same shape, the same
+ * defaults and the same ceiling as the driver statement's — two money statements in one admin
+ * panel that page differently is a difference somebody has to hold in their head for no gain.
+ */
+export const customerWalletQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  /**
+   * `?type=CREDIT_GRANT,FINE`. Parsed against the enum rather than passed through, so a typo is a
+   * 400 rather than a filter that silently matches nothing and reads as "no activity".
+   */
+  type: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value === undefined
+        ? undefined
+        : value
+            .split(',')
+            .map((part) => part.trim())
+            .filter((part) => part !== ''),
+    )
+    .pipe(z.array(z.enum(WALLET_ENTRY_TYPES)).min(1).optional()),
+  from: isoDaySchema.optional(),
+  to: isoDaySchema.optional(),
+});
+
+/** Turns the parsed query into the repository's shape: an inclusive `to` day becomes exclusive. */
+export function toWalletQuery(
+  parsed: z.infer<typeof customerWalletQuerySchema>,
+): WalletQuery | undefined {
+  if (parsed.type === undefined && parsed.from === undefined && parsed.to === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(parsed.type === undefined ? {} : { types: parsed.type }),
+    ...(parsed.from === undefined ? {} : { from: istDayStart(parsed.from) }),
+    ...(parsed.to === undefined ? {} : { to: istNextDayStart(parsed.to) }),
+  };
+}

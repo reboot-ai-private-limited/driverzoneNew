@@ -1,10 +1,12 @@
 import type { Router } from 'express';
 import type { SettingsReadContract } from '../settings/settings.public.js';
-import type { LedgerPublicContract } from './ledger.public.js';
+import type { LedgerFinanceContract, LedgerPublicContract } from './ledger.public.js';
 import { MongoLedgerRepository } from './infrastructure/ledgerRepository.impl.js';
 import { AppendLedgerEntriesUseCase } from './application/useCases/appendEntries.usecase.js';
 import { GetWalletBalanceUseCase } from './application/useCases/getWalletBalance.usecase.js';
 import { GetDriverWalletUseCase } from './application/useCases/getDriverWallet.usecase.js';
+import { GetDriverBalancesUseCase } from './application/useCases/getDriverBalances.usecase.js';
+import { SettleDriverUseCase } from './application/useCases/settleDriver.usecase.js';
 import { makeDriverWalletController, makeMyWalletController } from './interface/ledger.controller.js';
 import { buildAdminRouter, buildDriverRouter } from './interface/ledger.routes.js';
 
@@ -15,6 +17,13 @@ export interface LedgerDependencies {
 
 export interface LedgerContainer {
   contract: LedgerPublicContract;
+  /**
+   * The cross-driver reads, handed only to the tier-8 `admin` module.
+   *
+   * Separate from `contract` so `bookings` — which takes `LedgerPublicContract` — is not also
+   * handed a query that walks every driver in the system.
+   */
+  financeContract: LedgerFinanceContract;
   /** Mounted at `/api/admin/drivers`, for `/admin/drivers/:id/wallet`. */
   buildAdminRouter: () => Router;
   /**
@@ -33,6 +42,8 @@ export function buildLedgerContainer(deps: LedgerDependencies): LedgerContainer 
   const append = new AppendLedgerEntriesUseCase(repo);
   const balance = new GetWalletBalanceUseCase(repo);
   const wallet = new GetDriverWalletUseCase(repo, deps.settings);
+  const balances = new GetDriverBalancesUseCase(repo, deps.settings);
+  const settle = new SettleDriverUseCase(repo);
 
   return {
     contract: {
@@ -41,6 +52,19 @@ export function buildLedgerContainer(deps: LedgerDependencies): LedgerContainer 
       lifetimeEarnings: (driverId) => repo.sumEarningsForDriver(driverId),
       entriesForBooking: (bookingId) => repo.listForBooking(bookingId),
       recentEntriesForDriver: (driverId, limit) => repo.listForDriver(driverId, limit),
+    },
+    financeContract: {
+      driverBalances: (input, page, limit) => balances.execute(input, page, limit),
+      settleDriver: (input) => settle.execute(input),
+      feed: async (page, limit, query) => {
+        // Rows and totals together: the caller always needs both, and issuing them in parallel
+        // here keeps that one round trip rather than two sequential ones at the edge.
+        const [result, totals] = await Promise.all([
+          repo.pageAll(page, limit, query),
+          repo.totalsAll(query),
+        ]);
+        return { entries: result.entries, totals, totalItems: result.totalItems };
+      },
     },
     buildAdminRouter: () => buildAdminRouter({ driverWallet: makeDriverWalletController(wallet) }),
     buildDriverRouter: () => buildDriverRouter({ myWallet: makeMyWalletController(wallet) }),

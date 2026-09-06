@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { CAR_CATEGORIES, PAYMENT_MODES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
+import {
+  BOOKING_STATUSES,
+  CAR_CATEGORIES,
+  PAYMENT_MODES,
+  VEHICLE_TYPE_PREFERENCES,
+} from '@driverzone/contracts';
 
 const latLng = z.object({
   lat: z.number().min(-90).max(90),
@@ -64,6 +69,59 @@ export const reportPinSchema = z
 export const forceArriveSchema = z.object({ reason: z.string().min(1).max(500) }).strict();
 
 export const bookingIdParamSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * A calendar day as the admin panel sends it. Parsed here rather than trusted, because
+ * `new Date('nonsense')` is an Invalid Date that Mongo will happily accept and match nothing —
+ * a filter that silently returns zero rows is indistinguishable from a quiet day.
+ */
+const isoDay = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+  /*
+   * ROUND-TRIPPED, not merely parsed. `Date.parse('2025-02-30')` does NOT fail — JavaScript rolls
+   * the surplus day over and hands back the 2nd of March. A plain "is this parseable" check
+   * therefore accepts a date that does not exist and then filters by a different day than the one
+   * asked for, which is far worse than a 400: the admin gets rows and no reason to doubt them.
+   * Formatting the parsed date back and comparing is what catches the rollover.
+   */
+  .refine((value) => new Date(`${value}T00:00:00.000Z`).toISOString().startsWith(value), {
+    message: 'Not a real date',
+  });
+
+/**
+ * `GET /admin/bookings`. Query params arrive as strings, so every number is transformed.
+ *
+ * `limit` caps at 100, matching `adminCustomerListQuerySchema` — the panel asks for 10 and the cap
+ * is there so a hand-written URL cannot ask for the whole collection in one response.
+ */
+export const adminBookingListQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 1))
+    .refine((n) => !Number.isNaN(n) && n >= 1, 'Page must be >= 1'),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 10))
+    .refine((n) => !Number.isNaN(n) && n >= 1 && n <= 100, 'Limit must be between 1 and 100'),
+  search: z.string().trim().max(120).optional(),
+  /**
+   * Comma-separated statuses. An UNKNOWN one is rejected rather than dropped: silently ignoring it
+   * would answer a question the caller did not ask and look like the filter simply found nothing.
+   */
+  status: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.split(',')))
+    .refine(
+      (list) => list === undefined || list.every((s) => (BOOKING_STATUSES as readonly string[]).includes(s)),
+      'Unknown booking status',
+    ),
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+});
 
 export type CreateBookingBody = z.input<typeof createBookingSchema>;
 export type CancelBookingBody = z.input<typeof cancelBookingSchema>;

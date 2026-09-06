@@ -1,4 +1,5 @@
 import type { Request, RequestHandler } from 'express';
+import type { BookingStatus } from '@driverzone/contracts';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import { AppError } from '../../../shared/errors/AppError.js';
@@ -28,6 +29,7 @@ import type {
 } from '../application/useCases/driverProgress.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
 import {
+  adminBookingListQuerySchema,
   bookingIdParamSchema,
   cancelBookingSchema,
   completeTripSchema,
@@ -540,6 +542,172 @@ export function makeForceArriveController(useCase: ForceArriveUseCase): RequestH
 
     const booking = await useCase.execute(id, principalOf(req), body.reason);
     sendSuccess(req, res, toBookingDto({ booking, adjustments: [] }), 'Driver marked as arrived');
+  });
+}
+
+/**
+ * A `YYYY-MM-DD` day, read in the timezone the admin lives in.
+ *
+ * IST, NOT UTC — the same boundary `ledger.controller.ts` documents and for the same reason:
+ * `new Date('2026-09-04')` is midnight UTC, which is 05:30 on the 4th in India, so an admin
+ * filtering "the 4th" would lose every booking from before breakfast and gain the small hours of
+ * the 5th. Duplicated rather than shared because a `shared/` date module that two interface
+ * layers reach into is the kind of coupling this codebase's module rules exist to prevent — the
+ * day this becomes a third copy is the day it earns a home.
+ */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function startOfDay(isoDate: string): Date {
+  return new Date(new Date(`${isoDate}T00:00:00.000Z`).getTime() - IST_OFFSET_MS);
+}
+
+/**
+ * The instant the NEXT day begins, so `to` can be an EXCLUSIVE bound while meaning an inclusive
+ * day. "To 18 May" has to include a booking at 23:50 on the 18th; comparing `<=` against the
+ * start of the 18th would drop everything but the first instant of it.
+ */
+function startOfNextDay(isoDate: string): Date {
+  return new Date(startOfDay(isoDate).getTime() + 24 * 60 * 60 * 1000);
+}
+
+/**
+ * How many accounts a name-or-number search may resolve to before the query stops widening.
+ *
+ * A one-letter search matches most of the customer table, and every id it returns is spliced into
+ * an `$in`. Two hundred is generous for a search box — past that the admin is not looking for
+ * somebody, they are browsing, and the right answer is to narrow the term.
+ */
+const SEARCH_ACCOUNT_LIMIT = 200;
+
+/**
+ * `GET /admin/bookings` — the booking management table.
+ *
+ * THE ONLY BOOKING LIST THAT PAGES, because it is the only one that is not a single person's
+ * history. See `AdminBookingListDto` for why it still returns `BookingDto` unchanged.
+ *
+ * A NAME OR MOBILE SEARCH COSTS TWO EXTRA QUERIES, one per role, and they run in parallel with
+ * each other. `identity` turns the term into account ids and this module intersects them with its
+ * own rows — the module boundary means there is no join available, and `bookings` has no business
+ * reading the accounts collection. When the term is only a reference, both are still issued and
+ * return nothing; the alternative is guessing from the shape of the string which kind of search
+ * an admin meant, and "9001" is a plausible reference and a plausible phone number at once.
+ *
+ * Names are resolved for the PAGE, one batched lookup per role, exactly as the driver's trip
+ * history does it. Phones are never resolved: `toBookingDto` would gate them on the trip being
+ * live anyway, and an admin table is not a kerb.
+ */
+export function makeListAdminBookingsController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: AccountDirectoryContract & CustomerContactContract & DriverCardContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const query = adminBookingListQuerySchema.parse(req.query);
+
+    /*
+     * Both roles, in parallel, and only when there is something to search for. `undefined` (no
+     * term) and `[]` (a term that matched nobody) are different answers and the repository treats
+     * them differently — see `AdminBookingFilter.accountIds`.
+     */
+    const accountIds =
+      query.search === undefined || query.search === ''
+        ? undefined
+        : (
+            await Promise.all([
+              directory.idsMatching('CUSTOMER', query.search, SEARCH_ACCOUNT_LIMIT),
+              directory.idsMatching('DRIVER', query.search, SEARCH_ACCOUNT_LIMIT),
+            ])
+          ).flat();
+
+    const { bookings, totalItems } = await repo.listForAdmin({
+      page: query.page,
+      limit: query.limit,
+      ...(query.search === undefined ? {} : { search: query.search }),
+      ...(accountIds === undefined ? {} : { accountIds }),
+      ...(query.status === undefined ? {} : { statuses: query.status as BookingStatus[] }),
+      ...(query.from === undefined ? {} : { from: startOfDay(query.from) }),
+      ...(query.to === undefined ? {} : { before: startOfNextDay(query.to) }),
+    });
+
+    /*
+     * CONTACTS, NOT BARE NAMES — one batched lookup per role, deduped so a repeat customer is not
+     * fetched once per booking they made. `revealPhones` below is what makes the numbers
+     * survive the mapper's live-trip gate; see its note for why an admin is exempt from it.
+     */
+    const [contacts, cards] = await Promise.all([
+      directory.customerContactsByIds([...new Set(bookings.map((b) => b.customerId))]),
+      directory.driverCardsByIds([
+        ...new Set(bookings.map((b) => b.driverId).filter((id): id is string => id !== null)),
+      ]),
+    ]);
+
+    const dtos = await Promise.all(
+      bookings.map(async (booking) =>
+        toBookingDto({
+          booking,
+          adjustments: await charges.listAdjustments(booking.id),
+          revealPhones: true,
+          customerCard: contacts.get(booking.customerId) ?? null,
+          driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
+        }),
+      ),
+    );
+
+    sendSuccess(
+      req,
+      res,
+      {
+        bookings: dtos,
+        pagination: {
+          page: query.page,
+          limit: query.limit,
+          total_items: totalItems,
+          total_pages: Math.max(1, Math.ceil(totalItems / query.limit)),
+        },
+      },
+      'Bookings listed',
+    );
+  });
+}
+
+/**
+ * `GET /admin/bookings/:id` — one booking, in full.
+ *
+ * Named on the row's own terms rather than either party's: no start OTP (the code exists so the
+ * customer can prove themselves to the driver, and an admin reading it defeats that), and names
+ * without phone numbers, matching the list.
+ */
+export function makeGetAdminBookingController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: CustomerContactContract & DriverCardContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const booking = await repo.findById(id);
+    if (booking === null) throw new BookingNotFoundError(id);
+
+    const [contacts, cards, adjustments] = await Promise.all([
+      directory.customerContactsByIds([booking.customerId]),
+      booking.driverId === null
+        ? Promise.resolve(new Map<string, DriverCard>())
+        : directory.driverCardsByIds([booking.driverId]),
+      charges.listAdjustments(booking.id),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      toBookingDto({
+        booking,
+        adjustments,
+        revealPhones: true,
+        customerCard: contacts.get(booking.customerId) ?? null,
+        driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
+      }),
+      'Booking',
+    );
   });
 }
 

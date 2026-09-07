@@ -149,16 +149,21 @@ docker compose -f docker-compose.dev.yml up -d    # infrastructure only
 pnpm dev:web                                      # api + admin panel
 ```
 
-`docker-compose.dev.yml` runs Mongo, Redis and OSRM and nothing else — the apps run on the
-host so a save reloads instead of rebuilding an image. `docker-compose.prod.yml` runs the
-stack below in full, from these images. Both are covered in
-[`../setup-development.md`](../setup-development.md).
+`docker-compose.dev.yml` runs Mongo and Redis and nothing else — the apps run on the host so a
+save reloads instead of rebuilding an image. `docker-compose.prod.yml` runs the stack below in
+full, from these images. Both are covered in [`../setup-development.md`](../setup-development.md).
 
 `mongo-init` promotes the single node to a replica set and exits. Without it Mongo starts but
 refuses every write with `not primary` — multi-document transactions require a replica set, and
 the booking→ledger write needs one.
 
-OSRM is commented out in compose because it needs a prepared OSM extract:
+**Road distance** is the Google Routes API in every deployed environment — set
+`GOOGLE_ROUTES_API_KEY` in `apps/api/.env.prod` to a server-side key restricted to that host's
+egress IP and the Routes API, with a daily quota cap and a billing alert set in the Google Cloud
+console (the reversal from self-hosted OSRM is in [`../decision-log.md`](../decision-log.md)).
+Locally the key is left unset and `HaversineRoadDistance` stands in — approximate fares, no key,
+no billed calls. `OsrmRoadDistance` is still in the tree: to self-host, add an `osrm` service to
+the compose file, prepare an extract, and point `OSRM_BASE_URL` at it —
 
 ```bash
 mkdir -p deploy/osrm && cd deploy/osrm
@@ -171,9 +176,8 @@ docker run -t -v "${PWD}:/data" ghcr.io/project-osrm/osrm-backend \
   osrm-customize /data/india-latest.osrm
 ```
 
-Takes about an hour and needs ~8GB RAM. Worth doing once — without it, every developer's quote
-flow either hits a paid API or gets mocked, and mocked distances hide exactly the band-boundary
-bugs that matter ([`../LLD/zone-resolution.md`](../LLD/zone-resolution.md)).
+— which takes about an hour and ~8GB RAM for the India extract, or minutes and a few hundred MB
+for a West Bengal + Sikkim one.
 
 ## CI
 

@@ -60,13 +60,13 @@ services:
       timeout: 3s
       retries: 5
 
-  # Road distance for outstation band matching (docs/LLD/zone-resolution.md). Self-hosted because every quote hits
-  # it and quote volume runs ~3x booking volume — per-call pricing adds up fast.
+  # Road distance for outstation band matching (docs/LLD/zone-resolution.md). Deployed, this is
+  # the Google Routes API (docs/decision-log.md). Locally, HaversineRoadDistance stands in with
+  # no key and no billed calls — its fares are approximate, which is fine for walking the flow
+  # but hides band-boundary bugs. Set GOOGLE_ROUTES_API_KEY in apps/api/.env to quote for real.
   #
-  # Needs a prepared OSM extract before first run; the commands are in
-  # docs/engineering/build-and-deploy.md. Commented out until then so this file comes up on
-  # a fresh clone. Without it, quotes either hit a paid API or get mocked — and mocked
-  # distances hide exactly the band-boundary bugs that matter.
+  # To self-host OSRM instead: uncomment below, prepare an OSM extract
+  # (docs/engineering/build-and-deploy.md), and point OSRM_BASE_URL at 127.0.0.1:5000.
   # osrm:
   #   image: ghcr.io/project-osrm/osrm-backend:latest
   #   command: ['osrm-routed', '--algorithm', 'mld', '/data/india-latest.osrm']

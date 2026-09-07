@@ -167,30 +167,40 @@ resolveOutstation(from, to, direction, carCategoryId) -> Quote[] | Error
 Straight-line (haversine) distance under-reports by 30–50% in hill terrain. With 70–100 km
 bands, that error puts trips in the wrong band constantly and mis-prices them.
 
-Use **OSRM**, self-hosted on the India OSM extract:
+Use the **Google Routes API** (Compute Routes), keyed to distance only:
 
 ```
-GET /route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=false
-→ { routes: [ { distance: 87421.3, duration: 7200.1 } ] }
+POST https://routes.googleapis.com/directions/v2:computeRoutes
+X-Goog-FieldMask: routes.distanceMeters
+{ origin, destination, travelMode: DRIVE, routingPreference: TRAFFIC_UNAWARE }
+→ { routes: [ { distanceMeters: 87421 } ] }     // {} when no route exists
 ```
 
-Self-hosting is the right call here — Google Distance Matrix priced per call becomes a
-meaningful line item once every quote request hits it, and quote requests are ~3× booking
-volume. One `c6g.xlarge` handles the India extract comfortably.
+Per-call pricing is contained rather than avoided (see the reversal in
+[`../decision-log.md`](../decision-log.md) — the pilot VM cannot host an OSRM India extract).
+The field mask and `TRAFFIC_UNAWARE` keep the call in the Essentials SKU ($5 / 1000, 10k free
+per month); a jam must not move a fare band. `OsrmRoadDistance` stays in the tree behind
+`OSRM_BASE_URL` for anyone who does self-host.
 
-**Cache** on an H3 cell pair at resolution 8 (~460 m edge), TTL 30 days:
+**Two things keep billable calls inside the free tier:**
 
-```
-key: route:{h3(from,8)}:{h3(to,8)}
-val: { distance_m, duration_s }
-```
+1. **In-city trips never call the router.** Road distance only decides outstation bands, and
+   in-city packages outrank outstation unconditionally — so `CreateQuoteUseCase` resolves the
+   in-city match first and only measures the road if that misses.
+2. **Cache** on a rounded-coordinate key (~110 m grid), TTL 30 days, `NO_ROUTE` cached for 1 day:
 
-Hit rate in practice runs 60–80% because pickup and drop points cluster hard around towns
-and landmarks.
+   ```
+   key: roaddist:{lat.toFixed(3)},{lng.toFixed(3)}:{lat.toFixed(3)},{lng.toFixed(3)}
+   val: "<km>" | "NO_ROUTE"
+   ```
 
-`overview=false`, and no polyline in the cache: the route geometry was only ever fetched so
-terrain classification could measure it, and terrain now comes from the destination point. We
-need the distance and nothing else — a smaller response and a smaller cache value.
+   Hit rate runs 60–80% because pickup and drop points cluster hard around towns and landmarks.
+   The design on file is an H3 res-8 cell pair (~460 m); rounded coordinates are finer and need
+   no dependency. Redis is not a hard dependency — a miss or an outage falls through to the API.
+
+Distance only, no geometry: the route polyline was only ever fetched so terrain classification
+could measure it, and terrain now comes from the destination point. We need the distance and
+nothing else — a smaller response, a smaller cache value, and a cheaper call.
 
 ### Terrain
 

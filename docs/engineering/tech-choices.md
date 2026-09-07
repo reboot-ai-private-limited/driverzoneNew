@@ -335,17 +335,25 @@ Current stable at the time of writing. React Native's New Architecture is on by 
 
 ## Infrastructure
 
-### OSRM (self-hosted)
+### Road distance — Google Routes API (Compute Routes)
 
-- **Chosen for:** road distance and route geometry on every outstation quote.
-- **Why this one:** straight-line distance under-reports by 30–50% in hill terrain, which puts
-  trips in the wrong band and mis-prices them against 70–100km bands. Self-hosted because every
-  quote hits it and quote volume runs roughly 3× booking volume — per-call pricing becomes a
-  meaningful line item fast. One mid-size instance handles the India extract.
-- **Rejected:** Google Distance Matrix (accurate, priced per call, and rate-limited at exactly
-  the wrong moment); Mapbox Directions (same shape of problem); haversine (wrong, see above).
-- **Cached:** on an H3 cell pair at resolution 8, TTL 30 days. Hit rate runs 60–80% because
-  pickup and drop points cluster hard around towns and landmarks.
+- **Chosen for:** road distance on every outstation quote. Straight-line under-reports by 30–50%
+  in hill terrain, which puts trips in the wrong 25–30 km band and mis-prices them.
+- **Why this one:** the pilot VM cannot host an OSRM India extract, and per-call pricing — the
+  original reason to self-host — is contained by two things. `CreateQuoteUseCase` skips the call
+  entirely for in-city trips (road distance only decides outstation bands), and
+  `CachingRoadDistance` keys results on a ~110 m coordinate grid, TTL 30 days, 60–80% hit rate
+  because pickup and drop points cluster hard around towns and landmarks. Compute Routes
+  Essentials is $5 / 1000 with 10,000 free per month; projected pilot volume stays inside that.
+- **Held in the cheap SKU by:** `X-Goog-FieldMask: routes.distanceMeters` and
+  `routingPreference: TRAFFIC_UNAWARE`. A duration, a polyline or traffic-awareness each move the
+  call to the Pro SKU — and a fare band must not shift because of a traffic jam.
+- **Rejected:** self-hosted OSRM India extract (the RAM the pilot VM does not have — see the
+  reversal in [`../decision-log.md`](../decision-log.md)); a regional OSRM extract (light enough,
+  kept as the fallback when volume outgrows the free tier); Mapbox Directions (same per-call
+  shape); haversine (wrong, and refuses to run in production).
+- **Retained:** `OsrmRoadDistance`, tested and reachable via `OSRM_BASE_URL` — self-hosting again
+  is a compose service plus one env var, not a code change.
 
 ### Docker + Compose
 

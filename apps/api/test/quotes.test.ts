@@ -185,9 +185,11 @@ describe('CreateQuoteUseCase — unavailable answers', () => {
   });
 
   it('reports no route rather than throwing', async () => {
+    // An outstation trip: the drop is in a hill zone, not the pickup's city, so the in-city
+    // fast path is skipped and the routing provider is actually consulted.
     const useCase = new CreateQuoteUseCase(
-      fakeZones({ city: cityZone, pickup: freePickup }, { city: cityZone }),
-      incityPackages(),
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: hillZone }),
+      outstationPackages(),
       settings,
       { roadDistanceKm: vi.fn(async () => null) },
       repo,
@@ -228,6 +230,22 @@ describe('CreateQuoteUseCase — unavailable answers', () => {
 });
 
 describe('CreateQuoteUseCase — incity', () => {
+  it('never calls the routing provider for an in-city trip', async () => {
+    const roadDistanceKm = vi.fn(async () => 8);
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { city: cityZone }),
+      incityPackages(),
+      settings,
+      { roadDistanceKm },
+      repo,
+    );
+
+    const result = await useCase.execute({ customerId: 'cus_1', pickup: SILIGURI, drop: SILIGURI });
+
+    expect(result.available).toBe(true);
+    expect(roadDistanceKm).not.toHaveBeenCalled();
+  });
+
   it('writes one quote per variant so the customer can pick a duration', async () => {
     const useCase = new CreateQuoteUseCase(
       fakeZones({ city: cityZone, pickup: freePickup }, { city: cityZone }),

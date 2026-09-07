@@ -7,6 +7,8 @@ import type { ConsumeResult, QuotesPublicContract } from './quotes.public.js';
 import { isExpired } from './domain/quote.entity.js';
 import type { RoadDistancePort } from './domain/roadDistance.port.js';
 import { MongoQuoteRepository } from './infrastructure/quoteRepository.impl.js';
+import { CachingRoadDistance } from './infrastructure/caching.roadDistance.js';
+import { GoogleRoadDistance } from './infrastructure/google.roadDistance.js';
 import { OsrmRoadDistance } from './infrastructure/osrm.roadDistance.js';
 import { HaversineRoadDistance } from './infrastructure/haversine.roadDistance.js';
 import { CreateQuoteUseCase } from './application/useCases/createQuote.usecase.js';
@@ -25,18 +27,25 @@ export interface QuotesDependencies {
 }
 
 /**
- * Chooses the road-distance adapter.
+ * Chooses the road-distance adapter, then wraps it in the shared read-through cache.
  *
- * OSRM in production, always — the haversine adapter refuses to construct there anyway. Locally
- * it depends on whether OSRM is actually running, which it usually is not: the service is
- * commented out in `docker-compose.dev.yml` and needs a region extract. `USE_REAL_ROUTING` is the
- * opt-in for someone who has set it up.
+ * Precedence:
+ *   1. `GOOGLE_ROUTES_API_KEY` set → Google Routes API. The deployed path since the pilot VM
+ *      could not host an OSRM India extract (docs/decision-log.md).
+ *   2. else, production or a non-default `OSRM_BASE_URL` → OSRM, for anyone still self-hosting.
+ *   3. else → the haversine stand-in, which refuses to construct in production anyway.
+ *
+ * The cache wraps whichever is chosen — it is provider-neutral, and its only effect is to make
+ * quoting cheaper.
  */
 function selectRoadDistance(): RoadDistancePort {
-  if (isProduction || env.OSRM_BASE_URL !== 'http://localhost:5000') {
-    return new OsrmRoadDistance();
-  }
-  return new HaversineRoadDistance();
+  const base: RoadDistancePort = env.GOOGLE_ROUTES_API_KEY
+    ? new GoogleRoadDistance(env.GOOGLE_ROUTES_API_KEY)
+    : isProduction || env.OSRM_BASE_URL !== 'http://localhost:5000'
+      ? new OsrmRoadDistance()
+      : new HaversineRoadDistance();
+
+  return new CachingRoadDistance(base);
 }
 
 export function buildQuotesContainer(deps: QuotesDependencies): QuotesContainer {

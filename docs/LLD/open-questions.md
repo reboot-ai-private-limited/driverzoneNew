@@ -182,7 +182,7 @@ and progressively more expensive later.
 | A7 | Scheduled bookings dispatch at T−90 min | `dispatch-and-assignment.md` |
 | A8 | Trip start requires a customer OTP | `booking-lifecycle.md` |
 | A9 | Commission excludes tax and driver allowance | `pricing-and-commission.md` |
-| A10 | Self-hosted OSRM for road distance | `zone-resolution.md`, `architecture.md` |
+| A10 | ~~Self-hosted OSRM for road distance~~ — **superseded 2026-09-07.** Google Routes API (Compute Routes, Essentials SKU), with in-city trips skipping the call and a coordinate cache keeping it in the free tier; OSRM retained behind `OSRM_BASE_URL` | `zone-resolution.md`, [`decision-log.md`](../decision-log.md) |
 | A11 | Modular monolith, not microservices | `architecture.md` |
 | A12 | Android-first for drivers, foreground service while on duty | `dispatch-and-assignment.md`, `architecture.md` |
 | A13 | MongoDB `2dsphere` for containment, Turf for geometric predicates | `zones.md` |

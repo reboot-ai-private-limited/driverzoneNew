@@ -29,6 +29,20 @@ const schema = z.object({
   OSRM_BASE_URL: z.string().url().default('http://localhost:5000'),
 
   /**
+   * Google Routes API key for road distance — the deployed path since the pilot VM could not
+   * host an OSRM India extract (docs/decision-log.md). Set it and `selectRoadDistance()` in
+   * `quotes.container.ts` uses `GoogleRoadDistance`; unset, it falls back to `OSRM_BASE_URL`.
+   *
+   * SEPARATE from `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, which is the browser key for the admin
+   * map — referrer-locked, Maps JS + Places. This one is server-side: lock it to the API
+   * host's egress IP and restrict it to the Routes API alone.
+   *
+   * Optional. Unset locally, where `HaversineRoadDistance` stands in, so a developer needs no
+   * key and makes no billed calls.
+   */
+  GOOGLE_ROUTES_API_KEY: z.string().min(1).optional(),
+
+  /**
    * Token signing secrets — SEPARATE, and that is the point (docs/decision-log.md, 2026-08-24).
    * A leaked access secret must not also forge refresh tokens: the two have very different
    * blast radii, 15 minutes against up to 30 days.

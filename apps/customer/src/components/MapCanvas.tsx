@@ -82,6 +82,12 @@ const ZOOM_DELTA: Record<MapZoom, number> = { street: 0.006, city: 0.06 };
 /** The apex of the route's bow, as a fraction of the straight-line distance. */
 const ROUTE_ARC = 0.14;
 
+/**
+ * The padding passed before the map is ready. A module-level constant so its IDENTITY never
+ * changes — see the crash note on `mapPadding` in the component.
+ */
+const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 } as const;
+
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
   {
     initialCentre,
@@ -119,15 +125,52 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     [],
   );
 
+  /**
+   * True once `getMapAsync` has delivered the native `GoogleMap`.
+   *
+   * EVERY route into the native map is gated on this — `mapPadding`, `fitToCoordinates` and
+   * `animateToRegion` all reach the same instance, and under the new architecture the view is laid
+   * out and taking props before that instance exists. See the crash note on `mapPadding`.
+   */
+  const [mapReady, setMapReady] = useState(false);
+
+  /**
+   * A `moveTo` that arrived before the native map existed, held for the `onMapReady` flush.
+   *
+   * Not dropped, because the earliest callers are real: the screen recentres on the customer's
+   * location as soon as it resolves, which can beat `getMapAsync`. Dropping it would leave the map
+   * sitting on `initialCentre` with no way back until the customer panned.
+   */
+  const pendingMove = useRef<{ lat: number; lng: number; zoom?: MapZoom } | null>(null);
+
+  const applyMove = (lat: number, lng: number, zoom?: MapZoom): void => {
+    const delta = zoom === undefined ? region.current.latitudeDelta : ZOOM_DELTA[zoom];
+    map.current?.animateToRegion(
+      { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
+      450,
+    );
+  };
+
   useImperativeHandle(ref, () => ({
     moveTo: (lat, lng, zoom) => {
-      const delta = zoom === undefined ? region.current.latitudeDelta : ZOOM_DELTA[zoom];
-      map.current?.animateToRegion(
-        { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
-        450,
-      );
+      // Same null-map hazard as `mapPadding` and `fitToCoordinates` — hold it rather than reach
+      // into a map that is not there yet.
+      if (!mapReady) {
+        pendingMove.current = zoom === undefined ? { lat, lng } : { lat, lng, zoom };
+        return;
+      }
+      applyMove(lat, lng, zoom);
     },
   }));
+
+  useEffect(() => {
+    if (!mapReady) return;
+    const queued = pendingMove.current;
+    pendingMove.current = null;
+    if (queued !== null) applyMove(queued.lat, queued.lng, queued.zoom);
+    // `applyMove` closes only over refs, so it needs no dependency of its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady]);
 
   const pickup = markers.find((m) => m.kind === 'pickup');
   const drop = markers.find((m) => m.kind === 'drop');
@@ -180,6 +223,12 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       framedTo.current = null;
       return;
     }
+    // Wait for the native map. `fitToCoordinates` reaches the same `GoogleMap` instance that
+    // `mapPadding` does, and calling it early has the same null-dereference shape. `mapReady` is
+    // in the dependency list rather than an early bail so the pair still gets framed once the map
+    // arrives, and `framedTo` is only claimed when the work is genuinely scheduled — bailing after
+    // setting it would mark the pair as framed and silently never frame it.
+    if (!mapReady) return;
     if (routeKey === framedTo.current) return;
     framedTo.current = routeKey;
 
@@ -198,7 +247,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       );
     }, 80);
     return () => clearTimeout(t);
-  }, [routeKey]);
+  }, [routeKey, mapReady]);
 
   return (
     <View style={styles.root}>
@@ -207,9 +256,24 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={initialRegion}
-        // The bottom strip the sheet covers — makes the map's centre the middle of what is
-        // actually visible, so the crosshair and the reported coordinate agree.
-        mapPadding={{ top: 0, right: 0, bottom: bottomInset, left: 0 }}
+        onMapReady={() => setMapReady(true)}
+        /**
+         * The bottom strip the sheet covers — makes the map's centre the middle of what is
+         * actually visible, so the crosshair and the reported coordinate agree.
+         *
+         * WITHHELD UNTIL `onMapReady`, and that is a crash fix, not caution.
+         * `MapView.applyBaseMapPadding` guards on the VIEW being laid out but not on the
+         * `GoogleMap` existing, and under the new architecture those are different moments:
+         * `getMapAsync` can still be in flight after layout. The sheet reports its height through
+         * `onLayout` almost immediately, so `bottomInset` went 0 → N right in that window — a
+         * padding CHANGE, past the layout guard, straight into
+         * `NullPointerException: GoogleMap.setPadding(...) on a null object reference`.
+         *
+         * `NO_PADDING` is a module constant so its identity is stable: before the map is ready the
+         * prop never changes, so the only `setMapPadding` call is the pre-layout one that defers
+         * harmlessly.
+         */
+        mapPadding={mapReady ? { top: 0, right: 0, bottom: bottomInset, left: 0 } : NO_PADDING}
         // Only the SETTLED region is needed — for `onRegionSettled` and for `moveTo` to keep the
         // current span when no zoom is passed. The intermediate `onRegionChange` stream is noise.
         onRegionChangeComplete={(next) => {

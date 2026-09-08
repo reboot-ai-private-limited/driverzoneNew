@@ -37,6 +37,8 @@ export interface LedgerRepositoryPort {
     driverId: string,
     page: number,
     limit: number,
+    fromDate?: Date,
+    toDate?: Date,
   ): Promise<{ entries: LedgerEntry[]; totalItems: number }>;
 
   /**
@@ -47,6 +49,13 @@ export interface LedgerRepositoryPort {
    * "everything newer" without re-fetching the rows themselves.
    */
   sumMostRecentForDriver(driverId: string, count: number): Promise<number>;
+
+  /**
+   * The sum of all entries for a driver that are strictly newer than the given entry.
+   * Used to anchor the running balance calculation correctly even when the history is filtered
+   * by date ranges.
+   */
+  sumNewerThan(driverId: string, date: Date, id: string): Promise<number>;
 
   listForBooking(bookingId: string): Promise<LedgerEntry[]>;
 }

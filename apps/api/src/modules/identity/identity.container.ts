@@ -25,7 +25,10 @@ import { VerifyDriverUseCase } from './application/useCases/verifyDriver.usecase
 import { ListDriversAdminUseCase } from './application/useCases/listDriversAdmin.usecase.js';
 import { ListCustomersAdminUseCase } from './application/useCases/listCustomersAdmin.usecase.js';
 import { ManageCustomerAdminUseCase } from './application/useCases/manageCustomerAdmin.usecase.js';
+import { ManageDriverAdminUseCase } from './application/useCases/manageDriverAdmin.usecase.js';
 import { GetDriverDetailsAdminUseCase } from './application/useCases/getDriverDetailsAdmin.usecase.js';
+import { GetDriverDutyHistoryAdminUseCase } from './application/useCases/getDriverDutyHistoryAdmin.usecase.js';
+import { GetLiveDriversAdminUseCase } from './application/useCases/getLiveDriversAdmin.usecase.js';
 import { MongoAccountRepository } from './infrastructure/account.repository.impl.js';
 import { MongoAccountDirectory } from './infrastructure/accountDirectory.impl.js';
 import { MongoSessionRepository } from './infrastructure/session.repository.impl.js';
@@ -33,6 +36,7 @@ import { MongoCustomerProfileRepository } from './infrastructure/customerProfile
 import { MongoDriverProfileRepository } from './infrastructure/driverProfile.repository.impl.js';
 import { MongoDriverDocumentRepository } from './infrastructure/driverDocument.repository.impl.js';
 import { MongoDriverDeviceRepository } from './infrastructure/driverDevice.repository.impl.js';
+import { MongoDutySessionRepository } from './infrastructure/dutySession.repository.impl.js';
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
@@ -137,21 +141,25 @@ export function buildIdentityContainer(): IdentityContainer {
     env.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024,
     env.UPLOAD_ALLOWED_FORMATS
   );
+  const dutySessions = new MongoDutySessionRepository();
   const submitOnboarding = new SubmitOnboardingUseCase(drivers, documents);
-  const setDuty = new SetDutyStatusUseCase(drivers);
+  const setDuty = new SetDutyStatusUseCase(drivers, dutySessions);
   const recordLocation = new RecordLocationPingsUseCase(drivers);
   const devices = new MongoDriverDeviceRepository();
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
-  const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit);
+  const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit, dutySessions);
   // Same repository the customer's own profile routes use, a different use case in front of it.
   // The narrow, self-only use cases stay exactly as they are — widening one of them to accept a
   // customer id is how an admin-shaped hole appears in the customer app's surface.
   const listCustomersAdmin = new ListCustomersAdminUseCase(customers);
   const manageCustomerAdmin = new ManageCustomerAdminUseCase(customers, audit);
 
-  const listDriversAdmin = new ListDriversAdminUseCase(drivers);
+  const listDriversAdmin = new ListDriversAdminUseCase(drivers, documents, documentStorage);
   const getDriverDetailsAdmin = new GetDriverDetailsAdminUseCase(drivers, documents, documentStorage);
+  const manageDriverAdmin = new ManageDriverAdminUseCase(drivers, audit);
+  const getDriverDutyHistoryAdmin = new GetDriverDutyHistoryAdminUseCase(dutySessions);
+  const getLiveDriversAdmin = new GetLiveDriversAdminUseCase(drivers);
 
   const authRouterFor = (role: Role): Router =>
     buildAuthRouter(role, makeAuthControllers(role, { sendOtp, verifyOtp, refreshSession, logout }));
@@ -185,7 +193,10 @@ export function buildIdentityContainer(): IdentityContainer {
       profile: adminProfile,
       verifyDriver,
       listDrivers: listDriversAdmin,
+      getLiveDrivers: getLiveDriversAdmin,
       getDriverDetails: getDriverDetailsAdmin,
+      manageDriver: manageDriverAdmin,
+      getDriverDutyHistory: getDriverDutyHistoryAdmin,
       listCustomers: listCustomersAdmin,
       manageCustomer: manageCustomerAdmin
     }));
@@ -201,6 +212,7 @@ export function buildIdentityContainer(): IdentityContainer {
       // admin ledger and writes back the rolling average it computes.
       namesByIds: (role, ids) => directory.namesByIds(role, ids),
       setRating: (role, id, average, count) => directory.setRating(role, id, average, count),
+      recordCompletedRide: (driverId, completedAt) => directory.recordCompletedRide(driverId, completedAt),
 
       // The write-side surface `bookings` (tier 6) consumes when POST /bookings carries
       // `save_pickup_address` or `save_vehicle`.

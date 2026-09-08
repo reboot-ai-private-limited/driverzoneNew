@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { User, CheckCircle, XCircle, FileText } from 'lucide-react';
+import { User, CheckCircle, XCircle, FileText, CircleSlash, Pencil, ArrowLeft } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -10,6 +10,7 @@ import {
   DefinitionList,
   Dialog,
   FieldRow,
+  FormField,
   Input,
   PageHeader,
   Panel,
@@ -24,9 +25,13 @@ import {
   useDriverDetails,
   useApproveDriver,
   useRejectDriver,
+  useVerifyHillDriving,
+  useReviewDocument,
+  useSuspendDriver,
 } from '../hooks/useDriverDetails';
 import { DriverWalletTab } from './DriverWalletTab';
 import { DriverDutyHistoryTab } from './DriverDutyHistoryTab';
+import { DriverEditDialog } from './DriverEditDialog';
 
 export function DriverDetailsScreen() {
   const { id } = useParams() as { id: string };
@@ -35,12 +40,19 @@ export function DriverDetailsScreen() {
   const query = useDriverDetails(id);
   const approveMutation = useApproveDriver(id);
   const rejectMutation = useRejectDriver(id);
+  const verifyHillDrivingMutation = useVerifyHillDriving(id);
+  const reviewDocumentMutation = useReviewDocument(id);
+  const suspendMutation = useSuspendDriver(id);
 
   const [activeTab, setActiveTab] = useState<'profile' | 'financials' | 'duty'>('profile');
   const [rejectReason, setRejectReason] = useState('');
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [confirmingSuspend, setConfirmingSuspend] = useState(false);
+  const [suspendReason, setSuspendReason] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
 
   const [reviewingDoc, setReviewingDoc] = useState<DriverDocumentDto | null>(null);
+  const [docRejectReason, setDocRejectReason] = useState('');
 
   const getExpirationStatus = (expiresOn: string | null) => {
     if (!expiresOn) return 'UNKNOWN';
@@ -77,11 +89,16 @@ export function DriverDetailsScreen() {
   }
 
   const { profile, documents } = query.data;
+  const dlDoc = documents.find((d) => d.doc_type === 'LICENCE');
 
   const handleApprove = async () => {
     try {
+      const pendingDocs = documents.filter(d => d.status === 'PENDING');
+      for (const doc of pendingDocs) {
+        await reviewDocumentMutation.mutateAsync({ docId: doc.id, data: { status: 'VERIFIED' } });
+      }
       await approveMutation.mutateAsync();
-      toast.success('Driver approved successfully');
+      toast.success('Driver and pending documents approved successfully');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to approve driver');
     }
@@ -99,48 +116,143 @@ export function DriverDetailsScreen() {
     }
   };
 
+  const handleOpenRejectDialog = () => {
+    const lines = [];
+    let hasRejectedDoc = false;
+    for (const doc of documents) {
+      if (doc.status === 'VERIFIED') {
+        lines.push(`- ${doc.doc_type}: Accepted`);
+      } else if (doc.status === 'REJECTED') {
+        hasRejectedDoc = true;
+        lines.push(`- ${doc.doc_type}: Rejected (${doc.rejection_reason || 'No reason provided'})`);
+      } else {
+        lines.push(`- ${doc.doc_type}: Pending review`);
+      }
+    }
+
+    if (documents.length === 0) {
+      setRejectReason('Your profile has been rejected. Please provide required documents.');
+    } else {
+      const prefix = hasRejectedDoc ? "Your profile has been rejected based on the following document reviews:" : "Your profile requires further attention:";
+      setRejectReason(`${prefix}\n${lines.join('\n')}`);
+    }
+    setRejectDialogOpen(true);
+  };
+
+  const handleVerifyHillDriving = async (verified: boolean) => {
+    try {
+      await verifyHillDrivingMutation.mutateAsync({ verified });
+      toast.success(`Hill driving ${verified ? 'verified' : 'unverified'} successfully`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update hill driving verification');
+    }
+  };
+
+  const handleReviewDocument = async (status: 'VERIFIED' | 'REJECTED') => {
+    if (!reviewingDoc) return;
+    if (status === 'REJECTED' && !docRejectReason.trim()) {
+      toast.error('Please provide a rejection reason');
+      return;
+    }
+
+    try {
+      await reviewDocumentMutation.mutateAsync({ docId: reviewingDoc.id, data: { status, reason: status === 'REJECTED' ? docRejectReason : undefined } });
+      toast.success(`Document ${status.toLowerCase()}`);
+      setReviewingDoc(null);
+      setDocRejectReason('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to review document');
+    }
+  };
+
 
   return (
     <>
       <PageHeader
         title="Driver Details"
-        onBack={() => router.push('/drivers')}
         breadcrumbs={[
           { label: 'Home', href: '/' },
           { label: 'Drivers', href: '/drivers' },
           { label: profile.full_name || profile.mobile_number },
         ]}
         actions={
-          <div className="flex gap-2">
-            {profile.onboarding_status === 'REJECTED' ? (
-              <Tooltip content="Driver is already rejected">
-                <span>
-                  <Button
-                    variant="secondary"
-                    icon={<XCircle className="size-4" />}
-                    disabled
-                  >
-                    Reject
-                  </Button>
-                </span>
-              </Tooltip>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              icon={<ArrowLeft aria-hidden className="size-3.5" />}
+              onClick={() => router.push('/drivers')}
+            >
+              Back
+            </Button>
+
+            <Button
+              size="sm"
+              icon={<Pencil aria-hidden className="size-3.5" />}
+              onClick={() => setIsEditing(true)}
+            >
+              Edit
+            </Button>
+
+            {profile.is_suspended ? (
+              <Button
+                size="sm"
+                variant="primary"
+                icon={<CheckCircle aria-hidden className="size-3.5" />}
+                onClick={() => {
+                  setSuspendReason('');
+                  setConfirmingSuspend(true);
+                }}
+              >
+                Reinstate
+              </Button>
             ) : (
               <Button
-                variant="secondary"
-                icon={<XCircle className="size-4" />}
-                onClick={() => setRejectDialogOpen(true)}
-                loading={rejectMutation.isPending}
+                size="sm"
+                variant="danger"
+                icon={<CircleSlash aria-hidden className="size-3.5" />}
+                onClick={() => {
+                  setSuspendReason('');
+                  setConfirmingSuspend(true);
+                }}
               >
-                Reject
+                Suspend
               </Button>
+            )}
+
+            {!profile.is_verified && (
+              profile.onboarding_status === 'REJECTED' ? (
+                <Tooltip content="Driver is already rejected">
+                  <span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={<XCircle aria-hidden className="size-3.5" />}
+                      disabled
+                    >
+                      Reject
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<XCircle aria-hidden className="size-3.5" />}
+                  onClick={handleOpenRejectDialog}
+                  loading={rejectMutation.isPending}
+                >
+                  Reject
+                </Button>
+              )
             )}
 
             {profile.is_verified ? (
               <Tooltip content="Driver is already verified">
                 <span>
                   <Button
+                    size="sm"
                     variant="primary"
-                    icon={<CheckCircle className="size-4" />}
+                    icon={<CheckCircle aria-hidden className="size-3.5" />}
                     disabled
                   >
                     Verified
@@ -149,17 +261,50 @@ export function DriverDetailsScreen() {
               </Tooltip>
             ) : (
               <Button
+                size="sm"
                 variant="primary"
-                icon={<CheckCircle className="size-4" />}
+                icon={<CheckCircle className="size-3.5" />}
                 onClick={handleApprove}
                 loading={approveMutation.isPending}
               >
-                Approve
+                Verify
               </Button>
             )}
           </div>
         }
       />
+
+      {profile.is_suspended && (
+        <div className="mb-6 p-4 rounded-lg bg-danger/10 border border-danger/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <CircleSlash className="size-5 text-danger shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-semibold text-danger">Driver Account Suspended</h4>
+              <p className="text-xs text-text mt-0.5">
+                {profile.suspension_reason ? (
+                  <>
+                    <span className="font-medium text-text-subtle">Reason:</span> {profile.suspension_reason}
+                  </>
+                ) : (
+                  'This driver is currently suspended and cannot go on duty or accept trip requests.'
+                )}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<CheckCircle aria-hidden className="size-3.5" />}
+            onClick={() => {
+              setSuspendReason('');
+              setConfirmingSuspend(true);
+            }}
+            className="self-start sm:self-center shrink-0"
+          >
+            Reinstate Driver
+          </Button>
+        </div>
+      )}
 
       <nav className="flex items-center gap-6 border-b border-border mb-6">
         <button
@@ -221,8 +366,17 @@ export function DriverDetailsScreen() {
                 </div>
 
                 <div className="mt-3 flex flex-col items-center gap-1.5">
-                  <StatusPill status={profile.onboarding_status} />
-                  {profile.onboarding_status === 'REJECTED' && profile.onboarding_rejection_reason && (
+                  {profile.is_suspended ? (
+                    <Badge tone="danger">Suspended</Badge>
+                  ) : (
+                    <StatusPill status={profile.onboarding_status} />
+                  )}
+                  {profile.is_suspended && profile.suspension_reason && (
+                    <div className="text-[10px] text-danger text-center max-w-[160px] leading-tight">
+                      <span className="font-semibold">Reason:</span> {profile.suspension_reason}
+                    </div>
+                  )}
+                  {!profile.is_suspended && profile.onboarding_status === 'REJECTED' && profile.onboarding_rejection_reason && (
                     <div className="text-[10px] text-danger text-center max-w-[160px] leading-tight">
                       <span className="font-semibold">Reason:</span> {profile.onboarding_rejection_reason}
                     </div>
@@ -263,6 +417,12 @@ export function DriverDetailsScreen() {
                       {profile.address || '—'}
                     </span>
                   </FieldRow>
+                  <FieldRow label="DL Number">
+                    <span className="tnum font-medium">{dlDoc?.number || '—'}</span>
+                  </FieldRow>
+                  <FieldRow label="DL Expiry">
+                    <span className="tnum">{dlDoc?.expires_on || '—'}</span>
+                  </FieldRow>
                 </DefinitionList>
               </div>
             </div>
@@ -290,9 +450,20 @@ export function DriverDetailsScreen() {
                   {profile.can_drive_hill ? 'Yes' : 'No'}
                 </FieldRow>
                 <FieldRow label="Hill Driving (Verified)">
-                  <Badge tone={profile.can_drive_hill_verified ? 'success' : 'neutral'}>
-                    {profile.can_drive_hill_verified ? 'Verified' : 'Not Verified'}
-                  </Badge>
+                  <div className="flex items-center gap-3">
+                    <Badge tone={profile.can_drive_hill_verified ? 'success' : 'neutral'}>
+                      {profile.can_drive_hill_verified ? 'Verified' : 'Not Verified'}
+                    </Badge>
+                    {profile.can_drive_hill && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleVerifyHillDriving(!profile.can_drive_hill_verified)}
+                        loading={verifyHillDrivingMutation.isPending}
+                      >
+                        {profile.can_drive_hill_verified ? 'Revoke' : 'Verify'}
+                      </Button>
+                    )}
+                  </div>
                 </FieldRow>
               </DefinitionList>
             </div>
@@ -404,10 +575,11 @@ export function DriverDetailsScreen() {
         description="Provide a reason for rejection. This will be shown to the driver."
       >
         <div className="space-y-4 py-4">
-          <Input
+          <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="e.g. Documents are blurry or incomplete"
+            className="w-full p-2 rounded-md bg-surface text-text text-sm border border-border-strong placeholder:text-text-subtle focus-visible:outline-2 focus-visible:outline-interactive min-h-[120px] resize-y"
           />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setRejectDialogOpen(false)}>Cancel</Button>
@@ -426,7 +598,12 @@ export function DriverDetailsScreen() {
       {/* View Document Dialog */}
       <Dialog
         open={!!reviewingDoc}
-        onOpenChange={(open) => !open && setReviewingDoc(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReviewingDoc(null);
+            setDocRejectReason('');
+          }
+        }}
         title={`View ${reviewingDoc?.doc_type}`}
         description="Preview of the uploaded document."
         className="max-w-3xl"
@@ -443,8 +620,126 @@ export function DriverDetailsScreen() {
               <span className="text-text-subtle">No file uploaded</span>
             )}
           </div>
+
+          {reviewingDoc && reviewingDoc.status !== 'VERIFIED' && (
+            <div className="flex flex-col gap-4 pt-4 border-t border-border mt-4">
+              <div className="flex gap-2 items-center">
+                <Input
+                  className="flex-1"
+                  placeholder="Rejection reason (required if rejecting)"
+                  value={docRejectReason}
+                  onChange={(e) => setDocRejectReason(e.target.value)}
+                />
+                <Button
+                  variant="danger"
+                  disabled={!docRejectReason.trim()}
+                  onClick={() => handleReviewDocument('REJECTED')}
+                  loading={reviewDocumentMutation.isPending && docRejectReason.trim() !== ''}
+                >
+                  Reject Document
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => handleReviewDocument('VERIFIED')}
+                  loading={reviewDocumentMutation.isPending && docRejectReason.trim() === ''}
+                >
+                  Verify Document
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </Dialog>
+      {/* Suspend / Reinstate Dialog */}
+      <Dialog
+        open={confirmingSuspend}
+        onOpenChange={(open) => {
+          setConfirmingSuspend(open);
+          if (!open) setSuspendReason('');
+        }}
+        title={profile.is_suspended ? `Reinstate ${profile.full_name || 'Driver'}` : `Suspend ${profile.full_name || 'Driver'}`}
+        description={
+          profile.is_suspended
+            ? 'Are you sure you want to reinstate this driver? They will be able to log in and go on duty again.'
+            : 'Are you sure you want to suspend this driver? They will immediately be taken off duty and blocked from taking bookings.'
+        }
+      >
+        <div className="space-y-4 py-3">
+          {!profile.is_suspended ? (
+            <>
+              <div className="text-xs text-text-subtle space-y-1.5 bg-surface-sunken p-3 rounded-md border border-border">
+                <p className="font-medium text-text">Consequences of suspension:</p>
+                <ul className="list-disc list-inside space-y-0.5">
+                  <li>They will immediately be forced off-duty and any active shift ended.</li>
+                  <li>They can no longer log in, receive offers, or accept bookings.</li>
+                  <li>Their documents, past trip records, and wallet balances are preserved.</li>
+                </ul>
+              </div>
+              <FormField label="Reason for suspension" required>
+                {({ id, describedBy }) => (
+                  <Input
+                    id={id}
+                    aria-describedby={describedBy}
+                    value={suspendReason}
+                    onChange={(e) => setSuspendReason(e.target.value)}
+                    placeholder="e.g. Policy violation, safety complaints, expired documents"
+                    autoFocus
+                  />
+                )}
+              </FormField>
+            </>
+          ) : (
+            <div className="text-xs text-text-subtle space-y-1.5 bg-surface-sunken p-3 rounded-md border border-border">
+              <p className="font-medium text-text">Upon reinstatement:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>The driver can log back into their driver app.</li>
+                <li>They will be permitted to go on duty and receive trip requests again.</li>
+              </ul>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setConfirmingSuspend(false);
+                setSuspendReason('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={profile.is_suspended ? 'primary' : 'danger'}
+              disabled={!profile.is_suspended && !suspendReason.trim()}
+              loading={suspendMutation.isPending}
+              onClick={async () => {
+                try {
+                  const isSuspending = !profile.is_suspended;
+                  await suspendMutation.mutateAsync({
+                    is_suspended: isSuspending,
+                    reason: isSuspending ? suspendReason.trim() : 'Reinstated by admin',
+                  });
+                  setConfirmingSuspend(false);
+                  setSuspendReason('');
+                  toast.success(
+                    isSuspending
+                      ? `${profile.full_name || 'Driver'} suspended successfully`
+                      : `${profile.full_name || 'Driver'} reinstated successfully`
+                  );
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Failed to update driver status');
+                }
+              }}
+            >
+              {profile.is_suspended ? 'Reinstate Driver' : 'Suspend Driver'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+      <DriverEditDialog
+        driverId={isEditing ? id : undefined}
+        onClose={() => setIsEditing(false)}
+      />
     </>
   );
 }

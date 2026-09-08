@@ -15,7 +15,7 @@ import mongoose, { Schema } from 'mongoose';
  * an audit log the application can rewrite answers no question worth asking.
  */
 
-export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE' | 'APPROVE' | 'REJECT';
+export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE' | 'APPROVE' | 'REJECT' | 'SUSPEND' | 'UNSUSPEND';
 
 export interface AuditLogDoc {
   _id: mongoose.Types.ObjectId;
@@ -41,7 +41,7 @@ const auditLogSchema = new Schema<AuditLogDoc>(
     action: {
       type: String,
       required: true,
-      enum: ['CREATE', 'UPDATE', 'DELETE', 'ACTIVATE', 'APPROVE', 'REJECT'],
+      enum: ['CREATE', 'UPDATE', 'DELETE', 'ACTIVATE', 'APPROVE', 'REJECT', 'SUSPEND', 'UNSUSPEND'],
     },
 
     before: { type: Schema.Types.Mixed },

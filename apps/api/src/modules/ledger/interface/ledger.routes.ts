@@ -3,6 +3,12 @@ import { requireAuth } from '../../../shared/http/auth.middleware.js';
 
 export interface AdminControllers {
   driverWallet: RequestHandler;
+  adjustWallet: RequestHandler;
+}
+
+export interface PayoutAdminControllers {
+  createPayout: RequestHandler;
+  listPayouts: RequestHandler;
 }
 
 /**
@@ -15,13 +21,32 @@ export interface AdminControllers {
  *
  * `/admin/drivers/:id/wallet` reaches this by the same prefix fall-through `/admin/zones` uses:
  * identity's admin router has no route matching three segments after `/drivers`, so it calls
- * `next()` and the request arrives here. Payouts will mount alongside it when they land.
+ * `next()` and the request arrives here.
  */
 export function buildAdminRouter(handlers: AdminControllers): Router {
   const router = Router();
   router.use(requireAuth('ADMIN'));
 
   router.get('/:id/wallet', handlers.driverWallet);
+  router.post('/:id/wallet/adjustment', handlers.adjustWallet);
 
   return router;
 }
+
+/**
+ * Mounted at `/api/admin/payouts`.
+ *
+ * Manages driver settlement payouts:
+ * - `POST /` to create and disburse a payout batch/transaction
+ * - `GET /` to list payouts with pagination and filtering
+ */
+export function buildPayoutRouter(handlers: PayoutAdminControllers): Router {
+  const router = Router();
+  router.use(requireAuth('ADMIN'));
+
+  router.post('/', handlers.createPayout);
+  router.get('/', handlers.listPayouts);
+
+  return router;
+}
+

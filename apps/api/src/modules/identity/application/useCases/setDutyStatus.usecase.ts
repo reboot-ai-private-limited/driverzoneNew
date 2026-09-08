@@ -1,6 +1,7 @@
 import type { DutyStatus } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { DriverProfileRepositoryPort } from '../../domain/driverProfile.repository.port.js';
+import type { DutySessionRepositoryPort } from '../../domain/dutySession.repository.port.js';
 
 export interface SetDutyStatusResult {
   isOnDuty: boolean;
@@ -19,11 +20,18 @@ export interface SetDutyStatusResult {
  * fight rather than use.
  */
 export class SetDutyStatusUseCase {
-  constructor(private readonly drivers: DriverProfileRepositoryPort) {}
+  constructor(
+    private readonly drivers: DriverProfileRepositoryPort,
+    private readonly dutySessions?: DutySessionRepositoryPort
+  ) {}
 
   async execute(driverId: string, status: DutyStatus): Promise<SetDutyStatusResult> {
     const profile = await this.drivers.findById(driverId);
     if (profile === undefined) throw AppError.notFound('Your profile could not be found.');
+
+    if (status === 'ONLINE' && profile.isBlocked) {
+      throw AppError.forbidden('Your account has been suspended.');
+    }
 
     if (status === 'ONLINE' && !profile.isVerified) {
       /*
@@ -36,8 +44,17 @@ export class SetDutyStatusUseCase {
       });
     }
 
-    const updated = await this.drivers.setDutyStatus(driverId, status === 'ONLINE');
+    const isGoingOnline = status === 'ONLINE';
+    const updated = await this.drivers.setDutyStatus(driverId, isGoingOnline);
     if (updated === undefined) throw AppError.notFound('Your profile could not be found.');
+
+    if (this.dutySessions) {
+      if (isGoingOnline) {
+        await this.dutySessions.startSession(driverId);
+      } else {
+        await this.dutySessions.endActiveSession(driverId);
+      }
+    }
 
     return { isOnDuty: updated.isOnDuty };
   }

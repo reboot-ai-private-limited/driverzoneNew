@@ -38,6 +38,7 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
       entryType: entry.entryType,
       amountPaise: entry.amountPaise,
       note: entry.note ?? null,
+      payoutId: entry.payoutId ? new mongoose.Types.ObjectId(entry.payoutId) : null,
     }));
 
     try {
@@ -77,8 +78,17 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
     driverId: string,
     page: number,
     limit: number,
+    fromDate?: Date,
+    toDate?: Date,
   ): Promise<{ entries: LedgerEntry[]; totalItems: number }> {
     if (!mongoose.isValidObjectId(driverId)) return { entries: [], totalItems: 0 };
+
+    const query: any = { driverId: new mongoose.Types.ObjectId(driverId) };
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = fromDate;
+      if (toDate) query.createdAt.$lte = toDate;
+    }
 
     /*
      * Sorted by `createdAt` DESC then `_id` DESC. The tiebreak is not decoration: several entries
@@ -87,11 +97,11 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
      * UUIDv7-adjacent ObjectId, so it orders by insertion.
      */
     const [entries, totalItems] = await Promise.all([
-      DriverEarningModel.find({ driverId })
+      DriverEarningModel.find(query)
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit),
-      DriverEarningModel.countDocuments({ driverId }),
+      DriverEarningModel.countDocuments(query),
     ]);
 
     return {
@@ -108,6 +118,20 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
       { $match: { driverId: new mongoose.Types.ObjectId(driverId) } },
       { $sort: { createdAt: -1, _id: -1 } },
       { $limit: count },
+      { $group: { _id: null, total: { $sum: '$amountPaise' } } },
+    ]);
+
+    return row?.total ?? 0;
+  }
+
+  async sumNewerThan(driverId: string, date: Date, id: string): Promise<number> {
+    if (!mongoose.isValidObjectId(driverId) || !mongoose.isValidObjectId(id)) return 0;
+
+    const [row] = await DriverEarningModel.aggregate<{ total: number }>([
+      { $match: {
+        driverId: new mongoose.Types.ObjectId(driverId),
+        $or: [{ createdAt: { $gt: date } }, { createdAt: date, _id: { $gt: new mongoose.Types.ObjectId(id) } }]
+      } },
       { $group: { _id: null, total: { $sum: '$amountPaise' } } },
     ]);
 

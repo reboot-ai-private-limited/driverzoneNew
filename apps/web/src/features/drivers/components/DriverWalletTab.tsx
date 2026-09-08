@@ -1,11 +1,14 @@
 'use client';
 
-import { Wallet, IndianRupee, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { useState } from 'react';
+import { Wallet, IndianRupee, ArrowDownRight, ArrowUpRight, Search, X } from 'lucide-react';
 import type { LedgerEntryDto, TransactionType } from '@driverzone/contracts';
 import {
   Badge,
+  Button,
   DataState,
   DataTable,
+  Input,
   Panel,
   SkeletonTable,
   type Column,
@@ -17,7 +20,12 @@ import { useDriverWallet } from '../hooks/useDriverDetails';
 const COLUMN_WIDTHS = ['w-32', 'w-48', 'w-64', 'w-32', 'w-32'];
 
 export function DriverWalletTab({ driverId }: { driverId: string }) {
-  const query = useDriverWallet(driverId);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [appliedFrom, setAppliedFrom] = useState('');
+  const [appliedTo, setAppliedTo] = useState('');
+
+  const query = useDriverWallet(driverId, appliedFrom, appliedTo);
 
   const columns: Column<LedgerEntryDto>[] = [
     {
@@ -155,6 +163,42 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
       </div>
 
       <Panel title="Ledger History">
+        <div className="flex flex-col sm:flex-row gap-3 mb-4 items-end">
+          <div className="flex-1 max-w-[200px]">
+            <label htmlFor="wallet-from-date" className="block text-xs font-medium text-text-subtle mb-1">From Date</label>
+            <Input
+              id="wallet-from-date"
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+            />
+          </div>
+          <div className="flex-1 max-w-[200px]">
+            <label htmlFor="wallet-to-date" className="block text-xs font-medium text-text-subtle mb-1">To Date</label>
+            <Input
+              id="wallet-to-date"
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="secondary"
+            icon={<Search className="size-4" />}
+            onClick={() => { setAppliedFrom(fromDate); setAppliedTo(toDate); }}
+          >
+            Filter
+          </Button>
+          {(appliedFrom || appliedTo) && (
+            <Button
+              variant="secondary"
+              icon={<X className="size-4" />}
+              onClick={() => { setFromDate(''); setToDate(''); setAppliedFrom(''); setAppliedTo(''); }}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
         <DataState
           loading={false}
           skeleton={<></>}

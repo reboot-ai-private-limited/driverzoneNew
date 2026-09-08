@@ -35,20 +35,28 @@ export class GetDriverWalletUseCase {
     private readonly settings: SettingsReadContract,
   ) {}
 
-  async execute(driverId: string, page: number, limit: number): Promise<DriverWallet> {
+  async execute(driverId: string, page: number, limit: number, fromDate?: Date, toDate?: Date): Promise<DriverWallet> {
     const [balancePaise, lifetimeEarningsPaise, pageResult, snapshot] = await Promise.all([
       this.repo.sumForDriver(driverId),
       this.repo.sumEarningsForDriver(driverId),
-      this.repo.pageForDriver(driverId, page, limit),
+      this.repo.pageForDriver(driverId, page, limit, fromDate, toDate),
       this.settings.snapshot(),
     ]);
 
     const maxDebtPaise = rupeesToPaise(snapshot['driver.max_negative_balance']);
 
-    // Everything newer than this page, so the walk starts from the right number rather than from
-    // the current balance on every page.
-    const newerRows = (page - 1) * limit;
-    const newerSum = newerRows > 0 ? await this.repo.sumMostRecentForDriver(driverId, newerRows) : 0;
+    // Everything newer than the first row of this page, so the walk starts from the right number
+    // even if the page itself was fetched with date filters.
+    let newerSum = 0;
+    const first = pageResult.entries[0];
+    if (first !== undefined) {
+      newerSum = await this.repo.sumNewerThan(driverId, first.createdAt, first.id);
+    } else {
+      // If the page is empty, the anchor balance is just the current balance minus anything newer
+      // than the toDate (if provided). But since there are no rows to display, the anchor balance
+      // doesn't matter for rendering anyway. We can just use 0.
+      newerSum = 0;
+    }
 
     return {
       balancePaise,

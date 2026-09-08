@@ -11,6 +11,8 @@ import type {
   DriverListFilter,
   PaginatedDrivers,
   DriverProfileRepositoryPort,
+  LiveDriverRecord,
+  LiveDriverFilter,
 } from '../domain/driverProfile.repository.port.js';
 import { DriverModel } from './driver.model.js';
 
@@ -33,6 +35,13 @@ interface RawDriver {
   onboardingRejectionReason?: string | null;
   isVerified?: boolean;
   isOnDuty?: boolean;
+  isBlocked?: boolean;
+  blockedReason?: string | null;
+  rating?: number;
+  ratingCount?: number;
+  totalTrips?: number;
+  lastRideAt?: Date | null;
+  createdAt?: Date;
 }
 
 function toDomain(doc: RawDriver): DriverProfile {
@@ -59,6 +68,13 @@ function toDomain(doc: RawDriver): DriverProfile {
     onboardingRejectionReason: doc.onboardingRejectionReason ?? null,
     isVerified: doc.isVerified ?? false,
     isOnDuty: doc.isOnDuty ?? false,
+    isBlocked: doc.isBlocked ?? false,
+    blockedReason: doc.blockedReason ?? null,
+    joinedAt: doc.createdAt ?? new Date(),
+    rating: doc.rating ?? 5.0,
+    ratingCount: doc.ratingCount ?? 0,
+    totalTrips: doc.totalTrips ?? doc.ratingCount ?? 0,
+    lastRideAt: doc.lastRideAt ?? null,
   };
 }
 
@@ -220,5 +236,72 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
       .lean()
       .exec();
     return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async verifyHillDriving(driverId: string, verified: boolean): Promise<DriverProfile | undefined> {
+    if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;
+
+    const doc = await DriverModel.findByIdAndUpdate(
+      driverId,
+      { $set: { canDriveHillVerified: verified } },
+      { new: true }
+    ).lean().exec();
+    return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async setBlockedStatus(driverId: string, isBlocked: boolean, reason: string | null): Promise<DriverProfile | undefined> {
+    if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;
+
+    const setPayload: Record<string, any> = {
+      isBlocked,
+      blockedReason: isBlocked ? (reason ?? null) : null,
+    };
+    // If the driver is being blocked, force them off-duty so they can't stay online
+    if (isBlocked) {
+      setPayload.isOnDuty = false;
+    }
+
+    const doc = await DriverModel.findByIdAndUpdate(
+      driverId,
+      { $set: setPayload },
+      { new: true }
+    ).lean().exec();
+    return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async findLiveDrivers(filter?: LiveDriverFilter): Promise<LiveDriverRecord[]> {
+    const query: Record<string, unknown> = {
+      'lastLocation.coordinates': { $exists: true, $ne: null },
+      lastLocationAt: { $ne: null },
+      isBlocked: { $ne: true },
+    };
+
+    if (filter?.dutyOnly) {
+      query.isOnDuty = true;
+    }
+
+    if (filter?.maxAgeMinutes) {
+      const cutoff = new Date(Date.now() - filter.maxAgeMinutes * 60_000);
+      query.lastLocationAt = { $gte: cutoff };
+    }
+
+    const docs = await DriverModel.find(query)
+      .select('fullName phone lastLocation lastLocationAt canDriveHill vehicleCategoryPreference isOnDuty')
+      .lean()
+      .exec();
+
+    return docs
+      .filter((doc) => doc.lastLocation && Array.isArray(doc.lastLocation.coordinates) && doc.lastLocation.coordinates.length >= 2)
+      .map((doc) => ({
+        id: String(doc._id),
+        fullName: doc.fullName ?? null,
+        mobileNumber: doc.phone,
+        lat: doc.lastLocation!.coordinates[1]!,
+        lng: doc.lastLocation!.coordinates[0]!,
+        lastLocationAt: doc.lastLocationAt ?? new Date(),
+        canDriveHill: doc.canDriveHill ?? false,
+        vehicleCategories: (doc.vehicleCategoryPreference ?? []) as CarCategory[],
+        isOnDuty: doc.isOnDuty ?? false,
+      }));
   }
 }

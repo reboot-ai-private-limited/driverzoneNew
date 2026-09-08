@@ -1,10 +1,12 @@
 import type {
   AdminDriverWalletDetailsDto,
   LedgerEntryDto,
+  PayoutDto,
   TransactionType,
 } from '@driverzone/contracts';
 import type { LedgerEntry } from '../domain/ledgerEntry.entity.js';
 import type { DriverWallet } from '../application/useCases/getDriverWallet.usecase.js';
+import type { Payout } from '../domain/payout.entity.js';
 
 /**
  * Fallback prose for a row that carries no note of its own.
@@ -66,7 +68,7 @@ export function toWalletDto(
   };
 }
 
-function toEntryDto(driverId: string, entry: LedgerEntry, balanceAfter: number): LedgerEntryDto {
+export function toEntryDto(driverId: string, entry: LedgerEntry, balanceAfter: number): LedgerEntryDto {
   return {
     id: entry.id,
     driver_id: driverId,
@@ -78,3 +80,17 @@ function toEntryDto(driverId: string, entry: LedgerEntry, balanceAfter: number):
     created_at: entry.createdAt.toISOString(),
   };
 }
+
+export function toPayoutDto(payout: Payout): PayoutDto {
+  return {
+    id: payout.id,
+    driver_id: payout.driverId,
+    amount_paise: payout.amountPaise,
+    status: payout.status,
+    utr: payout.utr,
+    notes: payout.notes,
+    created_at: payout.createdAt.toISOString(),
+    processed_at: payout.processedAt ? payout.processedAt.toISOString() : null,
+  };
+}
+

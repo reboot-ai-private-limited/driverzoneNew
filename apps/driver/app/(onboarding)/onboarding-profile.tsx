@@ -50,7 +50,7 @@ interface Draft {
   address: string;
   experienceYears: string;
   alternateNumber: string;
-  vehicleTypePreference: VehicleTypePreference | null;
+  vehicleTypePreferences: readonly VehicleTypePreference[];
   /** Which car categories this driver is competent to drive. Server caps the array at 20. */
   vehicleCategoryPreference: readonly CarCategory[];
   /** Both halves are required together — the server rejects a name with no number. */
@@ -205,7 +205,9 @@ export default function OnboardingProfileScreen(): ReactElement {
       experienceYears:
         profile.data.experience_years === null ? '' : String(profile.data.experience_years),
       alternateNumber: profile.data.alternate_number ?? '',
-      vehicleTypePreference: profile.data.vehicle_type_preference,
+      vehicleTypePreferences: profile.data.vehicle_type_preferences.filter(
+        (code): code is VehicleTypePreference => code in VEHICLE_LABELS,
+      ),
       // The DTO types this as `string[]` because the server stores free codes; narrowing to the
       // ones we can render keeps an unknown value from becoming an unlabelled chip.
       vehicleCategoryPreference: profile.data.vehicle_category_preference.filter(
@@ -262,9 +264,7 @@ export default function OnboardingProfileScreen(): ReactElement {
 
     if (draft.dob !== null) body.dob = toIsoDate(draft.dob);
     if (draft.gender !== null) body.gender = draft.gender;
-    if (draft.vehicleTypePreference !== null) {
-      body.vehicle_type_preference = draft.vehicleTypePreference;
-    }
+    body.vehicle_type_preferences = [...draft.vehicleTypePreferences];
 
     const years = Number.parseInt(draft.experienceYears, 10);
     if (!Number.isNaN(years)) body.experience_years = years;
@@ -449,16 +449,25 @@ export default function OnboardingProfileScreen(): ReactElement {
           {/* Competence, not ownership: the driver drives the CUSTOMER'S car
               (docs/LLD/open-questions.md Q5), so this says what they can handle, not what they
               have parked outside. */}
-          <FieldRow label="Transmission you can drive" boxed={false}>
+          <FieldRow label="Transmission you can drive" hint="(choose any)" boxed={false}>
             <View style={styles.chipRow}>
-              {VEHICLE_OPTIONS.map((value) => (
-                <Chip
-                  key={value}
-                  label={VEHICLE_LABELS[value]}
-                  selected={draft.vehicleTypePreference === value}
-                  onPress={() => patch({ vehicleTypePreference: value })}
-                />
-              ))}
+              {VEHICLE_OPTIONS.map((value) => {
+                const selected = draft.vehicleTypePreferences.includes(value);
+                return (
+                  <Chip
+                    key={value}
+                    label={VEHICLE_LABELS[value]}
+                    selected={selected}
+                    onPress={() =>
+                      patch({
+                        vehicleTypePreferences: selected
+                          ? draft.vehicleTypePreferences.filter((code) => code !== value)
+                          : [...draft.vehicleTypePreferences, value],
+                      })
+                    }
+                  />
+                );
+              })}
             </View>
           </FieldRow>
 

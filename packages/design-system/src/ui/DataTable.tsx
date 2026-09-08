@@ -30,14 +30,11 @@ export interface DataTableProps<Row> {
   onRowClick?: (row: Row) => void;
   /** Dims the body while a refetch is in flight, without removing a single row. */
   refetching?: boolean;
+  density?: 'dense' | 'comfortable';
 }
 
 /**
- * A dense table. Hairline rules, no shadow, no zebra striping — striping doubles the visual
- * weight of a 20-row table to solve a problem that row height and a hover state already solve.
- *
- * The header is sticky, because scrolling 128 rows past a header you can no longer see is the
- * single most common complaint about an admin table.
+ * A clean data table with hairline rules and sticky header.
  */
 export function DataTable<Row>({
   columns,
@@ -47,6 +44,7 @@ export function DataTable<Row>({
   onSortChange,
   onRowClick,
   refetching = false,
+  density = 'comfortable',
 }: DataTableProps<Row>) {
   const toggle = (key: string): void => {
     if (onSortChange === undefined) return;
@@ -75,7 +73,8 @@ export function DataTable<Row>({
                     : undefined
                 }
                 className={cn(
-                  'h-9 px-4 text-xs font-medium text-text-subtle whitespace-nowrap',
+                  density === 'dense' ? 'h-9 px-4' : 'h-11 px-4',
+                  'text-xs font-semibold text-text-subtle whitespace-nowrap',
                   'border-b border-border',
                   col.align === 'right' ? 'text-right' : 'text-left',
                   col.width,
@@ -126,7 +125,8 @@ export function DataTable<Row>({
                 <td
                   key={col.key}
                   className={cn(
-                    'px-4 py-2 align-middle',
+                    density === 'dense' ? 'px-4 py-2' : 'px-4 py-3.5',
+                    'align-middle',
                     col.align === 'right' ? 'text-right' : 'text-left',
                     col.numeric === true && 'tnum',
                   )}

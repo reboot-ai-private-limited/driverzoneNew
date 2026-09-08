@@ -63,4 +63,15 @@ export class MongoAccountDirectory {
     await DriverModel.updateOne({ _id: id }, { $set: { rating: average, ratingCount: count } })
       .exec();
   }
+
+  /** Increments completed trip counter and updates last ride timestamp. */
+  async recordCompletedRide(driverId: string, completedAt: Date): Promise<void> {
+    await DriverModel.updateOne(
+      { _id: driverId },
+      {
+        $inc: { totalTrips: 1 },
+        $set: { lastRideAt: completedAt },
+      }
+    ).exec();
+  }
 }

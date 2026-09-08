@@ -7,11 +7,13 @@ import type {
   AdminDriverListDto,
   AdminDriverDetailsDto,
   AdminDriverDutyHistoryDto,
+  AdminLiveDriversResponse,
   DriverProfileDto,
   DriverDocumentDto,
   ApproveDriverResponse,
   RejectDriverResponse,
   ReviewDocumentResponse,
+  SuspendDriverResponse,
   SavedAddressDto,
   VehicleDto,
 } from '@driverzone/contracts';
@@ -24,6 +26,9 @@ import type { ListDriversAdminUseCase } from '../application/useCases/listDriver
 import type { GetDriverDetailsAdminUseCase } from '../application/useCases/getDriverDetailsAdmin.usecase.js';
 import type { ListCustomersAdminUseCase } from '../application/useCases/listCustomersAdmin.usecase.js';
 import type { ManageCustomerAdminUseCase } from '../application/useCases/manageCustomerAdmin.usecase.js';
+import type { ManageDriverAdminUseCase } from '../application/useCases/manageDriverAdmin.usecase.js';
+import type { GetDriverDutyHistoryAdminUseCase } from '../application/useCases/getDriverDutyHistoryAdmin.usecase.js';
+import type { GetLiveDriversAdminUseCase } from '../application/useCases/getLiveDriversAdmin.usecase.js';
 import type { DriverProfile } from '../domain/driverProfile.repository.port.js';
 import type { DriverDocument } from '../domain/driverDocument.repository.port.js';
 import type { SavedAddress, Vehicle } from '../domain/customerProfile.entity.js';
@@ -34,9 +39,14 @@ import {
   updateAdminProfileSchema,
   adminDriverListQuerySchema,
   driverIdParamSchema,
+  adminDriverDutyHistoryQuerySchema,
+  suspendDriverSchema,
   adminCustomerListQuerySchema,
   adminUpdateCustomerSchema,
+  adminUpdateDriverSchema,
   customerIdParamSchema,
+  verifyHillDrivingSchema,
+  adminLiveDriversQuerySchema,
 } from './identity.validation.js';
 
 /**
@@ -47,6 +57,9 @@ import {
  * never taken from the request — it is what every audit entry is attributed to, and an
  * attributable-to-anyone audit log is not an audit log.
  */
+
+import type { AdminDriverListItem } from '../application/useCases/listDriversAdmin.usecase.js';
+import type { AdminDriverListItemDto } from '@driverzone/contracts';
 
 function actorId(req: Request): string {
   const id = req.principal?.sub;
@@ -78,6 +91,31 @@ function mapDriverProfileToDto(driver: DriverProfile, profilePictureUrl: string 
     onboarding_rejection_reason: driver.onboardingRejectionReason,
     is_verified: driver.isVerified,
     is_on_duty: driver.isOnDuty,
+  };
+}
+
+function mapDriverToListItemDto(item: AdminDriverListItem): AdminDriverListItemDto {
+  return {
+    id: item.profile.id,
+    mobile_number: item.profile.mobileNumber,
+    full_name: item.profile.fullName,
+    profile_picture_url: item.profilePictureUrl,
+    joined_at: item.profile.joinedAt.toISOString(),
+    last_ride_at: item.lastRideAt ? item.lastRideAt.toISOString() : null,
+    vehicle_type_preferences: item.profile.vehicleTypePreferences,
+    vehicle_category_preference: item.profile.vehicleCategoryPreference,
+    can_drive_hill: item.profile.canDriveHill,
+    can_drive_hill_verified: item.profile.canDriveHillVerified,
+    is_verified: item.profile.isVerified,
+    is_on_duty: item.profile.isOnDuty,
+    onboarding_status: item.profile.onboardingStatus,
+    is_suspended: item.profile.isBlocked,
+    suspension_reason: item.profile.blockedReason ?? null,
+    dl_expiry: item.dlExpiry ? item.dlExpiry.toISOString().split('T')[0]! : null,
+    dl_number: item.dlNumber,
+    address: item.profile.address,
+    rating: item.rating,
+    total_trips: item.totalTrips,
   };
 }
 
@@ -195,6 +233,9 @@ export interface AdminControllerDeps {
   verifyDriver: VerifyDriverUseCase;
   listDrivers: ListDriversAdminUseCase;
   getDriverDetails: GetDriverDetailsAdminUseCase;
+  manageDriver: ManageDriverAdminUseCase;
+  getDriverDutyHistory: GetDriverDutyHistoryAdminUseCase;
+  getLiveDrivers: GetLiveDriversAdminUseCase;
   listCustomers: ListCustomersAdminUseCase;
   manageCustomer: ManageCustomerAdminUseCase;
 }
@@ -206,8 +247,12 @@ export interface AdminControllers {
   rejectDriver: RequestHandler;
   reviewDocument: RequestHandler;
   listDrivers: RequestHandler;
+  getLiveDrivers: RequestHandler;
   getDriverDetails: RequestHandler;
+  updateDriver: RequestHandler;
   getDriverDutyHistory: RequestHandler;
+  verifyHillDriving: RequestHandler;
+  suspendDriver: RequestHandler;
   listCustomers: RequestHandler;
   getCustomerDetails: RequestHandler;
   updateCustomer: RequestHandler;
@@ -287,7 +332,7 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
       );
 
       const body: AdminDriverListDto = {
-        drivers: drivers.map(d => mapDriverProfileToDto(d)),
+        drivers: drivers.map(mapDriverToListItemDto),
         pagination: {
           page: input.page,
           limit: input.limit,
@@ -298,32 +343,121 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
       sendSuccess(req, res, body, 'Drivers listed');
     }),
 
+    getLiveDrivers: asyncHandler(async (req, res) => {
+      const query = adminLiveDriversQuerySchema.parse(req.query);
+      const result = await deps.getLiveDrivers.execute({
+        dutyOnly: query.duty_only,
+        maxAgeMinutes: query.max_age_minutes,
+      });
+
+      const body: AdminLiveDriversResponse = {
+        drivers: result.drivers.map((d) => ({
+          id: d.id,
+          full_name: d.fullName,
+          mobile_number: d.mobileNumber,
+          lat: d.lat,
+          lng: d.lng,
+          last_location_at: d.lastLocationAt.toISOString(),
+          can_drive_hill: d.canDriveHill,
+          vehicle_categories: d.vehicleCategories,
+          is_on_duty: d.isOnDuty,
+        })),
+        total_active: result.totalActive,
+      };
+
+      sendSuccess(req, res, body, 'Live drivers retrieved');
+    }),
+
     getDriverDetails: asyncHandler(async (req, res) => {
       const { id } = driverIdParamSchema.parse(req.params);
       const { profile, documents } = await deps.getDriverDetails.execute(id);
 
       const body: AdminDriverDetailsDto = {
-        profile: mapDriverProfileToDto(profile, profile.profilePictureUrl),
+        profile: {
+          ...mapDriverProfileToDto(profile, profile.profilePictureUrl),
+          is_suspended: profile.isBlocked,
+          suspension_reason: profile.blockedReason ?? null,
+        },
         documents: documents.map((doc) => mapDriverDocumentToDto(doc, doc.url)),
       };
       sendSuccess(req, res, body, 'Driver details retrieved');
     }),
 
+    updateDriver: asyncHandler(async (req, res) => {
+      const { id } = driverIdParamSchema.parse(req.params);
+      const input = adminUpdateDriverSchema.parse(req.body);
+
+      const updated = await deps.manageDriver.update(
+        id,
+        {
+          ...(input.full_name === undefined ? {} : { fullName: input.full_name }),
+          ...(input.dob === undefined
+            ? {}
+            : { dob: input.dob === null ? null : fromDateOnly(input.dob) }),
+          ...(input.gender === undefined ? {} : { gender: input.gender }),
+          ...(input.experience_years === undefined ? {} : { experienceYears: input.experience_years }),
+          ...(input.alternate_number === undefined ? {} : { alternatePhone: input.alternate_number }),
+          ...(input.emergency_contact === undefined
+            ? {}
+            : {
+                emergencyContact:
+                  input.emergency_contact === null
+                    ? null
+                    : {
+                        name: input.emergency_contact.name,
+                        phone: input.emergency_contact.number,
+                      },
+              }),
+          ...(input.address === undefined ? {} : { address: input.address }),
+          ...(input.vehicle_type_preferences === undefined
+            ? {}
+            : { vehicleTypePreferences: input.vehicle_type_preferences }),
+          ...(input.vehicle_category_preference === undefined
+            ? {}
+            : { vehicleCategoryPreference: input.vehicle_category_preference }),
+          ...(input.can_drive_hill === undefined ? {} : { canDriveHill: input.can_drive_hill }),
+        },
+        { adminId: actorId(req), ip: req.ip },
+      );
+
+      sendSuccess(req, res, mapDriverProfileToDto(updated), 'Driver updated');
+    }),
+
     getDriverDutyHistory: asyncHandler(async (req, res) => {
       const { id } = driverIdParamSchema.parse(req.params);
+      const query = adminDriverDutyHistoryQuerySchema.parse(req.query);
 
-      // Return empty real data until the dispatch/duty module is integrated
-      const body: AdminDriverDutyHistoryDto = {
-        sessions: [],
-        pagination: {
-          page: 1,
-          limit: 10,
-          total_items: 0,
-          total_pages: 1,
-        },
-      };
-
+      const body = await deps.getDriverDutyHistory.execute(id, query.page, query.limit);
       sendSuccess(req, res, body, 'Driver duty history retrieved');
+    }),
+
+    verifyHillDriving: asyncHandler(async (req, res) => {
+      const { id } = driverIdParamSchema.parse(req.params);
+      const input = verifyHillDrivingSchema.parse(req.body);
+
+      const driver = await deps.verifyDriver.verifyHillDriving(id, input.verified, {
+        adminId: actorId(req),
+        ip: req.ip,
+      });
+
+      const body = { can_drive_hill_verified: driver.canDriveHillVerified };
+      sendSuccess(req, res, body, `Hill driving ${input.verified ? 'verified' : 'unverified'}`);
+    }),
+
+    suspendDriver: asyncHandler(async (req, res) => {
+      const { id } = driverIdParamSchema.parse(req.params);
+      const input = suspendDriverSchema.parse(req.body);
+
+      const driver = await deps.verifyDriver.setSuspendedStatus(id, input.is_suspended, input.reason, {
+        adminId: actorId(req),
+        ip: req.ip,
+      });
+
+      const body: SuspendDriverResponse = {
+        is_suspended: driver.isBlocked,
+        reason: driver.blockedReason ?? null,
+      };
+      sendSuccess(req, res, body, `Driver ${input.is_suspended ? 'suspended' : 'reinstated'}`);
     }),
 
     listCustomers: asyncHandler(async (req, res) => {

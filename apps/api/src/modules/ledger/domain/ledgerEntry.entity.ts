@@ -68,6 +68,7 @@ export interface NewLedgerEntry {
   entryType: LedgerEntryType;
   amountPaise: number;
   note?: string | null;
+  payoutId?: string | null;
 }
 
 /**

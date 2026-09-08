@@ -96,6 +96,7 @@ export function buildContainers(): AppContainers {
     ledger: ledger.contract,
     wallet: wallet.contract,
     notifications: notifications.contract,
+    identity: identity.contract,
     scheduleDispatch: (booking) => enqueueDispatch(booking.id, booking.dispatchAt),
   });
 

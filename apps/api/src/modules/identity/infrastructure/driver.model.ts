@@ -47,6 +47,8 @@ export interface DriverDoc {
 
   rating: number;
   ratingCount: number;
+  totalTrips: number;
+  lastRideAt?: Date | null;
   acceptanceRate?: number | null;
   walletBalancePaise: number;
   lastLocation?: { type: 'Point'; coordinates: number[] } | null;
@@ -123,6 +125,8 @@ const driverSchema = new Schema<DriverDoc>(
 
     rating: { type: Number, default: 5.0 },
     ratingCount: { type: Number, default: 0 },
+    totalTrips: { type: Number, default: 0 },
+    lastRideAt: { type: Date, default: null },
     acceptanceRate: { type: Number, default: null },
     walletBalancePaise: { type: Number, default: 0 },
 

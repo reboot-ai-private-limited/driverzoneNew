@@ -410,6 +410,24 @@ export interface RejectDriverResponse {
   onboarding_status: OnboardingStatus;
 }
 
+export interface VerifyHillDrivingRequest {
+  verified: boolean;
+}
+
+export interface VerifyHillDrivingResponse {
+  can_drive_hill_verified: boolean;
+}
+
+export interface SuspendDriverRequest {
+  is_suspended: boolean;
+  reason?: string;
+}
+
+export interface SuspendDriverResponse {
+  is_suspended: boolean;
+  reason?: string | null;
+}
+
 export interface ReviewDocumentRequest {
   status: DocumentStatus;
   reason?: string | undefined;
@@ -420,8 +438,31 @@ export interface ReviewDocumentResponse {
   status: DocumentStatus;
 }
 
+export interface AdminDriverListItemDto {
+  id: string;
+  mobile_number: string;
+  full_name: string | null;
+  profile_picture_url?: string | null;
+  joined_at: string;
+  last_ride_at: string | null;
+  vehicle_type_preferences: VehicleTypePreference[];
+  vehicle_category_preference: CarCategory[];
+  can_drive_hill: boolean;
+  can_drive_hill_verified: boolean;
+  is_verified: boolean;
+  is_on_duty: boolean;
+  onboarding_status: OnboardingStatus;
+  is_suspended: boolean;
+  suspension_reason?: string | null;
+  dl_expiry: string | null;
+  dl_number?: string | null;
+  address?: string | null;
+  rating?: number | null;
+  total_trips?: number | null;
+}
+
 export interface AdminDriverListDto {
-  drivers: DriverProfileDto[];
+  drivers: AdminDriverListItemDto[];
   pagination: {
     page: number;
     limit: number;
@@ -431,7 +472,10 @@ export interface AdminDriverListDto {
 }
 
 export interface AdminDriverDetailsDto {
-  profile: DriverProfileDto;
+  profile: DriverProfileDto & {
+    is_suspended: boolean;
+    suspension_reason?: string | null;
+  };
   documents: DriverDocumentDto[];
 }
 
@@ -512,3 +556,65 @@ export interface AdminUpdateCustomerRequest {
   alternate_number?: string | null | undefined;
   is_blocked?: boolean | undefined;
 }
+
+/**
+ * What an ADMIN may change on a driver's profile directly.
+ */
+export interface AdminUpdateDriverRequest {
+  full_name?: string | undefined;
+  dob?: string | null | undefined;
+  gender?: Gender | null | undefined;
+  experience_years?: number | null | undefined;
+  alternate_number?: string | null | undefined;
+  emergency_contact?: EmergencyContactDto | null | undefined;
+  address?: string | null | undefined;
+  vehicle_type_preferences?: VehicleTypePreference[] | undefined;
+  vehicle_category_preference?: CarCategory[] | undefined;
+  can_drive_hill?: boolean | undefined;
+}
+
+/**
+ * Driver location entry for the live ops console and live map.
+ */
+export interface AdminLiveDriverDto {
+  id: string;
+  full_name: string | null;
+  mobile_number: string;
+  lat: number;
+  lng: number;
+  last_location_at: string;
+  can_drive_hill: boolean;
+  vehicle_categories: CarCategory[];
+  is_on_duty: boolean;
+}
+
+export interface AdminLiveDriversResponse {
+  drivers: AdminLiveDriverDto[];
+  total_active: number;
+}
+
+export type DriverAlertType = 'DOCUMENT_EXPIRING' | 'DOCUMENT_EXPIRED' | 'WALLET_NEGATIVE';
+export type AlertSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM';
+
+export interface AdminDriverAlertDto {
+  id: string;
+  driver_id: string;
+  driver_name: string;
+  driver_phone: string;
+  alert_type: DriverAlertType;
+  severity: AlertSeverity;
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AdminDriverAlertsResponse {
+  alerts: AdminDriverAlertDto[];
+  counts: {
+    critical: number;
+    high: number;
+    medium: number;
+    total: number;
+  };
+}
+

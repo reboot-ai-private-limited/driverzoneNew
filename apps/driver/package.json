@@ -10,7 +10,8 @@
     "prebuild": "expo prebuild",
     "build": "echo 'Android: apps/driver/android → ./gradlew bundleRelease. Driver is Android-only — see docs/engineering/build-and-deploy.md'",
     "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@driverzone/contracts": "workspace:*",

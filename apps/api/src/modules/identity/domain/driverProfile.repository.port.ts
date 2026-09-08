@@ -27,6 +27,13 @@ export interface DriverProfile {
   isVerified: boolean;
   /** Currently on duty. What `MongoDriverPool` filters on when picking who to ring. */
   isOnDuty: boolean;
+  isBlocked: boolean;
+  blockedReason?: string | null;
+  joinedAt: Date;
+  rating?: number;
+  ratingCount?: number;
+  totalTrips?: number;
+  lastRideAt?: Date | null;
 }
 
 export interface DriverProfilePatch {
@@ -102,4 +109,41 @@ export interface DriverProfileRepositoryPort {
     driverId: string,
     fix: { lat: number; lng: number; recordedAt: Date },
   ): Promise<DriverProfile | undefined>;
+
+  /**
+   * Explicit admin verification for hill driving.
+   *
+   * This is what actual hill dispatch checks, not the driver's self-declared `canDriveHill`.
+   */
+  verifyHillDriving(driverId: string, verified: boolean): Promise<DriverProfile | undefined>;
+
+  /**
+   * Suspends or reinstates a driver.
+   *
+   * An isBlocked driver cannot log in and cannot go on duty.
+   */
+  setBlockedStatus(driverId: string, isBlocked: boolean, reason: string | null): Promise<DriverProfile | undefined>;
+
+  /**
+   * Finds drivers with recent locations for the live ops map.
+   */
+  findLiveDrivers(filter?: LiveDriverFilter): Promise<LiveDriverRecord[]>;
 }
+
+export interface LiveDriverRecord {
+  id: string;
+  fullName: string | null;
+  mobileNumber: string;
+  lat: number;
+  lng: number;
+  lastLocationAt: Date;
+  canDriveHill: boolean;
+  vehicleCategories: CarCategory[];
+  isOnDuty: boolean;
+}
+
+export interface LiveDriverFilter {
+  dutyOnly?: boolean | undefined;
+  maxAgeMinutes?: number | undefined;
+}
+

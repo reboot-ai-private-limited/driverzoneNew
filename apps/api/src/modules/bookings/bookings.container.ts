@@ -6,6 +6,7 @@ import type { NotificationsContract } from '../notifications/notifications.publi
 import type { PaymentsContract } from '../payments/payments.public.js';
 import type { QuoteConsumptionContract } from '../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../settings/settings.public.js';
+import type { IdentityPublicContract } from '../identity/identity.public.js';
 import type { BookingsPublicContract, ClaimResult } from './bookings.public.js';
 import { MongoBookingRepository } from './infrastructure/bookingRepository.impl.js';
 import { MongoChargeRepository } from './infrastructure/chargeRepository.impl.js';
@@ -42,6 +43,7 @@ export interface BookingsDependencies {
   /** The CUSTOMER wallet: credit off a fare, debt onto it, and where a fee becomes a debt. */
   wallet: WalletPublicContract;
   notifications: NotificationsContract;
+  identity: IdentityPublicContract;
   /**
    * Enqueues the dispatch job for a confirmed booking.
    *
@@ -111,6 +113,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     deps.ledger,
     deps.payments,
     deps.notifications,
+    deps.identity,
   );
   const reportPin = new ReportPickupPinUseCase(repo, charges);
   const forceArrive = new ForceArriveUseCase(repo, deps.notifications);

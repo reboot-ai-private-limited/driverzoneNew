@@ -3,7 +3,6 @@
 import { Clock, Route } from 'lucide-react';
 import type { DutySessionDto } from '@driverzone/contracts';
 import {
-  Badge,
   DataState,
   DataTable,
   Panel,

@@ -59,4 +59,18 @@ export interface PushSenderPort {
   cancelOffer(driverId: string, offerId: string, reason: string): Promise<void>;
 
   sendBookingUpdate(to: Recipient, update: BookingUpdatePush): Promise<void>;
+
+  /**
+   * Tell a driver their shift ended without them — the worker's presence sweep took them off duty
+   * because their handset stopped reporting.
+   *
+   * The one push in this port aimed at an app that is probably NOT RUNNING, which is what makes it
+   * different from everything above. The others exist to reach a live process; this one exists
+   * precisely because the process died, and it is the only way a driver learns that the app they
+   * left "online" has been offline for an hour.
+   *
+   * Best effort, and it must not throw: the sweep has other drivers to take offline and a failed
+   * notification is not a reason to leave the rest on duty.
+   */
+  sendDutyEnded(driverId: string): Promise<void>;
 }

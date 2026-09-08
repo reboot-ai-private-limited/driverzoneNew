@@ -71,6 +71,16 @@ export interface IdentityContainer {
    * here rather than in `routes.ts` keeps the mount list at three entries as endpoints grow.
    */
   buildRoleRouter: (role: Role) => Router;
+
+  /**
+   * Take on-duty drivers who have stopped reporting their position off duty, and return their ids.
+   *
+   * On the container rather than in `contract` because the caller is the WORKER's sweeper, not
+   * another module — nothing in the tier graph needs this, and putting it on the public contract
+   * would invite something to. Same placement as `bookings.sweepAbandonedPayments` for the same
+   * reason.
+   */
+  sweepStalePresence: (cutoff: Date, limit: number) => Promise<string[]>;
 }
 
 export function buildIdentityContainer(): IdentityContainer {
@@ -237,6 +247,10 @@ export function buildIdentityContainer(): IdentityContainer {
   const directory = new MongoAccountDirectory(documentStorage);
 
   return {
+    // The worker's presence sweep. See the note on `IdentityContainer` for why it sits here and
+    // not on the public contract.
+    sweepStalePresence: (cutoff, limit) => drivers.sweepStalePresence(cutoff, limit),
+
     contract: {
       // The read side and the rating cache. Consumed by `reviews`, which renders names in the
       // admin ledger and writes back the rolling average it computes.

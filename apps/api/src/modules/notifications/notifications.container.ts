@@ -47,6 +47,7 @@ export function buildNotificationsContainer(): NotificationsContainer {
         sendOffer: (driverId, offer) => mock.sendOffer(driverId, offer),
         cancelOffer: (driverId, offerId, reason) => mock.cancelOffer(driverId, offerId, reason),
         sendBookingUpdate: (to, update) => mock.sendBookingUpdate(to, update),
+        sendDutyEnded: (driverId) => mock.sendDutyEnded(driverId),
       },
       mock,
     };
@@ -60,6 +61,7 @@ export function buildNotificationsContainer(): NotificationsContainer {
       sendOffer: (driverId, offer) => sender.sendOffer(driverId, offer),
       cancelOffer: (driverId, offerId, reason) => sender.cancelOffer(driverId, offerId, reason),
       sendBookingUpdate: (to, update) => sender.sendBookingUpdate(to, update),
+      sendDutyEnded: (driverId) => sender.sendDutyEnded(driverId),
     },
     mock,
   };

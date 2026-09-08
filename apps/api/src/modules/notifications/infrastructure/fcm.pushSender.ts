@@ -88,6 +88,72 @@ export class FcmPushSender implements PushSenderPort {
     );
   }
 
+  /**
+   * THE ONE MESSAGE THAT CARRIES A `notification` BLOCK, and the exception proves the rule at the
+   * top of this file.
+   *
+   * Every other push here is data-only because the APP has to draw it — a full-screen ringing
+   * intent is something Android cannot build on its own. This one is the opposite case: it is sent
+   * because the driver's process is GONE, so there is nothing left to draw anything. A data-only
+   * message would be handed to a background handler that is not running and would simply be lost,
+   * which is how the driver ends up never being told. A `notification` block is rendered by
+   * Android itself with no app code involved, which is the entire reason to use one here.
+   *
+   * `data` rides along anyway, for the case where the app IS alive — an OEM froze the ping loop
+   * without killing the process — so a running app can refresh its duty state rather than keep
+   * showing "You're online".
+   *
+   * **It will not reach a FORCE-STOPPED app.** Android delivers nothing at all to a package in the
+   * stopped state until the user launches it by hand, and no payload shape changes that (S-1). It
+   * does reach the far more common cases: a reboot, an OEM battery kill, and a low-memory
+   * reclamation.
+   *
+   * Normal priority and a long TTL, deliberately. This is not time-critical the way an offer is —
+   * the shift has already ended — and a high-priority wake would spend the driver's battery to
+   * tell them their battery settings killed the app.
+   */
+  async sendDutyEnded(driverId: string): Promise<void> {
+    const tokens = await this.devices.tokensFor(driverId);
+    if (tokens.length === 0) return;
+
+    try {
+      const response = await this.messaging.sendEachForMulticast({
+        tokens,
+        notification: {
+          title: 'You have been taken offline',
+          body: 'DriverZone stopped reporting your location, so you stopped receiving trips. Open the app to go back on duty.',
+        },
+        data: { type: 'duty.ended' },
+        android: {
+          priority: 'normal',
+          ttl: 24 * 60 * 60_000,
+          notification: {
+            /*
+             * `duty-alert-v1`, NOT the `duty-status` channel the foreground service uses. That one
+             * is LOW importance by design — it is on screen for a whole shift and must never make
+             * a sound — and posting this on it would inherit that silence, for the one message a
+             * driver has to notice. The app declares both in `notifications/channel.ts`; this id
+             * must match the one there or Android drops the notification without a word.
+             */
+            channelId: 'duty-alert-v1',
+            // Tapping it opens the app, which is the only action that fixes anything here.
+            clickAction: 'android.intent.action.MAIN',
+          },
+        },
+      });
+
+      await this.pruneDeadTokens(tokens, response);
+      logger.info(
+        { driverId, sent: response.successCount, failed: response.failureCount },
+        'fcm: duty-ended notice sent',
+      );
+    } catch (error) {
+      // Best effort by contract. The sweep has already taken them off duty, which is the part that
+      // matters; failing to say so must not abort the rest of the batch.
+      logger.error({ err: error, driverId }, 'fcm: duty-ended notice failed');
+    }
+  }
+
   /** Returns whether at least one device took it. */
   private async send(
     driverId: string,

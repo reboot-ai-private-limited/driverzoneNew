@@ -5,6 +5,7 @@ import notifee, {
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { DUTY_CHANNEL_ID } from '@/notifications/channel';
+import { pushLog } from '@/notifications/log';
 
 /**
  * THE FOREGROUND SERVICE — docs/LLD/driver-app.md S-8.
@@ -41,6 +42,24 @@ import { DUTY_CHANNEL_ID } from '@/notifications/channel';
 
 /** One id, so a restart replaces the notice rather than stacking a second one. */
 const DUTY_NOTIFICATION_ID = 'duty-status';
+
+/**
+ * Whether THIS process currently believes the service is up.
+ *
+ * The guard that stops the status-bar flicker. `startDutyForegroundService` is now called from
+ * three places — the boot screen, the Home screen's effect, and the app-resume listener — and
+ * each `notifee.displayNotification({ asForegroundService: true })` re-invokes `startForeground()`
+ * natively, which tears the persistent notification down and re-posts it. On a resume all three
+ * fired inside a second, so the OS re-posted the notice 7–9 times in a row and the shade
+ * flickered. It also restarts Notifee's own sound player, which is why a trip offer arriving in
+ * that window could stutter into silence.
+ *
+ * Reset whenever the service is stopped, or when Android reports it is no longer displayed.
+ */
+let serviceRunning = false;
+
+/** Coalesces concurrent starts — three callers on one resume must do one `displayNotification`. */
+let startInFlight: Promise<boolean> | null = null;
 
 /**
  * Resolves the task promise, which is how the service is allowed to end.
@@ -83,6 +102,34 @@ export function registerDutyForegroundService(): void {
 export async function startDutyForegroundService(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
 
+  /**
+   * Already up in this process — return immediately, touch nothing.
+   *
+   * The flag is the ONLY source of truth here, and that is deliberate. The first version of this
+   * guard cross-checked `notifee.getDisplayedNotifications()` and re-posted when the duty notice
+   * was not in the list — but a FOREGROUND-SERVICE notification does not reliably appear in that
+   * list (confirmed on realme / Android 15: the check fired "notice gone" 0.6s after a successful
+   * start). The result was a re-post on every call, which re-invoked `startForeground()`, which
+   * briefly churned the app's foreground state, which re-fired the app-resume listener that calls
+   * this — a ~1/second feedback loop that also spammed `registerForPush` and kept tearing down
+   * Notifee's audio context so an offer never actually rang.
+   *
+   * `serviceRunning` is cleared in exactly two places: `stopDutyForegroundService` (the driver
+   * went off duty) and the `catch` in `startDutyForegroundServiceInner` (the start genuinely
+   * failed). If Android silently kills the service some other way, the next cold start's
+   * `restoreDutyMachinery` re-establishes it — that path does not depend on this flag.
+   */
+  if (serviceRunning) return true;
+
+  // Coalesce concurrent callers onto one start.
+  if (startInFlight !== null) return startInFlight;
+  startInFlight = startDutyForegroundServiceInner().finally(() => {
+    startInFlight = null;
+  });
+  return startInFlight;
+}
+
+async function startDutyForegroundServiceInner(): Promise<boolean> {
   /**
    * THE GUARD THAT KEEPS THIS FROM KILLING THE APP.
    *
@@ -164,16 +211,26 @@ export async function startDutyForegroundService(): Promise<boolean> {
         visibility: AndroidVisibility.PUBLIC,
       },
     });
+    serviceRunning = true;
+    pushLog('duty FGS: started');
     return true;
-  } catch {
+  } catch (cause) {
     // Notification permission refused, or an OEM that blocks the service outright. Not fatal.
+    pushLog('duty FGS: start failed', { error: String(cause) });
     return false;
   }
+}
+
+/** Whether THIS process has the duty foreground service up. Cheap — just the flag. */
+export function isDutyServiceRunning(): boolean {
+  return serviceRunning;
 }
 
 /** Go off duty. Stops the service and clears the notice; safe when nothing is running. */
 export async function stopDutyForegroundService(): Promise<void> {
   if (Platform.OS !== 'android') return;
+
+  serviceRunning = false;
 
   // Resolve the task first so Notifee's own stop has nothing left holding the service open.
   releaseTask?.();

@@ -15,6 +15,7 @@ import {
   openAutostartSettings,
   openBatterySettings,
 } from '@/features/onboarding/oemIntents';
+import { openFullScreenIntentSettings } from '@/notifications/fullScreenIntent';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
 /**
@@ -38,7 +39,7 @@ import { colors, radius, shadow, space, text } from '@/theme/theme';
 export default function BatterySetupScreen(): ReactElement {
   const family = useMemo(detectOemFamily, []);
   const guide = guideFor(family);
-  const [busy, setBusy] = useState<'battery' | 'autostart' | null>(null);
+  const [busy, setBusy] = useState<'battery' | 'autostart' | 'fullscreen' | null>(null);
 
   /**
    * Whether THIS handset has an OEM autostart / power manager to send the driver to.
@@ -69,14 +70,15 @@ export default function BatterySetupScreen(): ReactElement {
 
   const canGoBack = router.canGoBack();
 
-  async function open(which: 'battery' | 'autostart'): Promise<void> {
+  async function open(which: 'battery' | 'autostart' | 'fullscreen'): Promise<void> {
     setBusy(which);
     try {
       // Seeing the settings page counts as "seen" — the driver has been shown the door even if
       // they do not walk through it, so the forced redirect should not fire again.
       await markBatterySetupSeen();
       if (which === 'battery') await openBatterySettings();
-      else await openAutostartSettings(family);
+      else if (which === 'autostart') await openAutostartSettings(family);
+      else await openFullScreenIntentSettings();
     } finally {
       setBusy(null);
     }
@@ -176,6 +178,22 @@ export default function BatterySetupScreen(): ReactElement {
               <Text style={styles.secondaryText}>Open autostart settings</Text>
             </Pressable>
           ) : null}
+
+          {/*
+            Android 14+ only. The offer is a full-screen "call" notification, and from API 34 that
+            needs a permission the OS hands out to dialers and alarm clocks alone — every other app
+            starts denied, and the ring then shows without waking the screen. There is no runtime
+            prompt; this is the one settings screen that flips it.
+          */}
+          <Pressable
+            onPress={() => void open('fullscreen')}
+            disabled={busy !== null}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+          >
+            <Feather name="maximize" size={16} color={colors.fg} style={styles.secondaryIcon} />
+            <Text style={styles.secondaryText}>Allow full-screen offer alerts</Text>
+          </Pressable>
         </View>
 
         <Text style={styles.hint}>

@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { type ReactElement, useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Logo } from '@/components/Logo';
+import { restoreDutyMachinery } from '@/duty/dutyRecovery';
 import * as session from '@/lib/auth/session';
 import { getInitialOfferHref } from '@/notifications/offerNotification';
 import { colors, space, text } from '@/theme/theme';
@@ -65,10 +66,37 @@ export default function BootScreen(): ReactElement {
       // nothing useful.
       if (cancelled) return;
 
-      if (session.getState().status !== 'authenticated') {
+      /**
+       * `anonymous` is the only status that means SIGNED OUT.
+       *
+       * `booting` here means the race above was won by the timeout, not by `restore()` — the
+       * refresh is still in flight on a slow connection. That says nothing about whether the
+       * driver has a session, so the stored refresh token is the thing to ask, and a driver who
+       * has one carries on to `/gate` rather than being sent to re-enter a phone number they are
+       * already signed in with. The gate's own error state handles it if the request never lands.
+       */
+      const status = session.getState().status;
+      if (status === 'anonymous' || (status === 'booting' && !(await session.hasStoredSession()))) {
         router.replace('/phone');
         return;
       }
+      if (cancelled) return;
+
+      /**
+       * PUT THE DRIVER BACK ON DUTY AT THE OS LEVEL, before deciding where to send them.
+       *
+       * Duty survives being killed — it is server state — but nothing that DELIVERS work does:
+       * the ping loop, the FCM registration and the foreground service all died with the process.
+       * This used to be `home.tsx`'s job, which covered the driver who reopens onto Home and
+       * missed the one who does not: a recovered trip routes straight to `/trip/[id]` below, so
+       * Home never mounts and a driver on a live job stayed invisible to dispatch for the rest of
+       * it.
+       *
+       * Not awaited. It reads a stored flag and starts a service; the first frame must not wait on
+       * either, and it reports its own failures through the duty screen when the driver gets
+       * there.
+       */
+      void restoreDutyMachinery();
 
       /*
        * THE OFFER WINS, by construction rather than by luck. This used to be checked in the root

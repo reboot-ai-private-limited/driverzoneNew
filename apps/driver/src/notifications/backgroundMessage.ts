@@ -1,5 +1,6 @@
 import { getMessaging, setBackgroundMessageHandler, type RemoteMessage } from '@react-native-firebase/messaging';
 import { ensureNotificationChannels } from './channel';
+import { pushLog } from './log';
 import { cancelOfferNotification, displayOfferNotification, type OfferPushData } from './offerNotification';
 
 /**
@@ -14,8 +15,20 @@ import { cancelOfferNotification, displayOfferNotification, type OfferPushData }
  * It must stay small and synchronous-ish. The OS grants a headless task a few seconds; anything
  * that waits on the network here risks being killed mid-ring.
  */
+pushLog('backgroundMessage handler registered');
+
 setBackgroundMessageHandler(getMessaging(), async (remoteMessage: RemoteMessage) => {
   const data = (remoteMessage.data ?? {}) as unknown as OfferPushData;
+
+  // The single most useful line in a field diagnosis: it proves FCM woke the process and what it
+  // handed us. Its ABSENCE when an offer was expected points the finger squarely at the server or
+  // the token, not at anything below.
+  pushLog('backgroundMessage received', {
+    type: data.type ?? '(none)',
+    offerId: data.offerId,
+    messageId: remoteMessage.messageId,
+    from: remoteMessage.from,
+  });
 
   /**
    * NOTHING IN HERE MAY THROW.

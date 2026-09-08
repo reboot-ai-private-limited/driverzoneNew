@@ -1,8 +1,10 @@
 import notifee, { EventType } from '@notifee/react-native';
 import { getMessaging, onMessage, type RemoteMessage } from '@react-native-firebase/messaging';
 import { useEffect } from 'react';
+import { rememberDutyState, teardownDutyMachinery } from '@/duty/dutyRecovery';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { ensureNotificationChannels } from './channel';
+import { pushLog } from './log';
 import {
   cancelOfferNotification,
   displayOfferNotification,
@@ -42,6 +44,14 @@ export function useOfferPushBridge(): void {
     const unsubscribeMessage = onMessage(getMessaging(), (remoteMessage: RemoteMessage) => {
       const data = (remoteMessage.data ?? {}) as unknown as OfferPushData;
 
+      // Foreground counterpart of the log in `backgroundMessage.ts` — proves the push arrived
+      // while the app was open, and which handler took it.
+      pushLog('onMessage received (foreground)', {
+        type: data.type ?? '(none)',
+        offerId: data.offerId,
+        messageId: remoteMessage.messageId,
+      });
+
       if (data.type === 'offer.new') {
         void displayOfferNotification(data);
         if (data.offerId !== undefined) openOffer(offerHref(data.offerId));
@@ -50,6 +60,23 @@ export function useOfferPushBridge(): void {
 
       if (data.type === 'offer.cancelled' && data.offerId !== undefined) {
         void cancelOfferNotification(data.offerId);
+        return;
+      }
+
+      /**
+       * The server's presence sweep took this driver off duty.
+       *
+       * Handled here as well as by Android's own rendering of the notification, because a message
+       * that arrives while the app is in the FOREGROUND is delivered to this callback and is NOT
+       * drawn by the system — so without this branch a running app would ignore it entirely and
+       * carry on showing "You're online" over a duty flag the server has already cleared.
+       *
+       * That combination is exactly the case worth catching: the process survived while an OEM
+       * froze the ping loop, so the flush observer in `locationPings` — the usual way a
+       * server-side duty change reaches this app — never ran to notice.
+       */
+      if (data.type === 'duty.ended') {
+        void rememberDutyState(false).then(() => teardownDutyMachinery());
       }
     });
 

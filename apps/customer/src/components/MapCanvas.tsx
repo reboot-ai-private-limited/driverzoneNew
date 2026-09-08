@@ -1,4 +1,12 @@
-import { type ReactElement, forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import {
+  type ReactElement,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { StyleSheet, View } from 'react-native';
 import MapView, {
   Marker,
@@ -132,30 +140,55 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     [pickup?.lat, pickup?.lng, drop?.lat, drop?.lng],
   );
 
-  // Frame both points the first time a given pickup/drop pair appears. A later `bottomInset`
-  // change (a row added to the sheet) must not re-frame and fight a customer who has since panned.
+  /**
+   * `<Marker>` with a custom child renders BLANK on Android if `tracksViewChanges` is false from
+   * the first frame — the native view needs at least one snapshot pass. So it starts true and is
+   * switched off a moment later, once the pins have rasterised. From then on the markers are
+   * static bitmaps and cost nothing on pan/zoom.
+   */
+  const [tracksChanges, setTracksChanges] = useState(true);
+  // A signature of the current marker set — changes when a pin is added/removed or the user dot
+  // appears/disappears, which is when a fresh snapshot pass is needed.
+  const markerSignature = `${markers.length}:${userLocation === null ? 'no-user' : 'user'}`;
+  useEffect(() => {
+    setTracksChanges(true);
+    const t = setTimeout(() => setTracksChanges(false), 1200);
+    return () => clearTimeout(t);
+  }, [markerSignature]);
+
+  /**
+   * Frame both points the first time a given pickup/drop pair appears. A later `bottomInset`
+   * change (a row added to the sheet) must NOT re-frame and fight a customer who has since panned,
+   * so the effect keys on the coordinate pair only and `bottomInset` is read fresh inside it.
+   */
   const routeKey =
     pickup !== undefined && drop !== undefined
       ? `${pickup.lat},${pickup.lng}|${drop.lat},${drop.lng}`
       : null;
-  if (routeKey !== null && routeKey !== framedTo.current) {
+  useEffect(() => {
+    if (routeKey === null) {
+      framedTo.current = null;
+      return;
+    }
+    if (routeKey === framedTo.current) return;
     framedTo.current = routeKey;
-    // Deferred a tick so it runs after the markers have laid out.
-    setTimeout(() => {
+
+    const [p, d] = routeKey.split('|').map((pair) => pair.split(',').map(Number));
+    const t = setTimeout(() => {
       map.current?.fitToCoordinates(
         [
-          { latitude: pickup!.lat, longitude: pickup!.lng },
-          { latitude: drop!.lat, longitude: drop!.lng },
+          { latitude: p![0]!, longitude: p![1]! },
+          { latitude: d![0]!, longitude: d![1]! },
         ],
         {
           edgePadding: { top: 90, right: 60, bottom: bottomInset + 90, left: 60 },
           animated: true,
         },
       );
-    }, 60);
-  } else if (routeKey === null) {
-    framedTo.current = null;
-  }
+    }, 80);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bottomInset read fresh, not a trigger
+  }, [routeKey]);
 
   return (
     <View style={styles.root}>
@@ -167,9 +200,8 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         // The bottom strip the sheet covers — makes the map's centre the middle of what is
         // actually visible, so the crosshair and the reported coordinate agree.
         mapPadding={{ top: 0, right: 0, bottom: bottomInset, left: 0 }}
-        onRegionChange={(next) => {
-          region.current = next;
-        }}
+        // Only the SETTLED region is needed — for `onRegionSettled` and for `moveTo` to keep the
+        // current span when no zoom is passed. The intermediate `onRegionChange` stream is noise.
         onRegionChangeComplete={(next) => {
           region.current = next;
           onRegionSettled?.(next.latitude, next.longitude);
@@ -221,7 +253,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
             coordinate={{ latitude: m.lat, longitude: m.lng }}
             title={m.title}
             anchor={m.kind === 'drop' ? { x: 0.5, y: 1 } : { x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
+            tracksViewChanges={tracksChanges}
           >
             {m.kind === 'pickup' ? <PickupGlyph /> : <DropGlyph />}
           </Marker>
@@ -231,7 +263,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
           <Marker
             coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
+            tracksViewChanges={tracksChanges}
             // Behind the pickup/drop markers — it is context, not the point being chosen.
             zIndex={0}
           >

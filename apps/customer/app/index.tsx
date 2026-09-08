@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { type ReactElement, useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Logo } from '@/components/Logo';
+import { getInitialNotificationHref } from '@/notifications/useNotificationBridge';
 import * as session from '@/lib/auth/session';
 import { colors, space, text } from '@/theme/theme';
 
@@ -35,6 +36,10 @@ export default function BootScreen(): ReactElement {
     let cancelled = false;
 
     async function boot(): Promise<void> {
+      // Started alongside the restore, not awaited until the routing decision — checking for a
+      // tapped notification adds nothing to the time already spent restoring the session.
+      const initialHref = getInitialNotificationHref();
+
       await Promise.race([
         session.restore(),
         new Promise((resolve) => setTimeout(resolve, RESTORE_TIMEOUT_MS)),
@@ -49,9 +54,17 @@ export default function BootScreen(): ReactElement {
       // nothing useful.
       if (cancelled) return;
 
-      // `replace`, never `push`: the hardware back button from the login screen must exit the
-      // app, not return to a boot screen that would immediately route forward again.
-      router.replace(session.getState().status === 'authenticated' ? '/home' : '/phone');
+      if (session.getState().status !== 'authenticated') {
+        router.replace('/phone');
+        return;
+      }
+
+      // A cold start from a tapped ride-update notification goes straight to that trip. Checked
+      // here, immediately before the ONE `replace` this screen issues, so nothing downstream can
+      // race and overwrite it. `replace`, never `push`: the hardware back button must exit or go
+      // home, not reveal this screen.
+      const href = await initialHref;
+      router.replace((href ?? '/home') as never);
     }
 
     void boot();

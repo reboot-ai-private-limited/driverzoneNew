@@ -1,5 +1,4 @@
 import notifee, { AndroidImportance } from '@notifee/react-native';
-import { Platform } from 'react-native';
 import { BOOKING_CHANNEL_ID } from './channel';
 import { pushLog } from './log';
 
@@ -32,14 +31,14 @@ export function bookingHref(bookingId: string): string {
 /**
  * Show a ride-update notification.
  *
- * Deliberately plain: `DEFAULT` importance from the channel, no `ongoing`, no `loopSound`, no
- * full-screen intent. The system plays the channel tone (which works from a headless FCM wake,
- * unlike Notifee's own player), taps deep-link into the trip, and a newer update for the same
- * booking overwrites the older one.
+ * Deliberately plain: `DEFAULT` importance, no `ongoing`, no `loopSound`, no full-screen intent.
+ * Taps deep-link into the trip, and a newer update for the same booking overwrites the older one.
+ *
+ * Called on the FOREGROUND path only (`onMessage`) — the system draws the server's `notification`
+ * block itself when the app is backgrounded, so drawing it here too would double up. Works on
+ * both platforms: the `android` block is ignored on iOS, where Notifee shows a default banner.
  */
 export async function displayBookingUpdate(data: BookingUpdateData): Promise<void> {
-  if (Platform.OS !== 'android') return;
-
   const bookingId = data.bookingId;
   const body = data.message;
   if (bookingId === undefined || body === undefined || body === '') {

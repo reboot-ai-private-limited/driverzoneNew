@@ -1,14 +1,11 @@
 import notifee from '@notifee/react-native';
-import {
-  AuthorizationStatus,
-  getMessaging,
-  getToken,
-  onTokenRefresh,
-  requestPermission,
-} from '@react-native-firebase/messaging';
+import { getMessaging, getToken, onTokenRefresh } from '@react-native-firebase/messaging';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { registerDevice as registerDeviceApi, removeDevice as removeDeviceApi } from '@/lib/api/endpoints/customer';
+import {
+  registerDevice as registerDeviceApi,
+  removeDevice as removeDeviceApi,
+} from '@/lib/api/endpoints/customer';
 import { pushLog } from './log';
 
 /**
@@ -21,8 +18,7 @@ import { pushLog } from './log';
  * A HARD RATE LIMIT guards it: several places may call `registerForPush` (login, an auth resume,
  * a screen effect), and one loose re-entry condition would turn that into a `getToken` +
  * `POST /customer/devices` every second — a bug the driver app hit. One real registration per
- * window is all that is ever needed; rotations still come through `onTokenRefresh`, which is not
- * limited.
+ * window is all that is ever needed; rotations still come through `onTokenRefresh`.
  */
 const REGISTER_MIN_INTERVAL_MS = 5 * 60 * 1000;
 let lastRegisterAt = 0;
@@ -44,19 +40,15 @@ export async function registerForPush(force = false): Promise<boolean> {
     return lastRegisterResult;
   }
 
-  // iOS shows the system prompt here; Android 13+ shows the POST_NOTIFICATIONS prompt. Notifee's
-  // wrapper covers both.
+  // Cross-platform: on iOS this shows the system alert AND registers with APNs (Notifee calls
+  // `registerForRemoteNotifications` under the hood); on Android 13+ it is the POST_NOTIFICATIONS
+  // prompt. `authorizationStatus === 0` is Notifee's DENIED.
   const settings = await notifee.requestPermission();
-  if (settings.authorizationStatus === AuthorizationStatus.DENIED) {
+  if (settings.authorizationStatus === 0) {
     pushLog('registerForPush: notification permission denied');
     lastRegisterAt = Date.now();
     lastRegisterResult = false;
     return false;
-  }
-
-  // iOS also needs the APNs registration to have completed before `getToken` will resolve.
-  if (Platform.OS === 'ios') {
-    await requestPermission(getMessaging()).catch(() => undefined);
   }
 
   try {
@@ -66,13 +58,17 @@ export async function registerForPush(force = false): Promise<boolean> {
     await sendToken(token);
     pushLog('registerForPush: token sent to server ok');
   } catch (cause) {
+    // On iOS this is usually "APNs token not set yet" on a cold first launch — transient. The
+    // rate-limit window is short (`force` from sign-in aside) and the next authenticated resume
+    // retries, so it self-heals without a bespoke retry loop.
     pushLog('registerForPush: FAILED', { error: String(cause) });
     lastRegisterAt = Date.now();
     lastRegisterResult = false;
     return false;
   }
 
-  // Subscribe to rotations ONCE per process.
+  // Subscribe to rotations ONCE per process — re-subscribing on every call is churn, and on some
+  // RNFB builds the act of subscribing fires the listener with the current token, a needless POST.
   if (unsubscribeFromRefresh === null) {
     unsubscribeFromRefresh = onTokenRefresh(getMessaging(), (next: string) => {
       lastToken = next;
@@ -97,8 +93,8 @@ async function sendToken(fcmToken: string): Promise<void> {
 
 /**
  * Sign-out. Withdraws THIS handset server-side (unlike the driver app, which keeps the token
- * across shifts) and stops listening for rotations — a customer who signs out should stop
- * getting another account's ride updates on a shared phone.
+ * across shifts) and stops listening for rotations — a customer who signs out on a shared phone
+ * should stop getting another account's ride updates.
  */
 export async function stopPushRegistration(): Promise<void> {
   unsubscribeFromRefresh?.();
@@ -106,12 +102,17 @@ export async function stopPushRegistration(): Promise<void> {
   lastRegisterAt = 0;
   lastRegisterResult = false;
 
-  const token = lastToken;
+  // `lastToken` is module state and is gone after a relaunch, so fall back to asking FCM — a
+  // sign-out on a fresh launch must still be able to withdraw the handset.
+  let token = lastToken;
   lastToken = null;
+  if (token === null && Platform.OS !== 'web') {
+    token = await getToken(getMessaging()).catch(() => null);
+  }
   if (token !== null) {
     await removeDeviceApi(token).catch((cause: unknown) => {
-      // Best effort — the sign-out itself must not fail because the network did. A stale token
-      // that keeps receiving pushes is pruned server-side the first time a send to it fails.
+      // Best effort — sign-out must not fail because the network did. A stale token is pruned
+      // server-side the first time a send to it comes back `not-registered`.
       pushLog('stopPushRegistration: removeDevice failed', { error: String(cause) });
     });
   }

@@ -1,27 +1,35 @@
-import { type ReactElement, forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import {
+  type ReactElement,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { StyleSheet, View } from 'react-native';
-import { WebView } from 'react-native-webview';
+import MapView, {
+  Marker,
+  Polyline,
+  PROVIDER_GOOGLE,
+  type Region,
+} from 'react-native-maps';
 import { colors, radius } from '@/theme/theme';
 
 /**
  * THE MAP IS A LEAF, AND THIS FILE IS THE ONLY THING THAT KNOWS WHAT DRAWS IT.
  *
- * `docs/engineering/tech-choices.md` records the admin panel's map swap — MapLibre out, Google
- * in — and what made it cheap: *"The map is a LEAF: swapping it touched `ZoneMap.tsx`… Keep it
- * that way."* Same rule here. This file has now been Google's native `react-native-maps` and is
- * currently Leaflet-in-a-WebView, and the screen has not changed for either: every prop below is
- * plain lat/lng, never a map library's own types.
+ * `docs/engineering/tech-choices.md` records the admin panel's map swap and what made it cheap:
+ * *"The map is a LEAF: swapping it touched `ZoneMap.tsx`… Keep it that way."* Same rule here.
+ * This file has been Google's native `react-native-maps`, then Leaflet-in-a-WebView, and is now
+ * native again — and the screen has not changed for any of it: every prop below is plain lat/lng,
+ * never a map library's own types.
  *
- * **Why not the native Google map.** It renders black in Expo Go: Expo Go's own bundled Maps key
- * is rejected (`Authorization failure … StatusCode=INVALID_ARGUMENT`, confirmed in logcat), and
- * an app cannot supply its own key to a host app it does not build. A development build with an
- * Android-restricted key fixes it and is the intended destination — `app.config.ts` and
- * `apps/customer/.env` already carry that wiring.
- *
- * **What this costs, honestly.** OpenStreetMap's public tile servers are for development, not
- * production: their usage policy forbids heavy or commercial traffic, and attribution is
- * mandatory (rendered by Leaflet, below — do not remove it). Before any real traffic this goes
- * back to the native map, or to a paid tile provider.
+ * **Native Google map, both platforms.** Android reads the key from
+ * `com.google.android.geo.API_KEY` in the manifest, iOS from `GMSApiKey` in the Info.plist —
+ * both come from `app.config.ts` (`GOOGLE_MAPS_ANDROID_API_KEY` / `GOOGLE_MAPS_IOS_API_KEY` in
+ * `apps/customer/.env`). WITHOUT a key the map renders as a blank grey grid: Expo Go supplies its
+ * own Android key so it works there, but a dev-client or store build needs the real ones.
  */
 
 export interface MapCanvasHandle {
@@ -51,9 +59,9 @@ interface MapCanvasProps {
   /**
    * How many points at the bottom of the map are COVERED by the sheet.
    *
-   * Without this the pin sits at the centre of the SCREEN — which is behind the sheet, invisible
-   * — and the coordinate reported back is the one under it rather than the one the customer is
-   * looking at. Everything below works in the visible rectangle instead.
+   * Passed to the native map as bottom padding, so the map's own idea of "centre" is the middle
+   * of the VISIBLE strip — which is where the crosshair sits and what `onRegionSettled` must
+   * report. Without it the reported coordinate is the one behind the sheet.
    */
   bottomInset?: number;
   /**
@@ -64,11 +72,21 @@ interface MapCanvasProps {
   onRegionSettled?: ((lat: number, lng: number) => void) | undefined;
 }
 
-/** Leaflet zoom levels, not degrees — roughly a few streets, and roughly a whole city. */
-const ZOOM: Record<MapZoom, number> = { street: 16, city: 12 };
+/**
+ * Latitude spans for the two zoom presets — "a few streets" and "a whole city". Longitude delta
+ * is derived from the view's aspect ratio by the map itself when only latitudeDelta is animated,
+ * so a single number per preset is enough.
+ */
+const ZOOM_DELTA: Record<MapZoom, number> = { street: 0.006, city: 0.06 };
 
-/** Pinned, not `latest`: a CDN that silently ships a new major would break the map in the field. */
-const LEAFLET_VERSION = '1.9.4';
+/** The apex of the route's bow, as a fraction of the straight-line distance. */
+const ROUTE_ARC = 0.14;
+
+/**
+ * The padding passed before the map is ready. A module-level constant so its IDENTITY never
+ * changes — see the crash note on `mapPadding` in the component.
+ */
+const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 } as const;
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
   {
@@ -82,95 +100,261 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
   },
   ref,
 ): ReactElement {
-  const web = useRef<WebView>(null);
+  const map = useRef<MapView>(null);
 
-  /**
-   * Built ONCE and frozen. Rebuilding the HTML on a prop change would reload the WebView and
-   * throw away wherever the customer had panned to — so the document only ever carries the
-   * FIRST centre, and every later change is injected as a script call instead.
-   */
-  const html = useMemo(
-    () => buildHtml(initialCentre.lat, initialCentre.lng),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally the first value only
+  /** Last region the map settled on — so `moveTo` without a zoom can keep the current span. */
+  const region = useRef<Region>({
+    latitude: initialCentre.lat,
+    longitude: initialCentre.lng,
+    latitudeDelta: ZOOM_DELTA.city,
+    longitudeDelta: ZOOM_DELTA.city,
+  });
+
+  /** The pickup/drop pair the map was last framed to, so it re-fits once per NEW pair only. */
+  const framedTo = useRef<string | null>(null);
+
+  const initialRegion = useMemo<Region>(
+    () => ({
+      latitude: initialCentre.lat,
+      longitude: initialCentre.lng,
+      latitudeDelta: ZOOM_DELTA.city,
+      longitudeDelta: ZOOM_DELTA.city,
+    }),
+    // First value only — the map keeps its own region after mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  function run(script: string): void {
-    // The trailing `true;` is required: without a completion value, injectJavaScript warns on iOS.
-    web.current?.injectJavaScript(`${script}; true;`);
-  }
+  /**
+   * True once `getMapAsync` has delivered the native `GoogleMap`.
+   *
+   * EVERY route into the native map is gated on this — `mapPadding`, `fitToCoordinates` and
+   * `animateToRegion` all reach the same instance, and under the new architecture the view is laid
+   * out and taking props before that instance exists. See the crash note on `mapPadding`.
+   */
+  const [mapReady, setMapReady] = useState(false);
+
+  /**
+   * A `moveTo` that arrived before the native map existed, held for the `onMapReady` flush.
+   *
+   * Not dropped, because the earliest callers are real: the screen recentres on the customer's
+   * location as soon as it resolves, which can beat `getMapAsync`. Dropping it would leave the map
+   * sitting on `initialCentre` with no way back until the customer panned.
+   */
+  const pendingMove = useRef<{ lat: number; lng: number; zoom?: MapZoom } | null>(null);
+
+  const applyMove = (lat: number, lng: number, zoom?: MapZoom): void => {
+    const delta = zoom === undefined ? region.current.latitudeDelta : ZOOM_DELTA[zoom];
+    map.current?.animateToRegion(
+      { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
+      450,
+    );
+  };
 
   useImperativeHandle(ref, () => ({
     moveTo: (lat, lng, zoom) => {
-      const level = zoom === undefined ? 'null' : String(ZOOM[zoom]);
-      run(`window.dz && window.dz.moveTo(${lat}, ${lng}, ${level})`);
+      // Same null-map hazard as `mapPadding` and `fitToCoordinates` — hold it rather than reach
+      // into a map that is not there yet.
+      if (!mapReady) {
+        pendingMove.current = zoom === undefined ? { lat, lng } : { lat, lng, zoom };
+        return;
+      }
+      applyMove(lat, lng, zoom);
     },
   }));
 
-  // Pushed imperatively rather than rendered, because the document is frozen above.
-  // `JSON.stringify` twice — once for the payload, once to embed it as a string literal — is what
-  // keeps an apostrophe in an address from ending the script.
-  const markersJson = JSON.stringify(markers);
-  const userJson = JSON.stringify(userLocation);
+  useEffect(() => {
+    if (!mapReady) return;
+    const queued = pendingMove.current;
+    pendingMove.current = null;
+    if (queued !== null) applyMove(queued.lat, queued.lng, queued.zoom);
+    // `applyMove` closes only over refs, so it needs no dependency of its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady]);
+
+  const pickup = markers.find((m) => m.kind === 'pickup');
+  const drop = markers.find((m) => m.kind === 'drop');
+
+  const route = useMemo(
+    () => (pickup !== undefined && drop !== undefined ? curvedPath(pickup, drop) : null),
+    // Recompute only when a coordinate actually moves — `pickup`/`drop` are fresh objects from
+    // `.find()` on every render, so depending on them would rebuild the 48-point path each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pickup?.lat, pickup?.lng, drop?.lat, drop?.lng],
+  );
+
+  /**
+   * `<Marker>` with a custom child renders BLANK on Android if `tracksViewChanges` is false from
+   * the first frame — the native view needs at least one snapshot pass. So it starts true and is
+   * switched off a moment later, once the pins have rasterised. From then on the markers are
+   * static bitmaps and cost nothing on pan/zoom.
+   */
+  const [tracksChanges, setTracksChanges] = useState(true);
+  // A signature of the current marker set — changes when a pin is added/removed or the user dot
+  // appears/disappears, which is when a fresh snapshot pass is needed.
+  const markerSignature = `${markers.length}:${userLocation === null ? 'no-user' : 'user'}`;
+  useEffect(() => {
+    setTracksChanges(true);
+    const t = setTimeout(() => setTracksChanges(false), 1200);
+    return () => clearTimeout(t);
+  }, [markerSignature]);
+
+  /**
+   * Frame both points the first time a given pickup/drop pair appears. A later `bottomInset`
+   * change (a row added to the sheet) must NOT re-frame and fight a customer who has since panned,
+   * so the effect keys on the coordinate pair only and `bottomInset` is read fresh inside it.
+   */
+  const routeKey =
+    pickup !== undefined && drop !== undefined
+      ? `${pickup.lat},${pickup.lng}|${drop.lat},${drop.lng}`
+      : null;
+
+  /**
+   * The latest pair and inset, mirrored into a ref so the effect below can read them without
+   * listing them as dependencies — `pickup`/`drop` are fresh objects from `.find()` on every
+   * render, and `bottomInset` changes whenever the sheet resizes. Only `routeKey` should trigger
+   * a re-frame.
+   */
+  const latest = useRef({ pickup, drop, bottomInset });
+  latest.current = { pickup, drop, bottomInset };
+
+  useEffect(() => {
+    if (routeKey === null) {
+      framedTo.current = null;
+      return;
+    }
+    // Wait for the native map. `fitToCoordinates` reaches the same `GoogleMap` instance that
+    // `mapPadding` does, and calling it early has the same null-dereference shape. `mapReady` is
+    // in the dependency list rather than an early bail so the pair still gets framed once the map
+    // arrives, and `framedTo` is only claimed when the work is genuinely scheduled — bailing after
+    // setting it would mark the pair as framed and silently never frame it.
+    if (!mapReady) return;
+    if (routeKey === framedTo.current) return;
+    framedTo.current = routeKey;
+
+    const t = setTimeout(() => {
+      const { pickup: p, drop: d, bottomInset: inset } = latest.current;
+      if (p === undefined || d === undefined) return;
+      map.current?.fitToCoordinates(
+        [
+          { latitude: p.lat, longitude: p.lng },
+          { latitude: d.lat, longitude: d.lng },
+        ],
+        {
+          edgePadding: { top: 90, right: 60, bottom: inset + 90, left: 60 },
+          animated: true,
+        },
+      );
+    }, 80);
+    return () => clearTimeout(t);
+  }, [routeKey, mapReady]);
 
   return (
     <View style={styles.root}>
-      <WebView
-        ref={web}
-        style={styles.web}
-        source={{ html }}
-        originWhitelist={['*']}
-        // The page is a fixed-size map, never a scrolling document; leaving scrolling on lets a
-        // drag bounce the page instead of panning the map.
-        scrollEnabled={false}
-        overScrollMode="never"
-        bounces={false}
-        javaScriptEnabled
-        domStorageEnabled
-        allowsLinkPreview={false}
-        androidLayerType="hardware"
-        onMessage={(event) => {
-          try {
-            const payload: unknown = JSON.parse(event.nativeEvent.data);
-            if (
-              typeof payload === 'object' &&
-              payload !== null &&
-              'lat' in payload &&
-              'lng' in payload
-            ) {
-              const { lat, lng } = payload as { lat: number; lng: number };
-              onRegionSettled?.(lat, lng);
-            }
-          } catch {
-            // A malformed message is not worth a crash; the map simply does not report a move.
-          }
+      <MapView
+        ref={map}
+        style={styles.map}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={initialRegion}
+        onMapReady={() => setMapReady(true)}
+        /**
+         * The bottom strip the sheet covers — makes the map's centre the middle of what is
+         * actually visible, so the crosshair and the reported coordinate agree.
+         *
+         * WITHHELD UNTIL `onMapReady`, and that is a crash fix, not caution.
+         * `MapView.applyBaseMapPadding` guards on the VIEW being laid out but not on the
+         * `GoogleMap` existing, and under the new architecture those are different moments:
+         * `getMapAsync` can still be in flight after layout. The sheet reports its height through
+         * `onLayout` almost immediately, so `bottomInset` went 0 → N right in that window — a
+         * padding CHANGE, past the layout guard, straight into
+         * `NullPointerException: GoogleMap.setPadding(...) on a null object reference`.
+         *
+         * `NO_PADDING` is a module constant so its identity is stable: before the map is ready the
+         * prop never changes, so the only `setMapPadding` call is the pre-layout one that defers
+         * harmlessly.
+         */
+        mapPadding={mapReady ? { top: 0, right: 0, bottom: bottomInset, left: 0 } : NO_PADDING}
+        // Only the SETTLED region is needed — for `onRegionSettled` and for `moveTo` to keep the
+        // current span when no zoom is passed. The intermediate `onRegionChange` stream is noise.
+        onRegionChangeComplete={(next) => {
+          region.current = next;
+          onRegionSettled?.(next.latitude, next.longitude);
         }}
-        onLoadEnd={() => {
-          run(
-            `window.dz && window.dz.sync(${JSON.stringify(markersJson)}, ${JSON.stringify(userJson)}, ${bottomInset})`,
-          );
-        }}
-      />
+        showsCompass={false}
+        showsMyLocationButton={false}
+        toolbarEnabled={false}
+        pitchEnabled={false}
+        rotateEnabled={false}
+        // The explicit `userLocation` prop is the source of truth; the OS blue dot would be a
+        // second, possibly-disagreeing one.
+        showsUserLocation={false}
+        loadingEnabled
+        loadingBackgroundColor={colors.bgSunken}
+      >
+        {route !== null ? (
+          <>
+            {/* A wide, faint line for lift — the nearest a native polyline gets to a soft glow. */}
+            <Polyline
+              coordinates={route}
+              strokeColor={withAlpha(colors.fg, 0.16)}
+              strokeWidth={9}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* The line itself. */}
+            <Polyline
+              coordinates={route}
+              strokeColor={colors.fg}
+              strokeWidth={3.5}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* A thin brand-yellow dashed accent on top, pointing the way. */}
+            <Polyline
+              coordinates={route}
+              strokeColor={colors.brand}
+              strokeWidth={3}
+              lineDashPattern={[2, 12]}
+              lineCap="round"
+            />
+          </>
+        ) : null}
 
-      <Sync run={run} markersJson={markersJson} userJson={userJson} bottomInset={bottomInset} />
+        {markers.map((m) => (
+          <Marker
+            key={m.id}
+            identifier={m.id}
+            coordinate={{ latitude: m.lat, longitude: m.lng }}
+            title={m.title}
+            anchor={m.kind === 'drop' ? { x: 0.5, y: 1 } : { x: 0.5, y: 0.5 }}
+            tracksViewChanges={tracksChanges}
+          >
+            {m.kind === 'pickup' ? <PickupGlyph /> : <DropGlyph />}
+          </Marker>
+        ))}
+
+        {userLocation !== null ? (
+          <Marker
+            coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={tracksChanges}
+            // Behind the pickup/drop markers — it is context, not the point being chosen.
+            zIndex={0}
+          >
+            <UserDotGlyph />
+          </Marker>
+        ) : null}
+      </MapView>
 
       {showCentrePin ? (
-        // OUTSIDE the WebView, and inset from the bottom by the sheet's height so it lands in the
-        // middle of what the customer can actually SEE. The pin stays still and the map moves
-        // under it — dragging a marker instead means fighting the pan gesture for the same finger.
+        // OUTSIDE the map, inset from the bottom by the sheet's height so it lands in the middle
+        // of what the customer can SEE. The pin stays still and the map moves under it — dragging
+        // a marker instead means fighting the pan gesture for the same finger.
         <View style={[styles.centrePin, { bottom: bottomInset }]} pointerEvents="none">
           <View
-            style={[
-              styles.centrePinHead,
-              centrePinKind === 'drop' && styles.centrePinHeadDrop,
-            ]}
+            style={[styles.centrePinHead, centrePinKind === 'drop' && styles.centrePinHeadDrop]}
           />
-          <View
-            style={[
-              styles.centrePinStem,
-              centrePinKind === 'drop' && styles.centrePinStemDrop,
-            ]}
-          />
+          <View style={styles.centrePinStem} />
           <View style={styles.centrePinShadow} />
         </View>
       ) : null}
@@ -179,400 +363,174 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
 });
 
 /**
- * A render-time bridge. It draws nothing — it exists so the overlay push happens as an ordinary
- * child render rather than in an effect on the parent, which would fire before the WebView has
- * finished loading on a cold start.
+ * PICKUP — an ink dot inside a soft brand halo. "This is where you are" reads at a glance and
+ * needs no label. Static rather than pulsing: an infinite animation inside a native map marker
+ * forces `tracksViewChanges` on, which re-rasterises the marker every frame and is a known
+ * Android jank source. The halo carries the "live" feel without the cost.
  */
-function Sync({
-  run,
-  markersJson,
-  userJson,
-  bottomInset,
-}: {
-  run: (script: string) => void;
-  markersJson: string;
-  userJson: string;
-  bottomInset: number;
-}): null {
-  const last = useRef('');
-  const key = `${markersJson}|${userJson}|${bottomInset}`;
-
-  if (last.current !== key) {
-    last.current = key;
-    run(
-      `window.dz && window.dz.sync(${JSON.stringify(markersJson)}, ${JSON.stringify(userJson)}, ${bottomInset})`,
-    );
-  }
-
-  return null;
+function PickupGlyph(): ReactElement {
+  return (
+    <View style={styles.pickupWrap}>
+      <View style={styles.pickupHalo} />
+      <View style={styles.pickupCore} />
+    </View>
+  );
 }
 
 /**
- * The whole map, as one self-contained document.
- *
- * Leaflet comes from a CDN rather than being bundled: the library is ~150KB and Metro has no way
- * to serve a raw asset into a WebView's own origin without a native file copy. The trade is that
- * a first load needs the network — acceptable for a screen whose tiles need it anyway.
+ * DESTINATION — a flat, branded teardrop: ink body, a yellow core, one white hairline for
+ * contrast against any map colour. Not the stock red Google pin, and no gradient — brand yellow
+ * is a flat surface everywhere else in this app.
  */
-function buildHtml(lat: number, lng: number): string {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.js"></script>
-  <style>
-    html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: ${colors.bgSunken}; }
-    /* OpenStreetMap's tile policy REQUIRES visible attribution, and the sheet covers the map's
-       bottom edge — the default bottom-right position would hide it. Moved below the top row. */
-    .leaflet-control-attribution { font-size: 9px; background: rgba(255,255,255,0.75); }
-    .leaflet-top.leaflet-right { margin-top: 76px; }
+function DropGlyph(): ReactElement {
+  return (
+    <View style={styles.dropWrap}>
+      <View style={styles.dropBody}>
+        <View style={styles.dropCore} />
+      </View>
+      <View style={styles.dropTip} />
+      <View style={styles.dropShadow} />
+    </View>
+  );
+}
 
-    /* PICKUP — a live pulse dot, not a static ring. On-brand (ink + yellow) rather than a
-       generic green/red map pin, and animated because "this is where you are, right now" is a
-       LIVE fact — a still marker undersells it. */
-    .dz-pickup-marker-wrap { background: transparent; border: none; }
-    .dz-pickup-pin-box {
-      position: relative;
-      width: 34px;
-      height: 34px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: dz-pin-in 0.22s cubic-bezier(0.34, 1.2, 0.64, 1);
-    }
-    .dz-pickup-pulse {
-      position: absolute;
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      background: ${colors.brand};
-      animation: dz-pulse 2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
-    }
-    .dz-pickup-core {
-      position: relative;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: ${colors.fg};
-      border: 2.5px solid ${colors.brand};
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    }
-    @keyframes dz-pulse {
-      0% { transform: scale(0.45); opacity: 0.55; }
-      70% { opacity: 0; }
-      100% { transform: scale(1); opacity: 0; }
-    }
+/** The customer's own position — the familiar Google blue dot with a soft accuracy ring. */
+function UserDotGlyph(): ReactElement {
+  return (
+    <View style={styles.userWrap}>
+      <View style={styles.userRing} />
+      <View style={styles.userDot} />
+    </View>
+  );
+}
 
-    /* DESTINATION — a flat, branded pin (ink body, yellow core) rather than a stock Google-style
-       red teardrop with a glossy gradient. Softer entrance too: a quick scale/fade, not a bounce
-       — a bounce is a 2015-era Maps mannerism this redesign is moving away from. */
-    .dz-drop-marker-wrap { background: transparent; border: none; }
-    .dz-drop-pin-box {
-      position: relative;
-      width: 28px;
-      height: 38px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: dz-pin-in 0.2s cubic-bezier(0.2, 0.8, 0.4, 1);
-      transform-origin: bottom center;
-    }
-    @keyframes dz-pin-in {
-      0% { transform: scale(0.5) translateY(-6px); opacity: 0; }
-      100% { transform: scale(1) translateY(0); opacity: 1; }
-    }
-    .dz-pin-ground-shadow {
-      position: absolute;
-      bottom: 0px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 12px;
-      height: 4px;
-      background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0) 72%);
-      border-radius: 50%;
-    }
-    .dz-drop-svg {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 28px;
-      height: 34px;
-      filter: drop-shadow(0 3px 3px rgba(0,0,0,0.22));
-    }
+/**
+ * A quadratic-bezier bow between two coordinates — a deliberate curve, not a route: this app
+ * draws the straight-line relationship, never the road. The control point is offset
+ * perpendicular to the chord by `ROUTE_ARC` of its length, always to the same side so the bow
+ * does not flip as the pair rotates. Ported from the previous Leaflet build.
+ */
+function curvedPath(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): { latitude: number; longitude: number }[] {
+  const midLat = (a.lat + b.lat) / 2;
+  const midLng = (a.lng + b.lng) / 2;
 
-    /* User GPS dot */
-    .dz-pin { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
-    .dz-user { background: #1A73E8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,0.20); }
+  const cosLat = Math.cos((midLat * Math.PI) / 180);
+  const dx = (b.lng - a.lng) * cosLat;
+  const dy = b.lat - a.lat;
+  const dist = Math.sqrt(dx * dx + dy * dy);
 
-    /* ROUTE — a slim glowing line, not a thick glossy tube. The blur is a real CSS filter on the
-       line itself (Leaflet's default renderer is SVG, so a CSS filter just works on the path)
-       rather than a second offset copy standing in for a shadow — that offset trick is what read
-       as a toy-like 3D pop-up rather than a soft, modern glow. */
-    .dz-route-glow { filter: blur(3px); }
-    @keyframes dz-flow { to { stroke-dashoffset: -32; } }
-    .dz-route-dash { animation: dz-flow 1s linear infinite; }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script>
-    (function () {
-      var map = L.map('map', {
-        zoomControl: false,
-        attributionControl: true,
-        // Smoother panning: inertia carries a flick, and a shorter fade keeps tiles from
-        // shimmering in while the map is still moving.
-        inertia: true,
-        inertiaDeceleration: 2600,
-        zoomAnimation: true,
-        fadeAnimation: true,
-        wheelPxPerZoomLevel: 100
-      }).setView([${lat}, ${lng}], ${ZOOM.city});
+  if (dist < 0.00001) {
+    return [
+      { latitude: a.lat, longitude: a.lng },
+      { latitude: b.lat, longitude: b.lng },
+    ];
+  }
 
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        // One ring of tiles beyond the viewport, so a pan reveals map rather than grey.
-        keepBuffer: 3,
-        updateWhenIdle: false,
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(map);
+  let nx = -dy / dist;
+  let ny = dx / dist;
+  // Keep the bow on a consistent side.
+  if (ny < -0.05 || (Math.abs(ny) <= 0.05 && nx < 0)) {
+    nx = -nx;
+    ny = -ny;
+  }
 
-      map.attributionControl.setPosition('topright');
+  const arc = dist * ROUTE_ARC;
+  const ctrlLat = midLat + ny * arc;
+  const ctrlLng = midLng + (nx * arc) / cosLat;
 
-      // Added in painting order, and it matters: the pickup starts AT the user's position, so a
-      // user dot added last sits on top of the marker and hides the point being chosen. The
-      // route sits UNDER both — a line is a straight edge in this app, not the road, so it must
-      // never look like it is sitting on top of a pin it merely connects.
-      var routeLayer = L.layerGroup().addTo(map);
-      var userLayer = L.layerGroup().addTo(map);
-      var markerLayer = L.layerGroup().addTo(map);
+  const points: { latitude: number; longitude: number }[] = [];
+  const steps = 48;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const u = 1 - t;
+    const lat = u * u * a.lat + 2 * u * t * ctrlLat + t * t * b.lat;
+    const lng = u * u * a.lng + 2 * u * t * ctrlLng + t * t * b.lng;
+    points.push({ latitude: lat, longitude: lng });
+  }
+  return points;
+}
 
-      /** Points of map hidden behind the bottom sheet. Everything below reads it. */
-      var inset = 0;
-
-      /**
-       * The last pickup/drop pair the map was fitted to, so it re-fits exactly once per NEW pair
-       * rather than on every sync() call — which also fires when only the sheet's height changes
-       * (bottomInset) as rows like Return appear or disappear. Re-zooming on that would fight
-       * a customer who has since panned or pinched to look at something else on their own trip.
-       */
-      var lastRoute = null;
-
-      function post(payload) {
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-        }
-      }
-
-      /**
-       * The coordinate under the PIN, not under the centre of the map.
-       *
-       * The sheet covers the lower part of the map, so the geometric centre is behind it. The
-       * pin sits at the middle of the visible strip, and this is the same point in map terms —
-       * getting this wrong means the address shown never matches where the pin is.
-       */
-      function visibleCentre() {
-        var size = map.getSize();
-        return map.containerPointToLatLng(L.point(size.x / 2, (size.y - inset) / 2));
-      }
-
-      // 'moveend' covers pan AND zoom, and fires once the movement has settled.
-      map.on('moveend', function () {
-        var c = visibleCentre();
-        post({ lat: c.lat, lng: c.lng });
-      });
-
-      function icon(kind) {
-        if (kind === 'drop') {
-          // A flat, branded pin — ink body, a yellow ring and core, a single white hairline
-          // stroke for contrast against any tile colour. No gradient: gradients on a small glyph
-          // read as glossy/dated at this size, and this app's brand yellow is used as a flat
-          // surface everywhere else in the app, never as a gradient fill.
-          return L.divIcon({
-            className: 'dz-drop-marker-wrap',
-            html: '<div class="dz-drop-pin-box">' +
-              '<div class="dz-pin-ground-shadow"></div>' +
-              '<svg class="dz-drop-svg" viewBox="0 0 28 34" width="28" height="34" fill="none">' +
-              '  <path d="M14 33 C13.3 30.4 3 19.7 3 13 A11 11 0 1 1 25 13 C25 19.7 14.7 30.4 14 33 Z" fill="${colors.fg}" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>' +
-              '  <circle cx="14" cy="13" r="5" fill="${colors.brand}"/>' +
-              '</svg>' +
-              '</div>',
-            iconSize: [28, 38],
-            iconAnchor: [14, 35]
-          });
-        }
-
-        if (kind === 'pickup') {
-          // A pulsing dot rather than a static ring — pickup is a LIVE fact, and the animation is
-          // what says so. The pulse ring shares the pin box's own centre, so it never drifts off
-          // the coordinate the way an independently-positioned glow layer could.
-          return L.divIcon({
-            className: 'dz-pickup-marker-wrap',
-            html: '<div class="dz-pickup-pin-box">' +
-              '<div class="dz-pickup-pulse"></div>' +
-              '<div class="dz-pickup-core"></div>' +
-              '</div>',
-            iconSize: [34, 34],
-            iconAnchor: [17, 17]
-          });
-        }
-
-        var size = 14;
-        return L.divIcon({
-          className: '',
-          html: '<div class="dz-pin dz-user" style="width:' + size + 'px;height:' + size + 'px"></div>',
-          iconSize: [size, size],
-          iconAnchor: [size / 2, size / 2]
-        });
-      }
-
-      function getCurvedPath(p1, p2) {
-        var lat1 = p1.lat, lng1 = p1.lng;
-        var lat2 = p2.lat, lng2 = p2.lng;
-
-        var midLat = (lat1 + lat2) / 2;
-        var midLng = (lng1 + lng2) / 2;
-
-        var cosLat = Math.cos(midLat * Math.PI / 180);
-        var dx = (lng2 - lng1) * cosLat;
-        var dy = lat2 - lat1;
-        var dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < 0.00001) {
-          return [[lat1, lng1], [lat2, lng2]];
-        }
-
-        var nx = -dy / dist;
-        var ny = dx / dist;
-
-        if (ny < -0.05 || (Math.abs(ny) <= 0.05 && nx < 0)) {
-          nx = -nx;
-          ny = -ny;
-        }
-
-        // A softer bulge than before (was 0.22) — enough to read as a deliberate curve rather
-        // than a straight line, subtle enough not to look like an exaggerated cartoon arc.
-        var arcHeight = dist * 0.14;
-        var ctrlLat = midLat + (ny * arcHeight);
-        var ctrlLng = midLng + ((nx * arcHeight) / cosLat);
-
-        var points = [];
-        var steps = 45;
-        for (var i = 0; i <= steps; i++) {
-          var t = i / steps;
-          var oneMinusT = 1 - t;
-          var b0 = oneMinusT * oneMinusT;
-          var b1 = 2 * oneMinusT * t;
-          var b2 = t * t;
-
-          var lat = b0 * lat1 + b1 * ctrlLat + b2 * lat2;
-          var lng = b0 * lng1 + b1 * ctrlLng + b2 * lng2;
-          points.push([lat, lng]);
-        }
-        return points;
-      }
-
-      window.dz = {
-        moveTo: function (lat, lng, zoom) {
-          var z = zoom === null ? map.getZoom() : zoom;
-          // Offset the CENTRE so the target lands under the pin rather than behind the sheet.
-          var target = map.project([lat, lng], z);
-          var centre = map.unproject(target.add([0, inset / 2]), z);
-          map.flyTo(centre, z, { duration: 0.6, easeLinearity: 0.2 });
-        },
-        sync: function (markersJson, userJson, nextInset) {
-          var markers = JSON.parse(markersJson) || [];
-          var user = JSON.parse(userJson);
-          inset = nextInset || 0;
-
-          markerLayer.clearLayers();
-          markers.forEach(function (m) {
-            L.marker([m.lat, m.lng], { icon: icon(m.kind), title: m.title }).addTo(markerLayer);
-          });
-
-          userLayer.clearLayers();
-          if (user) {
-            L.marker([user.lat, user.lng], { icon: icon('user'), interactive: false }).addTo(userLayer);
-          }
-
-          // THE ROUTE, drawn as a slim glowing line — not the thick glossy tube this replaced.
-          // Three layers, each doing one job: a soft blurred glow for lift, a slim solid line
-          // for the actual path, and a thin animated dash on top for direction. No offset
-          // "shadow copy" of the path — that was what made the old version look like a raised
-          // toy tube rather than a modern line with a soft shadow under it.
-          routeLayer.clearLayers();
-          var pickup = markers.filter(function (m) { return m.kind === 'pickup'; })[0];
-          var drop = markers.filter(function (m) { return m.kind === 'drop'; })[0];
-          if (pickup && drop) {
-            var curvedPath = getCurvedPath(pickup, drop);
-
-            // 1. Soft glow — a wide, low-opacity, blurred stroke sitting under everything. This
-            // is the depth cue; a real CSS blur reads as a soft shadow, not a hard duplicate line.
-            L.polyline(curvedPath, {
-              color: '${colors.fg}',
-              weight: 9,
-              opacity: 0.16,
-              lineCap: 'round',
-              interactive: false,
-              className: 'dz-route-glow'
-            }).addTo(routeLayer);
-
-            // 2. The line itself — slim, ink-coloured, rounded caps. This alone reads as "modern
-            // minimal route" without any casing or tube layering.
-            L.polyline(curvedPath, {
-              color: '${colors.fg}',
-              weight: 3,
-              opacity: 0.92,
-              lineCap: 'round',
-              interactive: false
-            }).addTo(routeLayer);
-
-            // 3. The animated accent — brand yellow, thin, marching toward the destination. The
-            // one piece of colour on the whole line, and the one thing that moves.
-            L.polyline(curvedPath, {
-              color: '${colors.brand}',
-              weight: 3,
-              opacity: 0.95,
-              dashArray: '2, 12',
-              lineCap: 'round',
-              interactive: false,
-              className: 'dz-route-dash'
-            }).addTo(routeLayer);
-
-            // Fit map bounds to frame both pins and the full apex of the curve
-            var routeKey = pickup.lat + ',' + pickup.lng + '|' + drop.lat + ',' + drop.lng;
-            if (routeKey !== lastRoute) {
-              lastRoute = routeKey;
-              var bounds = L.latLngBounds(curvedPath);
-              map.fitBounds(bounds, {
-                paddingTopLeft: [40, 80],
-                paddingBottomRight: [40, inset + 40],
-                maxZoom: 16,
-                animate: true,
-                duration: 0.6
-              });
-            }
-          } else {
-            lastRoute = null;
-          }
-        }
-      };
-
-      post({ ready: true });
-    })();
-  </script>
-</body>
-</html>`;
+/** `#RRGGBB` + alpha 0..1 → `#RRGGBBAA`. The theme colours are plain hex. */
+function withAlpha(hex: string, alpha: number): string {
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, '0');
+  return `${hex}${a}`;
 }
 
 const styles = StyleSheet.create({
   // Written out rather than `StyleSheet.absoluteFillObject`, which React Native 0.86's types no
   // longer expose (`absoluteFill` is a registered style ID, not a spreadable object).
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  web: { flex: 1, backgroundColor: colors.bgSunken },
+  map: { flex: 1, backgroundColor: colors.bgSunken },
 
+  // ── Pickup ──────────────────────────────────────────────────────────────────────────────────
+  pickupWrap: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  pickupHalo: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: withAlpha(colors.brand, 0.35),
+  },
+  pickupCore: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.fg,
+    borderWidth: 2.5,
+    borderColor: colors.brand,
+  },
+
+  // ── Destination ─────────────────────────────────────────────────────────────────────────────
+  dropWrap: { width: 30, height: 40, alignItems: 'center' },
+  dropBody: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.fg,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropCore: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.brand },
+  dropTip: {
+    width: 2,
+    height: 12,
+    marginTop: -2,
+    backgroundColor: colors.fg,
+  },
+  dropShadow: {
+    width: 10,
+    height: 3,
+    borderRadius: 5,
+    backgroundColor: 'rgba(0,0,0,0.22)',
+    marginTop: 1,
+  },
+
+  // ── User dot ────────────────────────────────────────────────────────────────────────────────
+  userWrap: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  userRing: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(26,115,232,0.18)',
+  },
+  userDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#1A73E8',
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+  },
+
+  // ── Centre crosshair (overlay, not on the map) ─────────────────────────────────────────────
   centrePin: {
     position: 'absolute',
     top: 0,
@@ -581,8 +539,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // The head sits half its own height above centre so the stem's TIP marks the coordinate,
-  // which is the point the customer is actually choosing.
   centrePinHead: {
     width: 22,
     height: 22,
@@ -592,16 +548,8 @@ const styles = StyleSheet.create({
     borderColor: colors.brand,
     marginBottom: -2,
   },
-  // Inverted, not recoloured to red — pickup is ink-with-yellow-border, drop is the same two
-  // brand colours the other way round. Distinguishable at a glance without reaching for a
-  // generic red/green that has nothing to do with this app's own palette.
-  centrePinHeadDrop: {
-    backgroundColor: colors.brand,
-    borderColor: colors.fg,
-    borderWidth: 4,
-  },
+  centrePinHeadDrop: { backgroundColor: colors.brand, borderColor: colors.fg },
   centrePinStem: { width: 2, height: 16, backgroundColor: colors.fg },
-  centrePinStemDrop: { backgroundColor: colors.fg },
   centrePinShadow: {
     width: 10,
     height: 4,

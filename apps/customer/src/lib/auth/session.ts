@@ -1,5 +1,7 @@
 import { AppState } from 'react-native';
 import type { AuthUserDto, OtpVerifyResponse } from '@driverzone/contracts';
+import { ApiError } from '../api/ApiError';
+import { setTokenRefresher } from '../api/client';
 import * as authApi from '../api/endpoints/auth';
 import { clearRefreshToken, readRefreshToken, writeRefreshToken } from './tokenStore';
 
@@ -75,11 +77,52 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
-function scheduleRenewal(): void {
+/**
+ * Is there a refresh token on this device at all?
+ *
+ * The question "might this customer be signed in?", answerable WITHOUT a round-trip — which is
+ * the one thing `restore()` cannot offer, since proving a session costs a request. The boot screen
+ * uses it when its own timeout fires: a restore that has not answered in eight seconds says
+ * nothing about whether the customer is signed in, only that the network is slow.
+ */
+export async function hasStoredSession(): Promise<boolean> {
+  return (await readRefreshToken()) !== null;
+}
+
+/**
+ * How soon to try again after a renewal that failed for a reason that might pass.
+ *
+ * Without this a transient failure left NO timer scheduled — the proactive path is armed only on
+ * success — so a customer who lost signal for ten seconds at the wrong moment had no renewal
+ * pending at all and stayed on a dying token until something 401'd.
+ */
+const TRANSIENT_RETRY_MS = 60 * 1000;
+
+/**
+ * IS THIS FAILURE THE END OF THE SESSION, OR JUST A BAD MOMENT?
+ *
+ * `renew()` used to answer "the end" for everything it caught. A `NetworkError` from a phone whose
+ * radio was still reconnecting, a 502 from a deploying API, a captive portal on café wifi — each
+ * one destroyed the refresh token and dropped the customer on the login screen, with no way back
+ * but a fresh OTP. On a handset those failures are routine; the token being genuinely dead is
+ * rare.
+ *
+ * The server makes the distinction unambiguous, so there is no guessing: BOTH refresh rejections
+ * — `REFRESH_TOKEN_INVALID` and `SESSION_REVOKED` — are 401 (`identity.errors.ts`). Anything that
+ * is not a 401 from the API may pass, and the stored refresh token is kept so it can.
+ *
+ * Erring towards "keep" is deliberate. Keeping a dead session costs one more failed request, which
+ * then answers 401 and ends it properly. Discarding a live one costs the customer their account.
+ */
+function isSessionRejection(cause: unknown): boolean {
+  return cause instanceof ApiError && cause.status === 401;
+}
+
+function scheduleRenewal(inMs: number = ACCESS_TOKEN_TTL_MS * RENEW_AT_FRACTION): void {
   if (renewTimer !== null) clearTimeout(renewTimer);
   renewTimer = setTimeout(() => {
     void renew();
-  }, ACCESS_TOKEN_TTL_MS * RENEW_AT_FRACTION);
+  }, inMs);
 }
 
 function stopRenewal(): void {
@@ -143,10 +186,28 @@ export function renew(): Promise<string | null> {
       // one case where there is nothing to preserve and the boot restore below fills it in.
       if (state.status === 'authenticated') publish({ ...state });
       return result.access_token;
-    } catch {
-      // Any failure here — revoked, rotated out, expired, or the device offline for longer than
-      // the refresh TTL — ends in the same place. Not a toast, not a retry: the login screen.
-      await endSession();
+    } catch (cause) {
+      /*
+       * REVOKED OR ROTATED OUT — the session is genuinely over. Not a toast, not a retry: the
+       * login screen, and the stored refresh token is destroyed on the way.
+       */
+      if (isSessionRejection(cause)) {
+        await endSession();
+        return null;
+      }
+
+      /*
+       * EVERYTHING ELSE — offline, a captive portal, a 5xx, a request that timed out. The refresh
+       * token is deliberately LEFT ALONE: it is very probably still valid, and deleting it would
+       * turn a momentary lapse in signal into a fresh OTP the customer has to sit through.
+       *
+       * A short retry is armed because nothing else would arm one — the proactive timer is only
+       * scheduled on success.
+       *
+       * `null` here means "no token right now", which is NOT "signed out"; `restore()` below is
+       * careful to tell the two apart.
+       */
+      scheduleRenewal(TRANSIENT_RETRY_MS);
       return null;
     } finally {
       inFlightRenewal = null;
@@ -163,14 +224,37 @@ export function renew(): Promise<string | null> {
  */
 export async function restore(): Promise<SessionStatus> {
   const token = await renew();
-  if (token === null) {
-    publish({ status: 'anonymous', user: null, isNewUser: false });
-    return 'anonymous';
-  }
+
   // The refresh response carries no user. The profile fetch that fills this in lands with the
   // account screens; until then an authenticated boot is enough to leave the login flow.
-  publish({ status: 'authenticated', user: state.user, isNewUser: false });
-  return 'authenticated';
+  if (token !== null) {
+    publish({ status: 'authenticated', user: state.user, isNewUser: false });
+    return 'authenticated';
+  }
+
+  /**
+   * A `null` from `renew()` has TWO meanings, and collapsing them is what made an offline launch
+   * destructive.
+   *
+   * If the session was rejected, `renew()` has already ended it and cleared the keystore — so the
+   * absence of a stored refresh token below is the signal that the customer really is signed out.
+   *
+   * If renewal merely FAILED — no signal, a captive portal, the API mid-deploy — the token is
+   * still there, and the honest answer is "we believe there is a session, we just cannot prove it
+   * yet". Reporting `anonymous` there sent a signed-in customer to re-enter their number, which
+   * they cannot even complete without the network that just failed.
+   *
+   * So we proceed as authenticated. Nothing is faked: there is no access token, so the first
+   * authenticated call answers 401, the client's recovery retries the refresh, and a screen that
+   * still cannot reach the server shows its own error — the right place for a network failure.
+   */
+  if (await hasStoredSession()) {
+    publish({ status: 'authenticated', user: state.user, isNewUser: false });
+    return 'authenticated';
+  }
+
+  publish({ status: 'anonymous', user: null, isNewUser: false });
+  return 'anonymous';
 }
 
 /** Adopt the tokens from a successful `otp/verify`. */
@@ -207,3 +291,13 @@ export async function signOut(): Promise<void> {
   }
   await endSession();
 }
+
+/**
+ * THE 401 PATH, wired at module scope so it exists for the life of the process.
+ *
+ * `client.ts` calls this when any request comes back with an expired token, and retries that
+ * request once with whatever comes out. Inverted rather than imported: session already depends on
+ * `endpoints/auth`, which depends on the client, so a direct import the other way would close the
+ * cycle. Handing `renew` over also gives the client the single-flight guarantee for free.
+ */
+setTokenRefresher(renew);

@@ -126,8 +126,22 @@ export async function startLocationPings(onDutyChange?: DutyObserver): Promise<b
   if (fixTimer !== null) return true;
 
   if (devOverride() === null) {
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (!permission.granted) return false;
+    /**
+     * CHECK FIRST, PROMPT ONLY IF THERE IS SOMETHING TO ASK — the same rule
+     * `startDutyForegroundService` follows, and for the same reason.
+     * `requestForegroundPermissionsAsync` NEVER RESOLVES on ColorOS / realme UI when the
+     * permission is already granted. The first call of the shift often gets away with it because
+     * a dialog is genuinely shown; the SECOND call — after going off duty and back on, or a
+     * resume re-arm — hangs forever, and because this function is awaited inside
+     * `ensureDutyMachinery`'s single-flight guard, that one hang wedges every future recovery
+     * attempt too. `getForegroundPermissionsAsync` always resolves, so it is the one on the hot
+     * path; the prompting variant runs only when the grant is genuinely missing and askable.
+     */
+    let permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+    if (permission !== null && !permission.granted && permission.canAskAgain) {
+      permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
+    }
+    if (permission === null || !permission.granted) return false;
   }
 
   observer = onDutyChange ?? null;

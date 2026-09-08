@@ -15,7 +15,6 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /**
@@ -146,14 +145,22 @@ function TabItem({
 }
 
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps): ReactElement {
-  const insets = useSafeAreaInsets();
-
   return (
-    <View
-      // On a gesture-navigation phone `insets.bottom` is the home indicator; on a device with
-      // hardware keys it is 0, and the bar still needs breathing room under the labels.
-      style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space.sm) }]}
-    >
+    /*
+     * NO `insets.bottom` HERE — the root layout has already applied it.
+     *
+     * `app/_layout.tsx` wraps the whole navigator in a `SafeAreaView` with
+     * `edges={['top', 'bottom']}`, so by the time this bar renders, the navigation bar's height
+     * has already been subtracted from the space it is laid out in. Adding `insets.bottom` again
+     * padded it TWICE: on a three-button phone that is ~48dp of dead space between the labels and
+     * the navigation bar, and on gesture navigation a smaller but still visible gap. The root
+     * layout's own comment states the rule this violated — individual screens must not add
+     * `insets.top` or `insets.bottom` of their own.
+     *
+     * `space.sm` is the breathing room under the labels, and it is now the whole story: it was
+     * already the value used on hardware-key devices, where `insets.bottom` is 0.
+     */
+    <View style={styles.bar}>
       {state.routes.map((route, index) => {
         const options = descriptors[route.key]?.options ?? {};
         const focused = state.index === index;
@@ -199,6 +206,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
     paddingTop: space.sm,
+    // See the note at the render site: the root layout owns the bottom safe-area inset, so this is
+    // plain breathing room under the labels and must NOT have `insets.bottom` added to it.
+    paddingBottom: space.sm,
     paddingHorizontal: space.sm,
   },
   item: { flex: 1 },

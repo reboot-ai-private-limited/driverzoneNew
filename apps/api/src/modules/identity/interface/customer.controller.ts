@@ -1,6 +1,7 @@
 import type { Request, RequestHandler } from 'express';
 import type {
   CustomerProfileDto,
+  RegisterDeviceResponse,
   SavedAddressDto,
   VehicleDto,
 } from '@driverzone/contracts';
@@ -13,9 +14,12 @@ import type { GetCustomerProfileUseCase } from '../application/useCases/getCusto
 import type { UpdateCustomerProfileUseCase } from '../application/useCases/updateCustomerProfile.usecase.js';
 import type { ManageAddressesUseCase } from '../application/useCases/manageAddresses.usecase.js';
 import type { ManageVehiclesUseCase } from '../application/useCases/manageVehicles.usecase.js';
+import type { CustomerDeviceRepositoryPort } from '../domain/customerDevice.repository.port.js';
 import {
   createAddressSchema,
   createVehicleSchema,
+  deleteDeviceSchema,
+  registerDeviceSchema,
   updateAddressSchema,
   updateCustomerProfileSchema,
   updateVehicleSchema,
@@ -98,6 +102,7 @@ export interface CustomerControllerDeps {
   updateProfile: UpdateCustomerProfileUseCase;
   addresses: ManageAddressesUseCase;
   vehicles: ManageVehiclesUseCase;
+  devices: CustomerDeviceRepositoryPort;
 }
 
 export interface CustomerControllers {
@@ -109,6 +114,8 @@ export interface CustomerControllers {
   addVehicle: RequestHandler;
   updateVehicle: RequestHandler;
   removeVehicle: RequestHandler;
+  registerDevice: RequestHandler;
+  removeDevice: RequestHandler;
 }
 
 export function makeCustomerControllers(deps: CustomerControllerDeps): CustomerControllers {
@@ -198,6 +205,19 @@ export function makeCustomerControllers(deps: CustomerControllerDeps): CustomerC
     removeVehicle: asyncHandler(async (req, res) => {
       await deps.vehicles.remove(subjectId(req), req.params['id'] ?? '');
       sendSuccess(req, res, { deleted: true }, 'Vehicle removed');
+    }),
+
+    registerDevice: asyncHandler(async (req, res) => {
+      const input = registerDeviceSchema.parse(req.body);
+      await deps.devices.register(subjectId(req), input.fcm_token);
+      const body: RegisterDeviceResponse = { registered: true };
+      sendSuccess(req, res, body, 'Device registered');
+    }),
+
+    removeDevice: asyncHandler(async (req, res) => {
+      const input = deleteDeviceSchema.parse(req.body);
+      await deps.devices.removeForCustomer(subjectId(req), input.fcm_token);
+      sendSuccess(req, res, { deleted: true }, 'Device removed');
     }),
   };
 }

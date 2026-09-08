@@ -1,6 +1,8 @@
 import type {
   CreateAddressRequest,
   CustomerProfileDto,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
   SavedAddressDto,
   UpdateCustomerProfileRequest,
 } from '@driverzone/contracts';
@@ -52,6 +54,38 @@ export function addAddress(body: CreateAddressRequest): Promise<SavedAddressDto>
 export function removeAddress(id: string): Promise<void> {
   return request<void>(`${ROLE_PREFIX}/addresses/${id}`, {
     method: 'DELETE',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `POST /customer/devices` — register this handset for push.
+ *
+ * Idempotent server-side (`$addToSet`), so the app calls it on every sign-in and every FCM token
+ * rotation without checking whether anything changed — the only way to be sure a rotation is not
+ * missed. Without a registered token every ride update lands nowhere.
+ *
+ * Shares `RegisterDeviceRequest` with the driver app: the shape is role-agnostic and already
+ * carries `platform`, so an iOS customer needs no new contract.
+ */
+export function registerDevice(body: RegisterDeviceRequest): Promise<RegisterDeviceResponse> {
+  return request<RegisterDeviceResponse>(`${ROLE_PREFIX}/devices`, {
+    method: 'POST',
+    body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `DELETE /customer/devices` — withdraw this handset on sign-out.
+ *
+ * Only this token, leaving the customer's other devices registered. The body carries the token
+ * because the bearer identifies the customer, not the handset.
+ */
+export function removeDevice(fcmToken: string): Promise<void> {
+  return request<void>(`${ROLE_PREFIX}/devices`, {
+    method: 'DELETE',
+    body: { fcm_token: fcmToken },
     token: getAccessToken() ?? undefined,
   });
 }

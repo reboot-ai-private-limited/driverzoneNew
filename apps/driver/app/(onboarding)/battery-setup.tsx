@@ -1,18 +1,21 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { type ReactElement, useMemo, useState } from 'react';
+import { type ReactElement, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import {
+  isBatteryOptimisationActive,
   markBatterySetupConfirmed,
   markBatterySetupSeen,
 } from '@/features/onboarding/batteryOptimisation';
 import {
   detectOemFamily,
   guideFor,
+  hasPowerManager,
   openAutostartSettings,
   openBatterySettings,
 } from '@/features/onboarding/oemIntents';
+import { openFullScreenIntentSettings } from '@/notifications/fullScreenIntent';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
 /**
@@ -36,25 +39,73 @@ import { colors, radius, shadow, space, text } from '@/theme/theme';
 export default function BatterySetupScreen(): ReactElement {
   const family = useMemo(detectOemFamily, []);
   const guide = guideFor(family);
-  const [busy, setBusy] = useState<'battery' | 'autostart' | null>(null);
+  const [busy, setBusy] = useState<'battery' | 'autostart' | 'fullscreen' | null>(null);
+
+  /**
+   * Whether THIS handset has an OEM autostart / power manager to send the driver to.
+   *
+   * Asked of the device via Notifee rather than inferred from `family`, which is what the button
+   * below used to be gated on. That gate was wrong in both directions: a Transsion or Huawei
+   * phone that has such a screen was shown no button, and any phone in a listed family was shown
+   * one whether or not the activity still existed. Undefined until the lookup returns, so the
+   * button does not pop in after the screen has settled.
+   */
+  const [powerManager, setPowerManager] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    void hasPowerManager().then((value) => {
+      if (active) setPowerManager(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /**
+   * Set when the driver says they are done but Android still reports the app as optimised.
+   *
+   * Not a block — see `done()`. The driver is told once, and a second tap goes through.
+   */
+  const [unverified, setUnverified] = useState(false);
 
   const canGoBack = router.canGoBack();
 
-  async function open(which: 'battery' | 'autostart'): Promise<void> {
+  async function open(which: 'battery' | 'autostart' | 'fullscreen'): Promise<void> {
     setBusy(which);
     try {
       // Seeing the settings page counts as "seen" — the driver has been shown the door even if
       // they do not walk through it, so the forced redirect should not fire again.
       await markBatterySetupSeen();
       if (which === 'battery') await openBatterySettings();
-      else await openAutostartSettings(family);
+      else if (which === 'autostart') await openAutostartSettings(family);
+      else await openFullScreenIntentSettings();
     } finally {
       setBusy(null);
     }
   }
 
+  /**
+   * "I've set this up" — checked against the OS before it is believed.
+   *
+   * The whole screen used to take this on trust, which is how a driver who tapped it without
+   * changing anything silenced the Home banner permanently and then quietly stopped receiving
+   * work. Now the first tap verifies: if Android still reports the app as optimised, the driver
+   * is told so and kept on the screen with the steps in front of them.
+   *
+   * A SECOND tap goes through regardless, and that matters — the read only covers the standard
+   * AOSP setting, so a driver on a skin whose real restriction lives in an autostart list we
+   * cannot query would otherwise be trapped on this screen for ever, insisting they had done it
+   * and being told they had not. Being wrong once is recoverable; a dead end is not.
+   */
   function done(): void {
-    void markBatterySetupConfirmed().then(() => leave());
+    void (async () => {
+      if (!unverified && (await isBatteryOptimisationActive())) {
+        setUnverified(true);
+        return;
+      }
+      await markBatterySetupConfirmed();
+      leave();
+    })();
   }
 
   function later(): void {
@@ -116,7 +167,7 @@ export default function BatterySetupScreen(): ReactElement {
             showArrow={false}
           />
 
-          {family !== 'samsung' && family !== 'generic' ? (
+          {powerManager === true ? (
             <Pressable
               onPress={() => void open('autostart')}
               disabled={busy !== null}
@@ -127,6 +178,22 @@ export default function BatterySetupScreen(): ReactElement {
               <Text style={styles.secondaryText}>Open autostart settings</Text>
             </Pressable>
           ) : null}
+
+          {/*
+            Android 14+ only. The offer is a full-screen "call" notification, and from API 34 that
+            needs a permission the OS hands out to dialers and alarm clocks alone — every other app
+            starts denied, and the ring then shows without waking the screen. There is no runtime
+            prompt; this is the one settings screen that flips it.
+          */}
+          <Pressable
+            onPress={() => void open('fullscreen')}
+            disabled={busy !== null}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+          >
+            <Feather name="maximize" size={16} color={colors.fg} style={styles.secondaryIcon} />
+            <Text style={styles.secondaryText}>Allow full-screen offer alerts</Text>
+          </Pressable>
         </View>
 
         <Text style={styles.hint}>
@@ -136,9 +203,26 @@ export default function BatterySetupScreen(): ReactElement {
       </ScrollView>
 
       <View style={styles.footer}>
+        {/*
+          Shown only after a "done" that the OS disagreed with. It names what is still wrong and
+          what the next tap will do, so carrying on is a choice rather than a way of dismissing a
+          warning the driver did not understand.
+        */}
+        {unverified ? (
+          <View style={styles.warning} accessibilityLiveRegion="polite">
+            <Feather name="alert-triangle" size={16} color={colors.warning} />
+            <Text style={styles.warningText}>
+              Your phone still says DriverZone is battery optimised, so offers may not reach you.
+              Check the steps above — or tap again to carry on anyway.
+            </Text>
+          </View>
+        ) : null}
+
         <Pressable onPress={done} accessibilityRole="button" style={styles.doneButton}>
           <Feather name="check" size={18} color={colors.dutyOn} />
-          <Text style={styles.doneText}>I’ve set this up</Text>
+          <Text style={styles.doneText}>
+            {unverified ? 'Carry on anyway' : 'I’ve set this up'}
+          </Text>
         </Pressable>
         <Pressable onPress={later} accessibilityRole="button" style={styles.laterButton}>
           <Text style={styles.laterText}>Do this later</Text>
@@ -221,6 +305,19 @@ const styles = StyleSheet.create({
     paddingTop: space.md,
     paddingBottom: space.lg,
   },
+  warning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    backgroundColor: '#FFF6E0',
+    borderWidth: 1,
+    borderColor: '#F0D9A0',
+    borderRadius: radius.md,
+    padding: space.md,
+    marginBottom: space.md,
+  },
+  warningText: { ...text.caption, color: colors.fg, flex: 1 },
+
   doneButton: {
     flexDirection: 'row',
     alignItems: 'center',

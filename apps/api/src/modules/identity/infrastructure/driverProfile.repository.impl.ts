@@ -221,4 +221,49 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
       .exec();
     return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
   }
+
+  async sweepStalePresence(cutoff: Date, limit: number): Promise<string[]> {
+    /*
+     * SELECTED FIRST, THEN UPDATED, rather than one `updateMany`.
+     *
+     * The caller has to notify the drivers it took offline, and an `updateMany` reports how many
+     * documents it touched but not which — so there would be no way to tell anyone. Reading the
+     * ids first costs one extra query per sweep and is what makes the notification possible.
+     *
+     * `limit` bounds the read for the same reason every sweep query is bounded: the first run
+     * after an outage could match every driver in the collection, and the sweeper must not spend
+     * a minute-long tick on one enormous batch. Whatever it misses, it catches next minute.
+     *
+     * The `isOnDuty: true` predicate is what makes this idempotent — a driver swept last tick no
+     * longer matches, so a re-run cannot notify them twice.
+     */
+    const stale = await DriverModel.find({
+      isOnDuty: true,
+      $or: [{ lastLocationAt: { $lt: cutoff } }, { lastLocationAt: null }],
+    })
+      .select('_id')
+      .limit(limit)
+      .lean()
+      .exec();
+
+    const ids = stale.map((doc) => String(doc._id));
+    if (ids.length === 0) return [];
+
+    /*
+     * The same predicate is repeated in the write, not just the id list. Between the read above
+     * and this update a driver's app may have come back and flushed a fresh fix — re-checking
+     * `isOnDuty` and the cutoff means the write skips anyone who recovered in that window rather
+     * than knocking a now-healthy driver offline.
+     */
+    await DriverModel.updateMany(
+      {
+        _id: { $in: ids },
+        isOnDuty: true,
+        $or: [{ lastLocationAt: { $lt: cutoff } }, { lastLocationAt: null }],
+      },
+      { $set: { isOnDuty: false } },
+    ).exec();
+
+    return ids;
+  }
 }

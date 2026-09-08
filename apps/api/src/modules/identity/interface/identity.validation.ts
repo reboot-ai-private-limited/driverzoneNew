@@ -322,10 +322,16 @@ export const sendLocationPingsSchema = z.object({
 });
 export type SendLocationPingsInput = z.infer<typeof sendLocationPingsSchema>;
 
-/** `POST /driver/devices` — register this handset's FCM token for push. */
+/** `POST /driver/devices` and `POST /customer/devices` — register this handset's FCM token. */
 export const registerDeviceSchema = z.object({
   fcm_token: z.string().trim().min(10).max(4096),
   platform: z.enum(['android', 'ios']),
   app_version: z.string().trim().max(32).optional(),
 });
 export type RegisterDeviceInput = z.infer<typeof registerDeviceSchema>;
+
+/** `DELETE /customer/devices` — withdraw one handset on sign-out. */
+export const deleteDeviceSchema = z.object({
+  fcm_token: z.string().trim().min(10).max(4096),
+});
+export type DeleteDeviceInput = z.infer<typeof deleteDeviceSchema>;

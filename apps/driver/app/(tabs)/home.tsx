@@ -5,13 +5,13 @@ import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
-import { hasConfirmedBatterySetup } from '@/features/onboarding/batteryOptimisation';
+import { needsBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
-import { isPinging, startLocationPings, stopLocationPings } from '@/duty/locationPings';
 import {
-  startDutyForegroundService,
-  stopDutyForegroundService,
-} from '@/duty/dutyForegroundService';
+  ensureDutyMachinery,
+  rememberDutyState,
+  teardownDutyMachinery,
+} from '@/duty/dutyRecovery';
 import { registerForPush, stopPushRegistration } from '@/notifications/registerDevice';
 import { getProfile, setDuty } from '@/lib/api/endpoints/driver';
 import { listOffers } from '@/lib/api/endpoints/offers';
@@ -60,47 +60,48 @@ export default function HomeScreen(): ReactElement {
        * itself already succeeded server-side by the time we get here; these are follow-on setup
        * that report their own failures through `setDutyError` whenever they finish.
        */
+      /*
+       * Remember it FIRST, and on disk. This is what lets a process killed mid-shift come back on
+       * duty at the next launch without waiting for the profile to load — see `dutyRecovery.ts`.
+       */
+      void rememberDutyState(state.is_on_duty);
+
       if (state.is_on_duty) {
         /**
-         * LOCATION PERMISSION FIRST, THEN THE SERVICE — S-8 step 1 before step 3, and not a
-         * stylistic preference.
+         * One shared implementation, in `dutyRecovery.ts`, rather than a copy here.
          *
-         * The foreground service is typed `location`, which Android only starts if a runtime
-         * location grant is already held. Starting it first threw `SecurityException` natively
-         * inside `ForegroundService.onStartCommand` — uncatchable from JS — and crash-looped the
-         * app on the first "Go on duty" of a fresh install. Pings settle the grant first;
-         * `startDutyForegroundService` re-checks it anyway, because the dev fixed-coordinate
-         * override makes the ping loop skip the prompt entirely.
+         * It owns the ordering rule that used to be spelled out at this call site: the location
+         * grant must exist before a `location`-typed foreground service may be started, or Android
+         * throws `SecurityException` natively inside `onStartCommand` — uncatchable from JS — and
+         * crash-loops the app on the first "Go on duty" of a fresh install. That rule now has one
+         * home, and the resume path gets it for free instead of re-deriving it.
          *
-         * Both failures are reported, not fatal: duty already succeeded server-side, and a driver
-         * working with the app open beats one bounced back off duty.
+         * Failures are reported, not fatal: duty already succeeded server-side by the time this
+         * runs, and a driver working with the app open beats one bounced back off duty.
          */
-        void (async () => {
-          const pinging = await startLocationPings();
-          if (!pinging) {
+        void ensureDutyMachinery().then((result) => {
+          if (result === 'no-location') {
             setDutyError(
               'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
             );
-            // No grant means the location-typed service cannot legally start either.
-            return;
-          }
-
-          const serviceUp = await startDutyForegroundService();
-          if (!serviceUp) {
+          } else if (result === 'no-service') {
             setDutyError(
               'We could not keep DriverZone running in the background. Offers may only reach you while the app is open — check notification and location permissions in Settings.',
             );
           }
-        })();
+        });
         /**
          * Register for push in the same breath.
          *
-         * This is what makes an offer ring with the app CLOSED — the polling below only runs
-         * while this screen is alive. A driver who declines notification permission can still
-         * work, but only with the app open, so it is worth saying so rather than leaving them to
-         * wonder why trips stopped.
+         * `ensureDutyMachinery` also registers, and idempotently — but it does not report back,
+         * and a refused notification permission is the one failure a driver has to be told about:
+         * it is the difference between offers that ring a closed app and offers that only arrive
+         * while they are looking at the screen.
+         *
+         * `force` because this is a deliberate "I just went on duty" moment — it must not be
+         * skipped by the rate limit that keeps the background callers from looping.
          */
-        void registerForPush().then((pushable) => {
+        void registerForPush(true).then((pushable) => {
           if (!pushable) {
             setDutyError(
               'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
@@ -110,9 +111,8 @@ export default function HomeScreen(): ReactElement {
       } else {
         // The reverse order of going on duty: stop what the service was protecting, then release
         // the service itself, so the process is never kept alive for a loop that has already gone.
-        stopLocationPings();
         stopPushRegistration();
-        void stopDutyForegroundService();
+        void teardownDutyMachinery();
       }
     },
     onError: (cause) => {
@@ -169,43 +169,27 @@ export default function HomeScreen(): ReactElement {
   }, [ringingOfferId]);
 
   /**
-   * Resume the on-duty machinery on a cold start.
+   * Reconcile the local memory of duty with what the profile actually says, and re-arm if needed.
    *
-   * Duty survives closing the app, but nothing that DELIVERS work to the driver does — both the
-   * location loop and the push registration live in this process. A driver who was on duty
-   * yesterday reopens the app already "online" and would otherwise sit there invisible to
-   * dispatch until they toggled off and on again.
+   * The PROFILE is the authority — duty is server state, and a driver taken off duty by an admin
+   * or from another device must not be left with a service running here. `rememberDutyState` is
+   * what carries that answer to `dutyRecovery.ts`, whose own callers (the boot screen, the resume
+   * listener) run where no profile query exists.
    *
-   * Re-registering for push is the half that is easy to forget and impossible to notice: without
-   * it a driver on a fresh install is on duty with no FCM token, dispatch logs "driver has no
-   * registered device", and every offer lapses in silence while the app looks perfectly healthy.
-   * Both calls are idempotent — `isPinging()` guards one and the server's `$addToSet` guards the
-   * other — so this is safe on every render pass.
-   *
-   * The foreground service is restarted here for the same reason and is idempotent too: it is
-   * keyed on one notification id, so a second `displayNotification` replaces the notice rather
-   * than stacking a second service. Without this line a driver who reopened the app on a shift
-   * they never ended would be back on duty with nothing keeping the process alive.
+   * The re-arm itself is a safety net rather than the main path: the boot screen already did it
+   * before this screen mounted. It stays because it is the one place that has seen the server's
+   * current answer, so it corrects a stored flag that has drifted. `ensureDutyMachinery` now
+   * coalesces concurrent callers and `startDutyForegroundService` no-ops when the service is
+   * already up, so this firing alongside boot and the resume listener costs one guard check
+   * rather than a re-post of the duty notification — which is what used to flicker the shade.
    */
   useEffect(() => {
-    if (!onDuty) return;
-    void (async () => {
-      // Same ordering rule as the toggle above: the location grant has to exist before a
-      // `location`-typed foreground service may be started, or Android kills the process.
-      if (!isPinging()) await startLocationPings();
-      await startDutyForegroundService();
-    })();
-    void registerForPush();
+    void rememberDutyState(onDuty).then(() => {
+      if (onDuty) return ensureDutyMachinery();
+      return undefined;
+    });
   }, [onDuty]);
 
-  /**
-   * The battery-optimisation nudge (S-12). Shows until the driver confirms they have lifted the
-   * restriction, and re-checks every time Home regains focus — so it clears the instant they
-   * come back from the setup screen having pressed "I've set this up".
-   *
-   * `undefined` while the first read is in flight, so the banner does not flash in and out on a
-   * cold start.
-   */
   /**
    * The trip this driver is already on, if any — the banner's source.
    *
@@ -217,12 +201,21 @@ export default function HomeScreen(): ReactElement {
     queryFn: ({ signal }) => getCurrentTrip(signal),
   });
 
-  const [batteryConfirmed, setBatteryConfirmed] = useState<boolean | undefined>(undefined);
+  /**
+   * `undefined` while the first read is in flight, so the banner does not flash in and out on a
+   * cold start. `true` means Android is still battery-optimising this app.
+   *
+   * Re-read on every focus, and that is load-bearing rather than tidy: the driver leaves this
+   * screen for the system settings and comes straight back, so the focus event is the moment the
+   * answer changes. It also catches the case the old stored flag could not — a system update that
+   * silently re-enables optimisation on a driver who set it up weeks ago.
+   */
+  const [needsBattery, setNeedsBattery] = useState<boolean | undefined>(undefined);
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      void hasConfirmedBatterySetup().then((value) => {
-        if (active) setBatteryConfirmed(value);
+      void needsBatterySetup().then((value) => {
+        if (active) setNeedsBattery(value);
       });
       // Re-read the live trip on every focus too: completing one lands back here, and a banner
       // still offering to resume a finished trip is worse than no banner at all.
@@ -278,7 +271,7 @@ export default function HomeScreen(): ReactElement {
           </Pressable>
         ) : null}
 
-        {batteryConfirmed === false ? (
+        {needsBattery === true ? (
           <Pressable
             onPress={() => router.push('/battery-setup')}
             accessibilityRole="button"

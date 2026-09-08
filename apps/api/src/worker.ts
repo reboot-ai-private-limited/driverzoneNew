@@ -26,6 +26,21 @@ const SWEEPER_INTERVAL_MS = 60_000;
 /** A booking that never got paid for within this is not going to be. */
 const ABANDONED_PAYMENT_MINUTES = 30;
 
+/**
+ * How long an on-duty driver may report no position before they are taken off duty.
+ *
+ * DELIBERATELY MUCH WIDER THAN DISPATCH'S OWN WINDOW. `MongoDriverPool` stops offering trips to a
+ * driver whose fix is over two minutes old, and that is the right threshold for "can I route a
+ * trip to them right now". This is a different question — "has this handset gone for good" — and
+ * answering it on a two-minute silence would knock a working driver offline for a tunnel, a lift
+ * or a signal dead spot, which is a far worse bug than the one this sweep exists to fix.
+ *
+ * Fifteen minutes is long enough that only a dead process reaches it, and short enough that a
+ * driver is told inside one shift rather than at the end of it. The ping loop flushes every 15
+ * seconds, so a healthy handset misses roughly sixty consecutive flushes before qualifying.
+ */
+const STALE_PRESENCE_MINUTES = 15;
+
 async function main(): Promise<void> {
   loadEnv();
 
@@ -158,6 +173,38 @@ async function runSweep(containers: AppContainers): Promise<void> {
        */
       const published = await containers.reviews.processExpiredReviews();
       if (published > 0) logger.info({ published }, 'published reviews whose window elapsed');
+
+      /*
+       * Drivers whose handset stopped reporting — docs/LLD/driver-app.md S-1.
+       *
+       * The only failure in this sweep that no amount of client code can prevent: a force-stop, an
+       * OEM battery manager or a reboot kills the driver's process without running a line of it,
+       * so `isOnDuty` stays true for ever while nothing pings. Dispatch already declines to ring
+       * them — `MongoDriverPool` filters on `lastLocationAt` freshness — so no trip is misrouted.
+       * The harm is that nobody knows: the driver's app still reads "You're online", the panel
+       * still counts them as supply, and the driver waits out a shift that ended when their phone
+       * decided it had.
+       */
+      const stalePresenceCutoff = new Date(now.getTime() - STALE_PRESENCE_MINUTES * 60_000);
+      const takenOffline = await containers.identity.sweepStalePresence(stalePresenceCutoff, 200);
+      if (takenOffline.length > 0) {
+        logger.warn(
+          { count: takenOffline.length },
+          'drivers were on duty but had stopped reporting location — taken offline',
+        );
+        /*
+         * Told one at a time, and failures are contained per driver: the sweep must finish its
+         * batch even if one device token is stale. `sendDutyEnded` already swallows its own
+         * transport errors, so this only guards against something unexpected.
+         */
+        for (const driverId of takenOffline) {
+          try {
+            await containers.notifications.contract.sendDutyEnded(driverId);
+          } catch (error) {
+            logger.error({ err: error, driverId }, 'could not tell a driver they went offline');
+          }
+        }
+      }
     } catch (error) {
       // The sweeper must never die. It is the thing that catches everything else failing.
       logger.error({ err: error }, 'sweep failed');

@@ -20,7 +20,15 @@ import { Linking, Platform } from 'react-native';
  */
 
 /** The buckets we have specific guidance for. `generic` is the honest fallback for everything else. */
-export type OemFamily = 'xiaomi' | 'oppo' | 'vivo' | 'samsung' | 'nothing' | 'lava' | 'generic';
+export type OemFamily =
+  | 'xiaomi'
+  | 'oppo'
+  | 'vivo'
+  | 'samsung'
+  | 'motorola'
+  | 'nothing'
+  | 'lava'
+  | 'generic';
 
 export interface OemGuide {
   family: OemFamily;
@@ -47,6 +55,10 @@ export function detectOemFamily(): OemFamily {
   if (/oppo|realme|oneplus/.test(haystack)) return 'oppo';
   if (/vivo|iqoo/.test(haystack)) return 'vivo';
   if (/samsung/.test(haystack)) return 'samsung';
+  // `motorola` in both fields, lowercase, on every Moto handset — the Lenovo ownership does not
+  // show up here. Matched before the near-stock families below because My UX, despite looking
+  // like stock, keeps its per-app battery control somewhere the generic copy does not name.
+  if (/motorola/.test(haystack)) return 'motorola';
   // Nothing OS is near-stock AOSP and reports "Nothing" in both fields. It gets its own entry
   // not because it is hostile — it is one of the better-behaved skins — but because the generic
   // copy names screens that Nothing labels differently, and a step that does not match what is
@@ -98,6 +110,19 @@ const GUIDES: Record<OemFamily, OemGuide> = {
       // One UI turns this back on by itself after an update, and it is what quietly re-sleeps the
       // app weeks after a driver followed every other step.
       'Still in Background usage limits, turn OFF "Put unused apps to sleep".',
+    ],
+  },
+  motorola: {
+    family: 'motorola',
+    skinLabel: 'My UX (Motorola)',
+    steps: [
+      'Open the button below, then open App battery usage and choose Unrestricted.',
+      // The per-app setting above is the one that matters, but Moto ships a second, global switch
+      // that silently overrides it — a driver who sets only the first still gets throttled.
+      'In Settings → Battery, open Battery optimisation and set DriverZone to Don’t optimise.',
+      // My UX is close to stock and has no autostart list; saying so stops a driver hunting for
+      // one because the other guides mention it.
+      'There is no autostart list on Motorola — those two settings are all it needs.',
     ],
   },
   nothing: {

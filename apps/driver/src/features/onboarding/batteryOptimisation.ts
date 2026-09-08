@@ -1,4 +1,6 @@
+import notifee from '@notifee/react-native';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 /**
  * Two one-bit local memories about the battery-optimisation screen. Neither is security
@@ -15,8 +17,9 @@ import * as SecureStore from 'expo-secure-store';
  *                 nudging until they do. "Remind me later" sets `seen` but not `confirmed`, so
  *                 the forced redirect stops while the banner stays.
  *
- * Neither is a claim that battery optimisation is genuinely off — the OS gives no reliable read
- * of that from inside the app. They only record what the driver was shown and what they said.
+ * Neither is a claim that battery optimisation is genuinely off. They only record what the driver
+ * was shown and what they said. For whether it is ACTUALLY off, see `isBatteryOptimisationActive`
+ * at the bottom of this file — that one asks Android, and it is what the Home banner reads.
  */
 const SEEN_KEY = 'dz.driver.battery_setup_seen';
 const CONFIRMED_KEY = 'dz.driver.battery_setup_confirmed';
@@ -48,4 +51,59 @@ export const hasConfirmedBatterySetup = (): Promise<boolean> => read(CONFIRMED_K
 export async function markBatterySetupConfirmed(): Promise<void> {
   await write(SEEN_KEY);
   await write(CONFIRMED_KEY);
+}
+
+/**
+ * IS ANDROID STILL BATTERY-OPTIMISING US? The one question above that is answered by the OS
+ * rather than by the driver.
+ *
+ * `true` means optimisation is ACTIVE — the bad state, where the app can be frozen in the
+ * background and its offers delayed or dropped.
+ *
+ * The header above says the OS "gives no reliable read of that from inside the app". That was
+ * written before this: Notifee exposes `PowerManager.isIgnoringBatteryOptimizations`, which is
+ * exactly that read, and it is the standard AOSP check honoured by Nothing, Samsung, Lava and
+ * every other skin. It does NOT see an OEM autostart list — a Xiaomi phone can report itself
+ * unoptimised while MIUI still refuses to let the app start — so it is a floor, not a guarantee.
+ *
+ * Why it matters that this exists: `confirmed` records only that a driver TAPPED "I've set this
+ * up". A driver who taps it without changing anything, or who has the setting reset by a system
+ * update, silences the banner for ever and then quietly stops receiving work with nothing on
+ * screen to explain it. This read catches both.
+ *
+ * Fails to `false` — "not optimised", i.e. do not nag. An unreadable power manager must not
+ * produce a warning banner the driver cannot act on or dismiss.
+ */
+export async function isBatteryOptimisationActive(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return await notifee.isBatteryOptimizationEnabled();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Should the Home banner nag?
+ *
+ * The OS reading WINS over the driver's confirmation, in both directions:
+ *
+ *   - still optimised → nag, even if they once tapped "I've set this up". This is the case that
+ *     used to go unnoticed: a system update re-enables optimisation and the app goes quiet.
+ *   - not optimised → do not nag, even if they never confirmed. A driver who fixed it from the
+ *     system settings rather than through our screen has done the thing we were asking for, and
+ *     nagging them for the paperwork is how a real warning gets trained into background noise.
+ *
+ * The stored `confirmed` flag survives only as the answer for a device whose power manager cannot
+ * be read at all.
+ */
+export async function needsBatterySetup(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+
+  try {
+    return await notifee.isBatteryOptimizationEnabled();
+  } catch {
+    // No usable read — fall back to what the driver told us.
+    return !(await hasConfirmedBatterySetup());
+  }
 }

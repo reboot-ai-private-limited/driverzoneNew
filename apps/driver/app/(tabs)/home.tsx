@@ -5,7 +5,7 @@ import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
-import { hasConfirmedBatterySetup } from '@/features/onboarding/batteryOptimisation';
+import { needsBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { isPinging, startLocationPings, stopLocationPings } from '@/duty/locationPings';
 import {
@@ -199,14 +199,6 @@ export default function HomeScreen(): ReactElement {
   }, [onDuty]);
 
   /**
-   * The battery-optimisation nudge (S-12). Shows until the driver confirms they have lifted the
-   * restriction, and re-checks every time Home regains focus — so it clears the instant they
-   * come back from the setup screen having pressed "I've set this up".
-   *
-   * `undefined` while the first read is in flight, so the banner does not flash in and out on a
-   * cold start.
-   */
-  /**
    * The trip this driver is already on, if any — the banner's source.
    *
    * `refetchOnMount` plus the focus refetch below keep it honest: completing a trip navigates
@@ -217,12 +209,21 @@ export default function HomeScreen(): ReactElement {
     queryFn: ({ signal }) => getCurrentTrip(signal),
   });
 
-  const [batteryConfirmed, setBatteryConfirmed] = useState<boolean | undefined>(undefined);
+  /**
+   * `undefined` while the first read is in flight, so the banner does not flash in and out on a
+   * cold start. `true` means Android is still battery-optimising this app.
+   *
+   * Re-read on every focus, and that is load-bearing rather than tidy: the driver leaves this
+   * screen for the system settings and comes straight back, so the focus event is the moment the
+   * answer changes. It also catches the case the old stored flag could not — a system update that
+   * silently re-enables optimisation on a driver who set it up weeks ago.
+   */
+  const [needsBattery, setNeedsBattery] = useState<boolean | undefined>(undefined);
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      void hasConfirmedBatterySetup().then((value) => {
-        if (active) setBatteryConfirmed(value);
+      void needsBatterySetup().then((value) => {
+        if (active) setNeedsBattery(value);
       });
       // Re-read the live trip on every focus too: completing one lands back here, and a banner
       // still offering to resume a finished trip is worse than no banner at all.
@@ -278,7 +279,7 @@ export default function HomeScreen(): ReactElement {
           </Pressable>
         ) : null}
 
-        {batteryConfirmed === false ? (
+        {needsBattery === true ? (
           <Pressable
             onPress={() => router.push('/battery-setup')}
             accessibilityRole="button"

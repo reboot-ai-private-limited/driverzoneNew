@@ -66,41 +66,85 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
       ? `${data.pickupAddress} → ${data.dropAddress}`
       : (data.pickupAddress ?? 'Tap to see the trip');
 
-  await notifee.displayNotification({
-    id: notificationId(offerId),
-    title: earning === '' ? 'New trip offer' : `New trip · ${earning}`,
-    body: route,
+  const id = notificationId(offerId);
+  const title = earning === '' ? 'New trip offer' : `New trip · ${earning}`;
+  // Deep link into the ring screen, so tapping the notification lands on the same screen the
+  // full-screen intent opens.
+  const payload = { url: `/offer/${offerId}` };
 
-    // Deep link into the ring screen, so tapping the notification lands on the same screen the
-    // full-screen intent opens.
-    data: { url: `/offer/${offerId}` },
+  try {
+    await notifee.displayNotification({
+      id,
+      title,
+      body: route,
+      data: payload,
 
-    android: {
-      channelId: OFFER_CHANNEL_ID,
+      android: {
+        channelId: OFFER_CHANNEL_ID,
 
-      /*
-       * `CALL` category plus `fullScreenAction` is what makes Android treat this as a ringing
-       * call rather than a message: it wakes the screen and takes it over.
-       */
-      category: AndroidCategory.CALL,
-      importance: AndroidImportance.HIGH,
-      fullScreenAction: { id: 'default', launchActivity: 'default' },
-      pressAction: { id: 'default', launchActivity: 'default' },
+        /*
+         * `CALL` category plus `fullScreenAction` is what makes Android treat this as a ringing
+         * call rather than a message: it wakes the screen and takes it over.
+         */
+        category: AndroidCategory.CALL,
+        importance: AndroidImportance.HIGH,
+        fullScreenAction: { id: 'default', launchActivity: 'default' },
+        pressAction: { id: 'default', launchActivity: 'default' },
 
-      /*
-       * Keep ringing until answered. A single chime is a notification; a driver needs something
-       * that persists the way a call does. `ongoing` stops a swipe from dismissing it, and
-       * `timeoutAfter` guarantees it clears itself when the offer lapses even if nothing else
-       * removes it — the one safeguard against a notification that rings for ever.
-       */
-      loopSound: true,
-      ongoing: true,
-      autoCancel: false,
-      timeoutAfter: msLeft,
+        /*
+         * Keep ringing until answered. A single chime is a notification; a driver needs something
+         * that persists the way a call does. `ongoing` stops a swipe from dismissing it, and
+         * `timeoutAfter` guarantees it clears itself when the offer lapses even if nothing else
+         * removes it — the one safeguard against a notification that rings for ever.
+         */
+        loopSound: true,
+        ongoing: true,
+        autoCancel: false,
+        timeoutAfter: msLeft,
 
-      lightUpScreen: true,
-    },
-  });
+        lightUpScreen: true,
+      },
+    });
+  } catch {
+    /**
+     * THE DEGRADED RING — and the reason it is real code rather than a comment.
+     *
+     * The rich notification above asks for several things Android may refuse, and a refusal
+     * surfaces as a THROW, not as a quieter notification:
+     *
+     *   - `fullScreenAction` needs `USE_FULL_SCREEN_INTENT`, which from Android 14 is granted
+     *     automatically only to apps in the calling/alarm category. Play can withhold or revoke
+     *     it from everyone else, and this app is not a dialer.
+     *   - `ongoing` + `loopSound` behave differently across OEM skins, and some reject the
+     *     combination outright from a headless task.
+     *
+     * Before this, one throw here rejected the whole background handler and the driver got
+     * SILENCE — no ring, no banner, no log they could see. A plain heads-up notification is a
+     * large step down from a screen-waking ring, but it is an enormous step up from nothing, and
+     * it still carries the deep link so tapping it opens the offer.
+     *
+     * Deliberately asks for nothing that can be refused: no full-screen intent, no ongoing flag,
+     * no looping sound. The channel still supplies the tone and the HIGH importance, so this is
+     * audible.
+     */
+    try {
+      await notifee.displayNotification({
+        id,
+        title,
+        body: route,
+        data: payload,
+        android: {
+          channelId: OFFER_CHANNEL_ID,
+          importance: AndroidImportance.HIGH,
+          pressAction: { id: 'default', launchActivity: 'default' },
+          timeoutAfter: msLeft,
+        },
+      });
+    } catch {
+      // Notifications are blocked outright at the OS level. Nothing further is possible from
+      // here; the poll on the duty screen is the only remaining path, and it needs the app open.
+    }
+  }
 }
 
 /** Stop a ringing offer — the driver answered, or another driver won the race. */

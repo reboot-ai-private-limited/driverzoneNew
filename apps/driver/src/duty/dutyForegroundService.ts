@@ -111,6 +111,33 @@ export async function startDutyForegroundService(): Promise<boolean> {
   }
   if (permission === null || !permission.granted) return false;
 
+  /**
+   * BACKGROUND LOCATION — asked for, never required.
+   *
+   * The service runs on the foreground grant alone: while a `location`-typed foreground service is
+   * up, Android counts the app as "in use" and hands it fixes. So this is NOT what makes the
+   * running service work, and duty must never be blocked on it.
+   *
+   * It is what makes the service RESTARTABLE. The two paths that bring a driver back after the OS
+   * has reclaimed the process — the boot receiver, and re-arming from a background wake — both
+   * start the service from a background context, and there the foreground grant is not enough:
+   * Android refuses the location type and the restart fails silently, leaving a driver who looks
+   * on duty to dispatch and receives nothing.
+   *
+   * Fired and forgotten, deliberately. On Android 11+ this is not a dialog but a trip to the
+   * system settings page for "Allow all the time"; awaiting it would hang the duty toggle behind
+   * a screen the driver may never come back from. A refusal costs the restart path, not the shift.
+   */
+  void Location.getBackgroundPermissionsAsync()
+    .then((background) => {
+      if (background.granted || !background.canAskAgain) return;
+      return Location.requestBackgroundPermissionsAsync().then(() => undefined);
+    })
+    .catch(() => {
+      // Never granted, never asked again, or an OEM that does not expose the setting. The service
+      // still runs; only the restart path is weaker.
+    });
+
   try {
     await notifee.displayNotification({
       id: DUTY_NOTIFICATION_ID,

@@ -547,8 +547,12 @@ Per `module-anatomy.md`. Public surface:
   shape.
 - On an FCM `messaging/registration-token-not-registered` error, delete that token row.
 
-New dependency: `firebase-admin`. Credentials via `FCM_SERVICE_ACCOUNT_JSON` (path or inline
-JSON) — add to `apps/api/.env.example` and the env table in `build-and-deploy.md`.
+New dependency: `firebase-admin`. Credentials via **`FCM_SERVICE_ACCOUNT_PATH`** — a filesystem
+path to the service-account JSON (NOT inline JSON, and NOT `FCM_SERVICE_ACCOUNT_JSON`, which was
+this doc's original name and does not exist in the code). Read by
+`apps/api/src/modules/notifications/notifications.container.ts`; unset ⇒ `MockPushSender` and no
+offer ever reaches a device. `docker-compose.prod.yml` mounts the file and sets the path for the
+`api` and `worker` services; see `apps/api/.env.prod.example`.
 
 ### 16.2 `driverDevices` collection + endpoints
 

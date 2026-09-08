@@ -2,6 +2,7 @@ import type { DeliveryChannel } from '@driverzone/contracts';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, type BatchResponse, type Messaging } from 'firebase-admin/messaging';
 import { logger } from '../../../shared/logging/logger.js';
+import type { CustomerDeviceRepositoryPort } from '../../identity/domain/customerDevice.repository.port.js';
 import type { DriverDeviceRepositoryPort } from '../../identity/domain/driverDevice.repository.port.js';
 import type {
   BookingUpdatePush,
@@ -13,11 +14,16 @@ import type {
 /**
  * INFRASTRUCTURE — the real thing. Firebase Cloud Messaging.
  *
- * **DATA-ONLY MESSAGES, never a `notification` block.** A `notification` payload is drawn by
- * Android itself, on the default channel, with the default sound, once. That is a notification;
+ * **THE TRIP OFFER IS DATA-ONLY, never a `notification` block.** A `notification` payload is drawn
+ * by Android itself, on the default channel, with the default sound, once. That is a notification;
  * a trip offer needs a full-screen intent and a looping alarm tone, which only the app can build
  * — and the app only gets the chance if the message arrives as data. Adding a `notification`
- * block "so it shows something" is the single easiest way to break the ring.
+ * block to `sendOffer` "so it shows something" is the single easiest way to break the ring.
+ *
+ * The other two — `sendBookingUpdate` (customer ride updates) and `sendDutyEnded` — DO carry a
+ * `notification` block, on purpose: they are not time-critical, they must reach an app that may
+ * not be running, and there is nothing the app needs to build that Android cannot draw itself.
+ * `data` still rides along so a live app can deep-link rather than double-post.
  *
  * **Priority high, TTL short.** High priority is what wakes a dozing app; the TTL matches the
  * offer's own expiry because a ring that arrives after the offer lapsed is worse than silence —
@@ -30,6 +36,7 @@ export class FcmPushSender implements PushSenderPort {
   constructor(
     private readonly devices: DriverDeviceRepositoryPort,
     private readonly messaging: Messaging,
+    private readonly customerDevices: CustomerDeviceRepositoryPort,
   ) {}
 
   async sendOffer(driverId: string, offer: DriverOfferPush): Promise<DeliveryChannel> {
@@ -71,21 +78,65 @@ export class FcmPushSender implements PushSenderPort {
   }
 
   async sendBookingUpdate(to: Recipient, update: BookingUpdatePush): Promise<void> {
-    // Only drivers have registered tokens today; a customer update has nowhere to go yet and is
-    // dropped rather than pretended.
-    if (to.role !== 'DRIVER') return;
+    const data = {
+      type: 'booking.updated',
+      bookingId: update.bookingId,
+      reference: update.reference,
+      status: update.status,
+      message: update.message,
+    };
 
-    await this.send(
-      to.id,
-      {
-        type: 'booking.updated',
-        bookingId: update.bookingId,
-        reference: update.reference,
-        status: update.status,
-        message: update.message,
-      },
-      15 * 60_000,
-    );
+    // A customer ride update is not time-critical the way a trip offer is, so a data-only
+    // high-priority message would spend battery for nothing on the common case (app open, or
+    // reachable in the background). It carries a `notification` block so Android draws it even
+    // when the app is not running — `data` rides along so a live app deep-links to the trip
+    // rather than posting a second banner over what it already showed.
+    const tokens =
+      to.role === 'DRIVER'
+        ? await this.devices.tokensFor(to.id)
+        : await this.customerDevices.tokensFor(to.id);
+    if (tokens.length === 0) {
+      logger.warn({ role: to.role, id: to.id }, 'fcm: booking update — recipient has no device');
+      return;
+    }
+
+    try {
+      const response = await this.messaging.sendEachForMulticast({
+        tokens,
+        data,
+        notification: { title: `Ride ${update.reference}`, body: update.message },
+        android: {
+          priority: 'normal',
+          ttl: 15 * 60_000,
+          notification: { channelId: 'booking-updates-v1' },
+        },
+      });
+      await this.pruneRecipientTokens(to, tokens, response);
+    } catch (error) {
+      logger.error({ err: error, role: to.role, id: to.id }, 'fcm: booking update send failed');
+    }
+  }
+
+  /** Prune dead tokens for whichever side the recipient is. Mirrors `pruneDeadTokens`. */
+  private async pruneRecipientTokens(
+    to: Recipient,
+    tokens: string[],
+    response: BatchResponse,
+  ): Promise<void> {
+    const dead = response.responses
+      .map((result, index) => ({ result, token: tokens[index] }))
+      .filter(
+        ({ result }) =>
+          result.error?.code === 'messaging/registration-token-not-registered' ||
+          result.error?.code === 'messaging/invalid-registration-token',
+      )
+      .map(({ token }) => token)
+      .filter((token): token is string => token !== undefined);
+
+    for (const token of dead) {
+      if (to.role === 'DRIVER') await this.devices.remove(token);
+      else await this.customerDevices.remove(token);
+    }
   }
 
   /**

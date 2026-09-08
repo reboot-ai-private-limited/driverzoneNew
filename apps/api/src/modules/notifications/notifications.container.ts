@@ -1,5 +1,6 @@
 import { env } from '@/config/env.js';
 import { logger } from '@/shared/logging/logger.js';
+import { MongoCustomerDeviceRepository } from '../identity/infrastructure/customerDevice.repository.impl.js';
 import { MongoDriverDeviceRepository } from '../identity/infrastructure/driverDevice.repository.impl.js';
 import type { NotificationsPublicContract } from './notifications.public.js';
 import { MockPushSender } from './infrastructure/mock.pushSender.js';
@@ -53,7 +54,11 @@ export function buildNotificationsContainer(): NotificationsContainer {
     };
   }
 
-  const sender = new FcmPushSender(new MongoDriverDeviceRepository(), messaging);
+  const sender = new FcmPushSender(
+    new MongoDriverDeviceRepository(),
+    messaging,
+    new MongoCustomerDeviceRepository(),
+  );
   logger.info('notifications: FCM push sender active');
 
   return {

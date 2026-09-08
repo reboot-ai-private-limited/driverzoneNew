@@ -33,6 +33,7 @@ import { MongoSessionRepository } from './infrastructure/session.repository.impl
 import { MongoCustomerProfileRepository } from './infrastructure/customerProfile.repository.impl.js';
 import { MongoDriverProfileRepository } from './infrastructure/driverProfile.repository.impl.js';
 import { MongoDriverDocumentRepository } from './infrastructure/driverDocument.repository.impl.js';
+import { MongoCustomerDeviceRepository } from './infrastructure/customerDevice.repository.impl.js';
 import { MongoDriverDeviceRepository } from './infrastructure/driverDevice.repository.impl.js';
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
@@ -190,6 +191,7 @@ export function buildIdentityContainer(): IdentityContainer {
   const setDuty = new SetDutyStatusUseCase(drivers);
   const recordLocation = new RecordLocationPingsUseCase(drivers);
   const devices = new MongoDriverDeviceRepository();
+  const customerDevices = new MongoCustomerDeviceRepository();
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
   const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit);
@@ -213,6 +215,7 @@ export function buildIdentityContainer(): IdentityContainer {
           updateProfile: updateCustomerProfile,
           addresses: manageAddresses,
           vehicles: manageVehicles,
+          devices: customerDevices,
         }),
       );
     }

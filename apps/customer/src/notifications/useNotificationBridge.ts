@@ -9,6 +9,7 @@ import {
 import { router } from 'expo-router';
 import { useEffect } from 'react';
 import { useSession } from '@/lib/auth/SessionProvider';
+import * as session from '@/lib/auth/session';
 import { ensureNotificationChannels } from './channel';
 import { pushLog } from './log';
 import { registerForPush } from './registerDevice';
@@ -60,14 +61,14 @@ export function useNotificationBridge(): void {
     const unsubscribeOpened = onNotificationOpenedApp(messaging, (remoteMessage: RemoteMessage) => {
       const href = hrefFor(remoteMessage);
       pushLog('notification opened app (background)', { href });
-      if (href !== null) router.push(href as never);
+      openIfSignedIn(href);
     });
 
     /** Tapping a NOTIFEE-drawn notification while the app is alive (foreground path). */
     const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
       if (type !== EventType.PRESS) return;
       const url = detail.notification?.data?.['url'];
-      if (typeof url === 'string') router.push(url as never);
+      openIfSignedIn(typeof url === 'string' ? url : null);
     });
 
     return () => {
@@ -76,6 +77,24 @@ export function useNotificationBridge(): void {
       unsubscribeNotifee();
     };
   }, []);
+}
+
+/**
+ * Route to a tapped notification's target, but only for a signed-in customer.
+ *
+ * A ride-update notification can outlive the session that produced it — a stale one tapped on a
+ * shared phone after sign-out, or one that arrives while the session is being restored. Pushing
+ * `/trip/…` onto an unauthenticated stack gets a 401 and an error screen the customer cannot act
+ * on; leaving them where they are is the honest outcome, and the boot screen routes them properly
+ * once they sign in.
+ */
+function openIfSignedIn(href: string | null): void {
+  if (href === null) return;
+  if (session.getState().status !== 'authenticated') {
+    pushLog('notification tap ignored: not signed in', { href });
+    return;
+  }
+  router.push(href as never);
 }
 
 /** The deep link for an FCM message, from its `data.url` or reconstructed from `data.bookingId`. */

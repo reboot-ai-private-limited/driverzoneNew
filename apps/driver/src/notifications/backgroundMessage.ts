@@ -1,4 +1,5 @@
 import { getMessaging, setBackgroundMessageHandler, type RemoteMessage } from '@react-native-firebase/messaging';
+import { rememberDutyState, teardownDutyMachinery } from '@/duty/dutyRecovery';
 import { ensureNotificationChannels } from './channel';
 import { pushLog } from './log';
 import { cancelOfferNotification, displayOfferNotification, type OfferPushData } from './offerNotification';
@@ -67,6 +68,24 @@ setBackgroundMessageHandler(getMessaging(), async (remoteMessage: RemoteMessage)
       // Another driver won, or the customer cancelled. Silence immediately — a phone still ringing
       // for a trip that is gone is what teaches drivers to stop trusting the ring.
       await cancelOfferNotification(data.offerId);
+      return;
+    }
+
+    /**
+     * The server's presence sweep took this driver off duty.
+     *
+     * Handled HERE as well as in the foreground bridge, and the case it covers is the common one:
+     * the app is ALIVE but backgrounded — which is exactly the state the foreground service is
+     * there to maintain — so this handler runs in the live JS context and the teardown is real.
+     * Without it the app kept its duty flag, kept the service up and kept pinging a server that
+     * had already written the driver off, showing "You're online" until they next opened it.
+     *
+     * Nothing is DISPLAYED here: `sendDutyEnded` carries a `notification` block, so Android has
+     * already drawn the notice itself. Drawing a second one is the double-notification bug.
+     */
+    if (data.type === 'duty.ended') {
+      await rememberDutyState(false);
+      await teardownDutyMachinery();
     }
   } catch {
     // Swallowed for the reason in the header: there is nobody here to report to, and a rejection

@@ -7,6 +7,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { profileCompletionFromDto } from '@/features/profile/completion';
 import { getProfile } from '@/lib/api/endpoints/customer';
+import { stopPushRegistration } from '@/notifications/registerDevice';
 import * as session from '@/lib/auth/session';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
@@ -40,6 +41,11 @@ export default function AccountScreen(): ReactElement {
 
   async function handleSignOut(): Promise<void> {
     setSigningOut(true);
+    // Withdraw this handset from push BEFORE the session goes — the call is authenticated, and a
+    // customer who signs out on a shared phone must stop getting the previous account's ride
+    // updates. Done here rather than inside `session.signOut()` to keep `session.ts` free of an
+    // import cycle through the API layer.
+    await stopPushRegistration();
     await session.signOut();
     router.replace('/phone');
   }

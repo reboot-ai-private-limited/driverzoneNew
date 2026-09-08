@@ -12,6 +12,7 @@ import {
   initialWindowMetrics,
 } from 'react-native-safe-area-context';
 import { SessionProvider } from '@/lib/auth/SessionProvider';
+import { useNotificationBridge } from '@/notifications/useNotificationBridge';
 import { createQueryClient } from '@/lib/query/client';
 import { colors } from '@/theme/theme';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
@@ -58,6 +59,13 @@ export default function RootLayout(): ReactElement | null {
         <QueryClientProvider client={queryClient}>
           <SessionProvider>
             {/*
+              Push: creates the notification channel, registers this handset once the session is
+              authenticated, and routes a tapped ride-update notification to the trip screen.
+              Inside `SessionProvider` because it reads the session; renders nothing.
+            */}
+            <NotificationBridge />
+
+            {/*
               `style="dark"` means DARK GLYPHS, for our light backgrounds — white cards and the
               yellow header. Reading it as "dark theme" is the common misreading and gives you
               white-on-yellow, which is invisible.
@@ -97,6 +105,12 @@ export default function RootLayout(): ReactElement | null {
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** Draws nothing — it exists so `useNotificationBridge` runs inside the `SessionProvider` tree. */
+function NotificationBridge(): null {
+  useNotificationBridge();
+  return null;
 }
 
 const styles = StyleSheet.create({

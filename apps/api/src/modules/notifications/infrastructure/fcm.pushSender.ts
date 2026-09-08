@@ -77,6 +77,22 @@ export class FcmPushSender implements PushSenderPort {
     await this.send(driverId, { type: 'offer.cancelled', offerId, reason }, 60_000);
   }
 
+  /**
+   * A booking lifecycle change, to whichever side needs to know.
+   *
+   * THE TWO ROLES GET DIFFERENT MESSAGES, and that is not an inconsistency to tidy away:
+   *
+   *   - **DRIVER — data-only, high priority.** Exactly what it has always been. The driver app has
+   *     no `booking.updated` handler and no channel for it; a `notification` block would make
+   *     Android draw a raw "Ride DZ-…" banner on a fallback channel for every arrival, start and
+   *     completion — notifications a driver has never seen and did not ask for. Data-only stays
+   *     invisible until that app grows a handler for it.
+   *   - **CUSTOMER — `notification` block plus data, normal priority.** The customer app DOES have
+   *     a channel (`booking-updates-v1`, matched in its `firebase.json`) and this is the whole
+   *     point of the message: it must reach a phone in a pocket with the app closed, which only a
+   *     system-drawn notification does. `data` rides along so a foregrounded app can draw its own
+   *     instead, and so a tap can deep-link to the trip.
+   */
   async sendBookingUpdate(to: Recipient, update: BookingUpdatePush): Promise<void> {
     const data = {
       type: 'booking.updated',
@@ -86,17 +102,14 @@ export class FcmPushSender implements PushSenderPort {
       message: update.message,
     };
 
-    // A customer ride update is not time-critical the way a trip offer is, so a data-only
-    // high-priority message would spend battery for nothing on the common case (app open, or
-    // reachable in the background). It carries a `notification` block so Android draws it even
-    // when the app is not running — `data` rides along so a live app deep-links to the trip
-    // rather than posting a second banner over what it already showed.
-    const tokens =
-      to.role === 'DRIVER'
-        ? await this.devices.tokensFor(to.id)
-        : await this.customerDevices.tokensFor(to.id);
+    if (to.role === 'DRIVER') {
+      await this.send(to.id, data, 15 * 60_000);
+      return;
+    }
+
+    const tokens = await this.customerDevices.tokensFor(to.id);
     if (tokens.length === 0) {
-      logger.warn({ role: to.role, id: to.id }, 'fcm: booking update — recipient has no device');
+      logger.warn({ customerId: to.id }, 'fcm: booking update — customer has no registered device');
       return;
     }
 
@@ -106,36 +119,25 @@ export class FcmPushSender implements PushSenderPort {
         data,
         notification: { title: `Ride ${update.reference}`, body: update.message },
         android: {
+          // Not time-critical the way a trip offer is — a high-priority wake would spend the
+          // customer's battery to say the driver is two minutes away.
           priority: 'normal',
           ttl: 15 * 60_000,
           notification: { channelId: 'booking-updates-v1' },
         },
       });
-      await this.pruneRecipientTokens(to, tokens, response);
+      await this.pruneCustomerTokens(tokens, response);
     } catch (error) {
-      logger.error({ err: error, role: to.role, id: to.id }, 'fcm: booking update send failed');
+      logger.error({ err: error, customerId: to.id }, 'fcm: booking update send failed');
     }
   }
 
-  /** Prune dead tokens for whichever side the recipient is. Mirrors `pruneDeadTokens`. */
-  private async pruneRecipientTokens(
-    to: Recipient,
-    tokens: string[],
-    response: BatchResponse,
-  ): Promise<void> {
-    const dead = response.responses
-      .map((result, index) => ({ result, token: tokens[index] }))
-      .filter(
-        ({ result }) =>
-          result.error?.code === 'messaging/registration-token-not-registered' ||
-          result.error?.code === 'messaging/invalid-registration-token',
-      )
-      .map(({ token }) => token)
-      .filter((token): token is string => token !== undefined);
-
+  /** The customer-side twin of `pruneDeadTokens`. Same rule, the other collection. */
+  private async pruneCustomerTokens(tokens: string[], response: BatchResponse): Promise<void> {
+    const dead = deadTokensIn(tokens, response);
     for (const token of dead) {
-      if (to.role === 'DRIVER') await this.devices.remove(token);
-      else await this.customerDevices.remove(token);
+      await this.customerDevices.remove(token);
+      logger.info({ token: `${token.slice(0, 12)}…` }, 'fcm: removed dead customer device token');
     }
   }
 
@@ -254,21 +256,30 @@ export class FcmPushSender implements PushSenderPort {
     tokens: string[],
     response: BatchResponse,
   ): Promise<void> {
-    const dead = response.responses
-      .map((result, index) => ({ result, token: tokens[index] }))
-      .filter(
-        ({ result }) =>
-          result.error?.code === 'messaging/registration-token-not-registered' ||
-          result.error?.code === 'messaging/invalid-registration-token',
-      )
-      .map(({ token }) => token)
-      .filter((token): token is string => token !== undefined);
-
-    for (const token of dead) {
+    for (const token of deadTokensIn(tokens, response)) {
       await this.devices.remove(token);
       logger.info({ token: `${token.slice(0, 12)}…` }, 'fcm: removed dead device token');
     }
   }
+}
+
+/**
+ * The tokens in a batch FCM told us are gone.
+ *
+ * A free function rather than a method because both sides — drivers and customers — read the same
+ * two error codes off the same response shape, and the only thing that differs is which
+ * collection the caller then removes them from.
+ */
+function deadTokensIn(tokens: string[], response: BatchResponse): string[] {
+  return response.responses
+    .map((result, index) => ({ result, token: tokens[index] }))
+    .filter(
+      ({ result }) =>
+        result.error?.code === 'messaging/registration-token-not-registered' ||
+        result.error?.code === 'messaging/invalid-registration-token',
+    )
+    .map(({ token }) => token)
+    .filter((token): token is string => token !== undefined);
 }
 
 /**

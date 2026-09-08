@@ -19,6 +19,25 @@ export const FALLBACK_CENTRE: TripPoint = {
 
 export type LocationStatus = 'locating' | 'ready' | 'denied' | 'failed';
 
+/**
+ * A ceiling on every native location call, because on this platform "never" is a real answer.
+ *
+ * Balanced accuracy indoors can legitimately take a while, so this is generous — but it is not
+ * optional. Without it a single wedged native promise leaves the screen saying "Locating…" until
+ * the app is killed, with no error, no timer and nothing the customer can press.
+ */
+const LOCATION_TIMEOUT_MS = 12_000;
+
+/** Distinct from `null`, which is a real answer from `getLastKnownPositionAsync`. */
+const TIMED_OUT = Symbol('location-timeout');
+
+function withTimeout<T>(work: Promise<T>): Promise<T | typeof TIMED_OUT> {
+  return Promise.race([
+    work,
+    new Promise<typeof TIMED_OUT>((resolve) => setTimeout(() => resolve(TIMED_OUT), LOCATION_TIMEOUT_MS)),
+  ]);
+}
+
 interface CurrentLocation {
   status: LocationStatus;
   /** Never null: the fallback stands in until (and if) a real fix arrives. */
@@ -60,28 +79,59 @@ export function useCurrentLocation(): CurrentLocation {
     async function locate(): Promise<void> {
       setStatus('locating');
 
-      let permission: Location.LocationPermissionResponse;
-      try {
-        permission = await Location.requestForegroundPermissionsAsync();
-      } catch {
+      /**
+       * CHECK FIRST, PROMPT ONLY IF THERE IS SOMETHING TO ASK.
+       *
+       * `requestForegroundPermissionsAsync` NEVER RESOLVES on ColorOS / realme UI when the
+       * permission is ALREADY GRANTED — the same defect `startLocationPings` in the driver app
+       * documents. It is silent and total: no throw, no rejection, just a promise that never
+       * settles, so `status` stayed `'locating'` for the life of the process. On screen that was a
+       * Pickup row reading "Locating…" forever, no blue dot, and a map parked on the Siliguri
+       * fallback — for a customer whose permission was granted and whose GPS was on.
+       *
+       * It is invisible in testing on a fresh install, because the FIRST call genuinely shows a
+       * dialog and resolves normally. Only later launches — every launch after the grant — hang.
+       *
+       * `getForegroundPermissionsAsync` always resolves, so it is the one on the hot path; the
+       * prompting variant runs only when the grant is genuinely missing and askable.
+       */
+      let permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+      if (permission !== null && !permission.granted && permission.canAskAgain) {
+        permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
+      }
+
+      if (permission === null) {
         if (alive.current) setStatus('failed');
         return;
       }
-
       if (!permission.granted) {
         if (alive.current) setStatus('denied');
         return;
       }
 
+      // Local, not the `isReal` STATE: this closure captured that at effect-run time and would
+      // read `false` no matter what the cached fix did.
+      let adopted = false;
+
       try {
-        const cached = await Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 });
-        if (cached !== null && alive.current) {
+        const cached = await withTimeout(
+          Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 }),
+        );
+        if (cached !== null && cached !== TIMED_OUT && alive.current) {
+          adopted = true;
           await adopt(cached.coords.latitude, cached.coords.longitude);
         }
 
-        const fresh = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        const fresh = await withTimeout(
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        );
+        // A timeout is not a failure when the cache already answered: the map is on the customer's
+        // own position, just not the refined fix. Only say `failed` when we have nothing at all.
+        if (fresh === TIMED_OUT) {
+          if (alive.current) setStatus(adopted ? 'ready' : 'failed');
+          return;
+        }
+
         if (alive.current) await adopt(fresh.coords.latitude, fresh.coords.longitude);
         if (alive.current) setStatus('ready');
       } catch {

@@ -49,6 +49,8 @@ import {
 } from '@/features/booking/schedule';
 import { useTripQuote } from '@/features/booking/useTripQuote';
 import { forwardGeocode, reverseGeocode } from '@/features/location/geocoding';
+import { type PlaceSuggestion, hasPlacesProvider } from '@/features/location/placeSearch';
+import { usePlaceSuggestions } from '@/features/location/usePlaceSuggestions';
 import { useCurrentLocation } from '@/features/location/useCurrentLocation';
 import { checkCoverage } from '@/lib/api/endpoints/coverage';
 import { addAddress, getProfile, removeAddress } from '@/lib/api/endpoints/customer';
@@ -130,6 +132,31 @@ export default function HomeScreen(): ReactElement {
   const [search, setSearch] = useState('');
   const [searchMissed, setSearchMissed] = useState(false);
   const [searching, setSearching] = useState(false);
+  /**
+   * Whether the suggestion list is showing.
+   *
+   * Separate from "there are suggestions", because a chosen place must leave its own name in the
+   * field without immediately re-opening the list underneath it. Typing opens it; choosing,
+   * clearing, or leaving the picker closes it.
+   */
+  const [suggestOpen, setSuggestOpen] = useState(false);
+
+  /**
+   * Type-ahead for the search field, biased to whatever the map is currently looking at — the pin
+   * while picking, otherwise the pickup, otherwise the device. "Station" means the one nearby.
+   *
+   * Debouncing, stale-response ordering and the billing session all live in the hook; this screen
+   * only decides when to show the rows and what a tap does with one.
+   *
+   * The query is gated on `suggestOpen` rather than only the rendering, so a CLOSED list issues no
+   * requests at all. Without that, writing the chosen place's name back into the field — which
+   * `chooseSuggestion` does — would immediately schedule a lookup for it: a paid request for a
+   * place already chosen, whose results nobody would ever see.
+   */
+  const places = usePlaceSuggestions(
+    suggestOpen ? search : '',
+    draft ?? pickup ?? location.point,
+  );
   const [saveOpen, setSaveOpen] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   /**
@@ -477,6 +504,7 @@ export default function HomeScreen(): ReactElement {
     setDraftAddress(seed.address.length > 0 ? seed.address : null);
     setSearch('');
     setSearchMissed(false);
+    closeSuggestions();
     map.current?.moveTo(seed.lat, seed.lng, 'street');
   }
 
@@ -491,6 +519,7 @@ export default function HomeScreen(): ReactElement {
     setDraftAddress(null);
     setSearch('');
     setSearchMissed(false);
+    closeSuggestions();
 
     const focus = pickup ?? location.point;
     map.current?.moveTo(focus.lat, focus.lng, 'street');
@@ -524,6 +553,7 @@ export default function HomeScreen(): ReactElement {
     setDraftAddress(null);
     setSearch('');
     setSearchMissed(false);
+    closeSuggestions();
   }
 
   /**
@@ -542,7 +572,66 @@ export default function HomeScreen(): ReactElement {
     map.current?.moveTo(point.lat, point.lng, 'street');
   }
 
+  /** Dismiss the type-ahead list and end its billing session. */
+  function closeSuggestions(): void {
+    setSuggestOpen(false);
+    places.reset();
+  }
+
+  /**
+   * A found place becomes the DRAFT, not the choice.
+   *
+   * Searching drops the pin there and opens the map picker so the customer can nudge it — a
+   * geocoded result lands on a rooftop or a road centreline often enough that committing it
+   * outright would book pickups at the wrong gate. Confirm is still theirs to press.
+   */
+  function focusFound(point: TripPoint): void {
+    setSearchMissed(false);
+    setMapPick(true);
+    // The map moving fires `onRegionSettled`, which sets the draft coordinate; this only gets
+    // the customer's own words on screen ahead of the reverse geocode.
+    setDraftAddress(point.address);
+    map.current?.moveTo(point.lat, point.lng, 'street');
+  }
+
+  /**
+   * A tapped suggestion. Only Google's rows need resolving — the device-geocoder fallback carries
+   * its coordinate already, and `resolveSuggestion` returns it untouched.
+   */
+  async function chooseSuggestion(suggestion: PlaceSuggestion): Promise<void> {
+    // Close FIRST: the resolve is a network call, and a list left open under the customer's
+    // finger invites a second tap on a row that is already being acted on.
+    setSuggestOpen(false);
+    setSearch(suggestion.primary);
+    setSearching(true);
+
+    const point = await places.select(suggestion);
+    setSearching(false);
+    // A fresh session for whatever they search next; the token this one used is now spent.
+    places.reset();
+
+    if (point === null) {
+      setSearchMissed(true);
+      return;
+    }
+    focusFound(point);
+  }
+
+  /**
+   * Pressing the keyboard's search key.
+   *
+   * The top suggestion is what the list is already showing them, so that is what "search" means
+   * here. Only when there is nothing to take does this fall back to the whole-string geocode —
+   * which is also the entire behaviour when no Places key is configured.
+   */
   async function runSearch(): Promise<void> {
+    const top = places.suggestions[0];
+    if (top !== undefined) {
+      await chooseSuggestion(top);
+      return;
+    }
+
+    setSuggestOpen(false);
     setSearching(true);
     const found = await forwardGeocode(search);
     setSearching(false);
@@ -552,12 +641,7 @@ export default function HomeScreen(): ReactElement {
       return;
     }
 
-    setSearchMissed(false);
-    setMapPick(true);
-    // The map moving fires `onRegionSettled`, which sets the draft coordinate; this only gets
-    // the customer's own words on screen ahead of the reverse geocode.
-    setDraftAddress(found.address);
-    map.current?.moveTo(found.lat, found.lng, 'street');
+    focusFound(found);
   }
 
   function recentre(): void {
@@ -635,6 +719,7 @@ export default function HomeScreen(): ReactElement {
                   value={search}
                   onChangeText={(value) => {
                     setSearch(value);
+                    setSuggestOpen(true);
                     if (searchMissed) setSearchMissed(false);
                   }}
                   placeholder={
@@ -647,7 +732,7 @@ export default function HomeScreen(): ReactElement {
                   accessibilityLabel="Search for a place"
                 />
 
-                {searching ? (
+                {searching || places.loading ? (
                   <ActivityIndicator size="small" color={colors.muted} />
                 ) : search.length > 0 ? (
                   // Clearing a typed query is a one-tap job on every search field a customer has
@@ -656,6 +741,7 @@ export default function HomeScreen(): ReactElement {
                     onPress={() => {
                       setSearch('');
                       setSearchMissed(false);
+                      closeSuggestions();
                     }}
                     hitSlop={10}
                     accessibilityRole="button"
@@ -668,7 +754,67 @@ export default function HomeScreen(): ReactElement {
               </View>
             </GlassPanel>
           </Animated.View>
-        ) : (
+        ) : null}
+
+        {/* THE SUGGESTION LIST.
+            Inside `topBar` and after the row, so it hangs beneath the field it belongs to; the
+            back button's width is matched by a spacer so the rows line up with the field rather
+            than the screen. `box-none` on the bar means the map is still draggable either side. */}
+        {picking && suggestOpen && (places.suggestions.length > 0 || places.empty) ? (
+          <Animated.View
+            style={styles.suggestRow}
+            entering={FadeInDown.duration(180)}
+            exiting={FadeOut.duration(120)}
+            layout={LinearTransition.duration(200)}
+          >
+            <View style={styles.suggestSpacer} />
+            <GlassPanel rounded="card" liquid style={styles.suggestGlass}>
+              {places.suggestions.length === 0 ? (
+                <View style={styles.suggestEmpty}>
+                  <Text style={styles.suggestEmptyText}>
+                    {hasPlacesProvider
+                      ? 'No places match that.'
+                      : // Without a Places key this is one whole-string lookup, not type-ahead —
+                        // so it says what to do about it rather than pretending the place is gone.
+                        'No match. Try a fuller address, or drop the pin on the map.'}
+                  </Text>
+                </View>
+              ) : (
+                places.suggestions.map((suggestion, index) => (
+                  <Pressable
+                    key={suggestion.id}
+                    onPress={() => void chooseSuggestion(suggestion)}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      suggestion.secondary === null
+                        ? suggestion.primary
+                        : `${suggestion.primary}, ${suggestion.secondary}`
+                    }
+                    style={({ pressed }) => [
+                      styles.suggestItem,
+                      index > 0 && styles.suggestDivider,
+                      pressed && styles.pressedDim,
+                    ]}
+                  >
+                    <Feather name="map-pin" size={16} color={colors.muted} />
+                    <View style={styles.suggestText}>
+                      <Text style={styles.suggestPrimary} numberOfLines={1}>
+                        {suggestion.primary}
+                      </Text>
+                      {suggestion.secondary === null ? null : (
+                        <Text style={styles.suggestSecondary} numberOfLines={1}>
+                          {suggestion.secondary}
+                        </Text>
+                      )}
+                    </View>
+                  </Pressable>
+                ))
+              )}
+            </GlassPanel>
+          </Animated.View>
+        ) : null}
+
+        {!picking ? (
           <Animated.View
             key="header"
             style={styles.headerRow}
@@ -691,7 +837,7 @@ export default function HomeScreen(): ReactElement {
               </Pressable>
             </GlassPanel>
           </Animated.View>
-        )}
+        ) : null}
 
         {searchMissed ? (
           <Animated.Text
@@ -1239,6 +1385,26 @@ const styles = StyleSheet.create({
     color: colors.fg,
     height: '100%',
   },
+  // Indented past the back button so the rows hang under the FIELD, not the whole row — the list
+  // belongs to the input, and lining it up with the circle would read as a menu for that button.
+  suggestRow: { flexDirection: 'row', marginTop: space.sm },
+  suggestSpacer: { width: 44 + space.sm },
+  suggestGlass: { flex: 1, ...shadow.card },
+  suggestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    minHeight: 52,
+  },
+  suggestDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  suggestText: { flex: 1 },
+  suggestPrimary: { ...text.body, color: colors.fg, fontFamily: fontFamily.semibold },
+  suggestSecondary: { ...text.caption, color: colors.muted, marginTop: 1 },
+  suggestEmpty: { paddingHorizontal: space.md, paddingVertical: space.sm },
+  suggestEmptyText: { ...text.caption, color: colors.muted },
+
   pill: {
     ...text.caption,
     color: colors.fg,

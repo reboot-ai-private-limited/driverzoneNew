@@ -54,10 +54,21 @@ export default function BootScreen(): ReactElement {
       // nothing useful.
       if (cancelled) return;
 
-      if (session.getState().status !== 'authenticated') {
+      /**
+       * `anonymous` is the only status that means SIGNED OUT.
+       *
+       * `booting` here means the race above was won by the timeout, not by `restore()` — the
+       * refresh is still in flight on a slow connection. That says nothing about whether the
+       * customer has a session, so the stored refresh token is the thing to ask, and a customer
+       * who has one carries on rather than being sent to re-enter a number they are already
+       * signed in with.
+       */
+      const status = session.getState().status;
+      if (status === 'anonymous' || (status === 'booting' && !(await session.hasStoredSession()))) {
         router.replace('/phone');
         return;
       }
+      if (cancelled) return;
 
       // A cold start from a tapped ride-update notification goes straight to that trip. Checked
       // here, immediately before the ONE `replace` this screen issues, so nothing downstream can

@@ -165,6 +165,16 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     pickup !== undefined && drop !== undefined
       ? `${pickup.lat},${pickup.lng}|${drop.lat},${drop.lng}`
       : null;
+
+  /**
+   * The latest pair and inset, mirrored into a ref so the effect below can read them without
+   * listing them as dependencies — `pickup`/`drop` are fresh objects from `.find()` on every
+   * render, and `bottomInset` changes whenever the sheet resizes. Only `routeKey` should trigger
+   * a re-frame.
+   */
+  const latest = useRef({ pickup, drop, bottomInset });
+  latest.current = { pickup, drop, bottomInset };
+
   useEffect(() => {
     if (routeKey === null) {
       framedTo.current = null;
@@ -173,21 +183,21 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     if (routeKey === framedTo.current) return;
     framedTo.current = routeKey;
 
-    const [p, d] = routeKey.split('|').map((pair) => pair.split(',').map(Number));
     const t = setTimeout(() => {
+      const { pickup: p, drop: d, bottomInset: inset } = latest.current;
+      if (p === undefined || d === undefined) return;
       map.current?.fitToCoordinates(
         [
-          { latitude: p![0]!, longitude: p![1]! },
-          { latitude: d![0]!, longitude: d![1]! },
+          { latitude: p.lat, longitude: p.lng },
+          { latitude: d.lat, longitude: d.lng },
         ],
         {
-          edgePadding: { top: 90, right: 60, bottom: bottomInset + 90, left: 60 },
+          edgePadding: { top: 90, right: 60, bottom: inset + 90, left: 60 },
           animated: true,
         },
       );
     }, 80);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- bottomInset read fresh, not a trigger
   }, [routeKey]);
 
   return (

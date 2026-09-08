@@ -2,34 +2,41 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 /**
  * The dynamic half of the app config. `app.json` stays the readable, reviewable base — this file
- * only adds the parts that must NOT be committed.
+ * only adds the parts that must NOT be committed: the Google Maps keys.
  *
- * Exactly one such part today: the Google Maps Android key. It ends up as
- * `com.google.android.geo.API_KEY` in the generated AndroidManifest, which means it ships inside
- * the APK and can be extracted from it. That is unavoidable and not, by itself, the problem —
- * `docs/engineering/frontend-architecture.md` makes the same point about the panel's web key. The
- * key is protected by CONFIGURATION, and for Android that means:
+ * Both keys ship inside the binary — `com.google.android.geo.API_KEY` in the generated
+ * AndroidManifest, `GMSApiKey` in the iOS Info.plist — and can be extracted from it. That is
+ * unavoidable (`docs/engineering/frontend-architecture.md` makes the same point about the panel's
+ * web key); the protection is CONFIGURATION on the Google Cloud side:
  *
- *   - an APPLICATION restriction to package `in.driverzone.customer` plus the signing SHA-1, and
- *   - an API restriction to **Maps SDK for Android** alone.
+ *   - **Android key** — Application restriction: Android apps → package `in.driverzone.customer`
+ *     + the signing SHA-1 fingerprint. API restriction: **Maps SDK for Android** only.
+ *   - **iOS key** — Application restriction: iOS apps → bundle id `in.driverzone.customer`.
+ *     API restriction: **Maps SDK for iOS** only.
  *
- * It must be a DIFFERENT key from `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` in `apps/web/.env`. A Google
- * key accepts only one application-restriction type, so the panel's HTTP-referrer restriction and
- * an Android restriction cannot coexist on one key — and the panel's key is scoped to the Maps
- * JavaScript API, which Android does not use.
+ * They must be SEPARATE keys — from each other and from `apps/web`'s
+ * `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. A Google key takes exactly one application-restriction type,
+ * so an Android package restriction, an iOS bundle restriction and the panel's HTTP-referrer
+ * restriction cannot share a key.
  *
- * Keeping it in `apps/customer/.env` (gitignored) rather than in `app.json` (tracked) is what
- * stops a working key from being committed the first time someone runs a build.
+ * Kept in `apps/customer/.env` (gitignored) rather than `app.json` (tracked) so a working key is
+ * never committed on the first build. See `apps/customer/.env.example` for how to generate them.
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
   const androidGoogleMapsApiKey = process.env['GOOGLE_MAPS_ANDROID_API_KEY'] ?? '';
+  const iosGoogleMapsApiKey = process.env['GOOGLE_MAPS_IOS_API_KEY'] ?? '';
 
+  // A warning rather than a thrown error: `expo start` for Expo Go, `typecheck` and every CI task
+  // evaluate this file too, and none of them need a key. Only a native build does, and a build
+  // that quietly produced a black map is exactly what these lines exist to prevent.
   if (androidGoogleMapsApiKey.length === 0) {
-    // A warning rather than a thrown error: `expo start` for Expo Go, `typecheck` and every CI
-    // task evaluate this file too, and none of them need a key. Only a native build does, and a
-    // build that quietly produced a black map is exactly what this line exists to prevent.
     console.warn(
-      '[app.config] GOOGLE_MAPS_ANDROID_API_KEY is not set — a native build will render an empty map. See apps/customer/.env.example.',
+      '[app.config] GOOGLE_MAPS_ANDROID_API_KEY is not set — a native Android build will render an empty map. See apps/customer/.env.example.',
+    );
+  }
+  if (iosGoogleMapsApiKey.length === 0) {
+    console.warn(
+      '[app.config] GOOGLE_MAPS_IOS_API_KEY is not set — a native iOS build will render an empty map. See apps/customer/.env.example.',
     );
   }
 
@@ -37,8 +44,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: config.name ?? 'DriverZone',
     slug: config.slug ?? 'driverzone-customer',
+    ios: {
+      ...config.ios,
+      config: {
+        ...config.ios?.config,
+        // Expo's iOS Maps config plugin reads exactly this path and writes `GMSApiKey` into the
+        // Info.plist plus the `GMSServices.provideAPIKey` call in the generated AppDelegate.
+        googleMapsApiKey: iosGoogleMapsApiKey,
+      },
+    },
     plugins: [
       ...(config.plugins ?? []),
+      // The react-native-maps config plugin only takes the Android key; iOS goes through
+      // `ios.config.googleMapsApiKey` above.
       ['react-native-maps', { androidGoogleMapsApiKey }],
     ],
   };

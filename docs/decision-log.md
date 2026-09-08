@@ -20,6 +20,33 @@ entry links to it.
 
 ---
 
+## 2026-09-07 — Road distance moves from self-hosted OSRM to the Google Routes API
+
+**Decision:** `selectRoadDistance()` now prefers `GoogleRoadDistance` (Compute Routes, Essentials
+SKU) when `GOOGLE_ROUTES_API_KEY` is set. `OsrmRoadDistance` is retained, tested and reachable
+via `OSRM_BASE_URL`, but no compose file starts an `osrm` service any more. Every adapter is
+wrapped in `CachingRoadDistance`, and `CreateQuoteUseCase` no longer calls the router at all for
+an in-city trip — road distance only decides outstation bands, and in-city outranks outstation
+unconditionally.
+
+**This reverses [the infrastructure choice in `tech-choices.md` §OSRM](engineering/tech-choices.md).**
+That choice was right on cost per call and wrong on total cost here: the pilot VM cannot spare
+the RAM to run an OSRM India extract, and building/shipping the multi-GB `.osrm` files is
+operational weight a two-week pilot should not carry. Compute Routes Essentials is $5 / 1000
+with 10,000 free per month; with the in-city skip and the coordinate cache, projected pilot
+volume sits inside the free tier.
+
+**Rejected:** a regional OSRM extract (West Bengal + Sikkim — genuinely light, ~300 MB resident,
+still the fallback if quote volume outgrows the free tier); Haversine in production (mis-prices
+every trip, and the adapter refuses to construct there).
+
+**Consequences:** a billing account and a second Google key — server-side, IP-locked to the API
+host, restricted to the Routes API, and separate from the browser `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
+The `X-Goog-FieldMask` is `routes.distanceMeters` alone and `routingPreference` is
+`TRAFFIC_UNAWARE`: both keep the call in the Essentials SKU, and traffic-awareness would let a
+jam move a fare band. Revisit when monthly billable calls approach the free cap — the cache hit
+rate and the in-city share are the levers, then regional OSRM.
+
 ## 2026-09-01 — `STAGING_UNSAFE`: one opt-in flag opens the login guards, for staging only
 
 **Decision:** a single env var, off unless set to exactly `true`, relaxes four production guards

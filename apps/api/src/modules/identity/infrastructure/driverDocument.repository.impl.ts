@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import type { DocumentStatus, DocumentType } from '@driverzone/contracts';
+import type { DocumentSide, DocumentStatus, DocumentType } from '@driverzone/contracts';
 import type {
   DriverDocument,
   DriverDocumentRepositoryPort,
@@ -11,6 +11,7 @@ interface RawDocument {
   _id: mongoose.Types.ObjectId;
   driverId: mongoose.Types.ObjectId;
   docType: string;
+  side?: string | null;
   status: string;
   rejectionReason?: string | null;
   fileUrl: string;
@@ -25,6 +26,9 @@ function toDomain(doc: RawDocument): DriverDocument {
     id: String(doc._id),
     driverId: String(doc.driverId),
     docType: doc.docType as DocumentType,
+    // A row written before sides existed has no `side` at all. It was the one file for its type,
+    // which is the front — the same reading the schema default encodes for new writes.
+    side: (doc.side ?? 'FRONT') as DocumentSide,
     status: doc.status as DocumentStatus,
     rejectionReason: doc.rejectionReason ?? null,
     fileUrl: doc.fileUrl,
@@ -49,16 +53,21 @@ export class MongoDriverDocumentRepository implements DriverDocumentRepositoryPo
   }
 
   /**
-   * Upsert on `(driverId, docType)`, matching the unique index.
+   * Upsert on `(driverId, docType, side)`, matching the unique index.
    *
    * Note what is reset rather than preserved: `status` returns to `PENDING` and both review
-   * fields are cleared. A replaced file has not been verified, and inheriting the previous
-   * `VERIFIED` would let a driver upload an approved licence and then swap the object behind it
-   * for anything at all.
+   * fields are cleared — for THIS SIDE only. A replaced file has not been verified, and inheriting
+   * the previous `VERIFIED` would let a driver upload an approved licence and then swap the object
+   * behind it for anything at all. Re-photographing the back leaves the front's decision standing,
+   * which is what per-side review is for.
    */
   async upsert(input: UpsertDocumentInput): Promise<DriverDocument> {
     const doc = await DriverDocumentModel.findOneAndUpdate(
-      { driverId: new mongoose.Types.ObjectId(input.driverId), docType: input.docType },
+      {
+        driverId: new mongoose.Types.ObjectId(input.driverId),
+        docType: input.docType,
+        side: input.side,
+      },
       {
         $set: {
           fileUrl: input.fileUrl,

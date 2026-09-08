@@ -167,21 +167,26 @@ async function seedDriver(): Promise<void> {
     { upsert: true, new: true },
   ).exec();
 
-  // Both documents the onboarding gate requires, already verified — consistent with a driver
-  // whose application was approved.
-  for (const docType of ['LICENCE', 'AADHAAR'] as const) {
+  // Every document the onboarding gate requires — BOTH SIDES of each — already verified,
+  // consistent with a driver whose application was approved.
+  for (const { docType, side } of [
+    { docType: 'LICENCE', side: 'FRONT' },
+    { docType: 'LICENCE', side: 'BACK' },
+    { docType: 'GOVERNMENT_ID', side: 'FRONT' },
+    { docType: 'GOVERNMENT_ID', side: 'BACK' },
+  ] as const) {
     await DriverDocumentModel.findOneAndUpdate(
-      { driverId: oid(DEV_DRIVER.id), docType },
+      { driverId: oid(DEV_DRIVER.id), docType, side },
       {
         $set: {
-          fileUrl: `drivers/${DEV_DRIVER.id}/${docType.toLowerCase()}/seed`,
+          fileUrl: `drivers/${DEV_DRIVER.id}/${docType.toLowerCase()}-${side.toLowerCase()}/seed`,
           status: 'VERIFIED',
           rejectionReason: null,
           verifiedBy: oid(DEV_ADMIN.id),
           verifiedAt: new Date('2026-08-24T00:00:00.000Z'),
           ...(docType === 'LICENCE'
-            ? { number: 'WB7420110001234', subType: 'LMV-TR', expiresOn: new Date('2032-01-01') }
-            : {}),
+            ? { number: 'WB7420110001234', subType: 'LMV,LMV-NT', expiresOn: new Date('2032-01-01') }
+            : { number: '400012345678', subType: 'AADHAAR' }),
         },
       },
       { upsert: true, new: true },

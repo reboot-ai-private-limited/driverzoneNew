@@ -73,24 +73,39 @@ export class CreateQuoteUseCase {
     const to = await this.zones.resolveAt(input.drop);
     const toSameCityZone = from.city !== null && to.city !== null && from.city.id === to.city.id;
 
-    // ── 3. How far, by road ─────────────────────────────────────────────────────────────────
-    const distanceKm = await this.distance.roadDistanceKm(input.pickup, input.drop);
-    if (distanceKm === null) {
-      return {
-        available: false,
-        reason: 'ROUTE_NOT_FOUND',
-        message: 'We could not find a driving route between these two points.',
-      };
-    }
-
-    // ── 4. Exactly one product, chosen by `packages` and never by us ────────────────────────
-    const match = await this.packages.resolveForTrip({
+    // ── 3. Exactly one product — and the road distance, but only if it turns out to matter ──
+    //
+    // Road distance is a paid API call (docs/decision-log.md §road distance), and an in-city
+    // trip never uses it: `packages` matches in-city on the city zone alone, in-city outranks
+    // outstation unconditionally, and the quote row stores `distanceKm: null`. So try the
+    // in-city match FIRST with a placeholder distance, and only reach for the router when that
+    // does not land an in-city product.
+    const tripBase = {
       ...(from.city === null ? {} : { fromCityZoneId: from.city.id }),
       toSameCityZone,
       toHillZone: to.hill !== null,
-      distanceKm,
       ...(input.direction === undefined ? {} : { direction: input.direction }),
-    });
+    };
+
+    let distanceKm: number | null = null;
+    let match: Awaited<ReturnType<PackageLookupContract['resolveForTrip']>> | null = null;
+
+    if (from.city !== null && toSameCityZone) {
+      const attempt = await this.packages.resolveForTrip({ ...tripBase, distanceKm: 0 });
+      if (attempt.available && attempt.match.type === 'INCITY') match = attempt;
+    }
+
+    if (match === null) {
+      distanceKm = await this.distance.roadDistanceKm(input.pickup, input.drop);
+      if (distanceKm === null) {
+        return {
+          available: false,
+          reason: 'ROUTE_NOT_FOUND',
+          message: 'We could not find a driving route between these two points.',
+        };
+      }
+      match = await this.packages.resolveForTrip({ ...tripBase, distanceKm });
+    }
 
     if (!match.available) {
       return { available: false, reason: match.code, message: match.message };
@@ -180,6 +195,8 @@ export class CreateQuoteUseCase {
       };
     }
 
+    // An OUTSTATION match can only have come from the second `resolveForTrip` above, which runs
+    // only after `distanceKm` was measured to a number — so it is never null here.
     const { package: pkg, farePaise, direction } = match.match;
     const source: QuoteSource = {
       ...baseSource,

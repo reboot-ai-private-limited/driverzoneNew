@@ -12,8 +12,8 @@ export interface SubmitOnboardingResult {
  *
  * The gate is `missingForSubmission`, and the list it returns goes straight into the 400 body.
  * That is why it returns paths rather than a boolean: "complete your profile" sends a driver
- * hunting through every screen, while `["dob", "documents.AADHAAR"]` lets the app deep-link to
- * exactly what is missing. Drivers abandoning onboarding is a supply problem, not just a UX one.
+ * hunting through every screen, while `["dob", "documents.LICENCE.BACK"]` lets the app deep-link
+ * to exactly what is missing. Drivers abandoning onboarding is a supply problem, not just a UX one.
  */
 export class SubmitOnboardingUseCase {
   constructor(
@@ -42,7 +42,10 @@ export class SubmitOnboardingUseCase {
     }
 
     const docs = await this.documents.listByDriver(driverId);
-    const missing = missingForSubmission(profile, docs.map((d) => d.docType));
+    const missing = missingForSubmission(
+      profile,
+      docs.map((d) => ({ docType: d.docType, side: d.side })),
+    );
 
     if (missing.length > 0) {
       // `publicDetails`, not `details`: the caller cannot act without being told which fields —

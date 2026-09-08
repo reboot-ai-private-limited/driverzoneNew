@@ -57,9 +57,17 @@ export function DataTable<Row>({
   return (
     // The wrapper scrolls, not the page. A wide table must never make the whole document
     // scroll horizontally — that moves the nav off screen.
-    <div className="w-full overflow-x-auto">
+    //
+    // `print:overflow-visible`: browsers clip a scrollable region's overflow when printing —
+    // whatever needed a horizontal scroll to reach on screen is silently absent from the page
+    // rather than pushed onto a second one. `overflow-visible` lets a wide table spill and be
+    // printed in full instead of quietly losing its rightmost columns.
+    <div className="w-full overflow-x-auto print:overflow-visible">
       <table className="w-full border-collapse text-sm">
-        <thead className="sticky top-0 z-10 bg-surface-muted">
+        {/* `print:static`: sticky positioning means nothing once printed and repeating a
+            "sticky" header at a fixed screen offset on every physical page is not what anyone
+            wants from a report. */}
+        <thead className="sticky top-0 z-10 bg-surface-muted print:static">
           <tr>
             {columns.map((col) => (
               <th

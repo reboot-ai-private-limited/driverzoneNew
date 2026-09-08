@@ -1,4 +1,5 @@
 import type {
+  AudienceSettingsResponse,
   DutyStateDto,
   LocationPingDto,
   LocationPingsAcceptedDto,
@@ -9,10 +10,12 @@ import type {
   SetDutyStatusRequest,
   DriverDocumentDto,
   DriverProfileDto,
+  DriverWalletDetailsDto,
   RequestDocumentUploadRequest,
   RequestDocumentUploadResponse,
   RequestProfilePictureUploadResponse,
   SubmitOnboardingResponse,
+  TransactionType,
   UpdateDriverProfileRequest,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
@@ -128,6 +131,66 @@ export function registerDevice(body: RegisterDeviceRequest): Promise<RegisterDev
   return request<RegisterDeviceResponse>(`${ROLE_PREFIX}/devices`, {
     method: 'POST',
     body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `GET /driver/settings` — the flat key → value map of everything a DRIVER is allowed to see.
+ *
+ * Keys the other roles own are absent rather than null, so a caller reads what it needs and
+ * tolerates a miss. The cancellation sheet is the first consumer: it states the penalty before a
+ * driver commits to dropping a trip, and the two figures behind that
+ * (`cancellation.driver_penalty_en_route` and `…_arrived`) are declared `DRIVER`-visible for
+ * exactly this reason — never charge someone a penalty they were not shown.
+ */
+export function getDriverSettings(signal?: AbortSignal): Promise<AudienceSettingsResponse> {
+  return request<AudienceSettingsResponse>(`${ROLE_PREFIX}/settings`, {
+    token: getAccessToken() ?? undefined,
+    signal,
+  });
+}
+
+/**
+ * What the earnings screen may narrow the statement by. Everything optional; nothing set reads the
+ * whole statement, which is what the screen asks for until a chip is tapped.
+ */
+export interface EarningsFilter {
+  /** Wire form is one comma-separated `type` parameter — see `LedgerQueryParams`. */
+  types?: readonly TransactionType[] | undefined;
+  /** `YYYY-MM-DD`, inclusive at both ends. */
+  from?: string | undefined;
+  to?: string | undefined;
+}
+
+/**
+ * `GET /driver/wallet` — the earnings screen's one call.
+ *
+ * Returns the balance, lifetime earnings, a summary of whatever the filter selects, and a page of
+ * the ledger rows behind them. There is no driver id in the path: the server reads it off the
+ * bearer, so this cannot be pointed at anyone else's earnings.
+ *
+ * FILTERING HAPPENS ON THE SERVER, and has to. The statement is paginated, so a filter applied
+ * here would only search the pages already fetched and would silently miss every match further
+ * back — which on a screen about money reads as "I was not paid for that trip".
+ */
+export function getEarnings(
+  page = 1,
+  limit = 20,
+  filter: EarningsFilter = {},
+): Promise<DriverWalletDetailsDto> {
+  return request<DriverWalletDetailsDto>(`${ROLE_PREFIX}/wallet`, {
+    query: {
+      page,
+      limit,
+      // Omitted rather than sent empty: the server reads an absent key as "no filter", and an
+      // empty `type=` would fail its `min(1)` check.
+      ...(filter.types === undefined || filter.types.length === 0
+        ? {}
+        : { type: filter.types.join(',') }),
+      ...(filter.from === undefined ? {} : { from: filter.from }),
+      ...(filter.to === undefined ? {} : { to: filter.to }),
+    },
     token: getAccessToken() ?? undefined,
   });
 }

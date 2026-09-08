@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { CAR_CATEGORIES, VEHICLE_TYPE_PREFERENCES } from '@driverzone/contracts';
+import {
+  CAR_CATEGORIES,
+  DOCUMENT_SIDES,
+  DOCUMENT_TYPES,
+  VEHICLE_TYPE_PREFERENCES,
+} from '@driverzone/contracts';
 import { OTP_LENGTH } from '../domain/otpChallenge.entity.js';
 
 /**
@@ -167,9 +172,27 @@ export const updateDriverProfileSchema = z.object({
 });
 
 export const requestDocumentUploadSchema = z.object({
-  doc_type: z.enum(['LICENCE', 'AADHAAR', 'POLICE_VERIFICATION', 'VEHICLE_RC', 'INSURANCE']),
+  doc_type: z.enum(DOCUMENT_TYPES),
+  /**
+   * Optional, so a single-sided document (a police letter, a free-form extra) simply omits it and
+   * lands as its own only face.
+   *
+   * Absent rather than `.default('FRONT')` deliberately: a Zod default makes the INFERRED type
+   * required, which would break `identity.typecheck.ts`'s exact match against the contract, where
+   * the field is optional. The fallback lives at the one call site instead.
+   */
+  side: z.enum(DOCUMENT_SIDES).optional(),
   number: z.string().trim().min(1).max(40).optional(),
-  sub_type: z.string().trim().min(1).max(20).optional(),
+  /**
+   * The type-specific qualifier — see `DriverDocumentDto.sub_type`.
+   *
+   * 60, RAISED FROM 20 on 2026-09-04, because the field took on two jobs that do not fit in
+   * twenty characters: every licence class comma-joined (`LMV,LMV-NT,MCWG,HMV,HGMV,PSV` is 28)
+   * and the name of an issuing police station. Not validated per type here — the union of four
+   * shapes in one field is a form concern, and the server's job is to refuse what could never be
+   * legitimate rather than to re-model the document in Zod.
+   */
+  sub_type: z.string().trim().min(1).max(60).optional(),
   issued_on: isoDate.optional(),
   expires_on: isoDate.optional(),
 });

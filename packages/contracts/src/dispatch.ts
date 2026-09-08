@@ -64,13 +64,33 @@ export interface DriverOfferDto {
   /** What the driver earns if they take it — the single most decision-relevant number. */
   earning: Money;
   pickup: LatLngDto & { address: string };
+  /**
+   * Where the trip ends. Shown on the ring screen so the driver can judge the trip before
+   * accepting — an outstation drop 200 km away and a drop two streets over are the same earning
+   * line but very different decisions. `AcceptOfferResponse` still carries it too, for the trip
+   * screen after the claim.
+   */
+  drop: LatLngDto & { address: string };
   scheduled_at: string;
   service_type: 'INCITY' | 'OUTSTATION';
 }
 
-/** `GET /driver/offers/current` — `null` when nothing is ringing. */
-export interface CurrentOfferResponse {
-  offer: DriverOfferDto | null;
+/**
+ * `GET /driver/offers` — every offer currently ringing for this driver, SOONEST-EXPIRING FIRST.
+ *
+ * PLURAL, DELIBERATELY (2026-09-04). A driver can legitimately hold more than one live offer at
+ * once — dispatch's matching does not exclude a driver who already has an open offer or is
+ * mid-trip, and that is a deliberate choice, not a bug to close here. What changed is the app: it
+ * used to assume a single "current" offer (`findOne`, no sort — arbitrary the moment two existed)
+ * and rendered whichever one that returned, while its Accept/Decline buttons acted on the offer
+ * id from the route instead. The two could disagree. This is the fix: the driver app now asks for
+ * everything that is actually ringing and is responsible for presenting more than one without
+ * confusion, rather than the server pretending there is only ever one.
+ *
+ * An empty array is the ordinary "nothing is ringing" answer, not an error.
+ */
+export interface ListDriverOffersResponse {
+  offers: DriverOfferDto[];
 }
 
 /**

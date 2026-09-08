@@ -272,9 +272,10 @@ export default function OnboardingProfileScreen(): ReactElement {
     const alternate = draft.alternateNumber.trim();
     if (alternate !== '') body.alternate_number = alternate;
 
-    // Always sent, including as an empty array — this is the one field where "unchecked
+    // Both multi-select sets are always sent, including as an empty array — "unchecked
     // everything" is a real answer the driver may need to give, and omitting it would leave a
     // previous selection standing with no way to clear it.
+    body.vehicle_type_preferences = [...draft.vehicleTypePreferences];
     body.vehicle_category_preference = [...draft.vehicleCategoryPreference];
 
     /**
@@ -487,6 +488,7 @@ export default function OnboardingProfileScreen(): ReactElement {
                     key={value}
                     label={CAR_CATEGORY_LABELS[value]}
                     selected={selected}
+                    multiSelect
                     onPress={() =>
                       patch({
                         vehicleCategoryPreference: selected
@@ -597,16 +599,20 @@ function Chip({
   label,
   selected,
   onPress,
+  multiSelect = false,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  /** True for a set where more than one chip can be on at once — reported as a checkbox rather
+   *  than a radio button, since only one radio in a group is ever supposed to be selected. */
+  multiSelect?: boolean;
 }): ReactElement {
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
+      accessibilityRole={multiSelect ? 'checkbox' : 'radio'}
+      accessibilityState={multiSelect ? { checked: selected } : { selected }}
       style={[styles.chip, selected && styles.chipSelected]}
     >
       <Text style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>

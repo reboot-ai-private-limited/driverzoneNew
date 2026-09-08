@@ -58,6 +58,8 @@ export interface LedgerEntry {
   note: string | null;
   /** Set when the entry is included in a payout batch; null while it is outstanding. */
   payoutId: string | null;
+  /** Present only on rows written through an idempotent endpoint — today, a settlement. */
+  idempotencyKey: string | null;
   createdAt: Date;
 }
 
@@ -69,6 +71,14 @@ export interface NewLedgerEntry {
   amountPaise: number;
   note?: string | null;
   payoutId?: string | null;
+  /**
+   * Makes ONE write happen once, however many times it is sent.
+   *
+   * Optional because almost nothing needs it: a trip completion is already deduplicated by the
+   * once-per-booking index. A settlement is not — it has no booking to key on — so it carries
+   * this instead, and a unique partial index refuses the second insert of the same key.
+   */
+  idempotencyKey?: string | null;
 }
 
 /**
@@ -84,6 +94,8 @@ const REQUIRED_SIGN: Record<LedgerEntryType, 'POSITIVE' | 'NEGATIVE' | null> = {
   COMMISSION_DEBIT: 'NEGATIVE',
   CASH_COLLECTED: 'NEGATIVE',
   PAYOUT: 'NEGATIVE',
+  // Positive: the driver handing cash back RAISES their balance toward zero.
+  DEBT_COLLECTED: 'POSITIVE',
   ADJUSTMENT: null,
   PENALTY: 'NEGATIVE',
   BONUS: 'POSITIVE',

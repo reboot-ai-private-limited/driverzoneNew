@@ -8,10 +8,19 @@
     "userInterfaceStyle": "light",
     "scheme": "driverzone-driver",
     "backgroundColor": "#F2F200",
+    "icon": "./assets/icon.png",
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#F2F200"
+        }
+      ],
       "expo-status-bar",
       [
         "expo-location",
@@ -21,12 +30,17 @@
       ],
       "@react-native-firebase/app",
       "./plugins/withOfferSound",
-      "./plugins/withRingOverLockScreen"
+      "./plugins/withRingOverLockScreen",
+      "./plugins/withDutyForegroundService"
     ],
     "android": {
       "package": "in.driverzone.driver",
       "versionCode": 1,
       "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F2F200"
+      },
       "permissions": [
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -35,7 +49,9 @@
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.WAKE_LOCK",
         "android.permission.VIBRATE",
-        "android.permission.ACCESS_NOTIFICATION_POLICY"
+        "android.permission.ACCESS_NOTIFICATION_POLICY",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "ios": {

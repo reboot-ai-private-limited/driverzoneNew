@@ -1,4 +1,5 @@
 import type { Request, RequestHandler } from 'express';
+import type { BookingStatus } from '@driverzone/contracts';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import { AppError } from '../../../shared/errors/AppError.js';
@@ -6,6 +7,12 @@ import { toMoney } from '../../../shared/money/format.js';
 import type { BookingRepositoryPort } from '../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../domain/chargeRepository.port.js';
 import type { WalletReadContract } from '../../wallet/wallet.public.js';
+import type {
+  AccountDirectoryContract,
+  CustomerContactContract,
+  DriverCard,
+  DriverCardContract,
+} from '../../identity/identity.public.js';
 import { BookingNotFoundError } from '../domain/booking.errors.js';
 import type { CreateBookingUseCase } from '../application/useCases/createBooking.usecase.js';
 import type {
@@ -22,6 +29,7 @@ import type {
 } from '../application/useCases/driverProgress.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
 import {
+  adminBookingListQuerySchema,
   bookingIdParamSchema,
   cancelBookingSchema,
   completeTripSchema,
@@ -99,10 +107,26 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
   });
 }
 
+/**
+ * One driver card, or null — the customer-facing lookup, used by every read below.
+ *
+ * A booking with no driver skips the query entirely rather than asking for an empty set, because
+ * most reads of a searching booking would otherwise pay for a lookup that can only return nothing.
+ */
+async function cardFor(
+  directory: DriverCardContract,
+  driverId: string | null,
+): Promise<DriverCard | null> {
+  if (driverId === null) return null;
+  const cards = await directory.driverCardsByIds([driverId]);
+  return cards.get(driverId) ?? null;
+}
+
 /** The customer's own booking, which is the only view that carries the trip code. */
 export function makeGetCustomerBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
+  directory: DriverCardContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -111,13 +135,14 @@ export function makeGetCustomerBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.customerId !== customerId) throw new BookingNotFoundError(id);
 
-    const [adjustments, startOtp] = await Promise.all([
+    const [adjustments, startOtp, driverCard] = await Promise.all([
       charges.listAdjustments(booking.id),
       // Shown to the customer so they can read it out — and only ever from here.
       repo.readStartOtp(booking.id),
+      cardFor(directory, booking.driverId),
     ]);
 
-    sendSuccess(req, res, toBookingDto({ booking, adjustments, startOtp }), 'Booking');
+    sendSuccess(req, res, toBookingDto({ booking, adjustments, startOtp, driverCard }), 'Booking');
   });
 }
 
@@ -138,13 +163,28 @@ export function makeGetCustomerBookingController(
 export function makeListCustomerBookingsController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
+  directory: DriverCardContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const bookings = await repo.listForCustomer(principalOf(req), HISTORY_LIMIT);
 
+    /*
+     * ONE LOOKUP FOR THE WHOLE PAGE, deduped — a customer with forty rides from the same regular
+     * driver is one row in this query, not forty. The phone number is still gated per booking by
+     * the mapper, so a history full of finished trips carries none of them.
+     */
+    const driverIds = bookings
+      .map((booking) => booking.driverId)
+      .filter((id): id is string => id !== null);
+    const cards = await directory.driverCardsByIds(driverIds);
+
     const dtos = await Promise.all(
       bookings.map(async (booking) =>
-        toBookingDto({ booking, adjustments: await charges.listAdjustments(booking.id) }),
+        toBookingDto({
+          booking,
+          adjustments: await charges.listAdjustments(booking.id),
+          driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
+        }),
       ),
     );
 
@@ -152,10 +192,18 @@ export function makeListCustomerBookingsController(
   });
 }
 
-/** The driver's view of the same booking. No trip code, deliberately. */
+/**
+ * The driver's view of the same booking. No trip code, deliberately.
+ *
+ * CARRIES THE CUSTOMER CARD — name, and the number to call while the trip is live. The customer's
+ * own read of this booking gets neither; this is the mirror of the driver card a customer sees.
+ * `customerContactsByIds` resolves it in one lookup, and `toBookingDto` gates the phone on the
+ * trip still being live (`PHONE_VISIBLE_STATUSES`).
+ */
 export function makeGetDriverBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
+  directory: AccountDirectoryContract & CustomerContactContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -164,8 +212,147 @@ export function makeGetDriverBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.driverId !== driverId) throw new BookingNotFoundError(id);
 
-    const adjustments = await charges.listAdjustments(booking.id);
-    sendSuccess(req, res, toBookingDto({ booking, adjustments }), 'Booking');
+    const [adjustments, contacts] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      directory.customerContactsByIds([booking.customerId]),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      toBookingDto({
+        booking,
+        adjustments,
+        customerCard: contacts.get(booking.customerId) ?? null,
+      }),
+      'Booking',
+    );
+  });
+}
+
+/**
+ * `GET /driver/bookings` — this driver's own trip history, newest first.
+ *
+ * SCOPED BY THE TOKEN, like the customer's list: no `?driverId=`, so no shape of this request
+ * reads somebody else's trips.
+ *
+ * NAMES IN ONE QUERY, not one per row. `namesByIds` exists precisely for this — the "batch, don't
+ * invite N+1" rule in docs/engineering/module-anatomy.md — and a history of `HISTORY_LIMIT` rows
+ * would otherwise be a hundred lookups to render a hundred names.
+ *
+ * Adjustments are still fetched per booking, matching the customer list, and carry the same note:
+ * the honest fix is a batched `listAdjustmentsFor(bookingIds)` on the port the day this hurts.
+ */
+export function makeListDriverTripsController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: AccountDirectoryContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const bookings = await repo.listForDriver(principalOf(req), HISTORY_LIMIT);
+
+    const names = await directory.namesByIds(
+      'CUSTOMER',
+      // Deduped: a repeat customer must not be looked up once per trip they took.
+      [...new Set(bookings.map((booking) => booking.customerId))],
+    );
+
+    const dtos = await Promise.all(
+      bookings.map(async (booking) =>
+        toBookingDto({
+          booking,
+          adjustments: await charges.listAdjustments(booking.id),
+          customerName: names.get(booking.customerId) ?? null,
+        }),
+      ),
+    );
+
+    sendSuccess(req, res, { bookings: dtos }, 'Your trips');
+  });
+}
+
+/**
+ * `GET /customer/bookings/current` — the booking happening to this customer now, or `null`.
+ *
+ * CARRIES THE START OTP, like the single-booking read and unlike the history list. That is the
+ * point of the endpoint rather than a detail of it: the code lives on the live trip screen only,
+ * so a customer whose app was killed at the pickup had no route back to the four digits their
+ * driver is standing there waiting for.
+ *
+ * Scoped by the token, and `null` rather than 404 when nothing is live — the app asks on launch.
+ */
+export function makeGetCurrentCustomerBookingController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: DriverCardContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const booking = await repo.findActiveForCustomer(principalOf(req));
+
+    if (booking === null) {
+      sendSuccess(req, res, { booking: null }, 'No booking in progress');
+      return;
+    }
+
+    const [adjustments, startOtp, driverCard] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      repo.readStartOtp(booking.id),
+      cardFor(directory, booking.driverId),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments, startOtp, driverCard }) },
+      'Booking in progress',
+    );
+  });
+}
+
+/**
+ * `GET /driver/bookings/current` — the trip this driver is in the middle of, or `null`.
+ *
+ * THE TRIP EQUIVALENT OF `GET /driver/offers`, and it exists for the same reason: the app
+ * is killed mid-job by an OEM battery manager, and the booking id it needs to get back only ever
+ * lived in navigation state. Without this the driver reopens to the duty screen with a customer
+ * waiting and no route to arrive, start or complete.
+ *
+ * SCOPED BY THE TOKEN. There is no id in the path, so there is no shape of this request that
+ * reads somebody else's trip.
+ *
+ * `null` rather than a 404 when nothing is live — "you are not on a trip" is a normal answer to
+ * this question, and the app asks it on every launch.
+ */
+export function makeGetCurrentDriverTripController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: CustomerContactContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const booking = await repo.findActiveForDriver(principalOf(req));
+
+    if (booking === null) {
+      sendSuccess(req, res, { booking: null }, 'No trip in progress');
+      return;
+    }
+
+    const [adjustments, contacts] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      directory.customerContactsByIds([booking.customerId]),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking: toBookingDto({
+          booking,
+          adjustments,
+          customerCard: contacts.get(booking.customerId) ?? null,
+        }),
+      },
+      'Trip in progress',
+    );
   });
 }
 
@@ -355,6 +542,172 @@ export function makeForceArriveController(useCase: ForceArriveUseCase): RequestH
 
     const booking = await useCase.execute(id, principalOf(req), body.reason);
     sendSuccess(req, res, toBookingDto({ booking, adjustments: [] }), 'Driver marked as arrived');
+  });
+}
+
+/**
+ * A `YYYY-MM-DD` day, read in the timezone the admin lives in.
+ *
+ * IST, NOT UTC — the same boundary `ledger.controller.ts` documents and for the same reason:
+ * `new Date('2026-09-04')` is midnight UTC, which is 05:30 on the 4th in India, so an admin
+ * filtering "the 4th" would lose every booking from before breakfast and gain the small hours of
+ * the 5th. Duplicated rather than shared because a `shared/` date module that two interface
+ * layers reach into is the kind of coupling this codebase's module rules exist to prevent — the
+ * day this becomes a third copy is the day it earns a home.
+ */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function startOfDay(isoDate: string): Date {
+  return new Date(new Date(`${isoDate}T00:00:00.000Z`).getTime() - IST_OFFSET_MS);
+}
+
+/**
+ * The instant the NEXT day begins, so `to` can be an EXCLUSIVE bound while meaning an inclusive
+ * day. "To 18 May" has to include a booking at 23:50 on the 18th; comparing `<=` against the
+ * start of the 18th would drop everything but the first instant of it.
+ */
+function startOfNextDay(isoDate: string): Date {
+  return new Date(startOfDay(isoDate).getTime() + 24 * 60 * 60 * 1000);
+}
+
+/**
+ * How many accounts a name-or-number search may resolve to before the query stops widening.
+ *
+ * A one-letter search matches most of the customer table, and every id it returns is spliced into
+ * an `$in`. Two hundred is generous for a search box — past that the admin is not looking for
+ * somebody, they are browsing, and the right answer is to narrow the term.
+ */
+const SEARCH_ACCOUNT_LIMIT = 200;
+
+/**
+ * `GET /admin/bookings` — the booking management table.
+ *
+ * THE ONLY BOOKING LIST THAT PAGES, because it is the only one that is not a single person's
+ * history. See `AdminBookingListDto` for why it still returns `BookingDto` unchanged.
+ *
+ * A NAME OR MOBILE SEARCH COSTS TWO EXTRA QUERIES, one per role, and they run in parallel with
+ * each other. `identity` turns the term into account ids and this module intersects them with its
+ * own rows — the module boundary means there is no join available, and `bookings` has no business
+ * reading the accounts collection. When the term is only a reference, both are still issued and
+ * return nothing; the alternative is guessing from the shape of the string which kind of search
+ * an admin meant, and "9001" is a plausible reference and a plausible phone number at once.
+ *
+ * Names are resolved for the PAGE, one batched lookup per role, exactly as the driver's trip
+ * history does it. Phones are never resolved: `toBookingDto` would gate them on the trip being
+ * live anyway, and an admin table is not a kerb.
+ */
+export function makeListAdminBookingsController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: AccountDirectoryContract & CustomerContactContract & DriverCardContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const query = adminBookingListQuerySchema.parse(req.query);
+
+    /*
+     * Both roles, in parallel, and only when there is something to search for. `undefined` (no
+     * term) and `[]` (a term that matched nobody) are different answers and the repository treats
+     * them differently — see `AdminBookingFilter.accountIds`.
+     */
+    const accountIds =
+      query.search === undefined || query.search === ''
+        ? undefined
+        : (
+            await Promise.all([
+              directory.idsMatching('CUSTOMER', query.search, SEARCH_ACCOUNT_LIMIT),
+              directory.idsMatching('DRIVER', query.search, SEARCH_ACCOUNT_LIMIT),
+            ])
+          ).flat();
+
+    const { bookings, totalItems } = await repo.listForAdmin({
+      page: query.page,
+      limit: query.limit,
+      ...(query.search === undefined ? {} : { search: query.search }),
+      ...(accountIds === undefined ? {} : { accountIds }),
+      ...(query.status === undefined ? {} : { statuses: query.status as BookingStatus[] }),
+      ...(query.from === undefined ? {} : { from: startOfDay(query.from) }),
+      ...(query.to === undefined ? {} : { before: startOfNextDay(query.to) }),
+    });
+
+    /*
+     * CONTACTS, NOT BARE NAMES — one batched lookup per role, deduped so a repeat customer is not
+     * fetched once per booking they made. `revealPhones` below is what makes the numbers
+     * survive the mapper's live-trip gate; see its note for why an admin is exempt from it.
+     */
+    const [contacts, cards] = await Promise.all([
+      directory.customerContactsByIds([...new Set(bookings.map((b) => b.customerId))]),
+      directory.driverCardsByIds([
+        ...new Set(bookings.map((b) => b.driverId).filter((id): id is string => id !== null)),
+      ]),
+    ]);
+
+    const dtos = await Promise.all(
+      bookings.map(async (booking) =>
+        toBookingDto({
+          booking,
+          adjustments: await charges.listAdjustments(booking.id),
+          revealPhones: true,
+          customerCard: contacts.get(booking.customerId) ?? null,
+          driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
+        }),
+      ),
+    );
+
+    sendSuccess(
+      req,
+      res,
+      {
+        bookings: dtos,
+        pagination: {
+          page: query.page,
+          limit: query.limit,
+          total_items: totalItems,
+          total_pages: Math.max(1, Math.ceil(totalItems / query.limit)),
+        },
+      },
+      'Bookings listed',
+    );
+  });
+}
+
+/**
+ * `GET /admin/bookings/:id` — one booking, in full.
+ *
+ * Named on the row's own terms rather than either party's: no start OTP (the code exists so the
+ * customer can prove themselves to the driver, and an admin reading it defeats that), and names
+ * without phone numbers, matching the list.
+ */
+export function makeGetAdminBookingController(
+  repo: BookingRepositoryPort,
+  charges: ChargeRepositoryPort,
+  directory: CustomerContactContract & DriverCardContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const booking = await repo.findById(id);
+    if (booking === null) throw new BookingNotFoundError(id);
+
+    const [contacts, cards, adjustments] = await Promise.all([
+      directory.customerContactsByIds([booking.customerId]),
+      booking.driverId === null
+        ? Promise.resolve(new Map<string, DriverCard>())
+        : directory.driverCardsByIds([booking.driverId]),
+      charges.listAdjustments(booking.id),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      toBookingDto({
+        booking,
+        adjustments,
+        revealPhones: true,
+        customerCard: contacts.get(booking.customerId) ?? null,
+        driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
+      }),
+      'Booking',
+    );
   });
 }
 

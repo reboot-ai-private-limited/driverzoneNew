@@ -91,3 +91,102 @@ export interface GrantWalletCreditRequest {
   /** Why. Mandatory — an unexplained movement of someone's money is unanswerable later. */
   note: string;
 }
+
+// ─── Admin finance surface ──────────────────────────────────────────────────────────────────
+
+/**
+ * One customer on the Finance screen — `GET /admin/finance/customer-wallets`.
+ *
+ * THE SIGN POINTS THE OTHER WAY from `DriverBalanceRowDto`. A customer wallet is written from
+ * the CUSTOMER's side, so a positive balance is credit the company owes them; the driver ledger
+ * is written from the company's side, where positive means the same thing but negative means the
+ * driver is holding our cash. The two are mirror images and a screen showing both must say which
+ * it is showing — see `FinanceTransactionDto.direction` for how the merged feed handles it.
+ */
+export interface CustomerWalletRowDto {
+  customer_id: string;
+  name: string | null;
+  phone: string | null;
+  /** Signed, from the CUSTOMER's side: positive means the company owes them. */
+  balance: Money;
+  /** What they can actually spend on a fare — `balance` when positive, else zero. */
+  spendable_credit: Money;
+  /** An unpaid cancellation fee carried forward — `|balance|` when negative, else zero. */
+  amount_owed: Money;
+  last_entry_at: string | null;
+  entry_count: number;
+}
+
+export interface AdminCustomerWalletsDto {
+  rows: CustomerWalletRowDto[];
+  /** Across every page of the filter, not the page returned. */
+  totals: {
+    customers_in_debt: number;
+    total_owed_by_customers: Money;
+    customers_in_credit: number;
+    /** The company's outstanding liability — credit granted and not yet spent. */
+    total_credit_outstanding: Money;
+    customers: number;
+  };
+  pagination: { page: number; limit: number; total_items: number; total_pages: number };
+}
+
+export const CUSTOMER_WALLET_STATES = ['ALL', 'IN_CREDIT', 'IN_DEBT', 'SETTLED'] as const;
+export type CustomerWalletState = (typeof CUSTOMER_WALLET_STATES)[number];
+
+export interface AdminCustomerWalletsQuery {
+  search?: string | undefined;
+  state?: CustomerWalletState | undefined;
+  sort?: 'BALANCE_ASC' | 'BALANCE_DESC' | 'LAST_ACTIVITY_DESC' | undefined;
+  page?: number | undefined;
+  limit?: number | undefined;
+}
+
+/**
+ * The filters `GET /admin/customers/:id/wallet` accepts.
+ *
+ * ADDED 2026-09-05 to match the driver side. The customer statement was a hardcoded 100 rows
+ * with no paging and no filters, which is the opposite shape from the driver ledger for no
+ * reason anyone wrote down — and 100 is a cap a busy customer reaches, at which point the screen
+ * silently stops showing their older entries.
+ */
+export interface CustomerWalletQueryParams {
+  page?: number | undefined;
+  limit?: number | undefined;
+  /** Comma-separated `WalletEntryType`s. */
+  type?: string | undefined;
+  /** `YYYY-MM-DD`, inclusive, IST. */
+  from?: string | undefined;
+  to?: string | undefined;
+}
+
+/**
+ * What `GET /admin/customers/:id/wallet` returns — the customer statement with its pager.
+ *
+ * A SEPARATE TYPE FROM `CustomerWalletDto`, which `GET /me/wallet` still returns unchanged. The
+ * customer app renders a wallet screen, not a filtered statement, and widening the shared DTO
+ * would have made `summary` and `pagination` fields that app must carry and never reads. This
+ * mirrors the driver side, where `AdminDriverWalletDetailsDto` is the one that has the pager.
+ */
+export interface AdminCustomerWalletDetailsDto extends CustomerWalletDto {
+  /** Credited, debited, net and count across EVERY page of the filter, not the page returned. */
+  summary: CustomerWalletSummaryDto;
+  pagination: { page: number; limit: number; total_items: number; total_pages: number };
+}
+
+/**
+ * Totals over a filtered statement.
+ *
+ * Shaped like the ledger's `LedgerSummaryDto` but declared separately rather than imported: the
+ * two modules sit at the same tier and must not depend on each other, and a shared type here
+ * would be the wire-level version of the import the architecture forbids.
+ */
+export interface CustomerWalletSummaryDto {
+  /** Money that went the customer's way — grants and refunds. A positive magnitude. */
+  credited_paise: number;
+  /** Money charged to them — fees and fines. A POSITIVE magnitude, not a negative sum. */
+  debited_paise: number;
+  /** `credited − debited`. Negative means they owe more than they hold. */
+  net_paise: number;
+  count: number;
+}

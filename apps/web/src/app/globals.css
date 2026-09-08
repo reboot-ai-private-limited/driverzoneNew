@@ -10,6 +10,27 @@
 @source "../../../../packages/design-system/src";
 
 /**
+ * LANDSCAPE, for every print job in the panel.
+ *
+ * `overflow-visible` (see `DataTable.tsx` and the bookings list/detail screens) stops CSS from
+ * clipping a wide table — but it cannot make paper wider. A twelve-column report or a five-panel
+ * booking layout is wider than it is tall, and portrait was cutting its right edge off at the
+ * physical sheet boundary regardless of any overflow setting. `@page` is what actually asks the
+ * browser's print dialog to default to landscape; a person can still switch it back, but the
+ * screens this panel prints from are tables and dashboards, not letters, and landscape is the
+ * orientation that fits them.
+ *
+ * Global rather than scoped to one screen: `@page` has no selector to scope BY — it addresses
+ * the paper, not an element — and every other table in this panel (customers, drivers, packages)
+ * is exactly as wide as the bookings ones, so there is no screen here for which portrait was
+ * ever the better default.
+ */
+@page {
+  size: landscape;
+  margin: 12mm;
+}
+
+/**
  * Google's `<gmp-place-autocomplete>` (the zones map search) is a custom element whose internals
  * are NOT reachable from Tailwind — no light-DOM `input` exists to target, so a `[&_input]:`
  * variant silently styles nothing. It is themed the two ways Google supports instead: the

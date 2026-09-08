@@ -1,4 +1,5 @@
-import type { BookingDto, BookingEventDto } from '@driverzone/contracts';
+import type { BookingDto, BookingEventDto, BookingStatus } from '@driverzone/contracts';
+import type { CustomerContact, DriverCard } from '../../identity/identity.public.js';
 import { toMoney } from '../../../shared/money/format.js';
 import type { Booking } from '../domain/booking.entity.js';
 import type { BookingEvent } from '../domain/bookingRepository.port.js';
@@ -16,6 +17,82 @@ export interface BookingView {
    */
   startOtp?: string | null | undefined;
   driverName?: string | null | undefined;
+  /**
+   * The customer's name, supplied only where a caller has a reason to see it — the driver's own
+   * trip history and trip detail.
+   *
+   * Passed in rather than read off the entity for the same reason `startOtp` is: resolving it is
+   * a lookup in another module, and making it an argument keeps "who gets to see this" a decision
+   * at the call site instead of a default the mapper quietly applies everywhere.
+   *
+   * `undefined` (not passed) yields `customer: null`, so the DTO distinguishes a name that was
+   * never looked up from an account that has none — see the field's own note in contracts.
+   */
+  customerName?: string | null | undefined;
+  /**
+   * The customer as the DRIVER on their trip sees them — name plus the number to call at the
+   * kerb. The mirror of `driverCard`, supplied only on the driver's single-trip reads.
+   *
+   * Passed in for the same reason the others are: resolving it is a lookup in another module.
+   * When present it supersedes `customerName` — the phone is gated on the trip being live, see
+   * `PHONE_VISIBLE_STATUSES`. The driver's ride-history LIST still passes `customerName` alone,
+   * because a finished trip has no kerb to call.
+   */
+  customerCard?: CustomerContact | null | undefined;
+  /**
+   * The driver as a customer sees them, supplied only on a CUSTOMER-facing read.
+   *
+   * Passed in for the same reason `startOtp` and `customerName` are: resolving it is a lookup in
+   * another module, and making it an argument keeps "who gets to see this" a decision at the call
+   * site. The driver's own reads never pass it — a driver does not need their own card, and it
+   * carries a phone number.
+   */
+  driverCard?: DriverCard | null | undefined;
+  /**
+   * Lifts the live-trip gate on both phone numbers. ADMIN READS ONLY.
+   *
+   * `PHONE_VISIBLE_STATUSES` exists to stop the two PARTIES holding each other's numbers after
+   * the trip that justified it — a customer from three months ago has no business keeping their
+   * driver's login number. An admin is not a party to the trip and the reasoning does not
+   * transfer: the panel already renders `mobile_number` on the customer and driver directories
+   * (`CustomerDetailScreen`), so a booking table that hides it is not protecting anything, it is
+   * making support open a second screen to find a number they already have.
+   *
+   * An explicit flag rather than the mapper inferring it from the caller, because that is the
+   * rule this whole interface follows: who gets to see what is decided at the call site, where
+   * someone reviewing that endpoint can see the decision being made.
+   */
+  revealPhones?: boolean | undefined;
+}
+
+/**
+ * The statuses in which the two parties may have each other's phone number.
+ *
+ * EACH NEEDS TO REACH THE OTHER AT THE KERB, and that is the whole justification — so it lasts
+ * exactly as long as the kerb does. On a completed or cancelled trip the number is withheld by
+ * the server rather than merely hidden by the app, because a field that was never sent cannot be
+ * read out of a cached response or a screenshot of one. The gate is symmetric: the customer's
+ * view of `driver.phone` and the driver's view of `customer.phone` open and close together.
+ *
+ * `SEARCHING` and `CONFIRMED` are absent because no driver is assigned in them; there is nobody to
+ * ring. Listed explicitly rather than derived from "not terminal" so that a status added to the
+ * machine later is a deliberate decision about a phone number, not something a negation absorbs.
+ */
+const PHONE_VISIBLE_STATUSES: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
+  'ASSIGNED',
+  'DRIVER_EN_ROUTE',
+  'ARRIVED',
+  'STARTED',
+]);
+
+/**
+ * Whether this read may carry a phone number: the trip is live, or an admin lifted the gate.
+ *
+ * One function so the customer's view of the driver and the driver's view of the customer cannot
+ * drift apart — the gate is symmetric by construction rather than by two call sites agreeing.
+ */
+function canSeePhone(view: BookingView): boolean {
+  return view.revealPhones === true || PHONE_VISIBLE_STATUSES.has(view.booking.status);
 }
 
 export function toBookingDto(view: BookingView): BookingDto {
@@ -32,6 +109,8 @@ export function toBookingDto(view: BookingView): BookingDto {
     pickup: { ...booking.pickup, address: booking.pickupAddress },
     drop: { ...booking.drop, address: booking.dropAddress },
 
+    distance_km: booking.distanceKm,
+
     scheduled_at: booking.scheduledAt.toISOString(),
     is_scheduled: booking.isScheduled,
 
@@ -45,8 +124,9 @@ export function toBookingDto(view: BookingView): BookingDto {
 
     start_otp: view.startOtp ?? null,
 
-    driver:
-      booking.driverId === null ? null : { id: booking.driverId, name: view.driverName ?? null },
+    driver: toDriverDto(view),
+
+    customer: toCustomerDto(view),
 
     fare: {
       lines: fare.lines.map((line) => ({
@@ -81,6 +161,71 @@ export function toBookingDto(view: BookingView): BookingDto {
 
     cancellation_reason: booking.cancellationReason,
   };
+}
+
+/**
+ * The driver on a booking, at whatever detail the call site resolved.
+ *
+ * THREE CASES, and they are genuinely different. No driver assigned yet is `null`. A driver
+ * assigned but no card looked up — every driver-facing read, and the admin's — is the id and the
+ * name, which is exactly what this field carried before customer cards existed. A card resolved
+ * is the full thing, with the phone number gated on the trip still being live.
+ */
+function toDriverDto(view: BookingView): BookingDto['driver'] {
+  const { booking } = view;
+  if (booking.driverId === null) return null;
+
+  const card = view.driverCard;
+  if (card === null || card === undefined) {
+    return {
+      id: booking.driverId,
+      name: view.driverName ?? null,
+      photo_url: null,
+      rating: null,
+      rating_count: 0,
+      phone: null,
+    };
+  }
+
+  return {
+    id: booking.driverId,
+    name: card.fullName,
+    photo_url: card.photoUrl,
+    rating: card.rating,
+    rating_count: card.ratingCount,
+    // The gate. See `PHONE_VISIBLE_STATUSES`.
+    phone: canSeePhone(view) ? card.phone : null,
+  };
+}
+
+/**
+ * The customer on a booking, at whatever detail the call site resolved — the mirror of
+ * `toDriverDto`.
+ *
+ * THREE CASES. A call site that resolved nothing (`customerName` and `customerCard` both absent)
+ * produces `null` — "not looked up", distinct from an account with no name. A `customerCard`
+ * resolved is name plus a phone number gated on the trip still being live. A `customerName`
+ * alone — the driver's ride-history list, and every admin read — is name only, `phone: null`,
+ * exactly what the field carried before.
+ */
+function toCustomerDto(view: BookingView): BookingDto['customer'] {
+  const { booking } = view;
+
+  const card = view.customerCard;
+  if (card !== null && card !== undefined) {
+    return {
+      id: booking.customerId,
+      name: card.fullName,
+      // The gate. Symmetric with `toDriverDto` — see `PHONE_VISIBLE_STATUSES`.
+      phone: canSeePhone(view) ? card.phone : null,
+    };
+  }
+
+  if ('customerName' in view) {
+    return { id: booking.customerId, name: view.customerName ?? null, phone: null };
+  }
+
+  return null;
 }
 
 /**

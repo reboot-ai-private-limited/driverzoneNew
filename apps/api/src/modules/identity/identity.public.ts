@@ -32,6 +32,74 @@ export interface IdentityAccount {
  */
 export interface AccountDirectoryContract {
   namesByIds(role: Role, ids: string[]): Promise<Map<string, string | null>>;
+
+  /**
+   * The ids of accounts whose name or mobile number matches `search`, for a caller that filters
+   * its OWN rows by them.
+   *
+   * IT RETURNS IDS, NOT ROWS, and that is the whole design. The admin booking list must find "every
+   * booking by Rahul", but `bookings` cannot read the accounts collection and has no business
+   * learning what a phone number looks like. So identity answers the only question it is
+   * competent to answer — which accounts are these words about — and the caller intersects that
+   * with its own table. The alternative is a join across a module boundary, or `bookings`
+   * reimplementing name search over a collection it does not own.
+   *
+   * `limit` is not optional politeness: a one-letter search matches most of the customer table,
+   * and an unbounded answer would be spliced into an `$in` with fifty thousand ids in it. A
+   * caller that hits the cap gets the first `limit` matches, which for a search box is what the
+   * person wanted anyway — they narrow the term rather than page through the ambiguity.
+   */
+  idsMatching(role: Role, search: string, limit: number): Promise<string[]>;
+}
+
+/**
+ * A driver as a CUSTOMER sees them: the card on the trip screen.
+ *
+ * Separate from `namesByIds` rather than an expansion of it, per Interface Segregation — the
+ * admin review ledger wants a name and has no business being handed a phone number. It is also
+ * why this contract exists at all instead of `bookings` reading the driver collection: the phone
+ * number is the driver's login credential, and exactly one module should decide who may see it.
+ *
+ * `phone` is returned here unconditionally. WHEN it reaches a customer is the caller's decision
+ * and `bookings` makes it — the trip must be live — because only that module knows what a booking
+ * is doing. This contract's job is to answer "who is this driver", not to police the trip.
+ */
+export interface DriverCard {
+  id: string;
+  fullName: string | null;
+  /** The driver's real number. See the note above on who is allowed to pass it on. */
+  phone: string | null;
+  /** A fetchable URL, already resolved from the storage key — never the key itself. */
+  photoUrl: string | null;
+  /** Null until `ratingCount` is above zero: the account row defaults to 5.0 unrated. */
+  rating: number | null;
+  ratingCount: number;
+}
+
+export interface DriverCardContract {
+  /** Batched, like `namesByIds` — a list of bookings must not be a query per row. */
+  driverCardsByIds(ids: string[]): Promise<Map<string, DriverCard>>;
+}
+
+/**
+ * A customer as the DRIVER on their trip sees them: name, and the number to call at the kerb.
+ *
+ * The mirror of `DriverCard`, and separate from `namesByIds` for the same Interface Segregation
+ * reason — the admin ledger and the driver's ride history want a name and have no business being
+ * handed a phone number. `phone` is returned here unconditionally; WHEN it reaches the driver is
+ * `bookings`' decision (the trip must be live), because only that module knows what a booking is
+ * doing.
+ */
+export interface CustomerContact {
+  id: string;
+  fullName: string | null;
+  /** The customer's real number. See the note above on who is allowed to pass it on. */
+  phone: string | null;
+}
+
+export interface CustomerContactContract {
+  /** Batched, like `driverCardsByIds` — a list of trips must not be a query per row. */
+  customerContactsByIds(ids: string[]): Promise<Map<string, CustomerContact>>;
 }
 
 /**
@@ -94,5 +162,7 @@ export interface DriverStatsContract {
  */
 export type IdentityPublicContract = CustomerBookingProfileContract &
   AccountDirectoryContract &
+  DriverCardContract &
+  CustomerContactContract &
   RatingCacheContract &
   DriverStatsContract;

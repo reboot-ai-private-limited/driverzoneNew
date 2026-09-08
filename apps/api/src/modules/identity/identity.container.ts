@@ -3,6 +3,7 @@ import type { Role } from '@driverzone/contracts';
 import { allowDevShortcuts, env, isProduction } from '@/config/env.js';
 import { DEV_ACCOUNT_PHONES } from '@/config/devAccounts.js';
 import { getRedis } from '@/shared/queue/redis.js';
+import { logger } from '@/shared/logging/logger.js';
 import { TokenIssuer } from './application/tokenIssuer.js';
 import { LogoutUseCase } from './application/useCases/logout.usecase.js';
 import { RefreshSessionUseCase } from './application/useCases/refreshSession.usecase.js';
@@ -40,6 +41,7 @@ import { MongoDutySessionRepository } from './infrastructure/dutySession.reposit
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
+import { WhatsAppOtpSender } from './infrastructure/otpSender.whatsapp.js';
 import { CloudinaryStorage } from '@/shared/storage/cloudinary.storage.js';
 import { RedisOtpStore } from './infrastructure/otpStore.redis.js';
 import { makeAuthControllers } from './interface/auth.controller.js';
@@ -81,7 +83,44 @@ export function buildIdentityContainer(): IdentityContainer {
   // Redis is shared with BullMQ rather than opening a second connection: it is already
   // configured with `maxRetriesPerRequest: null` and multiplexes fine at these command volumes.
   const otpStore = new RedisOtpStore(getRedis());
-  const otpSender = new LoggingOtpSender();
+
+  /**
+   * How the login code is delivered:
+   *
+   *   - all four WA_* keys set  → WhatsApp, through wabridge (`WhatsAppOtpSender`)
+   *   - otherwise               → written to the log (`LoggingOtpSender`)
+   *
+   * Keyed on the CREDENTIALS being present, not on `NODE_ENV`. Running the whole API as
+   * `NODE_ENV=production` just to reach the real sender also trips every other "no mock in
+   * production" guard — payments, the Secure refresh cookie, the seed script — which is not what
+   * "send OTPs over WhatsApp from my machine" is asking for. A developer who does not want real
+   * sends simply leaves a WA_* key unset.
+   *
+   * `LoggingOtpSender` still refuses to run when `NODE_ENV=production` without `STAGING_UNSAFE`,
+   * so a real production deploy that forgot the WA_* keys fails loudly rather than writing login
+   * codes to stdout.
+   */
+  const waConfigured =
+    env.WA_APP_KEY !== undefined &&
+    env.WA_AUTH_KEY !== undefined &&
+    env.WA_DEVICE_ID !== undefined &&
+    env.WA_TEMPLATE_ID !== undefined;
+
+  const otpSender = waConfigured
+    ? new WhatsAppOtpSender({
+        apiUrl: env.WA_API_URL,
+        appKey: env.WA_APP_KEY,
+        authKey: env.WA_AUTH_KEY,
+        deviceId: env.WA_DEVICE_ID,
+        templateId: env.WA_TEMPLATE_ID,
+        contactNumber: env.WA_OTP_CONTACT_NUMBER,
+      })
+    : new LoggingOtpSender();
+
+  logger.info(
+    { channel: waConfigured ? 'whatsapp' : 'log' },
+    'identity: login OTP delivery channel',
+  );
   const documentStorage = new CloudinaryStorage({
     cloudName: env.CLOUDINARY_CLOUD_NAME,
     apiKey: env.CLOUDINARY_API_KEY,
@@ -204,15 +243,31 @@ export function buildIdentityContainer(): IdentityContainer {
 
   // Backs the read-side and rating-cache halves of the public contract. Stateless, so it is
   // constructed here beside the repositories rather than threaded through a use case.
-  const directory = new MongoAccountDirectory();
+  // `documentStorage` for the avatar's public URL: same provider, and an avatar is the one thing
+  // it stores publicly (`isPrivate: false`) rather than presigning per read.
+  const directory = new MongoAccountDirectory(documentStorage);
 
   return {
     contract: {
       // The read side and the rating cache. Consumed by `reviews`, which renders names in the
       // admin ledger and writes back the rolling average it computes.
       namesByIds: (role, ids) => directory.namesByIds(role, ids),
+
+      // Turns a search box's words into account ids, so a caller can filter its OWN rows by
+      // them. `bookings` is the first consumer: the admin booking table searches by customer and
+      // driver name, and cannot read this module's collections to do it.
+      idsMatching: (role, search, limit) => directory.idsMatching(role, search, limit),
+
       setRating: (role, id, average, count) => directory.setRating(role, id, average, count),
       recordCompletedRide: (driverId, completedAt) => directory.recordCompletedRide(driverId, completedAt),
+
+      // The driver card a customer sees on their trip. `bookings` decides whether the phone
+      // number on it is passed on — see `DriverCardContract`.
+      driverCardsByIds: (ids) => directory.driverCardsByIds(ids),
+
+      // The mirror: the customer contact the driver sees on their trip. Same rule — `bookings`
+      // gates the phone number on the trip being live.
+      customerContactsByIds: (ids) => directory.customerContactsByIds(ids),
 
       // The write-side surface `bookings` (tier 6) consumes when POST /bookings carries
       // `save_pickup_address` or `save_vehicle`.

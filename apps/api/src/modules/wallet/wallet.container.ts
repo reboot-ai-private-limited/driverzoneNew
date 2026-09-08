@@ -7,10 +7,12 @@ import {
   makeGetMyWalletController,
 } from './interface/wallet.controller.js';
 import { buildAdminRouter, buildCustomerRouter } from './interface/wallet.routes.js';
-import type { WalletPublicContract } from './wallet.public.js';
+import type { WalletFinanceContract, WalletPublicContract } from './wallet.public.js';
 
 export interface WalletContainer {
   contract: WalletPublicContract;
+  /** The cross-customer read, handed only to the tier-8 `admin` module. */
+  financeContract: WalletFinanceContract;
   /** Mounted at `/api/customer/wallet`. */
   buildCustomerRouter: () => Router;
   /** Mounted at `/api/admin/customers`, after identity's admin router. */
@@ -23,7 +25,8 @@ export interface WalletContainer {
  * for the same reason they do — everything above it needs it, and it needs nothing above.
  */
 export function buildWalletContainer(): WalletContainer {
-  const wallet = new ManageWalletUseCase(new MongoWalletRepository());
+  const repo = new MongoWalletRepository();
+  const wallet = new ManageWalletUseCase(repo);
 
   return {
     contract: {
@@ -31,6 +34,9 @@ export function buildWalletContainer(): WalletContainer {
       balance: (customerId) => wallet.balance(customerId),
       planFor: (customerId, farePaise) => wallet.planFor(customerId, farePaise),
       entriesForBooking: (bookingId) => wallet.entriesForBooking(bookingId),
+    },
+    financeContract: {
+      customerWallets: (query, page, limit) => repo.pageCustomerWallets(query, page, limit),
     },
     buildCustomerRouter: () =>
       buildCustomerRouter({ myWallet: makeGetMyWalletController(wallet) }),

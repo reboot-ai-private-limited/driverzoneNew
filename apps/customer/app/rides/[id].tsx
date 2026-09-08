@@ -24,6 +24,7 @@ import {
   toRideStatus,
   type RideStatus,
 } from '@/features/rides/rideHistory';
+import { DriverCard } from '@/components/DriverCard';
 import { getBooking } from '@/lib/api/endpoints/bookings';
 import { formatPaise } from '@/lib/money';
 import { keys } from '@/lib/query/keys';
@@ -124,14 +125,14 @@ export default function RideDetailScreen(): ReactElement {
             to say here, and "Driver details: —" is a worse answer than the absence. */}
         {ride.driver === null ? null : (
           <SectionCard title="Driver details">
-            <View style={styles.driverRow}>
-              <View style={styles.avatar}>
-                <Feather name="user" size={22} color={colors.fg} />
-              </View>
-              <View style={styles.flex}>
-                <Text style={styles.driverName}>{ride.driver.name ?? 'Your driver'}</Text>
-              </View>
-            </View>
+            {/*
+              The same card the live trip screen shows, and the call button is absent here for a
+              reason that lives on the SERVER rather than in a prop: `driver.phone` is null on a
+              finished trip, so `DriverCard` renders no number and no button without being told
+              which screen it is on. A history that could still ring the driver would be a
+              permanent line to their personal phone, months after the trip.
+            */}
+            <DriverCard driver={ride.driver} />
           </SectionCard>
         )}
 
@@ -492,23 +493,6 @@ const styles = StyleSheet.create({
   },
   cardTitle: { ...text.label, color: colors.fg, marginBottom: space.sm },
 
-  driverRow: { flexDirection: 'row', alignItems: 'center' },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bgSunken,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: space.sm,
-  },
-  driverNameRow: { flexDirection: 'row', alignItems: 'center' },
-  driverName: { ...text.body, color: colors.fg, fontFamily: fontFamily.bold },
-  starIcon: { marginLeft: space.xs, marginRight: 2 },
-  driverRating: { ...text.caption, color: colors.muted, fontFamily: fontFamily.semibold },
-  driverMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  metaIcon: { marginRight: 5 },
-  driverMeta: { ...text.caption, color: colors.muted },
 
   timelineRow: { flexDirection: 'row' },
   timelineMarkerCol: { alignItems: 'center', width: 20 },

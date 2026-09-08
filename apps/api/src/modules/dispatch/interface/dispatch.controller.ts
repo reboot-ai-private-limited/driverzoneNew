@@ -71,45 +71,51 @@ export function makeDeclineOfferController(useCase: DeclineOfferUseCase): Reques
 }
 
 /**
- * "What is ringing on my phone right now."
+ * "What is ringing on my phone right now" — every offer, soonest-expiring first.
  *
- * The recovery path after an app restart mid-offer. Without it a driver who was killed by the
- * OEM battery manager — which is most of them, most days — comes back to a blank screen with a
- * live offer they cannot see, and it lapses against their acceptance rate.
+ * THE RECOVERY PATH after an app restart mid-offer, same as the singular version this replaced.
+ * Without it a driver who was killed by the OEM battery manager — which is most of them, most
+ * days — comes back to a blank screen with a live offer they cannot see, and it lapses against
+ * their acceptance rate.
+ *
+ * PLURAL NOW (2026-09-04). A driver can legitimately hold more than one live offer — dispatch's
+ * matching does not exclude a driver who already has one open, and that is deliberate. The old
+ * `findOne` version returned an arbitrary one of them and let the app's ring screen render a
+ * different offer than the one its Accept button was about to act on; this returns the truth.
  */
-export function makeCurrentOfferController(
+export function makeListOffersController(
   offers: OfferRepositoryPort,
   bookings: BookingDispatchContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const offer = await offers.findLiveForDriver(driverOf(req));
-    if (offer === null) {
-      sendSuccess(req, res, { offer: null }, 'No live offer');
-      return;
-    }
+    const live = await offers.findAllLiveForDriver(driverOf(req));
 
-    const booking = await bookings.findById(offer.bookingId);
-    if (booking === null) {
-      sendSuccess(req, res, { offer: null }, 'No live offer');
-      return;
-    }
+    /*
+     * A booking missing under a still-SENT offer is the one-offer controller's `booking === null`
+     * case, carried over — filtered out here rather than failing the whole list, so a driver's
+     * other, healthy offer does not disappear because one row points at a booking that is gone.
+     */
+    const dtos = (
+      await Promise.all(
+        live.map(async (offer) => {
+          const booking = await bookings.findById(offer.bookingId);
+          if (booking === null) return null;
 
-    sendSuccess(
-      req,
-      res,
-      {
-        offer: {
-          offer_id: offer.id,
-          booking_id: booking.id,
-          reference: booking.reference,
-          expires_at: offer.expiresAt.toISOString(),
-          earning: toMoney(booking.fareSnapshot.fare.split.driverPaise),
-          pickup: { ...booking.pickup, address: booking.pickupAddress },
-          scheduled_at: booking.scheduledAt.toISOString(),
-          service_type: booking.serviceType,
-        },
-      },
-      'Live offer',
-    );
+          return {
+            offer_id: offer.id,
+            booking_id: booking.id,
+            reference: booking.reference,
+            expires_at: offer.expiresAt.toISOString(),
+            earning: toMoney(booking.fareSnapshot.fare.split.driverPaise),
+            pickup: { ...booking.pickup, address: booking.pickupAddress },
+            drop: { ...booking.drop, address: booking.dropAddress },
+            scheduled_at: booking.scheduledAt.toISOString(),
+            service_type: booking.serviceType,
+          };
+        }),
+      )
+    ).filter((dto): dto is NonNullable<typeof dto> => dto !== null);
+
+    sendSuccess(req, res, { offers: dtos }, dtos.length === 0 ? 'No live offers' : 'Live offers');
   });
 }

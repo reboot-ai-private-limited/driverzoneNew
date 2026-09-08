@@ -29,6 +29,20 @@ const schema = z.object({
   OSRM_BASE_URL: z.string().url().default('http://localhost:5000'),
 
   /**
+   * Google Routes API key for road distance — the deployed path since the pilot VM could not
+   * host an OSRM India extract (docs/decision-log.md). Set it and `selectRoadDistance()` in
+   * `quotes.container.ts` uses `GoogleRoadDistance`; unset, it falls back to `OSRM_BASE_URL`.
+   *
+   * SEPARATE from `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, which is the browser key for the admin
+   * map — referrer-locked, Maps JS + Places. This one is server-side: lock it to the API
+   * host's egress IP and restrict it to the Routes API alone.
+   *
+   * Optional. Unset locally, where `HaversineRoadDistance` stands in, so a developer needs no
+   * key and makes no billed calls.
+   */
+  GOOGLE_ROUTES_API_KEY: z.string().min(1).optional(),
+
+  /**
    * Token signing secrets — SEPARATE, and that is the point (docs/decision-log.md, 2026-08-24).
    * A leaked access secret must not also forge refresh tokens: the two have very different
    * blast radii, 15 minutes against up to 30 days.
@@ -98,6 +112,32 @@ const schema = z.object({
    * without credentials still gets a working booking flow.
    */
   FCM_SERVICE_ACCOUNT_PATH: z.string().optional(),
+
+  /**
+   * wabridge.com — the WhatsApp channel that delivers login OTPs in production.
+   *
+   * All OPTIONAL here, because development, test and staging never touch it: they print the code
+   * to the log (`LoggingOtpSender`). A real production process that lacks these does not silently
+   * degrade — `WhatsAppOtpSender` throws at construction naming the missing variable, so the
+   * process fails to boot rather than 500ing on the first login.
+   *
+   * `WA_TEMPLATE_ID` is an APPROVED WhatsApp template whose one variable is the code — a
+   * business-initiated message to a user outside a 24h session window must be a template, so a
+   * plain-text body is not an option here.
+   */
+  WA_API_URL: z.string().url().default('https://web.wabridge.com/api/createmessage'),
+  WA_APP_KEY: z.string().min(1).optional(),
+  WA_AUTH_KEY: z.string().min(1).optional(),
+  WA_DEVICE_ID: z.string().min(1).optional(),
+  WA_TEMPLATE_ID: z.string().min(1).optional(),
+
+  /**
+   * The `{{2}}` placeholder in the OTP template — a contact number shown to the user ("call this
+   * number if you did not request a code"). The template has TWO variables; sending only the
+   * code makes wabridge return success while WhatsApp silently drops the message. Defaulted so an
+   * unset value cannot reintroduce that failure.
+   */
+  WA_OTP_CONTACT_NUMBER: z.string().min(1).default('7044076603'),
 
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'CLOUDINARY_CLOUD_NAME is required'),
   CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),

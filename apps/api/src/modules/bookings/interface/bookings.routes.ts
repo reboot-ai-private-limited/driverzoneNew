@@ -5,11 +5,17 @@ export interface CustomerControllers {
   create: RequestHandler;
   list: RequestHandler;
   dues: RequestHandler;
+  /** `GET /customer/bookings/current` — the booking-recovery read, start OTP included. */
+  current: RequestHandler;
   get: RequestHandler;
   cancel: RequestHandler;
 }
 
 export interface DriverControllers {
+  /** `GET /driver/bookings` — this driver's own trip history. */
+  list: RequestHandler;
+  /** `GET /driver/bookings/current` — the trip-recovery read. */
+  current: RequestHandler;
   get: RequestHandler;
   enRoute: RequestHandler;
   arrived: RequestHandler;
@@ -20,6 +26,8 @@ export interface DriverControllers {
 }
 
 export interface AdminControllers {
+  list: RequestHandler;
+  get: RequestHandler;
   events: RequestHandler;
   forceArrive: RequestHandler;
 }
@@ -31,8 +39,9 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
 
   router.post('/', handlers.create);
   router.get('/', handlers.list);
-  // BEFORE `/:id`, or Express reads `dues` as a booking id and answers 404.
+  // BEFORE `/:id`, or Express reads these as booking ids and answers 404.
   router.get('/dues', handlers.dues);
+  router.get('/current', handlers.current);
   router.get('/:id', handlers.get);
   router.post('/:id/cancel', handlers.cancel);
 
@@ -49,6 +58,12 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
   const router = Router();
   router.use(requireAuth('DRIVER'));
 
+  /*
+   * BEFORE `/:id`, or `current` is read as a booking id and answers 404 — the same ordering trap
+   * the customer router's `/dues` and the dispatch router's `/current` both carry a note about.
+   */
+  router.get('/', handlers.list);
+  router.get('/current', handlers.current);
   router.get('/:id', handlers.get);
   router.post('/:id/en-route', handlers.enRoute);
   router.post('/:id/arrived', handlers.arrived);
@@ -65,6 +80,8 @@ export function buildAdminRouter(handlers: AdminControllers): Router {
   const router = Router();
   router.use(requireAuth('ADMIN'));
 
+  router.get('/', handlers.list);
+  router.get('/:id', handlers.get);
   router.get('/:id/events', handlers.events);
   router.post('/:id/force-arrive', handlers.forceArrive);
 

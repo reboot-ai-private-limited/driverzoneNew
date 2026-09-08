@@ -104,6 +104,13 @@ export interface BookingDto {
   pickup: { lat: number; lng: number; address: string };
   drop: { lat: number; lng: number; address: string };
 
+  /**
+   * The trip distance the QUOTE was priced against, frozen at booking time — not a live
+   * recomputation from `pickup`/`drop`, and not the driver's actual GPS track, which this system
+   * does not retain. Null only on a booking whose quote predates this field.
+   */
+  distance_km: number | null;
+
   scheduled_at: string;
   is_scheduled: boolean;
 
@@ -134,7 +141,50 @@ export interface BookingDto {
    */
   start_otp: string | null;
 
-  driver: { id: string; name: string | null } | null;
+  /**
+   * Who is driving, as much of them as the customer is entitled to see.
+   *
+   * WAS `{ id, name }` UNTIL 2026-09-04, and the trip screen carried a note saying a richer card
+   * was "a real thing to build once the identity module has something behind it to show". It has:
+   * drivers upload an avatar to a PUBLIC bucket precisely so a customer can see who is coming, and
+   * `reviews` keeps a rolling average on the account.
+   *
+   * `phone` IS THE ONE FIELD THAT COMES AND GOES. It is present only while the trip is live —
+   * assigned, en route, arrived, started — and null the moment it ends. A customer needs to reach
+   * the driver at the kerb; a customer from three months ago does not, and that number is also the
+   * one the driver's own login OTP is sent to. The server decides this, not the screen: a field
+   * withheld cannot be read out of a cached response.
+   *
+   * `rating` is null until somebody has actually rated them. The account row defaults to 5.0, so
+   * rendering it unconditionally would show every new driver a five-star average they have not
+   * earned — `rating_count` is what tells the two apart.
+   */
+  driver: {
+    id: string;
+    name: string | null;
+    /** A fetchable URL, not a storage key. Null when the driver has not uploaded one. */
+    photo_url: string | null;
+    rating: number | null;
+    rating_count: number;
+    /** Live trips only — see above. */
+    phone: string | null;
+  } | null;
+
+  /**
+   * Who the trip is for.
+   *
+   * `phone` IS THE MIRROR of `driver.phone` above — present only while the trip is live (assigned,
+   * en route, arrived, started) and null the moment it ends. A driver needs to reach the customer
+   * at the kerb; a driver looking at a trip from three months ago does not, and that number is
+   * also the one the customer's own login OTP is sent to. The server decides this, not the
+   * screen: a field withheld cannot be read out of a cached response. It is null on every
+   * customer-facing and admin read, and on any driver read where the trip is not live.
+   *
+   * `name` is null when the account never set one, and the whole object is null on a booking read
+   * by a caller the mapper was not asked to resolve the customer for — never a placeholder, so a
+   * screen can tell "no name on file" from "not looked up".
+   */
+  customer: { id: string; name: string | null; phone: string | null } | null;
 
   fare: {
     lines: Array<{ code: string; label: string; amount: Money }>;
@@ -183,6 +233,70 @@ export interface ListBookingsResponse {
   bookings: BookingDto[];
 }
 
+/**
+ * `GET /driver/bookings` — every trip this driver has been assigned, newest first.
+ *
+ * THE SAME SHAPE AS THE CUSTOMER'S HISTORY, for the same reason it reuses `BookingDto`: a trips
+ * list and a trip receipt are one object at two distances. What differs is what the mapper fills
+ * in — these rows carry `customer` (resolved in one batched lookup) and never `start_otp`, which
+ * is the exact mirror of the customer's list carrying `driver` and no code.
+ *
+ * ASSIGNED TRIPS ONLY. A booking this driver was rung for and lost was never theirs, so it is not
+ * in their history — the offer they declined is not a trip that happened to them.
+ */
+export interface ListDriverTripsResponse {
+  bookings: BookingDto[];
+}
+
+/**
+ * `GET /admin/bookings` — every booking in the system, newest first, filtered and paged.
+ *
+ * THE ONLY BOOKING LIST THAT IS PAGED. The customer's and the driver's are one person's own
+ * history capped at a limit; this one is the whole table and grows with the business, so a cap
+ * would silently hide rows from the person whose job is to find them.
+ *
+ * `BookingDto` unchanged, like the other two lists — a management row and a trip receipt are one
+ * object at two distances. Rows carry BOTH `customer` and `driver` as name-only, `phone: null`:
+ * an admin list resolves names in one batched lookup per role and never the phone numbers, which
+ * `PHONE_VISIBLE_STATUSES` reserves for the two people actually meeting at a kerb.
+ */
+export interface AdminBookingListDto {
+  bookings: BookingDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
+
+/**
+ * The filters `GET /admin/bookings` accepts, as query params.
+ *
+ * SERVER-SIDE, and for the reason `LedgerQueryParams` gives: the list is paged, so a filter
+ * applied in the client would only search the rows already fetched and would miss every match on
+ * page two. Every field is optional; omitting all of them returns the whole table newest-first.
+ */
+export interface AdminListBookingsQuery {
+  page?: number | undefined;
+  limit?: number | undefined;
+  /**
+   * Matches a booking REFERENCE, or the name or mobile number of either party.
+   *
+   * The two halves are answered by different modules and unioned: `bookings` owns the reference,
+   * and `identity` resolves a name or number to the account ids this module then filters on. That
+   * indirection is the module boundary doing its job — `bookings` cannot read the accounts
+   * collection, and the alternative is this module learning what a phone number is.
+   */
+  search?: string | undefined;
+  /** Comma-separated `BookingStatus`es: `?status=ASSIGNED,STARTED`. */
+  status?: string | undefined;
+  /** `YYYY-MM-DD`, inclusive, IST — matched against `scheduled_at`. */
+  from?: string | undefined;
+  /** `YYYY-MM-DD`, INCLUSIVE of the whole day named. */
+  to?: string | undefined;
+}
+
 /** One row of the booking's history. Rendered verbatim in the admin panel's detail view. */
 export interface BookingEventDto {
   from_status: BookingStatus | null;
@@ -219,6 +333,33 @@ export interface DriverArrivedRequest {
 export interface StartTripRequest {
   otp: string;
   location?: { lat: number; lng: number } | undefined;
+}
+
+/**
+ * `GET /driver/bookings/current` — the trip the signed-in driver is in the middle of.
+ *
+ * `null` is a normal answer, not an error: the app asks this on every launch precisely because it
+ * usually has nothing to resume. It exists because a driver's app is killed mid-trip by the OEM
+ * battery managers `battery-setup` warns about, taking the booking id in its navigation state with
+ * it — leaving no way to arrive, start or complete a trip a customer is waiting on.
+ */
+export interface CurrentDriverTripResponse {
+  booking: BookingDto | null;
+}
+
+/**
+ * `GET /customer/bookings/current` — the booking happening to this customer right now.
+ *
+ * CARRIES `start_otp`, unlike the history list. That is the reason it exists rather than a
+ * detail of it: the trip code is shown on the live trip screen only, so a customer whose app was
+ * killed at the pickup had no way back to the four digits their driver was waiting for — the
+ * history screen is a receipt and holds neither the code nor the cancel action.
+ *
+ * A scheduled booking sitting at `CONFIRMED` is NOT "current": it would otherwise pull a customer
+ * into a trip booked for next week every time they opened the app.
+ */
+export interface CurrentCustomerBookingResponse {
+  booking: BookingDto | null;
 }
 
 export interface CompleteTripRequest {

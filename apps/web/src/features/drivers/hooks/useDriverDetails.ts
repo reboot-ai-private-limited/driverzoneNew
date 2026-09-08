@@ -4,6 +4,7 @@ import type {
   AdminDriverWalletDetailsDto,
   AdminDriverDutyHistoryDto,
   ApproveDriverResponse,
+  LedgerQueryParams,
   RejectDriverRequest,
   RejectDriverResponse,
   ReviewDocumentRequest,
@@ -17,29 +18,40 @@ import type {
 } from '@driverzone/contracts';
 import { request } from '@/lib/api/client';
 import { authedQueryOptions } from '@/lib/query/factory';
+import { keys, staleTime } from '@/lib/query/keys';
 import { withAuth } from '@/lib/auth/session';
 
-export function useDriverDetails(id: string | undefined) {
+export function useDriverDetails(id: string | undefined, enabled = true) {
   return useQuery(
     authedQueryOptions({
       queryKey: ['admin', 'drivers', id ?? ''],
       fetch: (token, signal) => request<AdminDriverDetailsDto>(`/admin/drivers/${id}`, { token, signal }),
-      enabled: Boolean(id),
+      enabled: Boolean(id) && enabled,
     })
   );
 }
 
-export function useDriverWallet(id: string | undefined, fromDate?: string, toDate?: string) {
+export function useDriverWallet(id: string | undefined, query?: LedgerQueryParams) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', id ?? '', 'wallet', fromDate, toDate],
-      fetch: (token, signal) => {
-        const params = new URLSearchParams();
-        if (fromDate) params.append('from_date', fromDate);
-        if (toDate) params.append('to_date', toDate);
-        const qs = params.toString() ? `?${params.toString()}` : '';
-        return request<AdminDriverWalletDetailsDto>(`/admin/drivers/${id}/wallet${qs}`, { token, signal });
-      },
+      queryKey: keys.drivers.wallet(id ?? '', query),
+      fetch: (token, signal) =>
+        request<AdminDriverWalletDetailsDto>(`/admin/drivers/${id}/wallet`, {
+          token,
+          signal,
+          ...(query === undefined
+            ? {}
+            : {
+                query: {
+                  page: query.page,
+                  limit: query.limit,
+                  type: query.type,
+                  from: query.from,
+                  to: query.to,
+                },
+              }),
+        }),
+      staleTime: staleTime.directory,
       enabled: Boolean(id),
     })
   );

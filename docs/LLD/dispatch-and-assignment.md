@@ -101,9 +101,16 @@ ORDER BY score DESC
 LIMIT $waveSize;
 ```
 
-The **one open offer at a time** rule matters. A driver holding three simultaneous offers
-will accept all three and lose two races, which is exactly the experience that teaches
-drivers to stop responding.
+**This eligibility query is not what `MongoDriverPool.findEligible` implements.** The Mongo
+version filters on duty, verification, blocked, location freshness and wallet balance, plus the
+competency match — but not on any of the three `NOT EXISTS` clauses above. That was true when this
+paragraph originally argued for "one open offer at a time" as a rule worth enforcing; as of
+2026-09-04 it is a deliberate product decision rather than a gap to close: a driver may legitimately
+hold more than one live offer, or one while already mid-trip, and the *driver app* — not the
+matching query — is responsible for presenting more than one without confusion (`GET
+/driver/offers` returns all of them, soonest-expiring first; the ring screen shows one at a time
+with a way to see the rest). Accepting one never auto-declines another live offer for a different
+booking; each is independent until its own outcome.
 
 `last_location_at > now() - 2 min` filters drivers whose app was killed by the OS but who
 never flipped off duty. Without it a meaningful share of wave 1 goes to phones that are

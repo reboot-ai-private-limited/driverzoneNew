@@ -10,7 +10,7 @@
 | Monorepo | **pnpm + Turborepo** | Four apps, five shared packages. See [`engineering/01`](../engineering/monorepo-layout.md). |
 | Cache / queue | **Redis 7** | Driver locations (GEO), settings cache, BullMQ job store. |
 | Jobs | **BullMQ** | Durable delayed jobs — the dispatch timers depend on this. |
-| Routing | **OSRM**, self-hosted | Road distance on every quote; per-call pricing gets expensive fast. |
+| Routing | **Google Routes API** (Compute Routes) | Road distance on outstation quotes; in-city trips skip it and a coord cache holds it in the free tier. OSRM retained behind `OSRM_BASE_URL`. See [`decision-log.md`](../decision-log.md) 2026-09-07. |
 | Realtime | **Socket.IO** + Redis adapter | Offers, tracking, ops dashboard. |
 | Push | **FCM** | Android-first; APNs via FCM for iOS customers. |
 | Admin | **Next.js 14** + MapLibre GL + Mapbox Draw | MapLibre avoids Mapbox seat pricing; Draw is the polygon editor. |
@@ -174,13 +174,13 @@ Customer app                API                   Mongo / Redis / OSRM
 
 | Env | Purpose | Data |
 |-----|---------|------|
-| `local` | Docker Compose: Mongo (replica set), Redis, OSRM (India extract) | Seeded fixture zones |
+| `local` | Docker Compose: Mongo (replica set), Redis | Seeded fixture zones |
 | `staging` | Full stack, mirrors prod | Anonymised copy |
 | `production` | ap-south-1, multi-AZ RDS, ElastiCache | — |
 
-The **local OSRM container is worth the setup effort**. Without it, every developer's
-quote flow either hits a paid API or gets mocked — and mocked distances hide exactly the
-band-boundary bugs that matter.
+Road distance locally is `HaversineRoadDistance` — no key, no billed calls, approximate fares.
+That is fine for walking the flow but hides band-boundary bugs, so set `GOOGLE_ROUTES_API_KEY`
+(or point `OSRM_BASE_URL` at a self-hosted OSRM) when a quote's exact band matters.
 
 ## Backups & recovery
 

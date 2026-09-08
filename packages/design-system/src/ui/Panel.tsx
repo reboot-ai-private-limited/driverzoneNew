@@ -34,7 +34,18 @@ export function Panel({ title, icon, actions, children, className, flush }: Pane
           {actions !== undefined && <div className="flex items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={flush === true ? undefined : 'p-4'}>{children}</div>
+      {/*
+        `flex-1 min-h-0`: a NO-OP for the ordinary Panel, which sits in normal block flow and
+        never needs this. It only takes effect when a caller's own `className` makes the outer
+        `<section>` a flex column (e.g. `'flex flex-col'`) — typically because the Panel is one
+        of several equal-height cards in a CSS Grid row, where the default `align-items: stretch`
+        gives every card the height of its tallest sibling. Without this, that extra height
+        landed below the header and above nothing — the body stayed its own natural height and
+        the grown section just showed as dead space beneath it. With it, the body grows to fill
+        exactly the space the header does not use, so a caller's own content (a `justify-between`
+        footer, for instance) can use the height that was already there.
+      */}
+      <div className={cn(flush !== true && 'p-4', 'min-h-0 flex-1')}>{children}</div>
     </section>
   );
 }

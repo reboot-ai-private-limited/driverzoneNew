@@ -1,19 +1,20 @@
 import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
-import type { LedgerEntry } from '../../domain/ledgerEntry.entity.js';
-import type { LedgerRepositoryPort } from '../../domain/ledgerRepository.port.js';
+import type {
+  LedgerEntryWithBalance,
+  LedgerQuery,
+  LedgerRepositoryPort,
+  LedgerTotals,
+} from '../../domain/ledgerRepository.port.js';
 
 export interface DriverWallet {
   balancePaise: number;
   lifetimeEarningsPaise: number;
   /** True when the debt has passed the threshold dispatch already filters on. */
   isSuspendedForBalance: boolean;
-  entries: LedgerEntry[];
-  /**
-   * The balance immediately after the NEWEST row on this page — the point the running balance is
-   * walked back from. On page 1 it is the current balance; on later pages it is that minus
-   * everything newer, which is why it is computed here rather than assumed by the mapper.
-   */
-  anchorBalancePaise: number;
+  /** Each row with the balance that stood after it, straight from the repository's window sum. */
+  entries: LedgerEntryWithBalance[];
+  /** Totals for everything the query selects — every page of it, not the page returned. */
+  totals: LedgerTotals;
   totalItems: number;
 }
 
@@ -35,35 +36,37 @@ export class GetDriverWalletUseCase {
     private readonly settings: SettingsReadContract,
   ) {}
 
-  async execute(driverId: string, page: number, limit: number, fromDate?: Date, toDate?: Date): Promise<DriverWallet> {
-    const [balancePaise, lifetimeEarningsPaise, pageResult, snapshot] = await Promise.all([
+  /**
+   * `query` filters the STATEMENT ONLY, never the wallet.
+   *
+   * `balance_paise` and `lifetime_earnings_paise` stay whole-history figures whatever is filtered,
+   * because they are facts about the driver rather than about the rows on screen: a driver who
+   * filters to "bonuses" has not stopped owing the cash they collected yesterday, and a balance
+   * that moved when a chip was tapped would be the most alarming possible way to say so. What the
+   * filter does change is `totals`, which is explicitly about the selection.
+   */
+  async execute(
+    driverId: string,
+    page: number,
+    limit: number,
+    query?: LedgerQuery | undefined,
+  ): Promise<DriverWallet> {
+    const [balancePaise, lifetimeEarningsPaise, pageResult, totals, snapshot] = await Promise.all([
       this.repo.sumForDriver(driverId),
       this.repo.sumEarningsForDriver(driverId),
-      this.repo.pageForDriver(driverId, page, limit, fromDate, toDate),
+      this.repo.pageForDriver(driverId, page, limit, query),
+      this.repo.totalsForDriver(driverId, query),
       this.settings.snapshot(),
     ]);
 
     const maxDebtPaise = rupeesToPaise(snapshot['driver.max_negative_balance']);
-
-    // Everything newer than the first row of this page, so the walk starts from the right number
-    // even if the page itself was fetched with date filters.
-    let newerSum = 0;
-    const first = pageResult.entries[0];
-    if (first !== undefined) {
-      newerSum = await this.repo.sumNewerThan(driverId, first.createdAt, first.id);
-    } else {
-      // If the page is empty, the anchor balance is just the current balance minus anything newer
-      // than the toDate (if provided). But since there are no rows to display, the anchor balance
-      // doesn't matter for rendering anyway. We can just use 0.
-      newerSum = 0;
-    }
 
     return {
       balancePaise,
       lifetimeEarningsPaise,
       isSuspendedForBalance: balancePaise < -maxDebtPaise,
       entries: pageResult.entries,
-      anchorBalancePaise: balancePaise - newerSum,
+      totals,
       totalItems: pageResult.totalItems,
     };
   }

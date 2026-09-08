@@ -518,7 +518,11 @@ export function DriverDetailsScreen() {
                     <div className="flex-1 flex flex-col gap-1.5 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-baseline gap-2 truncate">
-                          <span className="font-semibold text-text text-sm leading-tight">{doc.doc_type}</span>
+                          {/* The side is part of the name, not a detail: a licence is two cards
+                              now, and two identically-titled ones are a review you cannot aim. */}
+                          <span className="font-semibold text-text text-sm leading-tight">
+                            {doc.doc_type} · {doc.side}
+                          </span>
                           {doc.sub_type && <span className="text-[10px] text-text-subtle">{doc.sub_type}</span>}
                         </div>
                         <StatusPill status={doc.status} />
@@ -604,7 +608,7 @@ export function DriverDetailsScreen() {
             setDocRejectReason('');
           }
         }}
-        title={`View ${reviewingDoc?.doc_type}`}
+        title={`View ${reviewingDoc?.doc_type ?? ''} ${reviewingDoc?.side ?? ''}`.trim()}
         description="Preview of the uploaded document."
         className="max-w-3xl"
       >

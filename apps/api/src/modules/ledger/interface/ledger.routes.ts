@@ -50,3 +50,22 @@ export function buildPayoutRouter(handlers: PayoutAdminControllers): Router {
   return router;
 }
 
+export interface DriverControllers {
+  myWallet: RequestHandler;
+}
+
+/**
+ * Mounted at `/api/driver/wallet` — the driver's own earnings screen.
+ *
+ * `GET /` and no `/:id`, deliberately: the driver id comes off the bearer token in the
+ * controller, so there is no path segment anyone could swap for another driver's. See the note on
+ * `makeMyWalletController`.
+ */
+export function buildDriverRouter(handlers: DriverControllers): Router {
+  const router = Router();
+  router.use(requireAuth('DRIVER'));
+
+  router.get('/', handlers.myWallet);
+
+  return router;
+}

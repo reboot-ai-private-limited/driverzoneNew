@@ -302,8 +302,15 @@ export type SetDutyStatusInput = z.infer<typeof setDutyStatusSchema>;
 /**
  * `POST /driver/location` — a batch of GPS fixes.
  *
- * Capped at 50: the app sends 5–10 per request, so anything far above that is a bug or an abuse,
- * and only the newest is stored anyway.
+ * Three fields, and each one is read: `lat`/`lng` become `lastLocation`, `recorded_at` becomes
+ * `lastLocationAt` and also decides which ping in the batch wins. Nothing else is accepted —
+ * `accuracy_m`, `heading` and `speed_mps` used to be, and were parsed and then dropped on the
+ * floor by the controller, which is a contract that lies about what the endpoint does.
+ *
+ * Capped at 50 as an ABUSE GUARD, not as a description of the client. The app sends one ping per
+ * flush in steady state and a short backlog after an offline stretch; 50 is deliberately far above
+ * either, so the cap only ever catches something pathological. Only the newest is stored whatever
+ * arrives.
  */
 export const sendLocationPingsSchema = z.object({
   pings: z
@@ -312,9 +319,6 @@ export const sendLocationPingsSchema = z.object({
         lat: z.number().min(-90).max(90),
         lng: z.number().min(-180).max(180),
         recorded_at: z.string().datetime(),
-        accuracy_m: z.number().nonnegative().optional(),
-        heading: z.number().optional(),
-        speed_mps: z.number().optional(),
       }),
     )
     .min(1)

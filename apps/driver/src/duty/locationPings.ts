@@ -25,14 +25,40 @@ import { sendLocationPings } from '@/lib/api/endpoints/driver';
 /** How often the buffer is sent. Well inside the server's two-minute freshness window. */
 const FLUSH_INTERVAL_MS = 15_000;
 
-/** How often a fix is taken. ~5 fixes per flush, matching the 5–10 the contract asks for. */
-const FIX_INTERVAL_MS = 3_000;
+/**
+ * How often a fix is taken — ONE PER FLUSH, deliberately.
+ *
+ * This used to be 3s, giving ~5 fixes per request. Every one of those but the last was wasted: the
+ * server stores only the newest fix and chooses it by `recorded_at`, never by quality, so the other
+ * four were uploaded and dropped without being compared to anything. Sampling to pick the best fix
+ * would be a reason to take several; sampling to pick the newest is not, because the newest is the
+ * one you get by waiting.
+ *
+ * The saving that matters is not the ~400 bytes. It is four fewer GPS acquisitions every fifteen
+ * seconds, all shift — and the GPS radio costs a driver far more battery than the request does.
+ */
+const FIX_INTERVAL_MS = FLUSH_INTERVAL_MS;
+
+/**
+ * How long to wait before a second attempt when a fix fails.
+ *
+ * At one fix per flush a failure is no longer cheap. `MongoDriverPool` drops a driver whose
+ * position is over two minutes old, which is eight consecutive failures now rather than the forty
+ * the 3s cadence allowed — and the driver cannot tell, because their app still says "online" while
+ * no wave can see them. The retry and the cached-position fallback in `takeFix` exist to buy that
+ * tolerance back without going back to sampling.
+ */
+const FIX_RETRY_DELAY_MS = 3_000;
 
 /**
  * Cap on the buffer.
  *
  * Only the newest fix is stored server-side, so an unbounded buffer during a long network outage
  * would send a large body to have all but one row discarded. Oldest are dropped first.
+ *
+ * At one fix per flush this is twenty fixes across five minutes of outage rather than one minute —
+ * the cap got more generous in wall-clock terms without changing, which is the right direction: the
+ * thing being protected against is a long disconnection, and that is measured in minutes.
  */
 const MAX_BUFFERED = 20;
 
@@ -62,35 +88,69 @@ let observer: DutyObserver | null = null;
 async function takeFix(): Promise<void> {
   const override = devOverride();
 
-  let lat: number;
-  let lng: number;
-  let accuracy: number | undefined;
-
   if (override !== null) {
-    lat = override.lat;
-    lng = override.lng;
-  } else {
-    try {
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      lat = position.coords.latitude;
-      lng = position.coords.longitude;
-      accuracy = position.coords.accuracy ?? undefined;
-    } catch {
-      // A single failed fix is normal indoors. The next one is 3s away; dropping it silently is
-      // correct, and the server's freshness window is the thing that notices a sustained outage.
-      return;
-    }
+    push(override.lat, override.lng, new Date());
+    return;
   }
 
+  try {
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    // Wall clock, NOT `position.timestamp`. A live fix has just been acquired, so the two agree to
+    // within milliseconds — but some Android devices report a boot-relative value there, and a
+    // `recorded_at` far in the past silently drops the driver out of every dispatch wave while
+    // their app still reads "online". The cached path below is the one case where the fix's own
+    // timestamp is the right answer, because there staleness is the fact being reported.
+    push(position.coords.latitude, position.coords.longitude, new Date());
+    return;
+  } catch {
+    // A single failed fix is normal indoors, and it is no longer cheap — see FIX_RETRY_DELAY_MS.
+    // Fall through to the two recoveries below rather than waiting a full interval.
+  }
+
+  /*
+   * The OS's last known position, which costs NO GPS acquisition — it is whatever the platform
+   * already had cached from any app.
+   *
+   * `recorded_at` is the cached fix's OWN timestamp, not now. That matters: a cached fix presented
+   * as current would hold a driver in the dispatch pool on a position they left ten minutes ago,
+   * which is exactly the failure the server's freshness window exists to prevent. Sent honestly
+   * stale, it either still falls inside that window or is correctly ignored.
+   */
+  const cached = await Location.getLastKnownPositionAsync().catch(() => null);
+  if (cached !== null) {
+    push(cached.coords.latitude, cached.coords.longitude, new Date(cached.timestamp));
+    return;
+  }
+
+  // Nothing cached either. One more attempt, well before the next interval — a driver walking out
+  // of a basement should be dispatchable in seconds, not at the top of the next flush.
+  await new Promise((resolve) => setTimeout(resolve, FIX_RETRY_DELAY_MS));
+
+  // The driver may have gone off duty while we waited. `stopLocationPings` has already emptied the
+  // buffer by then, so pushing here would resurrect a position from the end of a finished shift and
+  // hand it to the next shift's first flush.
+  if (fixTimer === null) return;
+
+  try {
+    const retried = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    push(retried.coords.latitude, retried.coords.longitude, new Date());
+  } catch {
+    // Genuinely no position available. Dropping it silently is correct; a sustained outage is the
+    // server's freshness window's job to notice, not something to surface per failed fix.
+  }
+}
+
+function push(lat: number, lng: number, recordedAt: Date): void {
   buffer.push({
     lat,
     lng,
     // CLIENT-supplied, and it must be: the app buffers offline and flushes on reconnect, so when
     // a fix was taken and when it arrives are different facts.
-    recorded_at: new Date().toISOString(),
-    ...(accuracy === undefined ? {} : { accuracy_m: accuracy }),
+    recorded_at: recordedAt.toISOString(),
   });
 
   if (buffer.length > MAX_BUFFERED) buffer = buffer.slice(-MAX_BUFFERED);

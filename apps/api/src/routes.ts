@@ -59,6 +59,8 @@ export function buildApiRouter(c: AppContainers): Router {
    * here — the module that owns the ledger rows answers for them.
    */
   router.use('/admin/drivers', c.ledger.buildAdminRouter());
+  /** `/admin/payouts` — manages settlements and disbursements to drivers. */
+  router.use('/admin/payouts', c.ledger.buildPayoutRouter());
   /** `/admin/customers/:id/wallet`, by the same fall-through past identity's admin router. */
   router.use('/admin/customers', c.wallet.buildAdminRouter());
   router.use('/admin/reviews', c.reviews.buildAdminRouter());

@@ -2,13 +2,23 @@ import type { Router } from 'express';
 import type { SettingsReadContract } from '../settings/settings.public.js';
 import type { LedgerFinanceContract, LedgerPublicContract } from './ledger.public.js';
 import { MongoLedgerRepository } from './infrastructure/ledgerRepository.impl.js';
+import { MongoPayoutRepository } from './infrastructure/payoutRepository.impl.js';
 import { AppendLedgerEntriesUseCase } from './application/useCases/appendEntries.usecase.js';
 import { GetWalletBalanceUseCase } from './application/useCases/getWalletBalance.usecase.js';
 import { GetDriverWalletUseCase } from './application/useCases/getDriverWallet.usecase.js';
+import { AdjustDriverWalletUseCase } from './application/useCases/adjustDriverWallet.usecase.js';
+import { ProcessPayoutUseCase } from './application/useCases/processPayout.usecase.js';
+import { ListPayoutsUseCase } from './application/useCases/listPayouts.usecase.js';
 import { GetDriverBalancesUseCase } from './application/useCases/getDriverBalances.usecase.js';
 import { SettleDriverUseCase } from './application/useCases/settleDriver.usecase.js';
-import { makeDriverWalletController, makeMyWalletController } from './interface/ledger.controller.js';
-import { buildAdminRouter, buildDriverRouter } from './interface/ledger.routes.js';
+import {
+  makeDriverWalletController,
+  makeAdjustDriverWalletController,
+  makeCreatePayoutController,
+  makeListPayoutsController,
+  makeMyWalletController,
+} from './interface/ledger.controller.js';
+import { buildAdminRouter, buildDriverRouter, buildPayoutRouter } from './interface/ledger.routes.js';
 
 export interface LedgerDependencies {
   /** For `driver.max_negative_balance` — the same figure dispatch filters on. */
@@ -26,6 +36,7 @@ export interface LedgerContainer {
   financeContract: LedgerFinanceContract;
   /** Mounted at `/api/admin/drivers`, for `/admin/drivers/:id/wallet`. */
   buildAdminRouter: () => Router;
+  buildPayoutRouter: () => Router;
   /**
    * Mounted at `/api/driver/wallet` — the driver's own earnings screen.
    *
@@ -38,10 +49,14 @@ export interface LedgerContainer {
 
 export function buildLedgerContainer(deps: LedgerDependencies): LedgerContainer {
   const repo = new MongoLedgerRepository();
+  const payoutRepo = new MongoPayoutRepository();
 
   const append = new AppendLedgerEntriesUseCase(repo);
   const balance = new GetWalletBalanceUseCase(repo);
   const wallet = new GetDriverWalletUseCase(repo, deps.settings);
+  const adjust = new AdjustDriverWalletUseCase(repo);
+  const processPayout = new ProcessPayoutUseCase(repo, payoutRepo);
+  const listPayouts = new ListPayoutsUseCase(payoutRepo);
   const balances = new GetDriverBalancesUseCase(repo, deps.settings);
   const settle = new SettleDriverUseCase(repo);
 
@@ -66,7 +81,17 @@ export function buildLedgerContainer(deps: LedgerDependencies): LedgerContainer 
         return { entries: result.entries, totals, totalItems: result.totalItems };
       },
     },
-    buildAdminRouter: () => buildAdminRouter({ driverWallet: makeDriverWalletController(wallet) }),
+    buildAdminRouter: () =>
+      buildAdminRouter({
+        driverWallet: makeDriverWalletController(wallet),
+        adjustWallet: makeAdjustDriverWalletController(adjust),
+      }),
+    buildPayoutRouter: () =>
+      buildPayoutRouter({
+        createPayout: makeCreatePayoutController(processPayout),
+        listPayouts: makeListPayoutsController(listPayouts),
+      }),
     buildDriverRouter: () => buildDriverRouter({ myWallet: makeMyWalletController(wallet) }),
   };
 }
+

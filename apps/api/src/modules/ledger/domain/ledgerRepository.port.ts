@@ -158,6 +158,13 @@ export interface LedgerRepositoryPort {
   /** Credited, debited and count for everything `query` selects — every page of it. */
   totalsForDriver(driverId: string, query?: LedgerQuery | undefined): Promise<LedgerTotals>;
 
+  /**
+   * The sum of all entries for a driver that are strictly newer than the given entry.
+   * Used to anchor the running balance calculation correctly even when the history is filtered
+   * by date ranges.
+   */
+  sumNewerThan(driverId: string, date: Date, id: string): Promise<number>;
+
   listForBooking(bookingId: string): Promise<LedgerEntry[]>;
 
   /**

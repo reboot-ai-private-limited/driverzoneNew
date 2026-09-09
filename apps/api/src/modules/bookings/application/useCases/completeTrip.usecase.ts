@@ -4,6 +4,7 @@ import { computeWaitingCharge } from '../../../pricing/pricing.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../../../ledger/ledger.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import type { PaymentsContract } from '../../../payments/payments.public.js';
+import type { DriverStatsContract } from '../../../identity/identity.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
@@ -45,6 +46,7 @@ export class CompleteTripUseCase {
     private readonly ledger: LedgerWriteContract,
     private readonly payments: PaymentsContract,
     private readonly notifications: NotificationsContract,
+    private readonly driverStats?: DriverStatsContract,
   ) {}
 
   async execute(input: CompleteTripInput): Promise<CompletedTrip> {
@@ -192,6 +194,14 @@ export class CompleteTripUseCase {
       await this.ledger.append(entries);
     } catch (error) {
       logger.error({ err: error, bookingId: booking.id }, 'could not write the trip ledger entries');
+    }
+
+    if (this.driverStats) {
+      try {
+        await this.driverStats.recordCompletedRide(input.driverId, now);
+      } catch (error) {
+        logger.error({ err: error, driverId: input.driverId }, 'could not record driver trip stats');
+      }
     }
 
     await this.notifications.sendBookingUpdate(

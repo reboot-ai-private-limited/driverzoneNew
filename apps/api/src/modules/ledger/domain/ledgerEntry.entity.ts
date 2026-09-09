@@ -70,6 +70,7 @@ export interface NewLedgerEntry {
   entryType: LedgerEntryType;
   amountPaise: number;
   note?: string | null;
+  payoutId?: string | null;
   /**
    * Makes ONE write happen once, however many times it is sent.
    *

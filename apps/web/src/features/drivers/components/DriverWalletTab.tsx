@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, IndianRupee, Scale, TrendingDown, Wallet } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, IndianRupee, Scale, TrendingDown, Wallet, X } from 'lucide-react';
 import {
   TRANSACTION_TYPES,
   TRANSACTION_TYPE_LABELS,
@@ -11,6 +11,7 @@ import {
 } from '@driverzone/contracts';
 import {
   Badge,
+  Button,
   DataState,
   DataTable,
   FilterBar,
@@ -30,7 +31,6 @@ import { useDriverWallet } from '../hooks/useDriverDetails';
 
 const COLUMN_WIDTHS = ['w-32', 'w-48', 'w-64', 'w-32', 'w-32'];
 const PAGE_SIZE = 15;
-
 
 export function DriverWalletTab({ driverId }: { driverId: string }) {
   /*
@@ -216,6 +216,22 @@ export function DriverWalletTab({ driverId }: { driverId: string }) {
             onChange={(e) => resetPage(setTo)(e.target.value)}
           />
         </FilterField>
+        {filtered && (
+          <div className="flex items-end pb-0.5">
+            <Button
+              variant="secondary"
+              icon={<X className="size-4" />}
+              onClick={() => {
+                setType('ALL');
+                setFrom('');
+                setTo('');
+                setPage(1);
+              }}
+            >
+              Clear
+            </Button>
+          </div>
+        )}
       </FilterBar>
 
       <Panel title="Ledger History" flush>

@@ -151,6 +151,7 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
       entryType: entry.entryType,
       amountPaise: entry.amountPaise,
       note: entry.note ?? null,
+      payoutId: entry.payoutId ? new mongoose.Types.ObjectId(entry.payoutId) : null,
       idempotencyKey: entry.idempotencyKey ?? null,
     }));
 
@@ -291,6 +292,20 @@ export class MongoLedgerRepository implements LedgerRepositoryPort {
       debitedPaise: row?.debited ?? 0,
       count: row?.count ?? 0,
     };
+  }
+
+  async sumNewerThan(driverId: string, date: Date, id: string): Promise<number> {
+    if (!mongoose.isValidObjectId(driverId) || !mongoose.isValidObjectId(id)) return 0;
+
+    const [row] = await DriverEarningModel.aggregate<{ total: number }>([
+      { $match: {
+        driverId: new mongoose.Types.ObjectId(driverId),
+        $or: [{ createdAt: { $gt: date } }, { createdAt: date, _id: { $gt: new mongoose.Types.ObjectId(id) } }]
+      } },
+      { $group: { _id: null, total: { $sum: '$amountPaise' } } },
+    ]);
+
+    return row?.total ?? 0;
   }
 
   async listForDriver(driverId: string, limit: number): Promise<LedgerEntry[]> {

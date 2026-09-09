@@ -148,6 +148,13 @@ export interface RatingCacheContract {
 }
 
 /**
+ * Ride statistics cached on the driver document for fast admin and dispatch queries.
+ */
+export interface DriverStatsContract {
+  recordCompletedRide(driverId: string, completedAt: Date): Promise<void>;
+}
+
+/**
  * The whole surface, as returned by `buildIdentityContainer()`.
  *
  * Authentication is deliberately absent: it is consumed over HTTP and through the shared JWT
@@ -157,4 +164,5 @@ export type IdentityPublicContract = CustomerBookingProfileContract &
   AccountDirectoryContract &
   DriverCardContract &
   CustomerContactContract &
-  RatingCacheContract;
+  RatingCacheContract &
+  DriverStatsContract;

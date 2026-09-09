@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { fileURLToPath } from 'node:url';
 
 const config: NextConfig = {
   // standalone traces only the files the server actually loads, which is what keeps the
@@ -6,7 +7,7 @@ const config: NextConfig = {
   output: 'standalone',
   // The monorepo root, so tracing follows the workspace packages rather than stopping at
   // apps/web and shipping an image missing half its imports.
-  outputFileTracingRoot: new URL('../../', import.meta.url).pathname,
+  outputFileTracingRoot: fileURLToPath(new URL('../../', import.meta.url)),
   // The workspace packages ship TypeScript source, not a build. Next compiles them itself.
   transpilePackages: ['@driverzone/design-system', '@driverzone/contracts', '@driverzone/geo'],
   reactStrictMode: true,

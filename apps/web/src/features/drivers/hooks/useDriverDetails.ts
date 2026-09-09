@@ -7,41 +7,34 @@ import type {
   LedgerQueryParams,
   RejectDriverRequest,
   RejectDriverResponse,
+  ReviewDocumentRequest,
+  ReviewDocumentResponse,
+  VerifyHillDrivingRequest,
+  VerifyHillDrivingResponse,
+  SuspendDriverRequest,
+  SuspendDriverResponse,
+  AdminUpdateDriverRequest,
+  DriverProfileDto,
 } from '@driverzone/contracts';
 import { request } from '@/lib/api/client';
 import { authedQueryOptions } from '@/lib/query/factory';
 import { keys, staleTime } from '@/lib/query/keys';
 import { withAuth } from '@/lib/auth/session';
 
-/**
- * `enabled` defaults to `true` — the original signature, still exactly how `DriverDetailsScreen`
- * calls it with an id straight off the route. It exists for a second caller
- * (`BookingDetailsScreen`'s driver card) that only sometimes has a driver to look up: without it,
- * an unassigned booking would still fire `GET /admin/drivers/` on every render, the same trap
- * `useCustomer` documents avoiding with its own `id: string | undefined` signature.
- */
-export function useDriverDetails(id: string, enabled = true) {
+export function useDriverDetails(id: string | undefined, enabled = true) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', id],
+      queryKey: ['admin', 'drivers', id ?? ''],
       fetch: (token, signal) => request<AdminDriverDetailsDto>(`/admin/drivers/${id}`, { token, signal }),
-      enabled,
+      enabled: Boolean(id) && enabled,
     })
   );
 }
 
-/**
- * One driver's statement.
- *
- * `GET /admin/drivers/:id/wallet` has accepted `page/limit/type/from/to` since 2026-09-04 and
- * returns a `summary` and `pagination` alongside the rows. This hook passed none of them and the
- * tab discarded both, so the screen silently showed the newest ten entries of an eighteen-entry
- * statement with no pager and no way to narrow it. The query is threaded through now.
- */
-export function useDriverWallet(id: string, query?: LedgerQueryParams) {
+export function useDriverWallet(id: string | undefined, query?: LedgerQueryParams) {
   return useQuery(
     authedQueryOptions({
-      queryKey: keys.drivers.wallet(id, query),
+      queryKey: keys.drivers.wallet(id ?? '', query),
       fetch: (token, signal) =>
         request<AdminDriverWalletDetailsDto>(`/admin/drivers/${id}/wallet`, {
           token,
@@ -59,15 +52,17 @@ export function useDriverWallet(id: string, query?: LedgerQueryParams) {
               }),
         }),
       staleTime: staleTime.directory,
+      enabled: Boolean(id),
     })
   );
 }
 
-export function useDriverDutyHistory(id: string) {
+export function useDriverDutyHistory(id: string | undefined) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', id, 'duty'],
+      queryKey: ['admin', 'drivers', id ?? '', 'duty'],
       fetch: (token, signal) => request<AdminDriverDutyHistoryDto>(`/admin/drivers/${id}/duty-history`, { token, signal }),
+      enabled: Boolean(id),
     })
   );
 }
@@ -106,3 +101,98 @@ export function useRejectDriver(id: string) {
     },
   });
 }
+
+export function useReviewDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ docId, data }: { docId: string; data: ReviewDocumentRequest }) => {
+      return withAuth((token) =>
+        request<ReviewDocumentResponse>(`/admin/drivers/${id}/documents/${docId}`, {
+          method: 'PATCH',
+          body: data,
+          token,
+        })
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+    },
+  });
+}
+
+export function useVerifyHillDriving(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: VerifyHillDrivingRequest) => {
+      return withAuth((token) =>
+        request<VerifyHillDrivingResponse>(`/admin/drivers/${id}/verify-hill`, {
+          method: 'PATCH',
+          body: data,
+          token,
+        })
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+    },
+  });
+}
+
+export function useSuspendDriver(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: SuspendDriverRequest) => {
+      return withAuth((token) =>
+        request<SuspendDriverResponse>(`/admin/drivers/${id}/suspend`, {
+          method: 'PATCH',
+          body: data,
+          token,
+        })
+      );
+    },
+    onSuccess: () => {
+      // Invalidate the list AND the specific driver's details
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+    },
+  });
+}
+
+export function useToggleSuspendDriver() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, is_suspended, reason }: { id: string; is_suspended: boolean; reason: string }) => {
+      return withAuth((token) =>
+        request<SuspendDriverResponse>(`/admin/drivers/${id}/suspend`, {
+          method: 'PATCH',
+          body: { is_suspended, reason },
+          token,
+        })
+      );
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', variables.id] });
+    },
+  });
+}
+
+export function useUpdateDriver(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: AdminUpdateDriverRequest) => {
+      return withAuth((token) =>
+        request<DriverProfileDto>(`/admin/drivers/${id}`, {
+          method: 'PATCH',
+          body: data,
+          token,
+        })
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+    },
+  });
+}
+

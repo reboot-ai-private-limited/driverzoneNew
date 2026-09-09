@@ -8,6 +8,7 @@ import {
   hashOtpCode,
 } from '../../domain/otpChallenge.entity.js';
 import { otpCooldownActive, otpSendLimitExceeded } from '../../domain/identity.errors.js';
+import { AppError } from '@/shared/errors/AppError.js';
 import type { AccountRepositoryPort } from '../../domain/account.repository.port.js';
 import type { OtpSenderPort } from '../../domain/otpSender.port.js';
 import type { OtpStorePort } from '../../domain/otpStore.port.js';
@@ -68,6 +69,12 @@ export class SendOtpUseCase {
       }
     }
 
+    const account = await this.accounts.findByPhone(role, phone);
+
+    if (account?.isBlocked) {
+      throw AppError.forbidden('Your account has been suspended.');
+    }
+
     /**
      * Admin accounts are never created by the auth flow (docs/LLD/auth.md §Admin provisioning),
      * so there is nothing to send to if the number is not already provisioned.
@@ -76,8 +83,7 @@ export class SendOtpUseCase {
      * above were already spent, and the caller below receives exactly the same result it would
      * for a real admin. The only difference is that no SMS leaves the building.
      */
-    const deliverable =
-      role !== 'ADMIN' || (await this.accounts.findByPhone(role, phone)) !== undefined;
+    const deliverable = role !== 'ADMIN' || account !== undefined;
 
     if (deliverable) {
       const code = generateOtpCode();

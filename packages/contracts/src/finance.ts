@@ -137,6 +137,52 @@ export interface WalletDetailsDto {
   };
 }
 
+export interface AdminAdjustDriverWalletRequest {
+  type: 'ADJUSTMENT' | 'PENALTY' | 'BONUS';
+  /** Positive for BONUS, negative for PENALTY, non-zero for ADJUSTMENT */
+  amount_paise: number;
+  /** Compulsory reason for the ledger row */
+  note: string;
+}
+
+export interface AdminAdjustDriverWalletResponse {
+  entry: LedgerEntryDto;
+  new_balance_paise: number;
+}
+
+export interface PayoutDto {
+  id: string;
+  driver_id: string;
+  amount_paise: number;
+  status: 'PENDING' | 'PROCESSING' | 'PAID' | 'FAILED';
+  utr: string | null;
+  notes: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+export interface AdminCreatePayoutRequest {
+  driver_id: string;
+  amount_paise?: number;
+  utr?: string;
+  notes?: string;
+}
+
+export interface AdminCreatePayoutResponse {
+  payout: PayoutDto;
+  ledger_entry: LedgerEntryDto;
+  new_balance_paise: number;
+}
+
+export interface AdminListPayoutsResponse {
+  payouts: PayoutDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    total_items: number;
+    total_pages: number;
+  };
+}
 /**
  * The totals for the rows a statement query SELECTS — every page of them, not the page returned.
  *

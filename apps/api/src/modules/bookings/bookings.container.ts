@@ -11,6 +11,7 @@ import type {
 import type { PaymentsContract } from '../payments/payments.public.js';
 import type { QuoteConsumptionContract } from '../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../settings/settings.public.js';
+import type { IdentityPublicContract } from '../identity/identity.public.js';
 import type { BookingsPublicContract, ClaimResult } from './bookings.public.js';
 import { MongoBookingRepository } from './infrastructure/bookingRepository.impl.js';
 import { MongoChargeRepository } from './infrastructure/chargeRepository.impl.js';
@@ -48,12 +49,10 @@ export interface BookingsDependencies {
   wallet: WalletPublicContract;
   notifications: NotificationsContract;
   /**
-   * Naming a person, and describing a driver to the customer they are driving.
-   *
-   * The READ halves of identity's contract only — this module renders names and driver cards, and
-   * has no business being handed the methods that write a customer's saved addresses.
+   * Naming a person, describing a driver to the customer they are driving, and recording
+   * driver ride completion stats.
    */
-  identity: AccountDirectoryContract & DriverCardContract & CustomerContactContract;
+  identity: IdentityPublicContract;
   /**
    * Enqueues the dispatch job for a confirmed booking.
    *
@@ -123,6 +122,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     deps.ledger,
     deps.payments,
     deps.notifications,
+    deps.identity,
   );
   const reportPin = new ReportPickupPinUseCase(repo, charges);
   const forceArrive = new ForceArriveUseCase(repo, deps.notifications);

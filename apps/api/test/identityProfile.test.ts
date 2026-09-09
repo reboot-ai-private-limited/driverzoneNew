@@ -29,6 +29,7 @@ import type {
   DriverProfile,
   DriverProfileRepositoryPort,
 } from '../src/modules/identity/domain/driverProfile.repository.port.js';
+import type { DutySessionRepositoryPort } from '../src/modules/identity/domain/dutySession.repository.port.js';
 import type {
   DriverDocument,
   DriverDocumentRepositoryPort,
@@ -144,6 +145,29 @@ function fakeDrivers(initial: DriverProfile): DriverProfileRepositoryPort & { cu
       current = { ...current, isOnDuty };
       return Promise.resolve(current);
     },
+    setBlockedStatus: (_id, isBlocked, reason) => {
+      current = {
+        ...current,
+        isBlocked,
+        blockedReason: isBlocked ? (reason ?? null) : null,
+        isOnDuty: isBlocked ? false : current.isOnDuty,
+      };
+      return Promise.resolve(current);
+    },
+  };
+}
+
+function fakeDutySessions(): DutySessionRepositoryPort & { ended: string[] } {
+  const ended: string[] = [];
+  return {
+    ended,
+    startSession: () => Promise.resolve({ id: 'ds_1', driverId: 'drv_1', startedAt: new Date(), endedAt: null, totalPings: 0 }),
+    endActiveSession: (driverId: string) => {
+      ended.push(driverId);
+      return Promise.resolve({ id: 'ds_1', driverId, startedAt: new Date(), endedAt: new Date(), totalPings: 0 });
+    },
+    findActiveSession: () => Promise.resolve(undefined),
+    findHistory: () => Promise.resolve({ sessions: [], totalItems: 0 }),
   };
 }
 
@@ -658,6 +682,71 @@ describe('VerifyDriverUseCase', () => {
 
     expect(drivers.current.onboardingStatus).toBe('SUBMITTED');
     expect(documents.list[0]?.status).toBe('REJECTED');
+  });
+
+  it('refuses to suspend a driver without providing a reason', async () => {
+    const drivers = fakeDrivers(submitted());
+
+    const code = await codeOfRejection(
+      new VerifyDriverUseCase(drivers, fakeDocuments(), fakeAudit()).setSuspendedStatus(
+        'drv_1',
+        true,
+        '   ',
+        { adminId: 'adm_1' },
+      ),
+    );
+
+    expect(code).toBe('VALIDATION_FAILED');
+  });
+
+  it('suspends a driver, stores the suspension reason, records SUSPEND audit, and terminates active duty session', async () => {
+    const drivers = fakeDrivers(driverProfile({ isOnDuty: true, isBlocked: false }));
+    const audit = fakeAudit();
+    const dutySessions = fakeDutySessions();
+
+    const useCase = new VerifyDriverUseCase(drivers, fakeDocuments(), audit, dutySessions);
+    const result = await useCase.setSuspendedStatus('drv_1', true, 'Repeated customer complaints.', {
+      adminId: 'adm_1',
+      ip: '10.0.0.1',
+    });
+
+    expect(result.isBlocked).toBe(true);
+    expect(result.blockedReason).toBe('Repeated customer complaints.');
+    expect(dutySessions.ended).toEqual(['drv_1']);
+
+    expect(audit.entries).toHaveLength(1);
+    expect(audit.entries[0]).toMatchObject({
+      adminId: 'adm_1',
+      entityType: 'Driver',
+      entityId: 'drv_1',
+      action: 'SUSPEND',
+      before: { isBlocked: false },
+      after: { isBlocked: true, reason: 'Repeated customer complaints.' },
+      ip: '10.0.0.1',
+    });
+  });
+
+  it('reinstates a suspended driver and records UNSUSPEND audit', async () => {
+    const drivers = fakeDrivers(driverProfile({ isBlocked: true, blockedReason: 'Old reason' }));
+    const audit = fakeAudit();
+
+    const useCase = new VerifyDriverUseCase(drivers, fakeDocuments(), audit);
+    const result = await useCase.setSuspendedStatus('drv_1', false, undefined, {
+      adminId: 'adm_1',
+    });
+
+    expect(result.isBlocked).toBe(false);
+    expect(result.blockedReason).toBeNull();
+
+    expect(audit.entries).toHaveLength(1);
+    expect(audit.entries[0]).toMatchObject({
+      adminId: 'adm_1',
+      entityType: 'Driver',
+      entityId: 'drv_1',
+      action: 'UNSUSPEND',
+      before: { isBlocked: true },
+      after: { isBlocked: false },
+    });
   });
 });
 

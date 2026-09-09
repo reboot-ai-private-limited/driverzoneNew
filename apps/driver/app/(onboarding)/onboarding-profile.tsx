@@ -50,7 +50,6 @@ interface Draft {
   address: string;
   experienceYears: string;
   alternateNumber: string;
-  /** Every type this driver is competent to drive. Server caps the array at 3. */
   vehicleTypePreferences: readonly VehicleTypePreference[];
   /** Which car categories this driver is competent to drive. Server caps the array at 20. */
   vehicleCategoryPreference: readonly CarCategory[];
@@ -206,7 +205,9 @@ export default function OnboardingProfileScreen(): ReactElement {
       experienceYears:
         profile.data.experience_years === null ? '' : String(profile.data.experience_years),
       alternateNumber: profile.data.alternate_number ?? '',
-      vehicleTypePreferences: profile.data.vehicle_type_preferences,
+      vehicleTypePreferences: profile.data.vehicle_type_preferences.filter(
+        (code): code is VehicleTypePreference => code in VEHICLE_LABELS,
+      ),
       // The DTO types this as `string[]` because the server stores free codes; narrowing to the
       // ones we can render keeps an unknown value from becoming an unlabelled chip.
       vehicleCategoryPreference: profile.data.vehicle_category_preference.filter(
@@ -263,6 +264,7 @@ export default function OnboardingProfileScreen(): ReactElement {
 
     if (draft.dob !== null) body.dob = toIsoDate(draft.dob);
     if (draft.gender !== null) body.gender = draft.gender;
+    body.vehicle_type_preferences = [...draft.vehicleTypePreferences];
 
     const years = Number.parseInt(draft.experienceYears, 10);
     if (!Number.isNaN(years)) body.experience_years = years;
@@ -447,12 +449,7 @@ export default function OnboardingProfileScreen(): ReactElement {
 
           {/* Competence, not ownership: the driver drives the CUSTOMER'S car
               (docs/LLD/open-questions.md Q5), so this says what they can handle, not what they
-              have parked outside.
-
-              Multi-select, like "Car types" below — someone who drives a manual almost always
-              drives an automatic too, and an EV is a third thing again. A single value used to
-              split the driver pool three ways and starved every dispatch wave (see
-              `VEHICLE_TYPE_PREFERENCES` in contracts); the server caps this set at 3. */}
+              have parked outside. */}
           <FieldRow label="Transmission you can drive" hint="(choose any)" boxed={false}>
             <View style={styles.chipRow}>
               {VEHICLE_OPTIONS.map((value) => {
@@ -462,7 +459,6 @@ export default function OnboardingProfileScreen(): ReactElement {
                     key={value}
                     label={VEHICLE_LABELS[value]}
                     selected={selected}
-                    multiSelect
                     onPress={() =>
                       patch({
                         vehicleTypePreferences: selected

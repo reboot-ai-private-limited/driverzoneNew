@@ -21,6 +21,7 @@ import {
   driverIdParamSchema,
   rejectDriverSchema,
   reviewDocumentSchema,
+  verifyHillDrivingSchema,
 } from './identity.validation.js';
 
 // ─── Response DTOs — mirror @driverzone/contracts/src/identity.ts ───────────────────────────
@@ -601,6 +602,50 @@ export function registerIdentitySwaggerPaths(): void {
     },
     responses: {
       200: { description: 'Document reviewed', content: { 'application/json': { schema: successResponse(reviewDocumentResponseSchema) } } },
+      401: unauthenticated,
+    },
+  });
+
+  // GET /admin/drivers/{id}/wallet
+  registry.registerPath({
+    method: 'get',
+    path: '/admin/drivers/{id}/wallet',
+    tags: adminTags,
+    summary: 'Get driver wallet details and ledger',
+    security: bearerAuth,
+    request: { params: driverIdParamSchema },
+    responses: {
+      200: { description: 'Driver wallet', content: { 'application/json': { schema: successResponse(z.any()) } } },
+      401: unauthenticated,
+      404: { description: 'Driver not found', ...jsonError },
+    },
+  });
+
+  // GET /admin/drivers/{id}/duty-history
+  registry.registerPath({
+    method: 'get',
+    path: '/admin/drivers/{id}/duty-history',
+    tags: adminTags,
+    summary: 'Get driver duty history sessions',
+    security: bearerAuth,
+    request: { params: driverIdParamSchema },
+    responses: {
+      200: { description: 'Driver duty history', content: { 'application/json': { schema: successResponse(z.any()) } } },
+      401: unauthenticated,
+      404: { description: 'Driver not found', ...jsonError },
+    },
+  });
+
+  // PATCH /admin/drivers/{id}/verify-hill
+  registry.registerPath({
+    method: 'patch',
+    path: '/admin/drivers/{id}/verify-hill',
+    tags: adminTags,
+    summary: 'Verify driver for hill driving',
+    security: bearerAuth,
+    request: { params: driverIdParamSchema, body: { content: { 'application/json': { schema: verifyHillDrivingSchema } } } },
+    responses: {
+      200: { description: 'Hill driving verified', content: { 'application/json': { schema: successResponse(z.object({ can_drive_hill_verified: z.boolean() })) } } },
       401: unauthenticated,
     },
   });

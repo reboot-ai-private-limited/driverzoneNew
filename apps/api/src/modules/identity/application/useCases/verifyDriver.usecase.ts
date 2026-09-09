@@ -4,6 +4,7 @@ import { canReview } from '../../domain/driverOnboarding.entity.js';
 import type { AuditPort } from '../../domain/audit.port.js';
 import type { DriverDocument, DriverDocumentRepositoryPort } from '../../domain/driverDocument.repository.port.js';
 import type { DriverProfile, DriverProfileRepositoryPort } from '../../domain/driverProfile.repository.port.js';
+import type { DutySessionRepositoryPort } from '../../domain/dutySession.repository.port.js';
 
 export interface ActorContext {
   adminId: string;
@@ -23,6 +24,7 @@ export class VerifyDriverUseCase {
     private readonly drivers: DriverProfileRepositoryPort,
     private readonly documents: DriverDocumentRepositoryPort,
     private readonly audit: AuditPort,
+    private readonly dutySessions?: DutySessionRepositoryPort,
   ) {}
 
   private async loadReviewable(driverId: string): Promise<DriverProfile> {
@@ -129,6 +131,54 @@ export class VerifyDriverUseCase {
       action: status === 'VERIFIED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : 'UPDATE',
       before: { status: before.status },
       after: { status: after.status, ...(after.rejectionReason === null ? {} : { reason: after.rejectionReason }) },
+      ip: actor.ip,
+    });
+
+    return after;
+  }
+
+  async verifyHillDriving(driverId: string, verified: boolean, actor: ActorContext): Promise<DriverProfile> {
+    const before = await this.drivers.findById(driverId);
+    if (before === undefined) throw AppError.notFound('That driver could not be found.');
+
+    const after = await this.drivers.verifyHillDriving(driverId, verified);
+    if (after === undefined) throw AppError.notFound('That driver could not be found.');
+
+    await this.audit.record({
+      adminId: actor.adminId,
+      entityType: 'Driver',
+      entityId: driverId,
+      action: 'UPDATE',
+      before: { canDriveHillVerified: before.canDriveHillVerified },
+      after: { canDriveHillVerified: after.canDriveHillVerified },
+      ip: actor.ip,
+    });
+
+    return after;
+  }
+
+  async setSuspendedStatus(driverId: string, isSuspended: boolean, reason: string | undefined, actor: ActorContext): Promise<DriverProfile> {
+    const before = await this.drivers.findById(driverId);
+    if (before === undefined) throw AppError.notFound('That driver could not be found.');
+
+    if (isSuspended && (reason === undefined || reason.trim() === '')) {
+      throw AppError.badRequest('Say why the driver is being suspended.', { field: 'reason' });
+    }
+
+    const after = await this.drivers.setBlockedStatus(driverId, isSuspended, reason ?? null);
+    if (after === undefined) throw AppError.notFound('That driver could not be found.');
+
+    if (isSuspended && this.dutySessions) {
+      await this.dutySessions.endActiveSession(driverId);
+    }
+
+    await this.audit.record({
+      adminId: actor.adminId,
+      entityType: 'Driver',
+      entityId: driverId,
+      action: isSuspended ? 'SUSPEND' : 'UNSUSPEND',
+      before: { isBlocked: before.isBlocked },
+      after: { isBlocked: after.isBlocked, ...(reason ? { reason } : {}) },
       ip: actor.ip,
     });
 

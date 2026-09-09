@@ -36,6 +36,7 @@ import { MongoSessionRepository } from './infrastructure/session.repository.impl
 import { MongoCustomerProfileRepository } from './infrastructure/customerProfile.repository.impl.js';
 import { MongoDriverProfileRepository } from './infrastructure/driverProfile.repository.impl.js';
 import { MongoDriverDocumentRepository } from './infrastructure/driverDocument.repository.impl.js';
+import { MongoCustomerDeviceRepository } from './infrastructure/customerDevice.repository.impl.js';
 import { MongoDriverDeviceRepository } from './infrastructure/driverDevice.repository.impl.js';
 import { MongoDutySessionRepository } from './infrastructure/dutySession.repository.impl.js';
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
@@ -75,6 +76,16 @@ export interface IdentityContainer {
    * here rather than in `routes.ts` keeps the mount list at three entries as endpoints grow.
    */
   buildRoleRouter: (role: Role) => Router;
+
+  /**
+   * Take on-duty drivers who have stopped reporting their position off duty, and return their ids.
+   *
+   * On the container rather than in `contract` because the caller is the WORKER's sweeper, not
+   * another module — nothing in the tier graph needs this, and putting it on the public contract
+   * would invite something to. Same placement as `bookings.sweepAbandonedPayments` for the same
+   * reason.
+   */
+  sweepStalePresence: (cutoff: Date, limit: number) => Promise<string[]>;
 }
 
 export function buildIdentityContainer(): IdentityContainer {
@@ -185,6 +196,7 @@ export function buildIdentityContainer(): IdentityContainer {
   const setDuty = new SetDutyStatusUseCase(drivers, dutySessions);
   const recordLocation = new RecordLocationPingsUseCase(drivers);
   const devices = new MongoDriverDeviceRepository();
+  const customerDevices = new MongoCustomerDeviceRepository();
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
   const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit, dutySessions);
@@ -211,6 +223,7 @@ export function buildIdentityContainer(): IdentityContainer {
           updateProfile: updateCustomerProfile,
           addresses: manageAddresses,
           vehicles: manageVehicles,
+          devices: customerDevices,
         }),
       );
     }
@@ -248,6 +261,10 @@ export function buildIdentityContainer(): IdentityContainer {
   const directory = new MongoAccountDirectory(documentStorage);
 
   return {
+    // The worker's presence sweep. See the note on `IdentityContainer` for why it sits here and
+    // not on the public contract.
+    sweepStalePresence: (cutoff, limit) => drivers.sweepStalePresence(cutoff, limit),
+
     contract: {
       // The read side and the rating cache. Consumed by `reviews`, which renders names in the
       // admin ledger and writes back the rolling average it computes.

@@ -53,6 +53,11 @@ export function completionPercent(draft: ProfileDraft): number {
  * was ever saved", this asks "how much of what the API actually persists is filled in now". Same
  * equal-weight rule and the same reason for it — no evidence exists to weight one field over
  * another, so an even split is the honest reading rather than a dressed-up guess.
+ *
+ * The three Safety fields count here because the edit screen now collects them and the API has
+ * always stored them (`languages_known`, `alternate_number`, `emergency_contact`). Leaving them
+ * out would let a customer who filled in everything the form offers still see less than 100%,
+ * which reads as the bar being broken.
  */
 export function profileCompletionFromDto(profile: CustomerProfileDto): number {
   const filled = [
@@ -61,6 +66,9 @@ export function profileCompletionFromDto(profile: CustomerProfileDto): number {
     profile.gender !== null,
     profile.dob !== null,
     profile.saved_addresses.length > 0,
+    profile.languages_known.length > 0,
+    profile.alternate_number !== null,
+    profile.emergency_contact !== null,
   ];
   const done = filled.filter(Boolean).length;
   return Math.round((done / filled.length) * 100);
@@ -71,6 +79,24 @@ export const GENDER_OPTIONS: ReadonlyArray<{ value: Gender; label: string }> = [
   { value: 'MALE', label: 'Male' },
   { value: 'FEMALE', label: 'Female' },
   { value: 'OTHER', label: 'Other' },
+];
+
+/**
+ * The languages offered as one-tap chips on the profile form.
+ *
+ * Scoped to what is actually spoken in the operating region — Siliguri and the North Bengal
+ * corridor — rather than a full ISO list nobody would scroll. `languages_known` on the wire is a
+ * free array of strings (`z.array(z.string())` server-side), so a customer is never limited to
+ * this set; it is the fast path, not the whole vocabulary. Kept as plain English labels because
+ * that is what the value stored and shown is — there is no separate code/label split for it.
+ */
+export const LANGUAGE_OPTIONS: readonly string[] = [
+  'English',
+  'Hindi',
+  'Bengali',
+  'Nepali',
+  'Bhojpuri',
+  'Assamese',
 ];
 
 /**

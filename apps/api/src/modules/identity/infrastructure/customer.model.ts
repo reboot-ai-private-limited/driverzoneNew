@@ -31,6 +31,7 @@ export interface CustomerDoc {
   vehicles?: unknown[];
   rating: number;
   ratingCount: number;
+  fcmTokens?: string[];
   isBlocked: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -103,6 +104,14 @@ const customerSchema = new Schema<CustomerDoc>(
 
     rating: { type: Number, default: 5.0 },
     ratingCount: { type: Number, default: 0 },
+
+    /**
+     * FCM tokens for this customer's handsets — ride-update push. An array on the document
+     * rather than its own collection: a customer has one or two phones, the tokens are read only
+     * on the notification path (which already has the customer id), and `$addToSet` keeps a
+     * re-register from duplicating. Mirrors `driver.model.ts`.
+     */
+    fcmTokens: { type: [String], default: [] },
 
     isBlocked: { type: Boolean, default: false },
   },

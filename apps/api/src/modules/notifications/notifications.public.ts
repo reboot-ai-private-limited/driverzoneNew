@@ -21,6 +21,13 @@ export interface NotificationsContract {
   sendOffer(driverId: string, offer: DriverOfferPush): Promise<DeliveryChannel>;
   cancelOffer(driverId: string, offerId: string, reason: string): Promise<void>;
   sendBookingUpdate(to: Recipient, update: BookingUpdatePush): Promise<void>;
+
+  /**
+   * Tell a driver the presence sweep took them off duty because their handset went silent. The
+   * worker is the only caller; see `PushSenderPort.sendDutyEnded` for why this one is aimed at an
+   * app that is probably not running.
+   */
+  sendDutyEnded(driverId: string): Promise<void>;
 }
 
 export type NotificationsPublicContract = NotificationsContract;

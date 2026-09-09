@@ -27,21 +27,33 @@
           "locationAlwaysAndWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area.",
           "locationWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area."
         }
-      ]
+      ],
+      "@react-native-firebase/app"
     ],
     "android": {
       "package": "in.driverzone.customer",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F2F200"
       },
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK"
+      ]
     },
     "ios": {
       "bundleIdentifier": "in.driverzone.customer",
       "buildNumber": "1",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     }
   }
 }

@@ -128,6 +128,27 @@ export interface DriverProfileRepositoryPort {
    * Finds drivers with recent locations for the live ops map.
    */
   findLiveDrivers(filter?: LiveDriverFilter): Promise<LiveDriverRecord[]>;
+
+  /**
+   * Take every on-duty driver who has stopped reporting their position off duty. Returns the ids
+   * of the ones it changed, so the caller can tell them.
+   *
+   * THE BACKSTOP FOR AN APP THAT DIED WITHOUT SAYING SO (docs/LLD/driver-app.md S-1). A driver's
+   * process can be force-stopped, killed by an OEM battery manager, or lost to a reboot, and none
+   * of those run a line of the app's code — so `isOnDuty` stays true for ever while the handset
+   * pings nothing. Dispatch already declines to ring them, because `MongoDriverPool` filters on
+   * `lastLocationAt` freshness, so the immediate harm is not misrouted trips. It is that NOBODY
+   * KNOWS: the driver's app still says "You're online", the admin panel still counts them as
+   * supply, and the driver waits out a shift that ended when their phone decided it had.
+   *
+   * `cutoff` should be comfortably wider than the pool's own freshness window — this is meant to
+   * catch a handset that is gone, not one in a lift or a tunnel, and taking a working driver off
+   * duty for a two-minute dead spot would be a far worse bug than the one it fixes.
+   *
+   * A null `lastLocationAt` counts as stale: it means the driver went on duty and never reported a
+   * single fix, which is the fresh-install case where the app was killed before its first flush.
+   */
+  sweepStalePresence(cutoff: Date, limit: number): Promise<string[]>;
 }
 
 export interface LiveDriverRecord {

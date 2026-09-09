@@ -26,7 +26,7 @@ import type {
 
 export interface RecordedPush {
   at: Date;
-  kind: 'OFFER' | 'OFFER_CANCELLED' | 'BOOKING_UPDATE';
+  kind: 'OFFER' | 'OFFER_CANCELLED' | 'BOOKING_UPDATE' | 'DUTY_ENDED';
   to: Recipient;
   payload: unknown;
 }
@@ -76,6 +76,11 @@ export class MockPushSender implements PushSenderPort {
       { role: to.role, recipientId: to.id, reference: update.reference, status: update.status },
       'mock push: booking update',
     );
+  }
+
+  async sendDutyEnded(driverId: string): Promise<void> {
+    this.record({ kind: 'DUTY_ENDED', to: { role: 'DRIVER', id: driverId }, payload: {} });
+    logger.info({ driverId }, 'mock push: driver taken off duty by the presence sweep');
   }
 
   /** Everything sent, oldest first. For tests and for the local end-to-end walkthrough. */

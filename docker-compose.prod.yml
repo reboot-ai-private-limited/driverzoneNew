@@ -82,6 +82,17 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
       REDIS_URL: redis://redis:6379
+      # WITHOUT THIS, EVERY TRIP OFFER IS A `MockPushSender` NO-OP and nothing reaches a driver's
+      # phone in the background. The path is inside the container; the file arrives via the bind
+      # mount below. `notifications.container.ts` reads exactly this variable — the LLD's mention
+      # of `FCM_SERVICE_ACCOUNT_JSON` is stale, do not use that name.
+      FCM_SERVICE_ACCOUNT_PATH: /run/secrets/fcm-service-account.json
+    # The Firebase Admin key, mounted read-only rather than baked into the image — it is a
+    # secret and the Dockerfile deliberately never COPYs it. Place the real key at
+    # `apps/api/firebaseServiceAccount.json` on the host before `up`; it must belong to the same
+    # Firebase project as `apps/driver/google-services.json` (`driver-zone-cf117`).
+    volumes:
+      - ./apps/api/firebaseServiceAccount.json:/run/secrets/fcm-service-account.json:ro
     ports: ['4000:4000']
     restart: unless-stopped
     healthcheck:
@@ -105,6 +116,11 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
       REDIS_URL: redis://redis:6379
+      # The worker sends push too — the dispatch wave runs here, and so does the presence sweep's
+      # "you've gone offline" notice. Same key, same mount as `api`.
+      FCM_SERVICE_ACCOUNT_PATH: /run/secrets/fcm-service-account.json
+    volumes:
+      - ./apps/api/firebaseServiceAccount.json:/run/secrets/fcm-service-account.json:ro
     restart: unless-stopped
 
   # Seeds the known development accounts and zones into a DEPLOYED stack. One-shot, and behind a

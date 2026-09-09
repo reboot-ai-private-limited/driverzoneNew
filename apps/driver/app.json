@@ -25,13 +25,16 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "DriverZone uses your location while you are on duty so nearby trips can be offered to you."
+          "locationWhenInUsePermission": "DriverZone uses your location while you are on duty so nearby trips can be offered to you.",
+          "locationAlwaysAndWhenInUsePermission": "DriverZone needs your location in the background so trip offers keep reaching you while you are on duty and the screen is off.",
+          "isAndroidBackgroundLocationEnabled": true
         }
       ],
       "@react-native-firebase/app",
       "./plugins/withOfferSound",
       "./plugins/withRingOverLockScreen",
-      "./plugins/withDutyForegroundService"
+      "./plugins/withDutyForegroundService",
+      "./plugins/withOfferProguardRules"
     ],
     "android": {
       "package": "in.driverzone.driver",
@@ -45,13 +48,15 @@
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.WAKE_LOCK",
         "android.permission.VIBRATE",
         "android.permission.ACCESS_NOTIFICATION_POLICY",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION"
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ]
     },
     "ios": {

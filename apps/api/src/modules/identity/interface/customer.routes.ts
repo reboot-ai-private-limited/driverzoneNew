@@ -25,5 +25,8 @@ export function buildCustomerRouter(controllers: CustomerControllers): Router {
   router.patch('/vehicles/:id', controllers.updateVehicle);
   router.delete('/vehicles/:id', controllers.removeVehicle);
 
+  router.post('/devices', controllers.registerDevice);
+  router.delete('/devices', controllers.removeDevice);
+
   return router;
 }

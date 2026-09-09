@@ -1,3 +1,4 @@
+import notifee from '@notifee/react-native';
 import Constants from 'expo-constants';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Linking, Platform } from 'react-native';
@@ -19,7 +20,15 @@ import { Linking, Platform } from 'react-native';
  */
 
 /** The buckets we have specific guidance for. `generic` is the honest fallback for everything else. */
-export type OemFamily = 'xiaomi' | 'oppo' | 'vivo' | 'samsung' | 'generic';
+export type OemFamily =
+  | 'xiaomi'
+  | 'oppo'
+  | 'vivo'
+  | 'samsung'
+  | 'motorola'
+  | 'nothing'
+  | 'lava'
+  | 'generic';
 
 export interface OemGuide {
   family: OemFamily;
@@ -46,6 +55,20 @@ export function detectOemFamily(): OemFamily {
   if (/oppo|realme|oneplus/.test(haystack)) return 'oppo';
   if (/vivo|iqoo/.test(haystack)) return 'vivo';
   if (/samsung/.test(haystack)) return 'samsung';
+  // `motorola` in both fields, lowercase, on every Moto handset — the Lenovo ownership does not
+  // show up here. Matched before the near-stock families below because My UX, despite looking
+  // like stock, keeps its per-app battery control somewhere the generic copy does not name.
+  if (/motorola/.test(haystack)) return 'motorola';
+  // Nothing OS is near-stock AOSP and reports "Nothing" in both fields. It gets its own entry
+  // not because it is hostile — it is one of the better-behaved skins — but because the generic
+  // copy names screens that Nothing labels differently, and a step that does not match what is
+  // on the driver's screen is a step they abandon.
+  if (/nothing/.test(haystack)) return 'nothing';
+  // Lava ships close to stock on its mid-range, so the settings paths are the standard ones. The
+  // reason it is called out separately is RAM: the budget models this brand sells most of will
+  // reclaim a backgrounded process under memory pressure no matter how it is configured, and the
+  // guidance has to be honest that keeping the app open matters more here than elsewhere.
+  if (/lava/.test(haystack)) return 'lava';
   return 'generic';
 }
 
@@ -82,7 +105,46 @@ const GUIDES: Record<OemFamily, OemGuide> = {
     skinLabel: 'One UI (Samsung)',
     steps: [
       'Open the button below, then in Battery set usage to Unrestricted.',
-      'In Settings → Battery → Background usage limits, remove DriverZone from Sleeping apps and add it to Never sleeping apps.',
+      'In Settings → Battery → Background usage limits, remove DriverZone from Sleeping apps and Deep sleeping apps.',
+      'In the same screen, add DriverZone to Never sleeping apps.',
+      // One UI turns this back on by itself after an update, and it is what quietly re-sleeps the
+      // app weeks after a driver followed every other step.
+      'Still in Background usage limits, turn OFF "Put unused apps to sleep".',
+    ],
+  },
+  motorola: {
+    family: 'motorola',
+    skinLabel: 'My UX (Motorola)',
+    steps: [
+      'Open the button below, then open App battery usage and choose Unrestricted.',
+      // The per-app setting above is the one that matters, but Moto ships a second, global switch
+      // that silently overrides it — a driver who sets only the first still gets throttled.
+      'In Settings → Battery, open Battery optimisation and set DriverZone to Don’t optimise.',
+      // My UX is close to stock and has no autostart list; saying so stops a driver hunting for
+      // one because the other guides mention it.
+      'There is no autostart list on Motorola — those two settings are all it needs.',
+    ],
+  },
+  nothing: {
+    family: 'nothing',
+    skinLabel: 'Nothing OS',
+    steps: [
+      'Open the button below, then open App battery usage and choose Unrestricted.',
+      'Back in Settings → Battery, make sure Battery saver is off while you are driving.',
+      // Nothing OS has no autostart list — Adaptive Battery is the only thing left that can
+      // deprioritise the app, and it learns from usage rather than from a switch.
+      'That is all Nothing OS needs — it has no separate autostart list.',
+    ],
+  },
+  lava: {
+    family: 'lava',
+    skinLabel: 'Lava',
+    steps: [
+      'Open the button below and choose Battery.',
+      'Set battery usage to Unrestricted (or turn off Optimise) for DriverZone.',
+      // Only some Lava models ship a security/autostart app; the button below is a no-op where
+      // there is none, so this is worded as a conditional rather than an instruction.
+      'If your phone has a Security or Phone Master app, open it and add DriverZone to Autostart.',
     ],
   },
   generic: {
@@ -133,6 +195,19 @@ async function openAppDetails(): Promise<void> {
 export async function openBatterySettings(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
+  /*
+   * Notifee first. It ships the same "stop optimising this app" dialog, but resolves the intent
+   * against its own maintained table of OEM quirks rather than assuming the AOSP action exists —
+   * which is the difference between a working shortcut and a dead button on the skins that
+   * renamed it. Ours stays below as the fallback for anything its table does not know.
+   */
+  try {
+    await notifee.openBatteryOptimizationSettings();
+    return;
+  } catch {
+    // Notifee could not resolve it either — fall through to the raw intents.
+  }
+
   try {
     await IntentLauncher.startActivityAsync(
       'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
@@ -163,6 +238,20 @@ export async function openBatterySettings(): Promise<void> {
 export async function openAutostartSettings(family: OemFamily): Promise<void> {
   if (Platform.OS !== 'android') return;
 
+  /*
+   * Notifee's power-manager table first, for the same reason as the battery dialog above: it
+   * covers far more skins than the three below — Transsion (Tecno, Infinix, itel), Huawei, Asus,
+   * Meizu and others that sell heavily into this market — and it is maintained upstream rather
+   * than by us. `hasPowerManager()` is what the UI uses to decide whether to offer this at all,
+   * so reaching here usually means there IS one.
+   */
+  try {
+    await notifee.openPowerManagerSettings();
+    return;
+  } catch {
+    // No known power manager on this device, or the activity moved — fall through.
+  }
+
   const component = AUTOSTART_COMPONENTS[family];
   if (component !== undefined) {
     try {
@@ -177,6 +266,28 @@ export async function openAutostartSettings(family: OemFamily): Promise<void> {
   }
 
   await openAppDetails();
+}
+
+/**
+ * Does this DEVICE have an OEM autostart / power manager worth sending the driver to?
+ *
+ * Asked of the device rather than inferred from the family, which is the point. The screen used to
+ * show its "Open autostart settings" button for every family except `samsung` and `generic` — so a
+ * Nothing or stock-Android handset with no such screen got no button (correct, but by luck), while
+ * a Transsion or Huawei handset that has one got none either (wrong). Notifee answers from its own
+ * table of real activities, so the button now appears exactly when there is something behind it.
+ *
+ * Fails closed: if the lookup throws, the button is hidden. A missing shortcut costs the driver
+ * one manual trip through Settings; a button that opens nothing costs their trust in the screen.
+ */
+export async function hasPowerManager(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  try {
+    const info = await notifee.getPowerManagerInfo();
+    return info.activity !== null && info.activity !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 /**

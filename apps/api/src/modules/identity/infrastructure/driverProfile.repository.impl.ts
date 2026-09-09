@@ -14,7 +14,7 @@ import type {
   LiveDriverRecord,
   LiveDriverFilter,
 } from '../domain/driverProfile.repository.port.js';
-import { DriverModel } from './driver.model.js';
+import { DriverModel, type DriverDoc } from './driver.model.js';
 
 interface RawDriver {
   _id: mongoose.Types.ObjectId;
@@ -107,7 +107,10 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
   }
 
   async findPaginated(filter: DriverListFilter, page: number, limit: number): Promise<PaginatedDrivers> {
-    const query: mongoose.FilterQuery<any> = {};
+    // Typed against the document, not `any`: `strictQuery` is on (see shared/db/mongo.ts), so a
+    // filter naming a field the schema does not have throws at runtime. Catching that here is the
+    // whole point — an `any` filter turns a typo into a query that silently matches everything.
+    const query: mongoose.FilterQuery<DriverDoc> = {};
 
     if (filter.onboardingStatus !== undefined) {
       query.onboardingStatus = filter.onboardingStatus;
@@ -252,7 +255,7 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
   async setBlockedStatus(driverId: string, isBlocked: boolean, reason: string | null): Promise<DriverProfile | undefined> {
     if (!mongoose.Types.ObjectId.isValid(driverId)) return undefined;
 
-    const setPayload: Record<string, any> = {
+    const setPayload: mongoose.UpdateQuery<DriverDoc> = {
       isBlocked,
       blockedReason: isBlocked ? (reason ?? null) : null,
     };

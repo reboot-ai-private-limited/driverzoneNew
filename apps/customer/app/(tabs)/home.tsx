@@ -6,6 +6,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -227,6 +228,11 @@ export default function HomeScreen(): ReactElement {
    * receipt with no live status, no cancel bar and, worst of all, no `start_otp`. A customer
    * whose app restarted at the pickup could not get to the four digits their driver was standing
    * there waiting for.
+   *
+   * THE ANSWER IS THE RESUME BANNER, not a redirect. This read is what makes the banner possible;
+   * the banner is what makes the trip reachable. Restoring an automatic navigation here would fix
+   * nothing this does not already fix, and would take the screen away from a customer who opened
+   * the app to do something else.
    */
   const activeBooking = useQuery({
     queryKey: keys.bookings.current(),
@@ -235,22 +241,19 @@ export default function HomeScreen(): ReactElement {
 
   const live = activeBooking.data?.booking ?? null;
 
-  /**
-   * Land the customer on their live booking ONCE per app launch, then never again.
+  /*
+   * NOTHING NAVIGATES AUTOMATICALLY. A live booking is announced by the banner below and reached
+   * by tapping it — never by moving the customer somewhere they did not ask to go.
    *
-   * The ref is the whole design. Redirecting whenever `live` is non-null would make Home
-   * unusable: a customer who deliberately backs out of a trip to look at the map — to book a
-   * second car, or just to look — would be thrown straight back, with no way to stay. So the
-   * automatic route fires on the first resolve after launch, and every visit after that is the
-   * banner's job, which invites rather than forces.
+   * There used to be a launch-time redirect here, fired once per app launch. Even once is once too
+   * many: a customer opening the app to book a second car, check a fare, or look at the map got
+   * thrown onto the trip screen before they could touch anything, and the only way back was the
+   * back gesture. An app that overrides where you were heading feels broken even when the
+   * destination is somewhere you would have chosen.
+   *
+   * `apps/driver` never did this — its home screen has only the equivalent banner — so removing it
+   * also settles a difference between the two apps that had no reason to exist.
    */
-  const recovered = useRef(false);
-  useEffect(() => {
-    if (recovered.current || live === null) return;
-    recovered.current = true;
-    // SEARCHING has a screen of its own — the wait for a driver is not the trip screen's job.
-    router.push(live.status === 'SEARCHING' ? `/searching/${live.id}` : `/trip/${live.id}`);
-  }, [live]);
 
   /*
    * Re-read whenever Home regains focus, so a trip that ended elsewhere stops offering to be
@@ -322,6 +325,8 @@ export default function HomeScreen(): ReactElement {
     servedHere && scheduledAt !== null,
     direction,
     scheduledAt,
+    // The return leg is part of the price now — the band fare multiplies by the days it spans.
+    returnAt,
     insurance,
   );
 
@@ -394,6 +399,37 @@ export default function HomeScreen(): ReactElement {
     (direction === 'ROUND_TRIP' && returnAt === null);
 
   const canContinue = !tripIncomplete && servedHere && !noPackage && !pricing && !timesInvalid;
+
+  /**
+   * The one incomplete field customers do not spot on their own.
+   *
+   * `tripIncomplete` above treats a missing time as an ordinary unset field, and the Pickup row
+   * says "Select a time" in muted type. That reads as an instruction only if you are looking at
+   * the row — and customers were not. They had picked both points, watched Continue stay dead,
+   * and had no idea the row above it was a question rather than a label. A disabled button with
+   * no stated reason is indistinguishable from a broken one.
+   *
+   * So this names the missing field, and ONLY when it is the last thing standing in the way:
+   * both points chosen, an area we serve, a package that exists. Raised before a destination is
+   * even set it would be noise on the screen's ordinary starting state, and would be showing
+   * every customer a warning about a step they had not reached yet.
+   *
+   * `tone_warn`, not `tone_bad` — nothing has gone wrong and nothing was rejected. A red line
+   * here would be the screen complaining about something the customer has not done yet, which
+   * is the distinction the notice tones exist to hold.
+   */
+  const missingTimeOnly =
+    pickup !== null &&
+    drop !== null &&
+    servedHere &&
+    !noPackage &&
+    !timesInvalid &&
+    (scheduledAt === null || (direction === 'ROUND_TRIP' && returnAt === null));
+
+  const missingTimeMessage =
+    scheduledAt === null
+      ? 'Tap the Pickup row above to choose when the driver should arrive.'
+      : 'Tap the Return row above to choose when you are coming back.';
 
   /**
    * The two points travel as ROUTE PARAMS rather than in a store, because they are the entire
@@ -602,6 +638,13 @@ export default function HomeScreen(): ReactElement {
     // Close FIRST: the resolve is a network call, and a list left open under the customer's
     // finger invites a second tap on a row that is already being acted on.
     setSuggestOpen(false);
+    /*
+     * And put the keyboard away with it. Picking a suggestion is the END of typing — the answer
+     * has been chosen — but nothing here blurs the field, so the keyboard stayed up and covered
+     * the bottom half of the map, which is the half the pin has just moved to. The customer had
+     * to dismiss it by hand before they could see what they had picked.
+     */
+    Keyboard.dismiss();
     setSearch(suggestion.primary);
     setSearching(true);
 
@@ -631,7 +674,10 @@ export default function HomeScreen(): ReactElement {
       return;
     }
 
+    // Same reasoning as `chooseSuggestion` — this is the other way a search ends, and the map is
+    // about to move behind a keyboard that has nothing left to type into.
     setSuggestOpen(false);
+    Keyboard.dismiss();
     setSearching(true);
     const found = await forwardGeocode(search);
     setSearching(false);
@@ -862,11 +908,12 @@ export default function HomeScreen(): ReactElement {
         ) : null}
 
         {/*
-          THE SECOND WAY BACK INTO A LIVE BOOKING. The effect above already sent the customer here
-          once, automatically, on launch — this is for the visit after that: someone who backed out
-          on purpose to glance at the map, or who dismissed the auto-redirect's timing, still needs
-          a way back that does not force them there. Not shown while `picking`, which already
-          covers the whole screen with the search field.
+          THE WAY BACK INTO A LIVE BOOKING — and the only one. Nothing redirects; this invites.
+
+          It carries the status and the reference rather than just an arrow, because the customer
+          has to recognise the trip as theirs before tapping is a decision rather than a gamble.
+          Not shown while `picking`, which already covers the screen with the search field, and a
+          banner offering to leave a search the customer just started is the wrong prompt.
         */}
         {live !== null && !picking ? (
           <Animated.View
@@ -1144,12 +1191,32 @@ export default function HomeScreen(): ReactElement {
               </Animated.View>
             ) : null}
 
+            {/* Sits directly above Continue, where the customer is looking when the button does
+                not respond. See `missingTimeOnly` for why it waits until the time is the only
+                thing left. */}
+            {missingTimeOnly ? (
+              <Animated.View
+                entering={FadeIn.duration(180)}
+                exiting={FadeOut.duration(120)}
+                style={[styles.notice, styles.tone_warn]}
+                accessibilityLiveRegion="polite"
+              >
+                <Feather name="clock" size={16} color={colors.fg} style={styles.noticeIcon} />
+                <View style={styles.flex}>
+                  <Text style={styles.noticeTitle}>
+                    {scheduledAt === null ? 'Choose a pickup time' : 'Choose a return time'}
+                  </Text>
+                  <Text style={styles.noticeBody}>{missingTimeMessage}</Text>
+                </View>
+              </Animated.View>
+            ) : null}
+
             <PrimaryButton
               label="Continue"
               onPress={openFareCard}
               // Every reason it can be disabled is already spelled out directly above — the
-              // coverage notice, or the no-package notice — so the button carries no second
-              // line of explanation of its own.
+              // coverage notice, the no-package notice, or the missing-time notice — so the
+              // button carries no second line of explanation of its own.
               disabled={!canContinue}
               loading={pricing}
             />

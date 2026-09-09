@@ -37,8 +37,10 @@ export const keys = {
       drop: readonly [number, number],
       direction: string | null,
       scheduledAt: string | null,
+      /** In the key because it is in the PRICE — the band fare multiplies by the days it spans. */
+      returnAt: string | null,
       insurance: boolean,
-    ) => ['quotes', pickup, drop, direction, scheduledAt, insurance] as const,
+    ) => ['quotes', pickup, drop, direction, scheduledAt, returnAt, insurance] as const,
   },
   /**
    * The wallet balance, which the fare sheet and the wallet screen both read.

@@ -18,6 +18,7 @@ export interface QuoteDoc {
   drop: { lat: number; lng: number };
   scheduledAt: Date;
   direction?: string | null;
+  returnAt?: Date | null;
   distanceKm?: number | null;
   includedMinutes?: number | null;
   source: unknown;
@@ -40,6 +41,7 @@ const quoteSchema = new Schema<QuoteDoc>(
     drop: { type: pointSchema, required: true },
     scheduledAt: { type: Date, required: true },
     direction: { type: String, enum: [...DIRECTIONS, null], default: null },
+    returnAt: { type: Date, default: null },
     distanceKm: { type: Number, default: null },
     includedMinutes: { type: Number, default: null },
     source: { type: Schema.Types.Mixed, required: true },

@@ -27,7 +27,7 @@ import {
   useRejectDriver,
   useVerifyHillDriving,
   useReviewDocument,
-  useSuspendDriver,
+  useToggleSuspendDriver,
 } from '../hooks/useDriverDetails';
 import { DriverWalletTab } from './DriverWalletTab';
 import { DriverDutyHistoryTab } from './DriverDutyHistoryTab';
@@ -42,7 +42,7 @@ export function DriverDetailsScreen() {
   const rejectMutation = useRejectDriver(id);
   const verifyHillDrivingMutation = useVerifyHillDriving(id);
   const reviewDocumentMutation = useReviewDocument(id);
-  const suspendMutation = useSuspendDriver(id);
+  const suspendMutation = useToggleSuspendDriver();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'financials' | 'duty'>('profile');
   const [rejectReason, setRejectReason] = useState('');
@@ -91,16 +91,46 @@ export function DriverDetailsScreen() {
   const { profile, documents } = query.data;
   const dlDoc = documents.find((d) => d.doc_type === 'LICENCE');
 
+  /**
+   * Verify whatever is still pending, then approve the driver.
+   *
+   * SEVERAL WRITES, NOT ONE — so a failure partway leaves the record genuinely half-changed, and
+   * the message has to say so. It used to report any failure as "Failed to approve driver", which
+   * reads as "nothing happened" while two documents had in fact just been marked VERIFIED. An
+   * admin who believes nothing happened checks nothing.
+   *
+   * Retrying is safe and the message says so: the loop re-filters on `status === 'PENDING'`, so
+   * documents already verified are skipped on the next attempt rather than written twice.
+   */
   const handleApprove = async () => {
+    const pendingDocs = documents.filter(d => d.status === 'PENDING');
+    let verified = 0;
+
     try {
-      const pendingDocs = documents.filter(d => d.status === 'PENDING');
       for (const doc of pendingDocs) {
         await reviewDocumentMutation.mutateAsync({ docId: doc.id, data: { status: 'VERIFIED' } });
+        verified += 1;
       }
       await approveMutation.mutateAsync();
       toast.success('Driver and pending documents approved successfully');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to approve driver');
+      const cause = err instanceof Error ? err.message : 'Something went wrong';
+
+      // Every document went through and only the approve itself failed — the documents are
+      // verified and stay that way, so say that rather than implying they need redoing.
+      if (verified === pendingDocs.length) {
+        toast.error(
+          pendingDocs.length === 0
+            ? `Failed to approve driver. ${cause}`
+            : `All ${pendingDocs.length} documents were approved, but the driver was not. ${cause}`
+        );
+        return;
+      }
+
+      toast.error(
+        `Approved ${verified} of ${pendingDocs.length} documents, then stopped — the driver was not approved. ` +
+          `Try again to continue from where it left off. ${cause}`
+      );
     }
   };
 
@@ -720,6 +750,7 @@ export function DriverDetailsScreen() {
                 try {
                   const isSuspending = !profile.is_suspended;
                   await suspendMutation.mutateAsync({
+                    id,
                     is_suspended: isSuspending,
                     reason: isSuspending ? suspendReason.trim() : 'Reinstated by admin',
                   });

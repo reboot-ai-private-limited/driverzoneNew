@@ -103,6 +103,13 @@ export interface OutstationFareInput {
    * 70–100 fare — and never null, because a band that cannot sell the direction did not match.
    */
   farePaise: number;
+  /**
+   * IST calendar days the journey covers, both ends included — `1` for a same-day trip.
+   *
+   * The band fare is a DAY RATE, so this multiplies it. One-way trips and incity are always `1`:
+   * neither has a return leg for a duration to be measured against.
+   */
+  days: number;
   driverCommissionBps: number;
   pickupZone: PickupZoneFare;
   scheduledAt: Date;

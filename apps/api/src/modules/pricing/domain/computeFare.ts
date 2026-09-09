@@ -104,20 +104,38 @@ export function computeIncityFare(input: IncityFareInput, config: FareConfig): F
 }
 
 /**
- * An outstation fare is the band's flat price for the direction, plus the same shared lines.
+ * An outstation fare is the band's price for the direction, times the days, plus the shared lines.
  *
- * FLAT ACROSS THE BAND — 72 km and 98 km both pay the 70–100 fare — and flat across the whole
- * journey however many days it runs. There is no per-km term and no per-day term to add here;
- * `outstation.hours_per_day` is a policy shown to both sides and read by nothing in this file.
+ * FLAT ACROSS THE BAND — 72 km and 98 km both pay the 70–100 fare. There is still no per-km term.
+ *
+ * **THE BAND FARE IS A DAY RATE.** It used to be read as covering the whole journey however long
+ * it ran, which meant a customer could pick a return date three days out and pay a same-day price
+ * — the driver was away three days for one day's money. Multiplying is the decision that replaced
+ * it: a three-day round trip is three times the band fare.
+ *
+ * `days` is `1` for a same-day return and for every one-way trip, so this multiplication leaves
+ * every fare that existed before it exactly where it was.
+ *
+ * THE DAY COUNT IS IN THE LABEL, and that is not decoration. A customer who expected ₹4,500 and is
+ * shown ₹13,500 needs the line itself to say why; a tripled number under an unchanged label is a
+ * support call. The same label is what the driver's trip card renders out of the fare snapshot, so
+ * it is also how the driver learns they are accepting three days rather than one.
+ *
+ * `outstation.hours_per_day` is still a policy shown to both sides and read by nothing here.
  */
 export function computeOutstationFare(
   input: OutstationFareInput,
   config: FareConfig,
 ): FareBreakdown {
-  const label = input.direction === 'ROUND_TRIP' ? 'Return journey' : 'One way';
+  const direction = input.direction === 'ROUND_TRIP' ? 'Return journey' : 'One way';
+  const label =
+    input.days > 1
+      ? `${input.packageName} — ${direction} × ${String(input.days)} days`
+      : `${input.packageName} — ${direction}`;
+
   return assemble(
     'OUTSTATION',
-    { code: 'BASE', label: `${input.packageName} — ${label}`, amountPaise: input.farePaise },
+    { code: 'BASE', label, amountPaise: input.farePaise * input.days },
     input,
     config,
   );

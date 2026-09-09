@@ -26,7 +26,7 @@ export { splitFare, assertFareReconciles } from './domain/splitFare.js';
 
 export { surchargeFor } from './domain/surcharge.js';
 
-export { inWindow, istWallClockMinutes } from './domain/istClock.js';
+export { inWindow, istCalendarDaysInclusive, istWallClockMinutes } from './domain/istClock.js';
 
 export {
   computeWaitingCharge,

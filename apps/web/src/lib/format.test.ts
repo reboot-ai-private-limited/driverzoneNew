@@ -6,6 +6,7 @@ import {
   formatMobile,
   formatPaise,
   formatTime,
+  istDateKey,
 } from './format';
 
 describe('timestamps render in Asia/Kolkata, not the browser zone', () => {
@@ -20,6 +21,26 @@ describe('timestamps render in Asia/Kolkata, not the browser zone', () => {
 
   it('renders the IST wall clock', () => {
     expect(formatTime(lateUtc)).toMatch(/12:15\s*am/i);
+  });
+});
+
+describe('istDateKey names the IST day, not the UTC one', () => {
+  // The dashboard's "today" filters are built from this, so the failure it guards against is a
+  // bookings tile that reads zero every night between IST midnight and 05:30 and then jumps —
+  // which looks like the API is down rather than like a timezone bug.
+  it('rolls over at IST midnight, not UTC midnight', () => {
+    // 18:45 UTC on the 18th is already 00:15 on the 19th in IST.
+    expect(istDateKey(new Date('2026-05-18T18:45:00Z'))).toBe('2026-05-19');
+  });
+
+  it('still names the earlier day just before that boundary', () => {
+    // 18:15 UTC is 23:45 IST — the same calendar day, and the case a naive UTC slice gets right
+    // by accident. Both directions are asserted so the fix cannot be "always add a day".
+    expect(istDateKey(new Date('2026-05-18T18:15:00Z'))).toBe('2026-05-18');
+  });
+
+  it('formats as YYYY-MM-DD, which is what the API filters take', () => {
+    expect(istDateKey(new Date('2026-01-05T06:00:00Z'))).toBe('2026-01-05');
   });
 });
 

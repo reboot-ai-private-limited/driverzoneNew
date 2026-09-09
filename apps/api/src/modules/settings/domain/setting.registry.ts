@@ -146,10 +146,11 @@ export const SETTING_REGISTRY = {
   },
 
   // ─── Outstation duty policy ────────────────────────────────────────────────────────────────
-  // DISPLAY ONLY. Nothing reads this to price, gate or end a trip: an outstation package is one
-  // flat fare for the whole journey however many days it runs, so a per-day figure has nothing
-  // to attach to. It exists so the fare card and the driver's trip card can state the policy
-  // both sides are agreeing to. If it ever acquires a fare consequence, that is a new decision.
+  // STILL DISPLAY ONLY. Nothing reads this to price, gate or end a trip. Note that the sentence
+  // this comment used to carry — "one flat fare for the whole journey however many days it runs"
+  // — is no longer true: the band fare is a day rate and `computeOutstationFare` multiplies it.
+  // What has not changed is that the HOURS figure has no fare consequence; it states the policy
+  // both sides are agreeing to and nothing enforces it.
   'outstation.hours_per_day': {
     schema: hours,
     default: 10,
@@ -159,6 +160,28 @@ export const SETTING_REGISTRY = {
     audiences: ['ADMIN', 'CUSTOMER', 'DRIVER'],
     description:
       'The daily driving hours an outstation booking is sold on. Shown to both sides; nothing enforces it.',
+  },
+
+  /*
+   * THE CEILING ON A MULTIPLIED FARE, and the reason it exists is arithmetic rather than policy.
+   *
+   * The band fare is multiplied by the days between pickup and return, and `apps/customer` lets a
+   * customer pick a return date up to thirty days out. With no cap, one mis-tapped date is a
+   * thirty-times fare — quoted, charged, and dispatched to a driver expecting a month away.
+   *
+   * A quote past this is REFUSED, never clamped. Clamping would charge fifteen days and still send
+   * the driver away for thirty, which is the same bug pointed at the driver instead of the
+   * customer. Longer trips are a conversation with ops, not a silent discount.
+   */
+  'outstation.max_trip_days': {
+    schema: count,
+    default: 15,
+    group: 'PRICING',
+    label: 'Maximum outstation trip days',
+    unit: 'DAYS',
+    audiences: ['ADMIN'],
+    description:
+      'The longest round trip that can be quoted. The band fare is multiplied by the days, so this bounds what one booking can charge.',
   },
 
   // ─── Waiting / customer late fee ───────────────────────────────────────────────────────────

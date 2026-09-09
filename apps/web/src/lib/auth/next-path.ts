@@ -10,16 +10,16 @@
  * The screen an admin lands on with no more specific destination: after login, after a 404,
  * and from `/` itself — app/page.tsx redirects here rather than naming a route of its own.
  *
- * ONE constant, imported by all three, because the answer changes. Zones is only the landing
- * screen because it is the only one with a working API; when the dashboard in
- * docs/LLD/admin-panel.md exists, this line is the change, and login, the 404 and `/` all
- * follow. Three copies of `/zones` is how two of them get left behind.
+ * ONE constant, imported by all three, because the answer changes. It was `/zones` for as long as
+ * zones was the only screen with a working API; the dashboard in docs/LLD/admin-panel.md now
+ * exists, so this is that line changing, exactly as this comment predicted. Login, the 404 and `/`
+ * all follow it. Three copies of the path is how two of them get left behind.
  *
  * Pointing this at `/` instead would have been the tidier-looking inversion and is wrong:
  * `redirect()` inside a prerendered page degrades to a one-second `<meta refresh>` on a hard
  * load, so every post-login navigation would pay for a hop that resolves to this value anyway.
  */
-export const LANDING_PATH = '/zones';
+export const LANDING_PATH = '/dashboard';
 
 /**
  * Tab, newline, carriage return and friends. See the note in `safeNextPath`.

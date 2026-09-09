@@ -102,7 +102,17 @@ export default function PhoneScreen(): ReactElement {
               keyboardType="phone-pad"
               autoComplete="tel"
               textContentType="telephoneNumber"
-              maxLength={10}
+              /*
+               * ROOM FOR A COUNTRY CODE THAT IS ABOUT TO BE STRIPPED, not for a longer number.
+               * `normaliseInput` returns at most ten digits and `value` is bound to its result, so
+               * the field can never actually display more than that.
+               *
+               * At 10 this silently broke: a driver typing `919876543210` had the input capped
+               * before `normaliseInput` could see the `91` to remove, leaving `9198765432` — ten
+               * digits, valid-looking, and the wrong person's number. The cap has to sit above
+               * the longest thing someone might paste, not at the length of the answer.
+               */
+              maxLength={16}
               style={styles.input}
               returnKeyType="go"
               onSubmitEditing={handleContinue}
@@ -125,15 +135,9 @@ export default function PhoneScreen(): ReactElement {
             />
           </View>
 
-          {/* Pushes the assurances and the legal line to the foot of a tall screen and collapses
-              on a short one, so they never float mid-screen. */}
+          {/* Pushes the legal line to the foot of a tall screen and collapses on a short one, so
+              it never floats mid-screen. */}
           <View style={styles.spacer} />
-
-          <View style={styles.assurances}>
-            <Assurance icon="dollar-sign" title="Fixed earnings" />
-            <Assurance icon="map-pin" title="Local trips" />
-            <Assurance icon="clock" title="Work your hours" />
-          </View>
 
           <Text style={styles.legal}>
             By continuing, you agree to our{' '}
@@ -142,23 +146,6 @@ export default function PhoneScreen(): ReactElement {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
-  );
-}
-
-function Assurance({
-  icon,
-  title,
-}: {
-  icon: 'dollar-sign' | 'map-pin' | 'clock';
-  title: string;
-}): ReactElement {
-  return (
-    <View style={styles.assurance}>
-      <View style={styles.assuranceIcon}>
-        <Feather name={icon} size={20} color={colors.fg} />
-      </View>
-      <Text style={styles.assuranceTitle}>{title}</Text>
     </View>
   );
 }
@@ -218,19 +205,6 @@ const styles = StyleSheet.create({
   buttonBlock: { marginTop: space.lg },
 
   spacer: { flex: 1, minHeight: space.xl },
-  assurances: { flexDirection: 'row', marginBottom: space.lg },
-  assurance: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
-  assuranceIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: space.sm,
-  },
-  assuranceTitle: { ...text.label, color: colors.fg, textAlign: 'center' },
-
   legal: { ...text.caption, color: colors.muted, textAlign: 'center', marginBottom: space.lg },
   legalLink: { color: colors.link },
 });

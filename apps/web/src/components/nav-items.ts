@@ -1,13 +1,10 @@
 import {
-  BarChart3,
   Building2,
   CalendarClock,
   Coins,
   LayoutDashboard,
   type LucideIcon,
-  Map,
   Package,
-  ScrollText,
   Settings,
   Users,
   UserCog,
@@ -29,11 +26,13 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard, comingSoon: true },
+  // Enabled: the screen is built. Every tile reads an endpoint that already exists — the admin
+  // booking, driver, review and finance lists all return a total for the filter they were given,
+  // so the counts needed no `/dashboard/summary` of their own.
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   // Enabled: the screen is built and `GET /admin/bookings` exists in `apps/api`, alongside the
   // single-booking read and the event timeline the detail view uses.
   { label: 'Bookings', href: '/bookings', icon: CalendarClock },
-  { label: 'Dispatch', href: '/dispatch', icon: Map, comingSoon: true },
   { label: 'Drivers', href: '/drivers', icon: Users },
   // Enabled: the screen is built. Its API (`GET/PATCH /admin/customers`) is not in `apps/api`
   // yet, so it renders its error state until those routes exist — see
@@ -48,8 +47,6 @@ export const NAV_ITEMS: NavItem[] = [
   // customer-wallets}` exist in `apps/api` (the tier-8 `admin` module), as does the settlement
   // POST. Payout batching is a separate project and is deliberately not behind this item.
   { label: 'Finance', href: '/finance', icon: Coins },
-  { label: 'Reports', href: '/reports', icon: BarChart3, comingSoon: true },
-  { label: 'Audit Log', href: '/audit', icon: ScrollText, comingSoon: true },
   // Enabled: the screen is built and `GET/PATCH /admin/settings` exists in `apps/api`.
   { label: 'Settings', href: '/settings', icon: Settings },
 ];

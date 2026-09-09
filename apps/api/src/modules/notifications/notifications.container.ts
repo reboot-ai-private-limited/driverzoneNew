@@ -1,7 +1,9 @@
 import { env } from '@/config/env.js';
 import { logger } from '@/shared/logging/logger.js';
-import { MongoCustomerDeviceRepository } from '../identity/infrastructure/customerDevice.repository.impl.js';
-import { MongoDriverDeviceRepository } from '../identity/infrastructure/driverDevice.repository.impl.js';
+import type {
+  CustomerDeviceRepositoryPort,
+  DriverDeviceRepositoryPort,
+} from '../identity/identity.public.js';
 import type { NotificationsPublicContract } from './notifications.public.js';
 import { MockPushSender } from './infrastructure/mock.pushSender.js';
 import { FcmPushSender, createFcmMessaging } from './infrastructure/fcm.pushSender.js';
@@ -29,7 +31,19 @@ export interface NotificationsContainer {
  * and a typo'd path should not take the server down. The `NONE` delivery channel is what makes
  * the degradation visible afterwards.
  */
-export function buildNotificationsContainer(): NotificationsContainer {
+/**
+ * The device registries, injected rather than constructed.
+ *
+ * They belong to `identity` — that is where a handset is registered on sign-in and dropped on
+ * sign-out. This module only needs somewhere to *send*, so it takes the ports and never learns
+ * where a token is stored.
+ */
+export interface NotificationsDeps {
+  driverDevices: DriverDeviceRepositoryPort;
+  customerDevices: CustomerDeviceRepositoryPort;
+}
+
+export function buildNotificationsContainer(deps: NotificationsDeps): NotificationsContainer {
   const mock = new MockPushSender();
 
   const path = env.FCM_SERVICE_ACCOUNT_PATH;
@@ -54,11 +68,7 @@ export function buildNotificationsContainer(): NotificationsContainer {
     };
   }
 
-  const sender = new FcmPushSender(
-    new MongoDriverDeviceRepository(),
-    messaging,
-    new MongoCustomerDeviceRepository(),
-  );
+  const sender = new FcmPushSender(deps.driverDevices, messaging, deps.customerDevices);
   logger.info('notifications: FCM push sender active');
 
   return {

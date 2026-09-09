@@ -166,3 +166,20 @@ export type IdentityPublicContract = CustomerBookingProfileContract &
   CustomerContactContract &
   RatingCacheContract &
   DriverStatsContract;
+
+/**
+ * Where a person's handsets are reachable — published because `notifications` sends to them.
+ *
+ * NOT part of `IdentityPublicContract`, and the distinction is the point. The contract above is
+ * what a module may *ask identity to do*; these two are ports identity IMPLEMENTS and hands out,
+ * so that `notifications` can be given a way to reach a device without learning that devices live
+ * in Mongo — or that they belong to identity's collections at all.
+ *
+ * The repositories themselves are built once in `identity.container.ts` and threaded through the
+ * composition root, the same way every other cross-module dependency is. `notifications`
+ * constructing its own `MongoDriverDeviceRepository` is what this replaces: it reached across a
+ * module boundary into an infrastructure class, and quietly produced a second instance of a
+ * repository identity had already built.
+ */
+export type { DriverDeviceRepositoryPort } from './domain/driverDevice.repository.port.js';
+export type { CustomerDeviceRepositoryPort } from './domain/customerDevice.repository.port.js';

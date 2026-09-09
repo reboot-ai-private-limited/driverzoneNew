@@ -73,6 +73,15 @@ export function useTripQuote(
    * surcharge window the trip falls in, and is therefore part of the price.
    */
   scheduledAt: Date | null = null,
+  /**
+   * The return instant for an outstation round trip, or null.
+   *
+   * A PRICE INPUT, not a note. The band fare is a day rate and the server multiplies it by the
+   * IST calendar days this spans — which is why it is in the query key below. This used to be
+   * held on the screen and never sent — see the note where `RETURN_IS_LOCAL_ONLY` used to be — so
+   * a customer could pick a return three days out and be quoted a same-day price.
+   */
+  returnAt: Date | null = null,
   /** On by default, matching the server's own default — see `CreateQuoteRequest.insurance`. */
   insurance = true,
 ): TripQuote {
@@ -88,6 +97,9 @@ export function useTripQuote(
    */
   const isDefaultDirection = direction === 'ONE_WAY';
   const scheduledIso = scheduledAt === null ? null : scheduledAt.toISOString();
+  // Only a round trip has a return leg; sending one on a one-way would be ignored anyway, and
+  // keeping it out of the key stops the two tabs from having separate cache entries for it.
+  const returnIso = direction === 'ROUND_TRIP' && returnAt !== null ? returnAt.toISOString() : null;
 
   const query = useQuery({
     queryKey: keys.quotes.forTrip(
@@ -95,6 +107,7 @@ export function useTripQuote(
       [round(drop?.lat ?? 0), round(drop?.lng ?? 0)],
       isDefaultDirection ? null : direction,
       scheduledIso,
+      returnIso,
       insurance,
     ),
     queryFn: () => {
@@ -106,6 +119,7 @@ export function useTripQuote(
         drop: { lat: drop.lat, lng: drop.lng },
         ...(isDefaultDirection ? {} : { direction }),
         ...(scheduledIso === null ? {} : { scheduledAt: scheduledIso }),
+        ...(returnIso === null ? {} : { returnAt: returnIso }),
         // Sent explicitly either way: `true` is the server's own default too, but sending it
         // keeps this call legible next to the key above rather than relying on both sides
         // agreeing on an omitted meaning.

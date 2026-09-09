@@ -22,6 +22,19 @@ export interface CreateQuoteRequest {
   /** Outstation only, ignored for incity. Defaults to ONE_WAY. */
   direction?: Direction | undefined;
   /**
+   * ISO 8601. When the customer comes back — OUTSTATION ROUND TRIPS ONLY, ignored everywhere else.
+   *
+   * THE BAND FARE IS A DAY RATE, so this is a price input rather than a note. The server counts
+   * IST calendar days from `scheduledAt` to here, both ends included, and multiplies. Omit it, or
+   * return the same day, and the fare is the single-day one every quote produced before this
+   * field existed.
+   *
+   * Must be after `scheduledAt`. There is a ceiling on the span — `outstation.max_trip_days` — and
+   * a quote past it is refused rather than clamped, because clamping would charge for fewer days
+   * than the driver is actually away.
+   */
+  returnAt?: string | undefined;
+  /**
    * Whether the INSURANCE line is priced into this trip. Omit for `true` — the charge stays on
    * by default, matching every quote before this field existed; pass `false` to opt out. Applies
    * to both incity and outstation, and every option in the resulting fare card agrees, since one

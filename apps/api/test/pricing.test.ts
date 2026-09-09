@@ -8,6 +8,7 @@ import {
   computeOutstationFare,
   computeWaitingCharge,
   inWindow,
+  istCalendarDaysInclusive,
   istWallClockMinutes,
   splitFare,
   surchargeFor,
@@ -61,6 +62,38 @@ describe('istWallClockMinutes', () => {
   it('wraps rather than going negative for a UTC instant before 18:30 the previous day', () => {
     // 02:00 IST is 20:30 UTC on the PREVIOUS calendar day — the case a naive `%` gets wrong.
     expect(istWallClockMinutes(ist(2, 0))).toBe(120);
+  });
+});
+
+describe('istCalendarDaysInclusive', () => {
+  // Days multiply an outstation fare, so an off-by-one here is an off-by-one on somebody's money.
+  const at = (iso: string): Date => new Date(iso);
+
+  it('counts a same-day return as one', () => {
+    // The property that keeps every pre-existing fare where it was.
+    expect(istCalendarDaysInclusive(at('2026-05-18T04:00:00Z'), at('2026-05-18T12:00:00Z'))).toBe(1);
+  });
+
+  it('counts calendar days, not elapsed time', () => {
+    // 23:00 IST on the 18th to 01:00 IST on the 19th is two hours of clock and two days of the
+    // driver's life. Dividing the gap by 86,400,000 would call it one and halve the fare.
+    expect(istCalendarDaysInclusive(at('2026-05-18T17:30:00Z'), at('2026-05-18T19:30:00Z'))).toBe(2);
+  });
+
+  it('reads the boundary in IST, not UTC', () => {
+    // Both instants are the 19th in India — 00:30 and 11:30 IST — though the first is still the
+    // 18th in UTC. Flooring the raw UTC instants would say two days and overcharge by half.
+    expect(istCalendarDaysInclusive(at('2026-05-18T19:00:00Z'), at('2026-05-19T06:00:00Z'))).toBe(1);
+  });
+
+  it('counts a three-day trip as three', () => {
+    expect(istCalendarDaysInclusive(at('2026-05-18T04:00:00Z'), at('2026-05-20T12:00:00Z'))).toBe(3);
+  });
+
+  it('never returns less than one, however the inputs are ordered', () => {
+    // The validator refuses a return before the pickup; if one arrives anyway it must not produce
+    // a zero or negative multiplier on a fare.
+    expect(istCalendarDaysInclusive(at('2026-05-20T04:00:00Z'), at('2026-05-18T04:00:00Z'))).toBe(1);
   });
 });
 
@@ -183,6 +216,7 @@ describe('computeOutstationFare', () => {
     terrain: 'HILL' as const,
     direction: 'ONE_WAY' as const,
     farePaise: 450_000,
+    days: 1,
     driverCommissionBps: 7_000,
     pickupZone: freeZone,
     scheduledAt: ist(9, 0),
@@ -206,6 +240,51 @@ describe('computeOutstationFare', () => {
     );
     expect(fare.lines[0]?.amountPaise).toBe(700_000);
     expect(fare.lines[0]?.label).toBe('PKG-3 — Return journey');
+  });
+
+  /*
+   * The band fare is a DAY RATE. These are the tests that pin that decision — before it, a
+   * customer could pick a return three days out and pay the same-day price.
+   */
+  it('leaves a single-day trip at exactly the band fare', () => {
+    // THE BACKWARD-COMPATIBILITY PROPERTY. Every fare that existed before multiplying was
+    // introduced must be untouched by it, and `days: 1` is what guarantees that.
+    const fare = computeOutstationFare({ ...input, days: 1 }, config);
+    expect(fare.lines[0]?.amountPaise).toBe(450_000);
+    expect(fare.lines[0]?.label).toBe('PKG-3 — One way');
+  });
+
+  it('multiplies the band fare by the days and says so on the line', () => {
+    const fare = computeOutstationFare(
+      { ...input, direction: 'ROUND_TRIP', farePaise: 700_000, days: 3 },
+      config,
+    );
+    expect(fare.lines[0]?.amountPaise).toBe(2_100_000);
+    // The count is in the label because a tripled number with an unchanged label is a support call.
+    expect(fare.lines[0]?.label).toBe('PKG-3 — Return journey × 3 days');
+  });
+
+  it('multiplies only the base — the shared lines are not per-day', () => {
+    const oneDay = computeOutstationFare({ ...input, direction: 'ROUND_TRIP' }, config);
+    const threeDay = computeOutstationFare(
+      { ...input, direction: 'ROUND_TRIP', days: 3 },
+      config,
+    );
+
+    // A pickup charge, insurance and the surcharge are properties of the trip, not of each day.
+    for (const code of ['PICKUP', 'INSURANCE'] as const) {
+      expect(threeDay.lines.find((l) => l.code === code)?.amountPaise).toBe(
+        oneDay.lines.find((l) => l.code === code)?.amountPaise,
+      );
+    }
+  });
+
+  it('splits the multiplied fare, so extra days are commissionable too', () => {
+    const fare = computeOutstationFare({ ...input, direction: 'ROUND_TRIP', days: 2 }, config);
+    // Whatever the split is, it has to reconcile against the doubled subtotal rather than a
+    // single day's — the whole amount is commissionable.
+    expect(fare.split.driverPaise + fare.split.companyPaise).toBe(fare.split.commissionablePaise);
+    expect(fare.lines[0]?.amountPaise).toBe(900_000);
   });
 
   it('applies the surcharge on the pickup instant, never on the journey length', () => {

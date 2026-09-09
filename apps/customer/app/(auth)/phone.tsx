@@ -136,15 +136,9 @@ export default function PhoneScreen(): ReactElement {
             />
           </View>
 
-          {/* Pushes the assurances and the legal line to the foot of the screen on a tall
-              device and collapses on a short one, so they never float mid-screen. */}
+          {/* Pushes the legal line to the foot of the screen on a tall device and collapses on a
+              short one, so it never floats mid-screen. */}
           <View style={styles.spacer} />
-
-          <View style={styles.assurances}>
-            <Assurance icon="shield" title={'Safe & Secure'} />
-            <Assurance icon="thumbs-up" title="Easy Booking" />
-            <Assurance icon="clock" title="24/7 Support" />
-          </View>
 
           <Text style={styles.legal}>
             By continuing, you agree to our{' '}
@@ -153,23 +147,6 @@ export default function PhoneScreen(): ReactElement {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
-  );
-}
-
-function Assurance({
-  icon,
-  title,
-}: {
-  icon: 'shield' | 'thumbs-up' | 'clock';
-  title: string;
-}): ReactElement {
-  return (
-    <View style={styles.assurance}>
-      <View style={styles.assuranceIcon}>
-        <Feather name={icon} size={20} color={colors.fg} />
-      </View>
-      <Text style={styles.assuranceTitle}>{title}</Text>
     </View>
   );
 }
@@ -221,18 +198,6 @@ const styles = StyleSheet.create({
   buttonBlock: { marginTop: space.lg },
 
   spacer: { flex: 1, minHeight: space.xl },
-  assurances: { flexDirection: 'row', marginBottom: space.lg },
-  assurance: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
-  assuranceIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: space.sm,
-  },
-  assuranceTitle: { ...text.label, color: colors.fg, textAlign: 'center' },
 
   legal: {
     ...text.caption,

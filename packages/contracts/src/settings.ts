@@ -24,6 +24,7 @@ export const SETTING_UNITS = [
   'MINUTES',
   'SECONDS',
   'HOURS',
+  'DAYS',
   'COUNT',
   'METRES',
   'BPS',

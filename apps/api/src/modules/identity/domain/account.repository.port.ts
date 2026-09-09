@@ -16,6 +16,8 @@ export interface Account {
   mobileNumber: string;
   /** Null until filled in — customer and driver profiles complete progressively. */
   fullName: string | null;
+  /** Whether the account is suspended/deactivated. */
+  isBlocked: boolean;
 }
 
 export interface AccountRepositoryPort {

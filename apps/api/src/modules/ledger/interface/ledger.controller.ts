@@ -1,12 +1,25 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
-import { TRANSACTION_TYPES } from '@driverzone/contracts';
+import {
+  TRANSACTION_TYPES,
+  type AdminAdjustDriverWalletResponse,
+  type AdminCreatePayoutResponse,
+  type AdminListPayoutsResponse,
+} from '@driverzone/contracts';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { isoDaySchema, istDayStart, istNextDayStart } from '../../../shared/http/istDay.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import type { GetDriverWalletUseCase } from '../application/useCases/getDriverWallet.usecase.js';
+import type { AdjustDriverWalletUseCase } from '../application/useCases/adjustDriverWallet.usecase.js';
+import type { ProcessPayoutUseCase } from '../application/useCases/processPayout.usecase.js';
+import type { ListPayoutsUseCase } from '../application/useCases/listPayouts.usecase.js';
 import type { LedgerQuery } from '../domain/ledgerRepository.port.js';
-import { toWalletDto } from './ledger.mapper.js';
+import { toWalletDto, toEntryDto, toPayoutDto } from './ledger.mapper.js';
+import {
+  adjustDriverWalletSchema,
+  createPayoutSchema,
+  payoutQuerySchema,
+} from './ledger.validation.js';
 
 const walletQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -29,19 +42,23 @@ const walletQuerySchema = z.object({
     .pipe(z.array(z.enum(TRANSACTION_TYPES)).min(1).optional()),
   from: isoDaySchema.optional(),
   to: isoDaySchema.optional(),
+  from_date: isoDaySchema.optional(),
+  to_date: isoDaySchema.optional(),
 });
 
 /** Turns the parsed query into the repository's shape: an inclusive `to` day becomes exclusive. */
 function toLedgerQuery(parsed: z.infer<typeof walletQuerySchema>): LedgerQuery | undefined {
-  if (parsed.type === undefined && parsed.from === undefined && parsed.to === undefined) {
+  const from = parsed.from ?? parsed.from_date;
+  const to = parsed.to ?? parsed.to_date;
+  if (parsed.type === undefined && from === undefined && to === undefined) {
     return undefined;
   }
 
   return {
     ...(parsed.type === undefined ? {} : { types: parsed.type }),
-    ...(parsed.from === undefined ? {} : { from: istDayStart(parsed.from) }),
+    ...(from === undefined ? {} : { from: istDayStart(from) }),
     // The day AFTER the one named, so `to=2026-09-04` includes everything that happened on the 4th.
-    ...(parsed.to === undefined ? {} : { to: istNextDayStart(parsed.to) }),
+    ...(to === undefined ? {} : { to: istNextDayStart(to) }),
   };
 }
 
@@ -64,6 +81,93 @@ export function makeDriverWalletController(useCase: GetDriverWalletUseCase): Req
     const wallet = await useCase.execute(id, page, limit, toLedgerQuery(parsed));
 
     sendSuccess(req, res, toWalletDto(id, wallet, page, limit), 'Driver wallet retrieved');
+  });
+}
+
+/**
+ * `POST /admin/drivers/:id/wallet/adjustment`
+ *
+ * Appends an ADJUSTMENT, PENALTY, or BONUS entry to the driver's ledger and returns
+ * the created entry along with the driver's new balance.
+ */
+export function makeAdjustDriverWalletController(useCase: AdjustDriverWalletUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = driverIdParamSchema.parse(req.params);
+    const body = adjustDriverWalletSchema.parse(req.body);
+
+    const { entry, newBalancePaise } = await useCase.execute({
+      driverId: id,
+      type: body.type,
+      amountPaise: body.amount_paise,
+      note: body.note,
+    });
+
+    const response: AdminAdjustDriverWalletResponse = {
+      entry: toEntryDto(id, entry, newBalancePaise),
+      new_balance_paise: newBalancePaise,
+    };
+
+    sendSuccess(req, res, response, 'Wallet balance adjusted', 201);
+  });
+}
+
+/**
+ * `POST /admin/payouts`
+ *
+ * Disburses a settlement to a driver, creating a Payout record and debiting the driver's ledger with PAYOUT.
+ */
+export function makeCreatePayoutController(useCase: ProcessPayoutUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const body = createPayoutSchema.parse(req.body);
+
+    const { payout, ledgerEntry, newBalancePaise } = await useCase.execute({
+      driverId: body.driver_id,
+      amountPaise: body.amount_paise,
+      utr: body.utr,
+      notes: body.notes,
+    });
+
+    const response: AdminCreatePayoutResponse = {
+      payout: toPayoutDto(payout),
+      ledger_entry: toEntryDto(body.driver_id, ledgerEntry, newBalancePaise),
+      new_balance_paise: newBalancePaise,
+    };
+
+    sendSuccess(req, res, response, 'Payout processed successfully', 201);
+  });
+}
+
+/**
+ * `GET /admin/payouts`
+ *
+ * Lists driver payouts with pagination and optional filtering by driver_id, status, and date range.
+ */
+export function makeListPayoutsController(useCase: ListPayoutsUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const query = payoutQuerySchema.parse(req.query);
+
+    const result = await useCase.execute(
+      {
+        driverId: query.driver_id,
+        status: query.status,
+        fromDate: query.from_date,
+        toDate: query.to_date,
+      },
+      query.page,
+      query.limit,
+    );
+
+    const response: AdminListPayoutsResponse = {
+      payouts: result.payouts.map(toPayoutDto),
+      pagination: {
+        page: result.page,
+        limit: result.limit,
+        total_items: result.totalItems,
+        total_pages: result.totalPages,
+      },
+    };
+
+    sendSuccess(req, res, response, 'Payouts retrieved successfully');
   });
 }
 

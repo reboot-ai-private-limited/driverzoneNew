@@ -15,12 +15,17 @@ import { DriverModel } from './driver.model.js';
 export class MongoAccountRepository implements AccountRepositoryPort {
   async findByPhone(role: Role, phone: string): Promise<Account | undefined> {
     if (role === 'ADMIN') {
-      // `isActive: false` reads as "no such account" rather than a distinct error — a
-      // deactivated admin must not be able to tell the difference from outside.
+      // For Admin, isActive: true means not blocked. However, since we return undefined
+      // if not found or inactive, an admin account returned from here is always not blocked.
       const admin = await AdminUserModel.findOne({ phone, isActive: true }).lean().exec();
       return admin === null
         ? undefined
-        : { id: String(admin._id), mobileNumber: admin.phone, fullName: admin.fullName };
+        : {
+            id: String(admin._id),
+            mobileNumber: admin.phone,
+            fullName: admin.fullName,
+            isBlocked: false
+          };
     }
 
     /**
@@ -37,7 +42,12 @@ export class MongoAccountRepository implements AccountRepositoryPort {
 
     return doc === null
       ? undefined
-      : { id: String(doc._id), mobileNumber: doc.phone, fullName: doc.fullName ?? null };
+      : {
+          id: String(doc._id),
+          mobileNumber: doc.phone,
+          fullName: doc.fullName ?? null,
+          isBlocked: doc.isBlocked ?? false
+        };
   }
 
   async create(role: Role, phone: string): Promise<Account> {
@@ -59,6 +69,6 @@ export class MongoAccountRepository implements AccountRepositoryPort {
         ? await CustomerModel.create({ phone })
         : await DriverModel.create({ phone });
 
-    return { id: String(created._id), mobileNumber: created.phone, fullName: null };
+    return { id: String(created._id), mobileNumber: created.phone, fullName: null, isBlocked: false };
   }
 }

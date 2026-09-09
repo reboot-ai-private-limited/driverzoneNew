@@ -23,6 +23,7 @@ export * from './ui/Badge';
 export * from './ui/Button';
 export * from './ui/DataState';
 export * from './ui/DataTable';
+export * from './ui/DateFilter';
 export * from './ui/Dialog';
 export * from './ui/DropdownMenu';
 export * from './ui/EmptyState';

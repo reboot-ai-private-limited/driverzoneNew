@@ -202,10 +202,19 @@ export const requestDocumentUploadSchema = z.object({
 export const updateAdminProfileSchema = z.object({
   full_name: personName.optional(),
 });
+export const verifyHillDrivingSchema = z.object({
+  verified: z.boolean(),
+});
+
 
 export const rejectDriverSchema = z.object({
   // Required and non-empty: this text is the entire content of what the driver is told to fix.
   reason: freeText,
+});
+
+export const suspendDriverSchema = z.object({
+  is_suspended: z.boolean(),
+  reason: freeText.optional(),
 });
 
 export const reviewDocumentSchema = z.object({
@@ -234,6 +243,19 @@ export const adminDriverListQuerySchema = z.object({
 
 export const driverIdParamSchema = z.object({
   id: z.string().min(1),
+});
+
+export const adminDriverDutyHistoryQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 1))
+    .refine((n) => !isNaN(n) && n >= 1, 'Page must be >= 1'),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 10))
+    .refine((n) => !isNaN(n) && n >= 1 && n <= 100, 'Limit must be between 1 and 100'),
 });
 
 /**
@@ -282,6 +304,38 @@ export const adminUpdateCustomerSchema = z.object({
   is_blocked: z.boolean().optional(),
 });
 
+export const adminUpdateDriverSchema = z.object({
+  full_name: personName.optional(),
+  dob: isoDate.nullable().optional(),
+  gender: gender.nullable().optional(),
+  experience_years: z.number().int().min(0).max(70).nullable().optional(),
+  alternate_number: mobileNumber.nullable().optional(),
+  emergency_contact: emergencyContact.nullable().optional(),
+  address: freeText.nullable().optional(),
+  vehicle_type_preferences: z.array(z.enum(VEHICLE_TYPE_PREFERENCES)).max(3).optional(),
+  vehicle_category_preference: z
+    .array(z.enum(CAR_CATEGORIES))
+    .max(CAR_CATEGORIES.length)
+    .optional(),
+  can_drive_hill: z.boolean().optional(),
+});
+
+export const adminLiveDriversQuerySchema = z.object({
+  duty_only: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
+  max_age_minutes: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : undefined))
+    .refine((n) => n === undefined || (!isNaN(n) && n >= 1 && n <= 1440), 'max_age_minutes must be between 1 and 1440'),
+});
+
+
+export type AdminUpdateDriverInput = z.infer<typeof adminUpdateDriverSchema>;
+
+
 export type UpdateCustomerProfileInput = z.infer<typeof updateCustomerProfileSchema>;
 export type CreateAddressInput = z.infer<typeof createAddressSchema>;
 export type UpdateAddressInput = z.infer<typeof updateAddressSchema>;
@@ -291,6 +345,7 @@ export type UpdateDriverProfileInput = z.infer<typeof updateDriverProfileSchema>
 export type RequestDocumentUploadInput = z.infer<typeof requestDocumentUploadSchema>;
 export type UpdateAdminProfileInput = z.infer<typeof updateAdminProfileSchema>;
 export type RejectDriverInput = z.infer<typeof rejectDriverSchema>;
+export type SuspendDriverInput = z.infer<typeof suspendDriverSchema>;
 export type ReviewDocumentInput = z.infer<typeof reviewDocumentSchema>;
 
 /** `POST /driver/duty` — the driver going on or off duty. */

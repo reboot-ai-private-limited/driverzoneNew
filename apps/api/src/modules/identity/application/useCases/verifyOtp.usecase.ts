@@ -1,6 +1,7 @@
 import type { Role } from '@driverzone/contracts';
 import { judgeOtp } from '../../domain/otpChallenge.entity.js';
 import { otpAttemptsExceeded, otpInvalidOrExpired } from '../../domain/identity.errors.js';
+import { AppError } from '@/shared/errors/AppError.js';
 import type { Account, AccountRepositoryPort } from '../../domain/account.repository.port.js';
 import type { OtpStorePort } from '../../domain/otpStore.port.js';
 import type { TokenIssuer } from '../tokenIssuer.js';
@@ -121,6 +122,10 @@ export class VerifyOtpUseCase {
     const { role, phone } = input;
 
     const existing = await this.accounts.findByPhone(role, phone);
+
+    if (existing?.isBlocked) {
+      throw AppError.forbidden('Your account has been suspended.');
+    }
 
     /**
      * Admin accounts are never created here (docs/LLD/auth.md §Admin provisioning) — an admin

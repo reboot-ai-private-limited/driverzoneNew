@@ -37,6 +37,12 @@ config.resolver.nodeModulesPaths = [
 // build, so Metro must read the exports map to find them.
 config.resolver.unstable_enablePackageExports = true;
 
+// Expo's getDefaultConfig sets server.tls to false, which Metro's own config validator
+// complains about with 'Unknown option "server.tls" with value false was found.'
+if (config.server && 'tls' in config.server) {
+  delete config.server.tls;
+}
+
 /**
  * `./http.js` inside `packages/contracts/src/index.ts` means `./http.ts`, and only Metro needs
  * telling.
@@ -65,7 +71,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 
   if (fromPackage && isRelative && moduleName.endsWith('.js')) {
     // Extensionless, so Metro applies its own `sourceExts` and finds the `.ts`. Falls through to
-    // the untouched specifier if that misses, which is what a genuine `.js` file there needs.
+    // the untouched specifier if that needs.
     try {
       return context.resolveRequest(context, moduleName.slice(0, -'.js'.length), platform);
     } catch {

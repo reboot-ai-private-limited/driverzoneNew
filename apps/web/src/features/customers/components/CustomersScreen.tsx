@@ -183,7 +183,7 @@ export function CustomersScreen() {
     },
     {
       key: 'actions',
-      header: <span className="sr-only">Actions</span>,
+      header: 'Action',
       width: COLUMN_WIDTHS[8] ?? '',
       align: 'right',
       // `stopPropagation` on both: the row itself opens the view dialog, so without it an Edit

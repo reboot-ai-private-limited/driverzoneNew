@@ -27,7 +27,9 @@ export function buildAdminRouter(controllers: AdminControllers): Router {
   router.patch('/customers/:id', controllers.updateCustomer);
 
   router.get('/drivers', controllers.listDrivers);
+  router.get('/drivers/live', controllers.getLiveDrivers);
   router.get('/drivers/:id', controllers.getDriverDetails);
+  router.patch('/drivers/:id', controllers.updateDriver);
   /*
    * `/drivers/:id/wallet` is NOT here. It lives in the `ledger` module, which owns the rows — this
    * router has no route matching it, so the request falls through to the `/admin/drivers` mount in
@@ -38,6 +40,8 @@ export function buildAdminRouter(controllers: AdminControllers): Router {
   router.post('/drivers/:id/approve', controllers.approveDriver);
   router.post('/drivers/:id/reject', controllers.rejectDriver);
   router.patch('/drivers/:id/documents/:docId', controllers.reviewDocument);
+  router.patch('/drivers/:id/verify-hill', controllers.verifyHillDriving);
+  router.patch('/drivers/:id/suspend', controllers.suspendDriver);
 
   return router;
 }

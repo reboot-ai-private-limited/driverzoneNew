@@ -30,7 +30,7 @@ it simply no longer decides what anything costs.
 ### Outstation is priced per direction
 
 A band carries two fares — `oneWayFarePaise` and `roundTripFarePaise` — and one
-`driverCommissionBps`. That is the whole of its pricing.
+`driverAmountPaise`. That is the whole of its pricing.
 
 **The fare is flat across the band.** 72 km and 98 km both pay the `70–100` fare; there is no
 per-km rate on top. This closes `open-questions.md` Q3, which asked exactly that and warned what
@@ -49,9 +49,11 @@ the driver's day is different in kind and not merely in length: they wait at the
 they may not get a return fare. Deriving one from the other would bake a ratio into code that
 belongs in a form field.
 
-**The company's commission is derived, never stored:** `10000 − driverCommissionBps`. Storing
-both sides let a form save 75% and 20% and quietly leave 5% of every trip in nobody's column.
-The pair that could disagree no longer exists.
+**The driver's share is a flat amount, not a percentage** (decision-log.md, 2026-09-10):
+`driverAmountPaise` is what the driver is paid for the package, and on outstation it is a
+**day rate** — `computeOutstationFare` multiplies it by the trip's days alongside the band fare.
+The **company's share is derived, never stored:** `subtotal − driver`. The admin API refuses to
+save an amount above the band's own fare, so the company's cut cannot be configured negative.
 
 **`ROUND_TRIP` is the whole two-way journey**, and `open-questions.md` Q4 closed on that:
 however many days the driver is away, `roundTripFarePaise` covers it. There is no same-day cap,
@@ -64,7 +66,8 @@ thing that selects a band.
 
 ### InCity is priced per variant
 
-A variant is a duration and a price: `includedMinutes`, `baseFarePaise`, `driverCommissionBps`.
+A variant is a duration and a price: `includedMinutes`, `baseFarePaise`, `driverAmountPaise`
+(a flat amount, not a share — no day multiplier on incity).
 The customer picks the variant, so a quote returns **all** active variants of the winning package,
 not one.
 

@@ -54,6 +54,14 @@ export const keys = {
      */
     all: () => ['settings'] as const,
   },
+  faq: {
+    /**
+     * One key for the list, for the same reason as `settings.all()` and one more: the save
+     * REPLACES the list, so there is no narrower thing to invalidate — every entry's `sort_order`
+     * can change in a single write.
+     */
+    all: () => ['faq'] as const,
+  },
   customers: {
     all: () => ['customers'] as const,
     // The query is PART of the key, because the list is paged and filtered server-side: page 2

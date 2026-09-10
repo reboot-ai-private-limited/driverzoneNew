@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { SettingDto } from '@driverzone/contracts';
-import { diffDrafts, isDirty, mapFieldErrors, mergeDrafts, parseDraft, toDrafts } from './draft';
+import {
+  diffDrafts,
+  isDirty,
+  mapFieldErrors,
+  mergeDrafts,
+  parseDraft,
+  toDraft,
+  toDrafts,
+} from './draft';
 
 /**
  * The form logic, tested without a DOM. `vitest.config.ts` keeps this app's tests DOM-free on
@@ -232,5 +240,98 @@ describe('mergeDrafts', () => {
     mergeDrafts(fresh, current, ['a']);
     expect(fresh).toEqual(snapshot);
     expect(current).toEqual({ a: '99', b: '2', c: '3' });
+  });
+});
+
+/**
+ * A key stored in one unit and shown in another — `dispatch.wave_base_radius_m` is metres on the
+ * wire and kilometres in the form. The interesting property is the ROUND TRIP: what the server
+ * sent must come back unchanged if the admin does not touch it, and what they type must reach the
+ * wire as whole metres.
+ */
+describe('display scale (metres shown as kilometres)', () => {
+  const KM = { unit: 'KILOMETRES', factor: 1000, decimals: 1 } as const;
+
+  const waveRadius = setting({
+    key: 'dispatch.wave_base_radius_m',
+    value: 3000,
+    unit: 'METRES',
+    display: KM,
+  });
+
+  it('shows the stored metres as kilometres', () => {
+    expect(toDraft(3000, KM)).toBe('3');
+    expect(toDraft(2500, KM)).toBe('2.5');
+  });
+
+  it('does not pad to the decimal allowance — "3", never "3.0"', () => {
+    expect(toDraft(3000, KM)).toBe('3');
+  });
+
+  it('leaves an unscaled value exactly as it is', () => {
+    expect(toDraft(500)).toBe('500');
+  });
+
+  it('converts what the admin types back into metres', () => {
+    expect(parseDraft('3', 'METRES', KM)).toEqual({ ok: true, value: 3000 });
+    expect(parseDraft('2.5', 'METRES', KM)).toEqual({ ok: true, value: 2500 });
+  });
+
+  /**
+   * 2.9 * 1000 is 2899.9999999999995 in binary floating point. Without the rounding in
+   * `parseDraft` an admin typing 2.9 km would silently store 2899 metres.
+   */
+  it('rounds rather than truncating, so 2.9 km is 2900 m and not 2899', () => {
+    expect(parseDraft('2.9', 'METRES', KM)).toEqual({ ok: true, value: 2900 });
+    expect(parseDraft('1.1', 'METRES', KM)).toEqual({ ok: true, value: 1100 });
+    expect(parseDraft('8.7', 'METRES', KM)).toEqual({ ok: true, value: 8700 });
+  });
+
+  it('round-trips every tenth of a kilometre without drift', () => {
+    for (let tenths = 0; tenths <= 200; tenths += 1) {
+      const metres = tenths * 100;
+      const shown = toDraft(metres, KM);
+      expect(parseDraft(shown, 'METRES', KM)).toEqual({ ok: true, value: metres });
+    }
+  });
+
+  it('accepts a decimal, which the unscaled metres field would have refused', () => {
+    expect(parseDraft('2.5', 'METRES').ok).toBe(false);
+    expect(parseDraft('2.5', 'METRES', KM).ok).toBe(true);
+  });
+
+  it('refuses more decimals than the scale allows, rather than storing a fraction of a metre', () => {
+    const result = parseDraft('2.55', 'METRES', KM);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toBe('At most 1 decimal place.');
+  });
+
+  it('still refuses a negative distance', () => {
+    expect(parseDraft('-1', 'METRES', KM).ok).toBe(false);
+  });
+
+  it('still refuses an empty box', () => {
+    expect(parseDraft('', 'METRES', KM).ok).toBe(false);
+  });
+
+  /** The bug this would have caused: every page load marking the row as edited. */
+  it('is not dirty when the shown value came from the stored one', () => {
+    expect(isDirty(toDraft(3000, KM), 3000, 'METRES', KM)).toBe(false);
+  });
+
+  it('is dirty when the admin changes the kilometre figure', () => {
+    expect(isDirty('4', 3000, 'METRES', KM)).toBe(true);
+  });
+
+  it('sends metres on the wire, not the kilometres that were typed', () => {
+    const { values, dirtyKeys } = diffDrafts([waveRadius], { 'dispatch.wave_base_radius_m': '5' });
+
+    expect(dirtyKeys).toEqual(['dispatch.wave_base_radius_m']);
+    expect(values).toEqual({ 'dispatch.wave_base_radius_m': 5000 });
+  });
+
+  it('sends nothing for an untouched scaled field', () => {
+    const drafts = toDrafts([waveRadius]);
+    expect(diffDrafts([waveRadius], drafts)).toEqual({ values: {}, invalid: {}, dirtyKeys: [] });
   });
 });

@@ -97,7 +97,8 @@ export function FareOptionCard({
 
             <View style={styles.priceBlock}>
               <Text style={styles.price}>{option.fare.total.amount_display}</Text>
-              <Text style={styles.priceNote}>total</Text>
+              {/* Says WHICH total, since the breakdown below no longer spells the tax out. */}
+              <Text style={styles.priceNote}>incl. taxes</Text>
             </View>
 
             <View style={[styles.radio, selected && styles.radioSelected]}>
@@ -124,16 +125,20 @@ export function FareOptionCard({
 
               <View style={styles.rule} />
 
-              <Row label="Subtotal" value={option.fare.subtotal.amount_display} />
               {/*
-                Tax is shown even at zero. A receipt that hides the line when it is nil makes the
-                customer wonder whether it was folded into something else.
+                ONE FIGURE, TAX ALREADY IN IT. A Subtotal and a Tax row used to sit above this,
+                and the pair invited the reading the total is meant to close — that the number
+                below is a "before tax" price with something still to be added at the end. The
+                total has always been tax-inclusive (`computeFare` rounds the total and derives
+                tax as the remainder); the caption states that rather than making the customer
+                add two rows to check it. The tax is still on the quote for anyone who needs the
+                figure — it is simply not what this card is for.
               */}
-              <Row label="Tax" value={option.fare.tax.amount_display} />
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>{option.fare.total.amount_display}</Text>
               </View>
+              <Text style={styles.totalNote}>Including all taxes</Text>
             </Animated.View>
           ) : null}
         </Pressable>
@@ -292,4 +297,6 @@ const styles = StyleSheet.create({
   },
   totalLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
   totalValue: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 15 },
+  /** Right-aligned under the figure it qualifies, so it reads as part of the total, not a row. */
+  totalNote: { ...text.caption, color: colors.faint, textAlign: 'right' },
 });

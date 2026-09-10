@@ -80,7 +80,7 @@ function fareSnapshot(totalPaise = 105_000, driverPaise = 77_250): FareSnapshot 
       totalPaise,
       split: {
         commissionablePaise: 103_000,
-        driverCommissionBps: 7_500,
+        driverAmountPaise: driverPaise,
         driverPaise,
         companyPaise: 103_000 - driverPaise,
       },

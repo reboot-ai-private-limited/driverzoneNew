@@ -82,8 +82,6 @@ export function useTripQuote(
    * a customer could pick a return three days out and be quoted a same-day price.
    */
   returnAt: Date | null = null,
-  /** On by default, matching the server's own default — see `CreateQuoteRequest.insurance`. */
-  insurance = true,
 ): TripQuote {
   /*
    * ONE_WAY IS SENT AS ABSENCE, AND BOTH HALVES OF THAT MATTER.
@@ -108,7 +106,6 @@ export function useTripQuote(
       isDefaultDirection ? null : direction,
       scheduledIso,
       returnIso,
-      insurance,
     ),
     queryFn: () => {
       if (pickup === null || drop === null) {
@@ -120,10 +117,12 @@ export function useTripQuote(
         ...(isDefaultDirection ? {} : { direction }),
         ...(scheduledIso === null ? {} : { scheduledAt: scheduledIso }),
         ...(returnIso === null ? {} : { returnAt: returnIso }),
-        // Sent explicitly either way: `true` is the server's own default too, but sending it
-        // keeps this call legible next to the key above rather than relying on both sides
-        // agreeing on an omitted meaning.
-        insurance,
+        // THE INSURANCE FEATURE IS WITHDRAWN from the customer app, so every quote is priced
+        // without the line. Sent explicitly rather than omitted, because the server's default is
+        // the opposite — omit it and the trip is quoted WITH insurance the customer can no longer
+        // see or decline. The endpoint still supports it, so bringing the choice back is a matter
+        // of restoring the control, not the API.
+        insurance: false,
       });
     },
     enabled: enabled && pickup !== null && drop !== null,

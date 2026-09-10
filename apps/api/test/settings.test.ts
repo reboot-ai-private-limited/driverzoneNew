@@ -96,6 +96,57 @@ describe('Settings Module', () => {
       },
     );
 
+    /**
+     * A `display` scale is a promise the admin form has to be able to keep: it shows
+     * `value / factor` in a box that accepts `decimals` places, and multiplies back on save. If a
+     * key's own default cannot survive that round trip, the form opens showing a number that is
+     * not the setting — and saving an untouched field would change it.
+     *
+     * A table test rather than one assertion about the wave radius, so the second scaled key
+     * inherits the check without anyone remembering to add it.
+     */
+    it.each(SETTING_KEYS.filter((k) => SETTING_REGISTRY[k].display !== undefined))(
+      '%s declares a display scale its own default round-trips through',
+      (key) => {
+        const { display, default: value } = SETTING_REGISTRY[key];
+        if (display === undefined) throw new Error('filtered above');
+
+        expect(display.factor).toBeGreaterThan(0);
+        expect(Number.isInteger(display.decimals)).toBe(true);
+        expect(display.decimals).toBeGreaterThanOrEqual(0);
+        expect(typeof value).toBe('number');
+
+        // Exactly what the form does: divide to show, round to store.
+        const shown = Number(((value as number) / display.factor).toFixed(display.decimals));
+        expect(Math.round(shown * display.factor)).toBe(value);
+      },
+    );
+
+    /** The scale is presentation. Storage stays in `unit`, so nothing that READS a setting moves. */
+    it('keeps a scaled key stored in its own unit, not the displayed one', () => {
+      const wave = SETTING_REGISTRY['dispatch.wave_base_radius_m'];
+
+      expect(wave.unit).toBe('METRES');
+      expect(wave.display?.unit).toBe('KILOMETRES');
+      expect(wave.default).toBe(3000);
+      // The schema still validates metres — a client sending 3 would be setting three metres.
+      expect(wave.schema.safeParse(3000).success).toBe(true);
+      expect(wave.schema.safeParse(2500).success).toBe(true);
+      expect(wave.schema.safeParse(2500.5).success).toBe(false);
+    });
+
+    /**
+     * The two radii next to it deliberately have NO scale: 500 m shown as "0.5 km" is worse than
+     * what it says now, which is the reason the scale is per key rather than per unit.
+     */
+    it.each(['dispatch.arrival_radius_m', 'dispatch.start_warn_radius_m'] as const)(
+      '%s stays in metres, unscaled',
+      (key) => {
+        expect(SETTING_REGISTRY[key].unit).toBe('METRES');
+        expect(SETTING_REGISTRY[key].display).toBeUndefined();
+      },
+    );
+
     it('rejects a time window whose start equals its end', () => {
       const { schema } = SETTING_REGISTRY['pricing.late_night_window'];
       expect(schema.safeParse({ start: '22:00', end: '22:00' }).success).toBe(false);

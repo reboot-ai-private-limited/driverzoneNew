@@ -40,7 +40,10 @@
 const MODULE_TIERS = [
   // pricing is PURE: rates and durations in, a FareBreakdown out, no I/O. That is what lets
   // the most dispute-prone logic in the product be tested without a database (docs/LLD/architecture.md).
-  ['health', 'settings', 'pricing'],
+  // `faq` is here for the plainest possible reason: it imports nothing. It is admin-authored
+  // content that no other module reads — nothing in the API decides anything from an FAQ, and
+  // the day something wants to, the value belongs in `settings` instead.
+  ['health', 'settings', 'pricing', 'faq'],
   ['identity'], //                     customers, drivers, admins, auth
   // payments sits beside them rather than above: it collects from CUSTOMERS, while ledger records
   // what is owed to DRIVERS. Neither reads the other, and the booking that ties the two together

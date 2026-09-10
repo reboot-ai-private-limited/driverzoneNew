@@ -26,6 +26,15 @@ const settingDtoSchema = z.object({
   group: z.enum(SETTING_GROUPS),
   label: z.string(),
   unit: z.enum(SETTING_UNITS),
+  /*
+   * Presentation only, and absent on all but one key. The wire value stays in `unit` — a scaled
+   * key is stored and validated in metres and merely SHOWN in kilometres, so a client that
+   * ignores this field is still correct, only less readable.
+   */
+  display: z
+    .object({ unit: z.enum(SETTING_UNITS), factor: z.number(), decimals: z.number().int() })
+    .optional()
+    .openapi({ description: 'Render in a friendlier unit: displayed = value ÷ factor.' }),
   description: z.string(),
   updated_at: z.string().nullable(),
   updated_by: z.string().nullable(),

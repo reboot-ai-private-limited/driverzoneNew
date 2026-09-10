@@ -166,9 +166,10 @@ const incityVariantSchema = new Schema({
 
   baseFarePaise:   { type: Number, required: true, min: 0 },
 
-  // Basis points: 7500 is 75%. The COMPANY's share is `10000 - this` and is not stored —
-  // two independently stored shares are two numbers that can fail to add up.
-  driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
+  // What the driver is paid, in paise — a flat amount, not a share (decision-log.md,
+  // 2026-09-10). The COMPANY's share is `subtotal - this`, derived and not stored. No upper
+  // bound here: the ceiling is the variant's own fare, enforced in packages.validation.ts.
+  driverAmountPaise: { type: Number, required: true, min: 0 },
 
   // No nightChargePaise: the early-morning and late-night surcharges are GLOBAL, set once in
   // globalSettings rather than per package (decision-log.md, 2026-08-28).
@@ -217,7 +218,9 @@ const outstationPackageSchema = new Schema({
   // look the same.
   roundTripFarePaise: { type: Number, default: null, min: 0 },
 
-  driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
+  // Flat amount in paise, PER DAY — computeOutstationFare multiplies it by the trip's days,
+  // exactly as it does the band fare (decision-log.md, 2026-09-10).
+  driverAmountPaise: { type: Number, required: true, min: 0 },
 
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });

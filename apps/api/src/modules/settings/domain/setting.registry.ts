@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import type { SettingAudience, SettingGroup, SettingUnit } from '@driverzone/contracts';
+import type {
+  SettingAudience,
+  SettingDisplayScale,
+  SettingGroup,
+  SettingUnit,
+} from '@driverzone/contracts';
 
 /**
  * DOMAIN — THE registry. Every tunable number in the product, in one table.
@@ -54,6 +59,12 @@ export interface SettingDefinition {
   group: SettingGroup;
   label: string;
   unit: SettingUnit;
+  /**
+   * Optional. Renders the value in a friendlier unit than it is stored in — see
+   * `SettingDisplayScale` in contracts. Presentation only: the stored and wire value stays in
+   * `unit`, so nothing that READS the setting is affected.
+   */
+  display?: SettingDisplayScale;
   /** Who may read it. ADMIN is implicit on every key but listed anyway, so the field reads whole. */
   audiences: readonly SettingAudience[];
   /** Shown in the admin form. Written for an ops reader, not for us. */
@@ -306,6 +317,16 @@ export const SETTING_REGISTRY = {
     group: 'DISPATCH',
     label: 'First wave radius',
     unit: 'METRES',
+    /*
+     * STORED IN METRES, SHOWN IN KILOMETRES. The dispatch code compares a radius against a
+     * distance and wants metres; an admin deciding how far the first wave should reach thinks in
+     * kilometres, and the LLD writes the ladder that way too ([3, 7, 15, 30] km). `3000` in a box
+     * is a number that has to be converted in the reader's head every time.
+     *
+     * The other two METRES keys below deliberately do NOT get this — 500 m shown as "0.5 km" is
+     * worse than what it says now, which is why the scale is per key rather than per unit.
+     */
+    display: { unit: 'KILOMETRES', factor: 1000, decimals: 1 },
     audiences: ['ADMIN'],
     description:
       'How far the first wave looks for a driver. Each subsequent wave doubles this distance.',

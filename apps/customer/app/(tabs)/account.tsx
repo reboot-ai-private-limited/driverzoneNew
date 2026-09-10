@@ -136,6 +136,9 @@ export default function AccountScreen(): ReactElement {
             label="Notifications"
             onPress={() => router.push('/info/notifications')}
           />
+          {/* Above Help & Support deliberately: most of what people write in wants an answer
+              this list already has, and the FAQs cost nobody a phone call. */}
+          <MenuRow icon="book-open" label="FAQs" onPress={() => router.push('/info/faqs')} />
           <MenuRow
             icon="help-circle"
             label="Help & Support"

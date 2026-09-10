@@ -20,6 +20,73 @@ entry links to it.
 
 ---
 
+## 2026-09-10 — The driver's package share is a flat amount, not a percentage
+
+**Decision:** `driverCommissionBps` (7500 = 75% of the subtotal) becomes `driverAmountPaise` — a
+flat rupee amount the driver is paid for the package, in paise. On outstation it is a **day
+rate**: `computeOutstationFare` multiplies it by the same IST day count as the band fare, so a
+driver away three days is paid three times. The company's share stays derived — `subtotal −
+driver`, never stored. `splitFare` keeps a runtime clamp (driver capped at the fare, company
+floored at zero) as a backstop; the admin API refuses to save an amount above the package's own
+fare, checked against the cheaper of the two directions.
+
+**Why:** Under a rate, the driver's payout moved every time a pickup fee or a night surcharge
+landed on the same trip, so "what does this job pay" could not be answered before the trip was
+priced. Ops wanted to set the number a driver earns for a job.
+
+**Consequences:** The company now absorbs all the variance — every surcharge, paid pickup zone
+and the insurance line accrues entirely to it, where a rate used to split them. `FareSplit` keeps
+both `driverAmountPaise` (configured, day-multiplied) and `driverPaise` (actually paid) so a
+package priced below its own payout is visible in stored data — `pricing` is pure and does not
+log. Existing packages are converted by `migrateCommissionBpsToAmount.ts`:
+`round(fare × bps / 10000)` against the base / one-way fare, which keeps a same-day trip's driver
+payout identical and hands the company the difference on longer or surcharged trips.
+
+**Rejected:** a flat amount that does *not* scale with outstation days — it would pay a driver
+once for a job that took three days, the exact failure the fare-side day multiplier was
+introduced to fix.
+
+---
+
+## 2026-09-10 — FAQs are their own module, and the cash charges are written down in them
+
+**Decision:** A `faq` module (tier 0) owns an ordered list of admin-authored question/answer pairs
+with a per-entry `isPublished` flag. `GET/PUT /admin/faq` edit it from a panel on the settings
+page; `GET /customer/faq` and `GET /driver/faq` return the published entries — the same list to
+both apps — which each app renders at `info/faqs` and caches on disk. The customer fare sheet's
+food-and-stay warning links there.
+
+**Why:** The driver's food and a place to stay on a long trip are settled in cash, are not fare
+lines, and had no stated amount anywhere in the product — the fare sheet said only that the
+customer would "settle that directly with the driver". Ops needed to publish those figures, and
+change them, without a deploy.
+
+**Why not a settings key:** the registry is scalar by design (`SettingValue = number |
+TimeWindow`) and the admin form renders one input per `unit`; `setting.registry.ts` already says a
+list-valued setting "needs its own admin form control". A variable-length, reorderable,
+per-row-publishable list of prose is not a tunable number. The amounts therefore live in the
+answer text an admin types, not in a priced field — nothing computes with them, and the day
+something needs to, that value belongs in the registry instead.
+
+**Consequences:** The write replaces the whole list, so `sort_order` is assigned server-side from
+array position and a stored id absent from the request is deleted — one drag is one request, but a
+stale page could delete rows it never knew about. Mitigated three ways: the use case rejects a
+list naming an id that no longer exists (422 `FAQ_NOT_FOUND`), the panel confirms before sending a
+shorter list, and the audit row carries the whole list either side of the save, which is the only
+record of deleted text. Reads are token-gated like every other app route, so a signed-out user
+cannot see the FAQs; both entry points are behind login today, and making them public would be
+the first public content GET in this API.
+
+**Also:** the settings page now has two save buttons — the registry fields batch into one PATCH
+because the API checks cross-key invariants against the whole configuration, and the FAQs share
+none of that. Each is labelled for what it covers and the FAQ panel's dirty state stays out of the
+page counter.
+
+**Rejected:** a dedicated FAQs screen in the admin nav. It is the same kind of thing as the fields
+above it — something ops changes without a deploy — and it belongs next to the charges it explains.
+
+---
+
 ## 2026-09-07 — Road distance moves from self-hosted OSRM to the Google Routes API
 
 **Decision:** `selectRoadDistance()` now prefers `GoogleRoadDistance` (Compute Routes, Essentials

@@ -35,6 +35,22 @@ export class InvalidBandError extends AppError {
   }
 }
 
+/**
+ * The driver amount is above the fare it is paid out of, so the company's share would be negative.
+ * 400 rather than 422: it is a field the admin typed wrong, correctable in the form, not a
+ * structural "this package cannot be sold" state.
+ */
+export class DriverAmountError extends AppError {
+  constructor(reason: string) {
+    super({
+      statusCode: 400,
+      code: 'VALIDATION_FAILED',
+      message: reason,
+      isExpected: true,
+    });
+  }
+}
+
 export class InvalidPackageError extends AppError {
   constructor(reason: string) {
     super({

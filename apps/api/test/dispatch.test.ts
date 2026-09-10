@@ -87,7 +87,7 @@ function booking(over: Partial<Booking> = {}): Booking {
         totalPaise: 108_200,
         split: {
           commissionablePaise: 103_000,
-          driverCommissionBps: 7_500,
+          driverAmountPaise: 77_250,
           driverPaise: 77_250,
           companyPaise: 25_750,
         },

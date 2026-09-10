@@ -11,6 +11,7 @@ import { buildPaymentsContainer } from '@/modules/payments/payments.container.js
 import { buildQuotesContainer } from '@/modules/quotes/quotes.container.js';
 import { buildReviewsContainer } from '@/modules/reviews/reviews.container.js';
 import { buildSettingsContainer } from '@/modules/settings/settings.container.js';
+import { buildFaqContainer } from '@/modules/faq/faq.container.js';
 import { buildWalletContainer } from '@/modules/wallet/wallet.container.js';
 import { buildZonesContainer } from '@/modules/zones/zones.container.js';
 
@@ -31,6 +32,7 @@ import { buildZonesContainer } from '@/modules/zones/zones.container.js';
 export interface AppContainers {
   health: ReturnType<typeof buildHealthContainer>;
   settings: ReturnType<typeof buildSettingsContainer>;
+  faq: ReturnType<typeof buildFaqContainer>;
   identity: ReturnType<typeof buildIdentityContainer>;
   notifications: ReturnType<typeof buildNotificationsContainer>;
   ledger: ReturnType<typeof buildLedgerContainer>;
@@ -51,6 +53,9 @@ export function buildContainers(): AppContainers {
   /** Also tier 0. `quotes` is its first real consumer — the fare engine reads every surcharge,
    * insurance and tax figure out of the snapshot rather than out of a constant. */
   const settings = buildSettingsContainer();
+  /** Also tier 0, and it has no consumer at all inside the API — the FAQs are content, read over
+   * HTTP by the admin panel and both apps and by nothing else. */
+  const faq = buildFaqContainer();
 
   // tier 1 — customers, drivers, admins, auth
   const identity = buildIdentityContainer();
@@ -142,6 +147,7 @@ export function buildContainers(): AppContainers {
   return {
     health,
     settings,
+    faq,
     identity,
     notifications,
     ledger,

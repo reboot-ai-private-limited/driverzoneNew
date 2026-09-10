@@ -31,7 +31,7 @@ const incityVariantDtoSchema = z.object({
   label: z.string(),
   included_minutes: z.number(),
   base_fare_paise: z.number(),
-  driver_commission_bps: z.number(),
+  driver_amount_paise: z.number(),
   is_active: z.boolean(),
 });
 
@@ -53,7 +53,7 @@ const outstationPackageDtoSchema = z.object({
   one_way_fare_paise: z.number(),
   /** The whole two-way journey. Null when the band does not sell a return trip — not zero. */
   round_trip_fare_paise: z.number().nullable(),
-  driver_commission_bps: z.number(),
+  driver_amount_paise: z.number(),
   is_active: z.boolean(),
 });
 

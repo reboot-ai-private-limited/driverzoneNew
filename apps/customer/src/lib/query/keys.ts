@@ -23,10 +23,10 @@ export const keys = {
    * float differing in its fifteenth decimal is the same street corner, and an unrounded key
    * would miss the cache and re-ask the server on every render that recreates the point.
    *
-   * `direction`, `scheduledAt` and `insurance` are part of the key because all three change the
-   * PRICE, not just the presentation: one-way and round trip are two different products with
-   * separate fares, the pickup instant decides whether the trip falls inside an early-morning or
-   * late-night surcharge window, and the insurance line is either on the fare card or it is not.
+   * `direction` and `scheduledAt` are part of the key because both change the PRICE, not just the
+   * presentation: one-way and round trip are two different products with separate fares, and the
+   * pickup instant decides whether the trip falls inside an early-morning or late-night surcharge
+   * window.
    * `direction`/`scheduledAt` are `null` for their default — "the server decides" — so a caller
    * that has not chosen shares a cache entry with one that explicitly chose the default.
    */
@@ -39,8 +39,7 @@ export const keys = {
       scheduledAt: string | null,
       /** In the key because it is in the PRICE — the band fare multiplies by the days it spans. */
       returnAt: string | null,
-      insurance: boolean,
-    ) => ['quotes', pickup, drop, direction, scheduledAt, returnAt, insurance] as const,
+    ) => ['quotes', pickup, drop, direction, scheduledAt, returnAt] as const,
   },
   /**
    * The wallet balance, which the fare sheet and the wallet screen both read.
@@ -50,6 +49,14 @@ export const keys = {
    */
   wallet: {
     me: () => ['wallet'] as const,
+  },
+
+  /**
+   * The published FAQs. One key, no parameters — every customer gets the same list, and the
+   * server decides what is in it.
+   */
+  faqs: {
+    all: () => ['faqs'] as const,
   },
 
   bookings: {

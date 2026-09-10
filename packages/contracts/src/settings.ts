@@ -28,9 +28,35 @@ export const SETTING_UNITS = [
   'COUNT',
   'METRES',
   'BPS',
+  'KILOMETRES',
   'TIME_WINDOW',
 ] as const;
 export type SettingUnit = (typeof SETTING_UNITS)[number];
+
+/**
+ * Render a key in a friendlier unit than the one it is STORED in.
+ *
+ * `dispatch.wave_base_radius_m` is the case this exists for: it is metres on the wire and in the
+ * dispatch code, because that is what a radius comparison wants, but `3000` in an admin form is a
+ * number nobody reads as "three kilometres" at a glance — and the LLD describes the wave ladder in
+ * km ([3, 7, 15, 30]) precisely because that is how people discuss it.
+ *
+ * THE WIRE VALUE DOES NOT CHANGE. This is a presentation instruction and nothing more: the API
+ * still receives, validates and stores metres, so no consumer of the setting is affected and
+ * there is no migration. The form multiplies back before it sends.
+ *
+ * It is declared PER KEY rather than per unit because the other two METRES settings — the arrival
+ * and start-warning radii, both 500 m — would read as "0.5 km", which is worse than what they say
+ * now. A unit is not enough information to know which scale suits a value.
+ */
+export interface SettingDisplayScale {
+  /** What to label the input with. */
+  unit: SettingUnit;
+  /** Stored value = displayed value × this. `1000` renders metres as kilometres. */
+  factor: number;
+  /** Decimal places the input accepts. `1` on a metres/km scale means 100 m granularity. */
+  decimals: number;
+}
 
 export const SETTING_GROUPS = [
   'PICKUP',
@@ -73,6 +99,11 @@ export interface SettingDto {
   group: SettingGroup;
   label: string;
   unit: SettingUnit;
+  /**
+   * Present only where the stored unit is not the one worth showing. Absent means "render `value`
+   * as it stands, labelled with `unit`" — which is every key but one.
+   */
+  display?: SettingDisplayScale | undefined;
   description: string;
   /** Null while the default is in force. */
   updated_at: string | null;

@@ -39,7 +39,16 @@ export interface FareLine {
 export interface FareSplit {
   /** The subtotal. Tax is EXCLUDED — it is passed to the government, not shared with the driver. */
   commissionablePaise: number;
-  driverCommissionBps: number;
+  /**
+   * What the PACKAGE said the driver is paid — already multiplied by the days on outstation.
+   *
+   * Kept alongside `driverPaise` rather than replaced by it, because the two differ exactly when
+   * `splitFare`'s clamp fired: the fare did not cover what the package promised. That makes a
+   * misconfigured package visible in stored data, which is the only way it is visible at all —
+   * `pricing` is pure and does not log.
+   */
+  driverAmountPaise: number;
+  /** What the driver is actually paid. Equals `driverAmountPaise` unless the fare could not cover it. */
   driverPaise: number;
   /**
    * The remainder, and derived rather than configured. Storing both sides independently is what
@@ -88,7 +97,7 @@ export interface PickupZoneFare {
 export interface IncityFareInput {
   variantLabel: string;
   baseFarePaise: number;
-  driverCommissionBps: number;
+  driverAmountPaise: number;
   pickupZone: PickupZoneFare;
   /** The scheduled pickup instant. The surcharge is decided from this and nothing else. */
   scheduledAt: Date;
@@ -110,7 +119,7 @@ export interface OutstationFareInput {
    * neither has a return leg for a duration to be measured against.
    */
   days: number;
-  driverCommissionBps: number;
+  driverAmountPaise: number;
   pickupZone: PickupZoneFare;
   scheduledAt: Date;
 }

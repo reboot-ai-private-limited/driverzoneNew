@@ -1,7 +1,15 @@
 import type { OutstationPackagePatch, PackageRepositoryPort } from '../../domain/packageRepository.port.js';
 import type { OutstationPackage } from '../../domain/outstationPackage.entity.js';
-import { validateOutstationBand } from '../../domain/outstationPackage.entity.js';
-import { InvalidBandError, OverlappingBandError, PackageNotFoundError } from '../../domain/package.errors.js';
+import {
+  validateOutstationBand,
+  validateOutstationDriverAmount,
+} from '../../domain/outstationPackage.entity.js';
+import {
+  DriverAmountError,
+  InvalidBandError,
+  OverlappingBandError,
+  PackageNotFoundError,
+} from '../../domain/package.errors.js';
 
 export class UpdateOutstationPackageUseCase {
   constructor(private readonly repo: PackageRepositoryPort) {}
@@ -16,6 +24,18 @@ export class UpdateOutstationPackageUseCase {
 
     const bandError = validateOutstationBand(mergedMinKm, mergedMaxKm);
     if (bandError) throw new InvalidBandError(bandError);
+
+    // On the MERGE, not the patch: an update touching only the driver amount still has to clear
+    // the stored fares, and one touching only a fare has to stay above the stored amount.
+    // `roundTripFarePaise` is nullable, so `'x' in data` is the test for "the patch set it" —
+    // `??` would swap a deliberate `null` for the old value.
+    const amountError = validateOutstationDriverAmount({
+      oneWayFarePaise: data.oneWayFarePaise ?? existing.oneWayFarePaise,
+      roundTripFarePaise:
+        'roundTripFarePaise' in data ? (data.roundTripFarePaise ?? null) : existing.roundTripFarePaise,
+      driverAmountPaise: data.driverAmountPaise ?? existing.driverAmountPaise,
+    });
+    if (amountError) throw new DriverAmountError(amountError);
 
     // No P-3 check here either — the fare is a required field on the band, so there is no
     // "active but unsellable" state left for an update to create.

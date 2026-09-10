@@ -420,32 +420,15 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
               required
             />
 
-            <FormField
-              label="Driver's share"
-              hint="The company keeps the rest."
+            <FareField
+              label="Driver is paid"
+              hint="A flat amount. The company keeps the rest of the fare."
+              value={variant.driverAmount}
+              onChange={(value) => set('driverAmount', value)}
+              error={errors[`${scope}.driverAmount`]}
+              disabled={disabled}
               required
-              {...(errors[`${scope}.driverCommission`] === undefined
-                ? {}
-                : { error: errors[`${scope}.driverCommission`] })}
-            >
-              {({ id, invalid, describedBy }) => (
-                <div className="relative">
-                  <Input
-                    id={id}
-                    inputMode="numeric"
-                    value={variant.driverCommission}
-                    onChange={(event) => set('driverCommission', event.target.value)}
-                    invalid={invalid}
-                    aria-describedby={describedBy}
-                    disabled={disabled}
-                    className="pr-7"
-                  />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-subtle text-sm">
-                    %
-                  </span>
-                </div>
-              )}
-            </FormField>
+            />
           </div>
 
           <label className="flex items-center gap-2 text-xs text-text">
@@ -463,7 +446,7 @@ function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: V
             <CommissionSplitLine
               label="Base fare"
               fare={variant.baseFare}
-              driverPercent={variant.driverCommission}
+              driverAmount={variant.driverAmount}
             />
           </div>
         </div>

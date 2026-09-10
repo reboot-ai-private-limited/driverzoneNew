@@ -52,6 +52,7 @@ export function buildApiRouter(c: AppContainers): Router {
    */
   router.use('/admin/zones', c.zones.buildAdminRouter());
   router.use('/admin/settings', c.settings.buildAdminRouter());
+  router.use('/admin/faq', c.faq.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
   /*
    * `/admin/drivers/:id/wallet`. Identity's ADMIN router owns `/admin/drivers` and
@@ -79,6 +80,14 @@ export function buildApiRouter(c: AppContainers): Router {
    */
   router.use('/customer/settings', c.settings.buildAudienceRouter('CUSTOMER'));
   router.use('/driver/settings', c.settings.buildAudienceRouter('DRIVER'));
+
+  /**
+   * The same published list to both, deliberately: an FAQ answers a question about a trip that a
+   * customer and a driver are on together — most pointedly, who pays for the driver's food — and
+   * two versions of that answer is the argument the FAQs exist to prevent.
+   */
+  router.use('/customer/faq', c.faq.buildAudienceRouter('CUSTOMER'));
+  router.use('/driver/faq', c.faq.buildAudienceRouter('DRIVER'));
 
   /** Same fall-through again: these miss identity's role routers and land here. */
   router.use('/customer/quotes', c.quotes.buildCustomerRouter());

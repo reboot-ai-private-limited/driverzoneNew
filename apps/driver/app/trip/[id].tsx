@@ -3,9 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BookingDto, BookingStatus } from '@driverzone/contracts';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { type ComponentProps, type ReactElement, useEffect, useState } from 'react';
+import { type ComponentProps, type ReactElement, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
@@ -109,6 +111,33 @@ export default function TripScreen(): ReactElement {
   /** Set once the customer has been rated, so the form does not reappear on this screen. */
   const [rated, setRated] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+
+  /**
+   * THE OTP CELLS MUST NOT SIT BEHIND THE KEYBOARD, and neither the ScrollView nor the platform
+   * gets them out of the way on its own.
+   *
+   * The code block is the LAST thing in the scroll on an ARRIVED trip, so it is exactly where the
+   * keyboard lands. On iOS the view never resizes at all; on Android the activity does resize,
+   * which shrinks the ScrollView but leaves it scrolled where it was — either way the driver is
+   * typing a code they cannot see, while a customer waits next to them.
+   *
+   * Scrolling to the end when the keyboard appears is what puts the cells above it. Gated on
+   * ARRIVED so that focusing anything else on this screen does not yank the page down.
+   */
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (status !== 'ARRIVED') return undefined;
+
+    const event = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const show = Keyboard.addListener(event, () => {
+      // A frame later: on Android the resize has not been laid out yet when this fires, so
+      // scrolling immediately measures the pre-keyboard content height and stops short.
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    });
+
+    return () => show.remove();
+  }, [status]);
 
   /**
    * The penalty figures, so the cancel sheet can state what dropping this trip costs BEFORE the
@@ -256,7 +285,23 @@ export default function TripScreen(): ReactElement {
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      {/*
+        `padding` on iOS, nothing on Android. iOS never resizes the window for the keyboard, so
+        the view has to be padded by hand; Android's `adjustResize` already shrinks it, and adding
+        padding on top of that would shrink it twice and leave a gap the size of the keyboard.
+      */}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          // Without this, the first tap anywhere while the OTP keyboard is up is swallowed by the
+          // dismiss instead of hitting the button the driver aimed at.
+          keyboardShouldPersistTaps="handled"
+        >
         <Stepper status={booking.status} />
 
         <Animated.View layout={LinearTransition.springify().damping(18)}>
@@ -533,7 +578,8 @@ export default function TripScreen(): ReactElement {
             </View>
           </Animated.View>
         ) : null}
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <CancelTripSheet
         visible={cancelling}
@@ -739,6 +785,7 @@ function callCustomer(phone: string): void {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   centred: {
     flex: 1,
     alignItems: 'center',

@@ -11,6 +11,7 @@ export * from './identity.js';
 export * from './zones.js';
 export * from './packages.js';
 export * from './settings.js';
+export * from './faq.js';
 export * from './finance.js';
 export * from './reviews.js';
 export * from './wallet.js';

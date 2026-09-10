@@ -193,16 +193,16 @@ export type FuelType = (typeof FUEL_TYPES)[number];
  * It lives here rather than in `packages.ts` for exactly that reason — the consumers left are
  * drivers and bookings.
  */
-export const CAR_CATEGORIES = ['HATCHBACK', 'SEDAN', 'SUV', 'LUXURY', 'EV'] as const;
+export const CAR_CATEGORIES = ['MINI', 'HATCHBACK', 'SEDAN', 'SUV', 'LUXURY'] as const;
 export type CarCategory = (typeof CAR_CATEGORIES)[number];
 
 /** Display names. The code is what crosses the wire; this is only ever rendered. */
 export const CAR_CATEGORY_LABELS: Record<CarCategory, string> = {
+  MINI: 'Mini',
   HATCHBACK: 'Hatchback',
   SEDAN: 'Sedan',
   SUV: 'SUV',
   LUXURY: 'Luxury',
-  EV: 'EV',
 };
 
 /**

@@ -26,6 +26,13 @@ export const keys = {
     /** `GET /driver/settings` — the driver-visible keys, cancellation penalties among them. */
     mine: () => ['settings', 'mine'] as const,
   },
+  /**
+   * The published FAQs. One key, no parameters — every driver gets the same list, and it is the
+   * same list the customer app gets.
+   */
+  faqs: {
+    all: () => ['faqs'] as const,
+  },
   trip: {
     all: () => ['trip'] as const,
     detail: (bookingId: string) => ['trip', bookingId] as const,

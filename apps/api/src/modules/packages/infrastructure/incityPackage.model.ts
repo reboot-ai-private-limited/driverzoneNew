@@ -14,9 +14,10 @@ const incityVariantSchema = new Schema(
 
     baseFarePaise: { type: Number, required: true, min: 0 },
 
-    // Basis points: 7500 is 75%. The company's share is `10000 - this` and is NOT stored —
-    // two independently stored shares are two numbers that can fail to add up.
-    driverCommissionBps: { type: Number, required: true, min: 0, max: 10000 },
+    // What the driver is paid, in paise — a flat amount, not a share (2026-09-10). The company
+    // keeps the remainder. No upper bound here: the ceiling is the variant's own fare, which
+    // this schema cannot see, so `packages.validation.ts` enforces it with both numbers in hand.
+    driverAmountPaise: { type: Number, required: true, min: 0 },
 
     isActive: { type: Boolean, default: true },
   },

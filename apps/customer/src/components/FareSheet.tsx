@@ -4,7 +4,7 @@ import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import type {
   CarCategory,
@@ -343,10 +343,28 @@ export function FareSheet({
         <Animated.View entering={FadeIn.duration(180)} style={styles.terms}>
           <View style={styles.termsHead}>
             <Feather name="info" size={14} color={colors.muted} style={styles.noticeIcon} />
-            <Text style={styles.termsBody}>
-              This trip does not cover the driver&apos;s food, or a place to stay if it runs that
-              long. You will settle that directly with the driver, not through the app.
-            </Text>
+            <View style={styles.flex}>
+              <Text style={styles.termsBody}>
+                This trip does not cover the driver&apos;s food, or a place to stay if it runs that
+                long. You will settle that directly with the driver, not through the app.
+              </Text>
+              {/*
+                THE AMOUNTS LIVE IN THE FAQs, because they are not a fare line and nothing here
+                can quote them — an admin writes them down and both apps read the same answer.
+                Below the notice and above the checkbox on purpose: the agreement is a gate, and
+                a customer must not have to tap a link to find out what they are agreeing to.
+              */}
+              <Pressable
+                onPress={() => router.push('/info/faqs')}
+                hitSlop={8}
+                accessibilityRole="link"
+                accessibilityLabel="See the FAQs for what these costs usually come to"
+                style={({ pressed }) => [styles.termsLinkRow, pressed && styles.termsLinkPressed]}
+              >
+                <Text style={styles.termsLink}>See FAQs for what these usually cost</Text>
+                <Feather name="chevron-right" size={13} color={colors.fg} />
+              </Pressable>
+            </View>
           </View>
           <Checkbox
             checked={agreed}
@@ -509,6 +527,12 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   termsHead: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: space.sm },
-  termsBody: { ...text.caption, color: colors.muted, flex: 1 },
+  /** No `flex` of its own any more — the shared `flex` style sits on the wrapper the notice text
+      and its FAQ link now share. */
+  termsBody: { ...text.caption, color: colors.muted },
+  termsLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: space.xs },
+  /** Underlined, not just coloured: on this sunken panel colour alone is not a strong enough cue. */
+  termsLink: { ...text.caption, color: colors.fg, textDecorationLine: 'underline' },
+  termsLinkPressed: { opacity: 0.6 },
   termsAgree: { ...text.caption, color: colors.fg },
 });

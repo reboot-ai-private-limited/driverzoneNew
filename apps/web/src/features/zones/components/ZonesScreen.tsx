@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { List, Map as MapIcon } from 'lucide-react';
 import type { PickupChargeType, ZoneDto, ZoneType } from '@driverzone/contracts';
@@ -257,6 +257,34 @@ export function ZonesScreen() {
     );
   };
 
+  /**
+   * The edit session is a full-screen surface (see the `<section>` className). Two things a
+   * full-screen surface owes: the page behind it must not scroll, and there must be a keyboard
+   * way out. Escape does exactly what Cancel does — discards the draft and drops back to the
+   * normal split view. It is deliberately not gated on "mid-trace": abandoning a half-drawn
+   * boundary with Escape is the expected thing, and it is the same discard the Cancel button
+   * already offers.
+   */
+  useEffect(() => {
+    if (!editing) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape' && !saving) cancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+    // `cancel` is a stable closure over setters only; re-subscribing on every `saving` flip is
+    // the point — the Escape guard has to see the current value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, saving]);
+
   const errorState = zonesQuery.isError
     ? toErrorState(zonesQuery.error, () => void zonesQuery.refetch())
     : undefined;
@@ -291,7 +319,19 @@ export function ZonesScreen() {
           }}
         />
       ) : (
-        <section className="bg-surface border border-border rounded-md overflow-hidden">
+        <section
+          className={cn(
+            'bg-surface border border-border rounded-md overflow-hidden',
+            // FULL SCREEN WHILE EDITING. Tracing a boundary against a ~380px map card is the
+            // complaint every admin has had — the corner being aimed at sits off the visible
+            // edge as often as not. In an edit session the map leaves the panel and takes the
+            // whole viewport; the rail (inert during editing anyway) is dropped, and the
+            // inspector docks to the bottom with its own scroll. Escape or Cancel leaves.
+            // z-50 clears the app rail (z-40); the GeoJSON dialog and toasts still land on top,
+            // being portalled later in the DOM.
+            editing && 'fixed inset-0 z-50 rounded-none border-0',
+          )}
+        >
           {/* A background refetch dims nothing and blanks nothing — the polygon an admin is
               editing must not vanish because a poll came back. */}
           <TopProgressBar active={zonesQuery.isFetching && !zonesQuery.isLoading} />
@@ -311,14 +351,16 @@ export function ZonesScreen() {
               <ErrorState {...errorState} />
             </div>
           ) : (
-            <div className="flex min-h-[36rem]">
+            <div className={cn('flex', editing ? 'h-full' : 'min-h-[36rem]')}>
               {/* The rail is the accessible path through this screen: every zone by name, with
                   the same selection state the map has. The map itself has no text alternative
                   worth writing. */}
               <div
                 className={cn(
-                  'w-80 shrink-0 border-r border-border transition-opacity',
-                  editing && 'opacity-40 pointer-events-none',
+                  'w-80 shrink-0 border-r border-border',
+                  // Hidden, not dimmed: editing is full screen now, and a greyed-out rail
+                  // taking 320px of it is 320px the map is not using.
+                  editing && 'hidden',
                 )}
               >
                 <ZoneRail
@@ -379,7 +421,7 @@ export function ZonesScreen() {
                   )}
                 </div>
 
-                <div className="border-t border-border">
+                <div className={cn('border-t border-border', editing && 'max-h-[42vh] overflow-y-auto')}>
                   <ZoneInspector
                     mode={editing ? 'edit' : 'view'}
                     zone={session?.zoneId == null ? (editing ? null : selected) : selected}

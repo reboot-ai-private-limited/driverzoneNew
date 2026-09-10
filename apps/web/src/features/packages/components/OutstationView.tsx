@@ -14,7 +14,6 @@ import {
   type Column,
 } from '@driverzone/design-system';
 import { formatPaise } from '@/lib/format';
-import { bpsToPercent } from '../lib/money';
 import { buildCoverage, formatBand, ladderFor, type CoverageSegment } from '../lib/band';
 import { BandStrip } from './BandStrip';
 import { SplitBandDialog } from './SplitBandDialog';
@@ -229,7 +228,7 @@ function TerrainLadder({ terrain, packages, refetching, onSplit }: TerrainLadder
       numeric: true,
       align: 'right',
       render: (row) =>
-        row.kind === 'band' ? `${bpsToPercent(row.band.driver_commission_bps)}%` : <Dash />,
+        row.kind === 'band' ? formatPaise(row.band.driver_amount_paise) : <Dash />,
     },
     {
       key: 'actions',

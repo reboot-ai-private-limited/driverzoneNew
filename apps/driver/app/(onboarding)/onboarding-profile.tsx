@@ -114,14 +114,14 @@ const VEHICLE_OPTIONS: readonly VehicleTypePreference[] = ['AUTO', 'MANUAL', 'EV
  * has been declared, not that they drive nothing.
  */
 const CAR_CATEGORY_LABELS: Record<CarCategory, string> = {
+  MINI: 'Mini',
   HATCHBACK: 'Hatchback',
   SEDAN: 'Sedan',
   SUV: 'SUV',
   LUXURY: 'Luxury',
-  EV: 'EV',
 };
 
-const CAR_CATEGORY_OPTIONS: readonly CarCategory[] = ['HATCHBACK', 'SEDAN', 'SUV', 'LUXURY', 'EV'];
+const CAR_CATEGORY_OPTIONS: readonly CarCategory[] = ['MINI', 'HATCHBACK', 'SEDAN', 'SUV', 'LUXURY'];
 
 export default function OnboardingProfileScreen(): ReactElement {
   const queryClient = useQueryClient();

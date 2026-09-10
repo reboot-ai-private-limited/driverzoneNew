@@ -21,7 +21,7 @@ export interface CreateIncityPackageData {
     label: string;
     includedMinutes: number;
     baseFarePaise: number;
-    driverCommissionBps: number;
+    driverAmountPaise: number;
     isActive?: boolean;
   }>;
   isActive?: boolean;
@@ -34,7 +34,7 @@ export interface CreateOutstationPackageData {
   maxKm: number;
   oneWayFarePaise: number;
   roundTripFarePaise?: number | null | undefined;
-  driverCommissionBps: number;
+  driverAmountPaise: number;
   isActive?: boolean;
 }
 

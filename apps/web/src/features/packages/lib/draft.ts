@@ -7,7 +7,7 @@ import type {
   Terrain,
 } from '@driverzone/contracts';
 import { validateBand } from './band';
-import { bpsToPercent, paiseToRupees, percentToBps, rupeesToPaise } from './money';
+import { paiseToRupees, rupeesToPaise } from './money';
 
 /**
  * The editors' form model, and the conversion to and from the wire.
@@ -40,7 +40,8 @@ export interface OutstationDraft {
    * return trip, `''` is no return trip on offer.
    */
   roundTripFare: string;
-  driverCommission: string;
+  /** What the driver is paid, in rupees as typed — per day on outstation. */
+  driverAmount: string;
   isActive: boolean;
 }
 
@@ -65,7 +66,7 @@ export function emptyOutstationDraft(prefill: OutstationPrefill = {}): Outstatio
     maxKm: prefill.maxKm ?? '',
     oneWayFare: '',
     roundTripFare: '',
-    driverCommission: '',
+    driverAmount: '',
     isActive: true,
   };
 }
@@ -79,7 +80,7 @@ export function toOutstationDraft(dto: OutstationPackageDto): OutstationDraft {
     oneWayFare: paiseToRupees(dto.one_way_fare_paise),
     roundTripFare:
       dto.round_trip_fare_paise === null ? '' : paiseToRupees(dto.round_trip_fare_paise),
-    driverCommission: bpsToPercent(dto.driver_commission_bps),
+    driverAmount: paiseToRupees(dto.driver_amount_paise),
     isActive: dto.is_active,
   };
 }
@@ -131,9 +132,16 @@ export function buildOutstationBody(
     errors['roundTripFare'] = 'Enter an amount in rupees, or leave it blank for no return trip.';
   }
 
-  const driverCommissionBps = percentToBps(draft.driverCommission);
-  if (driverCommissionBps === null) {
-    errors['driverCommission'] = 'Enter the driver’s share as a percentage between 0 and 100.';
+  const driverAmountPaise = rupeesToPaise(draft.driverAmount);
+  if (driverAmountPaise === null) {
+    errors['driverAmount'] = 'Enter what the driver is paid, in rupees.';
+  } else if (
+    // Mirrors the server: the amount cannot exceed the fare it is paid out of, checked against
+    // whichever direction the band sells more cheaply. Saves a round trip to a guaranteed 400.
+    (oneWayFarePaise !== null && driverAmountPaise > oneWayFarePaise) ||
+    (roundTripFarePaise !== null && driverAmountPaise > roundTripFarePaise)
+  ) {
+    errors['driverAmount'] = 'The driver amount cannot be more than the fare.';
   }
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
@@ -147,7 +155,7 @@ export function buildOutstationBody(
       maxKm: maxKm as number,
       oneWayFarePaise: oneWayFarePaise as number,
       roundTripFarePaise,
-      driverCommissionBps: driverCommissionBps as number,
+      driverAmountPaise: driverAmountPaise as number,
       isActive: draft.isActive,
     },
   };
@@ -166,7 +174,8 @@ export interface VariantDraft {
   label: string;
   includedMinutes: string;
   baseFare: string;
-  driverCommission: string;
+  /** What the driver is paid for this variant, in rupees as typed. */
+  driverAmount: string;
   isActive: boolean;
 }
 
@@ -197,7 +206,7 @@ export function emptyVariantDraft(): VariantDraft {
     label: '',
     includedMinutes: '',
     baseFare: '',
-    driverCommission: '',
+    driverAmount: '',
     isActive: true,
   };
 }
@@ -223,7 +232,7 @@ export function toIncityDraft(dto: IncityPackageDto): IncityDraft {
       label: variant.label,
       includedMinutes: String(variant.included_minutes),
       baseFare: paiseToRupees(variant.base_fare_paise),
-      driverCommission: bpsToPercent(variant.driver_commission_bps),
+      driverAmount: paiseToRupees(variant.driver_amount_paise),
       isActive: variant.is_active,
     })),
   };
@@ -248,17 +257,19 @@ export function buildIncityBody(draft: IncityDraft): BuildResult<CreateIncityPac
     const baseFarePaise = rupeesToPaise(variant.baseFare);
     if (baseFarePaise === null) errors[`${scope}.baseFare`] = 'Enter the base fare in rupees.';
 
-    const driverCommissionBps = percentToBps(variant.driverCommission);
-    if (driverCommissionBps === null) {
-      errors[`${scope}.driverCommission`] =
-        'Enter the driver’s share as a percentage between 0 and 100.';
+    const driverAmountPaise = rupeesToPaise(variant.driverAmount);
+    if (driverAmountPaise === null) {
+      errors[`${scope}.driverAmount`] = 'Enter what the driver is paid, in rupees.';
+    } else if (baseFarePaise !== null && driverAmountPaise > baseFarePaise) {
+      // Mirrors the server — the amount cannot exceed the variant's own fare.
+      errors[`${scope}.driverAmount`] = 'The driver amount cannot be more than the fare.';
     }
 
     return {
       label: variant.label.trim(),
       includedMinutes: includedMinutes ?? 0,
       baseFarePaise: baseFarePaise ?? 0,
-      driverCommissionBps: driverCommissionBps ?? 0,
+      driverAmountPaise: driverAmountPaise ?? 0,
       isActive: variant.isActive,
     };
   });

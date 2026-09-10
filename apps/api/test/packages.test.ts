@@ -6,7 +6,12 @@ import { CreateOutstationPackageUseCase } from '../src/modules/packages/applicat
 import { ResolveForTripUseCase } from '../src/modules/packages/application/useCases/resolveForTrip.usecase.js';
 import type { IncityPackage } from '../src/modules/packages/domain/incityPackage.entity.js';
 import type { OutstationPackage } from '../src/modules/packages/domain/outstationPackage.entity.js';
-import { InvalidPackageError, InvalidBandError, OverlappingBandError } from '../src/modules/packages/domain/package.errors.js';
+import {
+  DriverAmountError,
+  InvalidPackageError,
+  InvalidBandError,
+  OverlappingBandError,
+} from '../src/modules/packages/domain/package.errors.js';
 import type { PackageRepositoryPort } from '../src/modules/packages/domain/packageRepository.port.js';
 
 describe('Packages Module', () => {
@@ -111,12 +116,45 @@ describe('Packages Module', () => {
         const data: any = {
           cityZoneId: 'city_1',
           name: 'Test Package',
-          variants: [{ label: '1hr', includedMinutes: 60, baseFarePaise: 1000, driverCommissionBps: 7500 }],
+          variants: [{ label: '1hr', includedMinutes: 60, baseFarePaise: 1000, driverAmountPaise: 750 }],
         };
 
         const result = await useCase.execute(data);
         expect(result.id).toBe('incity_123');
         expect(mockRepo.createIncity).toHaveBeenCalledWith(data);
+      });
+
+      it('refuses a variant whose driver amount exceeds its fare', async () => {
+        const mockRepo = { createIncity: vi.fn() } as unknown as PackageRepositoryPort;
+        const useCase = new CreateIncityPackageUseCase(mockRepo);
+
+        await expect(
+          useCase.execute({
+            cityZoneId: 'city_1',
+            name: 'Test Package',
+            variants: [
+              { label: '1hr', includedMinutes: 60, baseFarePaise: 1000, driverAmountPaise: 1200 },
+            ],
+          } as any),
+        ).rejects.toThrow(DriverAmountError);
+
+        expect(mockRepo.createIncity).not.toHaveBeenCalled();
+      });
+
+      it('checks the amount even on an inactive draft — it is a landmine for whoever activates it', async () => {
+        const mockRepo = { createIncity: vi.fn() } as unknown as PackageRepositoryPort;
+        const useCase = new CreateIncityPackageUseCase(mockRepo);
+
+        await expect(
+          useCase.execute({
+            cityZoneId: 'city_1',
+            name: 'Test Package',
+            isActive: false,
+            variants: [
+              { label: '1hr', includedMinutes: 60, baseFarePaise: 1000, driverAmountPaise: 1200 },
+            ],
+          } as any),
+        ).rejects.toThrow(DriverAmountError);
       });
     });
 
@@ -135,7 +173,7 @@ describe('Packages Module', () => {
               minKm: 200,
             maxKm: 100, // Invalid
             oneWayFarePaise: 1000,
-            driverCommissionBps: 7500,
+            driverAmountPaise: 750,
           })
         ).rejects.toThrow(InvalidBandError);
 
@@ -157,7 +195,7 @@ describe('Packages Module', () => {
               minKm: 100,
             maxKm: 200,
             oneWayFarePaise: 1000,
-            driverCommissionBps: 7500,
+            driverAmountPaise: 750,
           })
         ).rejects.toThrow(OverlappingBandError);
 
@@ -182,13 +220,36 @@ describe('Packages Module', () => {
           minKm: 100,
           maxKm: 200,
           oneWayFarePaise: 1000,
-          driverCommissionBps: 7500,
+          driverAmountPaise: 750,
         };
 
         const result = await useCase.execute(data);
         expect(result.id).toBe('outstation_123');
         expect(mockRepo.findOverlappingBands).toHaveBeenCalled();
         expect(mockRepo.createOutstation).toHaveBeenCalledWith(data);
+      });
+
+      it('refuses a driver amount above the fare, and against the CHEAPER of the two directions', async () => {
+        const mockRepo = {
+          createOutstation: vi.fn(),
+          findOverlappingBands: vi.fn().mockResolvedValue(null),
+        } as unknown as PackageRepositoryPort;
+        const useCase = new CreateOutstationPackageUseCase(mockRepo);
+
+        await expect(
+          useCase.execute({
+            name: 'Weekend Getaway',
+            terrain: 'PLAIN',
+            minKm: 100,
+            maxKm: 200,
+            oneWayFarePaise: 5000,
+            // Below the one-way fare, but above a round-trip fare that undercuts it.
+            roundTripFarePaise: 3000,
+            driverAmountPaise: 4000,
+          } as any),
+        ).rejects.toThrow(DriverAmountError);
+
+        expect(mockRepo.createOutstation).not.toHaveBeenCalled();
       });
     });
   });
@@ -222,7 +283,7 @@ describe('Packages Module', () => {
         label: `${includedMinutes}min`,
         includedMinutes,
         baseFarePaise,
-        driverCommissionBps: 7500,
+        driverAmountPaise: Math.floor(baseFarePaise * 0.75),
         isActive,
       };
     }
@@ -240,7 +301,7 @@ describe('Packages Module', () => {
         updatedAt: new Date('2026-01-01'),
         oneWayFarePaise: 500000,
         roundTripFarePaise: null,
-        driverCommissionBps: 7500,
+        driverAmountPaise: 375000,
         ...overrides,
       };
     }

@@ -13,7 +13,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { CancelBookingSheet } from '@/components/CancelBookingSheet';
+import { CancelRide } from '@/components/CancelRide';
 import { tripStatusCopy } from '@/features/booking/status';
 import { getBooking } from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
@@ -136,7 +136,7 @@ export default function SearchingScreen(): ReactElement {
         </>
       )}
 
-      <CancelBookingSheet
+      <CancelRide
         visible={cancelling}
         bookingId={id}
         onClose={() => setCancelling(false)}

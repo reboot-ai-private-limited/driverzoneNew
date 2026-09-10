@@ -1,5 +1,15 @@
 import { type ReactElement, type ReactNode, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Modal, Pressable, StyleSheet, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Keyboard,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, space } from '@/theme/theme';
 
@@ -46,6 +56,40 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
    * too fast. The default only applies to the first frame, before layout has run.
    */
   const [height, setHeight] = useState(360);
+
+  /**
+   * How much of the screen the keyboard is covering, and why this is done by hand.
+   *
+   * A `Modal` is hoisted into its OWN window by the platform, outside the activity whose
+   * `windowSoftInputMode=adjustResize` normally shrinks the app around the keyboard. So the sheet
+   * — anchored to the bottom edge — keeps sitting exactly where the keyboard now is, and any
+   * field near its foot is typed into blind. `KeyboardAvoidingView` does not rescue it either: it
+   * measures the frame it is inside, and inside a modal window that frame never changed.
+   *
+   * Tracking the height directly and lifting the sheet by it is the one approach that does not
+   * depend on the modal participating in the activity's resize. Copied from the driver app's
+   * sheet, which had this from the start — this one did not, which is why the cancel sheet's
+   * "Other reason" box sat behind the keyboard.
+   */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const { height: screenHeight } = useWindowDimensions();
+
+  useEffect(() => {
+    // iOS emits `will*` ahead of the animation, so the sheet travels WITH the keyboard rather
+    // than snapping after it. Android only ever emits `did*`.
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const show = Keyboard.addListener(showEvent, (event) =>
+      setKeyboardHeight(event.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -152,7 +196,25 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
           style={[
             styles.sheet,
             {
-              paddingBottom: insets.bottom + space.lg,
+              // Lifted clear of the keyboard. `marginBottom` rather than padding: the sheet has to
+              // MOVE, not grow — growing would push its top off screen and leave the foot exactly
+              // where it was, still covered.
+              marginBottom: keyboardHeight,
+
+              /**
+               * The home inset only matters when nothing else is down there. With the keyboard up
+               * it sits above the gesture bar, so adding the inset too would leave a strip of dead
+               * space between the sheet and the keys.
+               */
+              paddingBottom: keyboardHeight > 0 ? space.lg : insets.bottom + space.lg,
+
+              /**
+               * With the keyboard up there may not be room for the whole sheet. Capping the height
+               * lets a ScrollView inside take over — without this the sheet simply grows past the
+               * top of the screen and its heading becomes unreachable.
+               */
+              maxHeight: screenHeight - keyboardHeight - insets.top - space.xl,
+
               transform: [{ translateY }, { scale }],
             },
           ]}

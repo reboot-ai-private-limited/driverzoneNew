@@ -19,13 +19,13 @@ function sellableBand(over: Partial<OutstationDraft> = {}): OutstationDraft {
     maxKm: '100',
     oneWayFare: '2100',
     roundTripFare: '3700',
-    driverCommission: '75',
+    driverAmount: '1500',
     ...over,
   };
 }
 
 describe('buildOutstationBody', () => {
-  it('converts rupees to paise and the percent to basis points', () => {
+  it('converts every rupee field to paise', () => {
     const result = buildOutstationBody(sellableBand());
 
     expect(result.ok).toBe(true);
@@ -37,7 +37,7 @@ describe('buildOutstationBody', () => {
       maxKm: 100,
       oneWayFarePaise: 210000,
       roundTripFarePaise: 370000,
-      driverCommissionBps: 7500,
+      driverAmountPaise: 150000,
       isActive: true,
     });
   });
@@ -53,7 +53,9 @@ describe('buildOutstationBody', () => {
   });
 
   it('sends a return fare of ZERO as 0 — a free return trip is not the same thing', () => {
-    const result = buildOutstationBody(sellableBand({ roundTripFare: '0' }));
+    // driverAmount 0 too: a ₹0 return fare cannot pay out anything, and the amount-vs-fare
+    // check would otherwise reject the fixture's default ₹1500.
+    const result = buildOutstationBody(sellableBand({ roundTripFare: '0', driverAmount: '0' }));
 
     expect(result.ok && result.body.roundTripFarePaise).toBe(0);
   });
@@ -74,23 +76,29 @@ describe('buildOutstationBody', () => {
     expect(result.errors['oneWayFare']).toMatch(/one-way fare/);
   });
 
-  it('refuses a driver share above 100%', () => {
-    const result = buildOutstationBody(sellableBand({ driverCommission: '120' }));
+  it('refuses a driver amount above the fare', () => {
+    // Over the one-way fare of ₹2100, though it would fit inside the return fare.
+    const result = buildOutstationBody(sellableBand({ driverAmount: '2500' }));
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.errors['driverCommission']).toMatch(/between 0 and 100/);
+    expect(result.errors['driverAmount']).toMatch(/more than the fare/);
+  });
+
+  it('allows a driver amount equal to the fare', () => {
+    const result = buildOutstationBody(sellableBand({ oneWayFare: '2100', driverAmount: '2100' }));
+    expect(result.ok).toBe(true);
   });
 
   it('collects every bad field at once rather than one per save', () => {
     const result = buildOutstationBody(
-      sellableBand({ name: '', minKm: 'abc', oneWayFare: '', driverCommission: '' }),
+      sellableBand({ name: '', minKm: 'abc', oneWayFare: '', driverAmount: '' }),
     );
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(Object.keys(result.errors).sort()).toEqual([
-      'driverCommission',
+      'driverAmount',
       'minKm',
       'name',
       'oneWayFare',
@@ -106,7 +114,7 @@ describe('buildOutstationBody', () => {
       max_km: 100,
       one_way_fare_paise: 240000,
       round_trip_fare_paise: null,
-      driver_commission_bps: 7000,
+      driver_amount_paise: 170000,
       is_active: true,
     };
 
@@ -121,7 +129,7 @@ describe('buildOutstationBody', () => {
       maxKm: 100,
       oneWayFarePaise: 240000,
       roundTripFarePaise: null,
-      driverCommissionBps: 7000,
+      driverAmountPaise: 170000,
       isActive: true,
     });
   });
@@ -136,7 +144,7 @@ describe('splitDraftFrom', () => {
     max_km: 150,
     one_way_fare_paise: 180000,
     round_trip_fare_paise: 320000,
-    driver_commission_bps: 7500,
+    driver_amount_paise: 120000,
     is_active: true,
   };
 
@@ -174,7 +182,7 @@ describe('buildIncityBody', () => {
     variant.label = '3 Hours';
     variant.includedMinutes = '180';
     variant.baseFare = '900';
-    variant.driverCommission = '75';
+    variant.driverAmount = '675';
     return draft;
   }
 
@@ -188,7 +196,7 @@ describe('buildIncityBody', () => {
       label: '3 Hours',
       includedMinutes: 180,
       baseFarePaise: 90000,
-      driverCommissionBps: 7500,
+      driverAmountPaise: 67500,
       isActive: true,
     });
   });
@@ -252,6 +260,19 @@ describe('buildIncityBody', () => {
     expect(result.errors[`variants.${draft.variants[0]!.key}.baseFare`]).toMatch(/base fare/);
   });
 
+  it('refuses a variant driver amount above its own fare', () => {
+    const draft = sellablePackage();
+    draft.variants[0]!.baseFare = '900';
+    draft.variants[0]!.driverAmount = '1200';
+
+    const result = buildIncityBody(draft);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[`variants.${draft.variants[0]!.key}.driverAmount`]).toMatch(
+      /more than the fare/,
+    );
+  });
+
   it('round-trips a DTO through the draft unchanged', () => {
     const dto: IncityPackageDto = {
       id: 'p1',
@@ -265,7 +286,7 @@ describe('buildIncityBody', () => {
           label: '10 Hours',
           included_minutes: 600,
           base_fare_paise: 220000,
-          driver_commission_bps: 7500,
+          driver_amount_paise: 165000,
           is_active: true,
         },
       ],
@@ -284,7 +305,7 @@ describe('buildIncityBody', () => {
       label: '10 Hours',
       includedMinutes: 600,
       baseFarePaise: 220000,
-      driverCommissionBps: 7500,
+      driverAmountPaise: 165000,
       isActive: true,
     });
   });

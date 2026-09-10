@@ -1,7 +1,10 @@
 import type { IncityPackagePatch, PackageRepositoryPort } from '../../domain/packageRepository.port.js';
 import type { IncityPackage } from '../../domain/incityPackage.entity.js';
-import { validateIncityPackageActivation } from '../../domain/incityPackage.entity.js';
-import { InvalidPackageError, PackageNotFoundError } from '../../domain/package.errors.js';
+import {
+  validateIncityDriverAmounts,
+  validateIncityPackageActivation,
+} from '../../domain/incityPackage.entity.js';
+import { DriverAmountError, InvalidPackageError, PackageNotFoundError } from '../../domain/package.errors.js';
 
 export class UpdateIncityPackageUseCase {
   constructor(private readonly repo: PackageRepositoryPort) {}
@@ -20,6 +23,12 @@ export class UpdateIncityPackageUseCase {
      * sellable price row before it would block ops from editing a draft.
      * `updateOutstationPackage.usecase.ts` has always done it this way; this is the twin.
      */
+    // Same wholesale-replacement logic as P-3 below: an omitted `variants` means "keep what is
+    // stored", so the check runs on the merge, not the patch.
+    const mergedVariants = data.variants ?? existing.variants;
+    const amountError = validateIncityDriverAmounts({ variants: mergedVariants });
+    if (amountError) throw new DriverAmountError(amountError);
+
     const mergedIsActive = data.isActive ?? existing.isActive;
     if (mergedIsActive !== false) {
       const reason = validateIncityPackageActivation({

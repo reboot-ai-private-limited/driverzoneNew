@@ -161,7 +161,9 @@ describe('computeIncityFare', () => {
   const input = {
     variantLabel: '3 Hours',
     baseFarePaise: 90_000,
-    driverCommissionBps: 7_500,
+    // A flat amount now, not 75% of the subtotal. 77_250 keeps the worked example's numbers
+    // identical: it happens to equal 75% of the 103_000 subtotal this input produces.
+    driverAmountPaise: 77_250,
     pickupZone: paidZone,
     scheduledAt: ist(12, 0),
   };
@@ -179,7 +181,7 @@ describe('computeIncityFare', () => {
     expect(fare.taxPaise).toBe(5_200);
     expect(fare.split).toEqual({
       commissionablePaise: 103_000,
-      driverCommissionBps: 7_500,
+      driverAmountPaise: 77_250,
       driverPaise: 77_250,
       companyPaise: 25_750,
     });
@@ -217,7 +219,8 @@ describe('computeOutstationFare', () => {
     direction: 'ONE_WAY' as const,
     farePaise: 450_000,
     days: 1,
-    driverCommissionBps: 7_000,
+    // Flat, per day. Multiplied by `days` alongside the band fare — see the test below.
+    driverAmountPaise: 300_000,
     pickupZone: freeZone,
     scheduledAt: ist(9, 0),
   };
@@ -287,6 +290,18 @@ describe('computeOutstationFare', () => {
     expect(fare.lines[0]?.amountPaise).toBe(900_000);
   });
 
+  it("multiplies the driver's amount by the days, exactly as it does the fare", () => {
+    // A driver away three days is paid three times. Both sides of the split scale by `days`; the
+    // fixed lines do not, which is why the company's share grows faster across a long trip.
+    const oneDay = computeOutstationFare({ ...input, direction: 'ROUND_TRIP' }, config);
+    const threeDay = computeOutstationFare(
+      { ...input, direction: 'ROUND_TRIP', days: 3 },
+      config,
+    );
+    expect(threeDay.split.driverAmountPaise).toBe(oneDay.split.driverAmountPaise * 3);
+    expect(threeDay.split.driverPaise).toBe(900_000); // 300_000 per day × 3
+  });
+
   it('applies the surcharge on the pickup instant, never on the journey length', () => {
     // A multi-day outstation trip departing at noon pays no night charge, however long it runs.
     expect(computeOutstationFare(input, config).lines.map((l) => l.code)).not.toContain('NIGHT');
@@ -297,18 +312,37 @@ describe('computeOutstationFare', () => {
 });
 
 describe('splitFare', () => {
-  it('derives the company share as the remainder, never independently', () => {
-    const split = splitFare(100_001, 7_500);
+  it('pays the driver their amount and gives the company the remainder', () => {
+    const split = splitFare(100_001, 60_000);
+    expect(split.driverPaise).toBe(60_000);
+    expect(split.companyPaise).toBe(40_001);
     expect(split.driverPaise + split.companyPaise).toBe(100_001);
   });
 
-  it('gives the driver everything at 10000 bps and nothing at 0', () => {
-    expect(splitFare(50_000, 10_000).companyPaise).toBe(0);
+  it('records the configured amount alongside what was actually paid', () => {
+    const split = splitFare(100_000, 40_000);
+    expect(split.driverAmountPaise).toBe(40_000);
+    expect(split.driverPaise).toBe(40_000);
+  });
+
+  it('takes nothing for the company at the full fare, and pays nothing at 0', () => {
+    expect(splitFare(50_000, 50_000).companyPaise).toBe(0);
     expect(splitFare(50_000, 0).driverPaise).toBe(0);
   });
 
+  it('clamps rather than paying out more than the fare, and still reconciles', () => {
+    // The backstop for a misconfigured package that slipped past validation. Driver paid in full
+    // up to the fare, company floors at zero, and `driverAmountPaise` keeps the configured figure
+    // so the shortfall is visible in stored data.
+    const split = splitFare(30_000, 45_000);
+    expect(split.driverPaise).toBe(30_000);
+    expect(split.companyPaise).toBe(0);
+    expect(split.driverAmountPaise).toBe(45_000);
+    expect(split.driverPaise + split.companyPaise).toBe(30_000);
+  });
+
   it('throws rather than returning a fare that does not reconcile', () => {
-    expect(() => assertFareReconciles(splitFare(1_000, 7_500), 50, 9_999)).toThrow();
+    expect(() => assertFareReconciles(splitFare(1_000, 750), 50, 9_999)).toThrow();
   });
 });
 
@@ -318,13 +352,15 @@ describe('every fare reconciles', () => {
     // that does not reconcile is how you end up unable to close the books, and the rounding-
     // absorption decision in computeFare.ts is exactly what this is guarding.
     for (let base = 10_000; base <= 900_000; base += 7_331) {
-      for (const bps of [0, 2_500, 7_000, 7_500, 10_000]) {
+      // Includes `base * 3`, which exceeds the subtotal and makes the clamp fire — the identity
+      // still has to hold with the company's share floored at zero.
+      for (const driverAmountPaise of [0, Math.floor(base / 3), base, base * 3]) {
         for (const at of [ist(12, 0), ist(23, 0), ist(4, 30)]) {
           const fare = computeIncityFare(
             {
               variantLabel: 'n Hours',
               baseFarePaise: base,
-              driverCommissionBps: bps,
+              driverAmountPaise,
               pickupZone: paidZone,
               scheduledAt: at,
             },

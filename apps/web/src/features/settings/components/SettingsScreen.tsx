@@ -18,6 +18,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useResetSettings, useUpdateSettings } from '../hooks/useSettingsMutations';
 import { diffDrafts, mapFieldErrors, mergeDrafts, toDrafts, type Draft, type Drafts } from '../lib/draft';
 import { SettingField } from './SettingField';
+import { FaqPanel } from './FaqPanel';
 
 /**
  * The global settings screen — the fare, waiting, dispatch and cancellation numbers ops tunes
@@ -230,6 +231,19 @@ export function SettingsScreen() {
           ))}
         </div>
       </DataState>
+
+      {/*
+        OUTSIDE THE `DataState`, deliberately. The FAQs are a different query with a different
+        endpoint, and nesting them inside the settings one would blank the whole FAQ editor —
+        including an admin's unsaved rows — whenever the settings request happened to fail. Each
+        half of this page loads, fails and retries on its own.
+
+        It also saves on its own; `FaqPanel` explains why, and why its dirty state stays out of
+        the `SaveBar` counter above.
+      */}
+      <div className="mt-4">
+        <FaqPanel disabled={busy} />
+      </div>
     </div>
   );
 }

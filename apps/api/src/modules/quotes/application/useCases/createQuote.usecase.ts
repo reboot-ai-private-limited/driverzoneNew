@@ -189,7 +189,7 @@ export class CreateQuoteUseCase {
             {
               variantLabel: variant.label,
               baseFarePaise: variant.baseFarePaise,
-              driverCommissionBps: variant.driverCommissionBps,
+              driverAmountPaise: variant.driverAmountPaise,
               pickupZone,
               scheduledAt,
             },
@@ -263,7 +263,7 @@ export class CreateQuoteUseCase {
           direction,
           farePaise,
           days,
-          driverCommissionBps: pkg.driverCommissionBps,
+          driverAmountPaise: pkg.driverAmountPaise,
           pickupZone,
           scheduledAt,
         },

@@ -26,8 +26,13 @@ export interface OutstationPackage {
    * successor to the old "leave the price row out" affordance.
    */
   roundTripFarePaise: number | null;
-  /** The driver's share in basis points. The company's is `10000 - this`, never stored. */
-  driverCommissionBps: number;
+  /**
+   * What the driver is paid for this band, in paise, PER DAY — a flat amount, not a share
+   * (2026-09-10). The band fare is a day rate and this is multiplied by the same IST day count in
+   * `computeOutstationFare`. `validateOutstationDriverAmount` refuses a value above the one-way
+   * fare (and the round-trip fare, when the band sells one).
+   */
+  driverAmountPaise: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -41,6 +46,32 @@ export function fareFor(pkg: OutstationPackage, direction: Direction): number | 
 export function validateOutstationBand(minKm: number, maxKm: number): string | null {
   if (minKm < 0) return 'minKm must be >= 0';
   if (maxKm <= minKm) return 'maxKm must be greater than minKm';
+  return null;
+}
+
+/**
+ * THE DRIVER AMOUNT MAY NOT EXCEED THE FARE IT IS PAID OUT OF.
+ *
+ * Same reasoning as the incity twin: `driverAmountPaise` is subtracted from the commissionable
+ * subtotal, whose tightest value is the band fare alone. Both the fare and this amount are
+ * day rates multiplied by the same day count, so the per-day comparison is the one that has to
+ * hold — a value that fits one day fits three.
+ *
+ * Checked against BOTH directions the band sells. A band with a cheap round-trip fare and a
+ * driver amount tuned to the one-way could still go negative on the return.
+ */
+export function validateOutstationDriverAmount(pkg: {
+  oneWayFarePaise: number;
+  roundTripFarePaise: number | null;
+  driverAmountPaise: number;
+}): string | null {
+  const floor =
+    pkg.roundTripFarePaise === null
+      ? pkg.oneWayFarePaise
+      : Math.min(pkg.oneWayFarePaise, pkg.roundTripFarePaise);
+  if (pkg.driverAmountPaise > floor) {
+    return `The driver amount (₹${String(pkg.driverAmountPaise / 100)}) cannot exceed the fare (₹${String(floor / 100)})`;
+  }
   return null;
 }
 

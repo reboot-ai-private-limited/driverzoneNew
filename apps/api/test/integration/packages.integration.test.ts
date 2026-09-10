@@ -17,7 +17,7 @@ describe('Packages Repository Integration', () => {
    */
   const FARE = {
     oneWayFarePaise: 1000,
-    driverCommissionBps: 7500,
+    driverAmountPaise: 750,
   } as const;
 
   beforeAll(async () => {
@@ -229,7 +229,7 @@ describe('Packages Repository Integration', () => {
       cityZoneId: zone1,
       name: 'Siliguri Hourly',
       variants: [
-        { label: '3 Hours', includedMinutes: 180, baseFarePaise: 90000, driverCommissionBps: 7500 },
+        { label: '3 Hours', includedMinutes: 180, baseFarePaise: 90000, driverAmountPaise: 67500 },
       ],
     } as const;
 
@@ -242,7 +242,7 @@ describe('Packages Repository Integration', () => {
       expect(found[0]?.name).toBe('Siliguri Hourly');
       expect(found[0]?.variants[0]?.includedMinutes).toBe(180);
       expect(found[0]?.variants[0]?.baseFarePaise).toBe(90000);
-      expect(found[0]?.variants[0]?.driverCommissionBps).toBe(7500);
+      expect(found[0]?.variants[0]?.driverAmountPaise).toBe(67500);
       // `isActive` defaults in the schema, so the mapper has to carry it back out.
       expect(found[0]?.variants[0]?.isActive).toBe(true);
     });

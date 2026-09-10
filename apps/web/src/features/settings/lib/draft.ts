@@ -1,4 +1,9 @@
-import type { SettingDto, SettingUnit, SettingValue } from '@driverzone/contracts';
+import type {
+  SettingDisplayScale,
+  SettingDto,
+  SettingUnit,
+  SettingValue,
+} from '@driverzone/contracts';
 
 /**
  * The form's own state, and the rules for turning it back into wire values.
@@ -16,13 +21,27 @@ export type Draft = string | { start: string; end: string };
 
 export type Drafts = Record<string, Draft>;
 
-export function toDraft(value: SettingValue): Draft {
-  return typeof value === 'number' ? String(value) : { start: value.start, end: value.end };
+/**
+ * A stored value, as text for its input box.
+ *
+ * `display` is the only place the two can differ: a key stored in metres and shown in kilometres
+ * arrives as `3000` and has to reach the box as `3`. `parseDraft` multiplies it back, and those
+ * two are the whole of the conversion — nothing between them ever sees the displayed number.
+ *
+ * Trailing zeroes are trimmed (`3`, not `3.0`) so an untouched field does not read as an edit and
+ * does not look like a value someone fiddled with.
+ */
+export function toDraft(value: SettingValue, display?: SettingDisplayScale | undefined): Draft {
+  if (typeof value !== 'number') return { start: value.start, end: value.end };
+  if (display === undefined) return String(value);
+  return String(Number((value / display.factor).toFixed(display.decimals)));
 }
 
 /** Seeds the whole form from what the server currently has. */
 export function toDrafts(settings: readonly SettingDto[]): Drafts {
-  return Object.fromEntries(settings.map((setting) => [setting.key, toDraft(setting.value)]));
+  return Object.fromEntries(
+    settings.map((setting) => [setting.key, toDraft(setting.value, setting.display)]),
+  );
 }
 
 export function isWindowDraft(draft: Draft): draft is { start: string; end: string } {
@@ -49,7 +68,11 @@ export type ParseResult = { ok: true; value: SettingValue } | ParseFailure;
  * configuration is. A save is never gated on this function agreeing — it gates only on the field
  * being parseable at all, because an unparseable field has no value to send.
  */
-export function parseDraft(draft: Draft, unit: SettingUnit): ParseResult {
+export function parseDraft(
+  draft: Draft,
+  unit: SettingUnit,
+  display?: SettingDisplayScale | undefined,
+): ParseResult {
   if (unit === 'TIME_WINDOW') {
     if (!isWindowDraft(draft)) return { ok: false, message: 'Expected a time window.' };
     if (!HH_MM.test(draft.start) || !HH_MM.test(draft.end)) {
@@ -70,6 +93,35 @@ export function parseDraft(draft: Draft, unit: SettingUnit): ParseResult {
 
   const parsed = Number(text);
   if (!Number.isFinite(parsed)) return { ok: false, message: 'Must be a number.' };
+
+  /*
+   * A SCALED FIELD IS PARSED IN THE UNIT THE ADMIN TYPED, then converted once.
+   *
+   * The decimals allowance is what makes the scale usable rather than a coarser version of the
+   * same box: 2.5 km has to be expressible, or showing kilometres would have cost the admin the
+   * ability to say what 2500 m used to say. It is bounded because the stored unit is integral —
+   * 2.55 km is 2550 m and fine, 2.5555 km is not a whole number of metres and the API would
+   * reject it after a round trip.
+   */
+  if (display !== undefined) {
+    if (parsed < 0) return { ok: false, message: 'Cannot be negative.' };
+
+    const places = (text.split('.')[1] ?? '').length;
+    if (places > display.decimals) {
+      return {
+        ok: false,
+        message:
+          display.decimals === 0
+            ? 'Must be a whole number.'
+            : `At most ${String(display.decimals)} decimal place${display.decimals === 1 ? '' : 's'}.`,
+      };
+    }
+
+    // `Math.round` rather than a bare multiply: 2.9 * 1000 is 2899.9999999999995 in binary
+    // floating point, and an admin typing 2.9 km must not store 2899 metres.
+    return { ok: true, value: Math.round(parsed * display.factor) };
+  }
+
   if (!Number.isInteger(parsed)) {
     // Whole rupees only, by design — see the note in `endpoints/settings.ts`. Worth spelling out
     // in the money case, since "no decimals" in a currency field reads as a bug otherwise.
@@ -83,9 +135,20 @@ export function parseDraft(draft: Draft, unit: SettingUnit): ParseResult {
   return { ok: true, value: parsed };
 }
 
-/** Compared as VALUES, not as text: `"20"` and `"20 "` are the same setting, not an edit. */
-export function isDirty(draft: Draft, original: SettingValue, unit: SettingUnit): boolean {
-  const parsed = parseDraft(draft, unit);
+/**
+ * Compared as VALUES, not as text: `"20"` and `"20 "` are the same setting, not an edit.
+ *
+ * Values, not text, is also what makes a scaled field behave. `original` is in the stored unit
+ * (3000 metres) and the draft is in the displayed one ("3"), so comparing the strings would mark
+ * the row dirty on every page load.
+ */
+export function isDirty(
+  draft: Draft,
+  original: SettingValue,
+  unit: SettingUnit,
+  display?: SettingDisplayScale | undefined,
+): boolean {
+  const parsed = parseDraft(draft, unit, display);
   // An unparseable draft is always dirty — the admin has typed something, and treating it as
   // unchanged would let a half-finished edit vanish silently on discard.
   if (!parsed.ok) return true;
@@ -118,11 +181,11 @@ export function diffDrafts(settings: readonly SettingDto[], drafts: Drafts): Dif
   for (const setting of settings) {
     const draft = drafts[setting.key];
     if (draft === undefined) continue;
-    if (!isDirty(draft, setting.value, setting.unit)) continue;
+    if (!isDirty(draft, setting.value, setting.unit, setting.display)) continue;
 
     dirtyKeys.push(setting.key);
 
-    const parsed = parseDraft(draft, setting.unit);
+    const parsed = parseDraft(draft, setting.unit, setting.display);
     if (parsed.ok) values[setting.key] = parsed.value;
     else invalid[setting.key] = parsed.message;
   }

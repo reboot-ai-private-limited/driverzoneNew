@@ -29,7 +29,7 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
       label: v.label,
       includedMinutes: v.includedMinutes,
       baseFarePaise: v.baseFarePaise,
-      driverCommissionBps: v.driverCommissionBps,
+      driverAmountPaise: v.driverAmountPaise,
       isActive: v.isActive,
     })),
     isActive: obj.isActive,
@@ -50,7 +50,7 @@ function toOutstationEntity(doc: InstanceType<typeof OutstationPackageModel>): O
     // `?? null` and not `?? 0`: a document written before this field existed, or one where ops
     // cleared it, means "no same-day return offered" — never "the return trip is free".
     roundTripFarePaise: obj.roundTripFarePaise ?? null,
-    driverCommissionBps: obj.driverCommissionBps,
+    driverAmountPaise: obj.driverAmountPaise,
     isActive: obj.isActive,
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,

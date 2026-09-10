@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import type { BookingStatus, CancelBookingResponse, SettingValue } from '@driverzone/contracts';
 import { useMutation } from '@tanstack/react-query';
-import { type ReactElement, useEffect, useState } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -50,6 +50,14 @@ export function CancelTripSheet({
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * The note sits near the foot of the sheet with the confirm button under it, so the keyboard
+   * lands on both. `BottomSheet` lifts the sheet clear of the keys and caps its height, which
+   * hands the overflow to this ScrollView — but a ScrollView does not move itself, so without
+   * this the driver focuses the box and finds it, and the button under it, below the fold.
+   */
+  const scrollRef = useRef<ScrollView>(null);
+
   // A sheet reopened after a change of heart must not still hold the last choice — a pre-selected
   // reason on a destructive form is one tap away from being submitted unread.
   useEffect(() => {
@@ -83,6 +91,7 @@ export function CancelTripSheet({
   return (
     <BottomSheet visible={visible} onClose={cancel.isPending ? () => undefined : onClose}>
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -152,6 +161,11 @@ export function CancelTripSheet({
           maxLength={160}
           style={styles.note}
           accessibilityLabel="Add a note"
+          // A frame later: the sheet is still being lifted by the keyboard when focus fires, so
+          // scrolling immediately measures the pre-keyboard height and stops short.
+          onFocus={() =>
+            requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }))
+          }
         />
 
         {error !== null ? (

@@ -59,6 +59,11 @@ export const FAULT_CODES = [
   /** Individually valid, jointly incoherent — overlapping windows, a ladder that steps down. 422. */
   'SETTING_INVARIANT_VIOLATED',
 
+  // FAQs. The list is saved whole, so the one thing that can go wrong beyond a malformed entry is
+  // saving a list that names an FAQ somebody else has since deleted.
+  /** `data.ids` names the entries that are gone, so the panel can point at the stale rows. 422. */
+  'FAQ_NOT_FOUND',
+
   // Identity (docs/LLD/auth.md). One generic code covers wrong/expired/no-challenge
   // and an unprovisioned admin number alike — telling those apart is an enumeration oracle.
   'OTP_INVALID_OR_EXPIRED',

@@ -119,26 +119,29 @@ For `ROUND_TRIP`, the fare is a separate field rather than a computed 2× — ro
 usually less than double one-way (the driver is returning anyway) and you want that
 pricing power explicit rather than derived.
 
-## Commission split
+## Driver / company split
 
-Stored per price row; percent values are **basis points** (`2500` = 25%).
+The package sets **what the driver is paid**, a flat amount in paise (`driverAmountPaise`), not a
+rate (decision-log.md, 2026-09-10). On outstation it is a **day rate** — the caller multiplies it
+by the trip's IST days, exactly as it does the band fare, before this function sees it.
 
 ```
-splitFare(commissionable, driverCommissionBps) -> { driver, company }
+splitFare(commissionable, driverAmountPaise) -> { driver, company }
 
-  driverShare  = round(commissionable * driverCommissionBps / 10000)
+  driverShare  = min(driverAmountPaise, commissionable)   // clamp: never pay out more than the fare
   companyShare = commissionable - driverShare
 ```
 
 Where `commissionable = subtotal` — **tax is excluded**, being passed through to the government
-rather than split. There is no driver allowance to exclude any more; it went with the outstation
-price row.
+rather than split.
 
 **The company's share is the remainder, and is never stored.** Both sides used to be stored
 independently, each with its own `PERCENT | FLAT` type, which let a form save 75% and 20% and
-quietly leave 5% of every trip in nobody's column. Deriving one from the other deletes that
-failure mode instead of validating against it, and makes the assertion below true by
-construction rather than by check.
+quietly leave 5% of every trip in nobody's column. The rate that replaced them had the opposite
+problem — the driver's payout moved with every pickup fee and surcharge. A set amount fixes what
+the job pays; the company absorbs the variance and takes the remainder. The admin API refuses an
+amount above the package's own fare, so the clamp above is only a backstop (an old package, a
+fare cut), and the assertion below still holds by construction.
 
 ```
 assert driverShare + companyShare + tax == total
@@ -185,9 +188,10 @@ Written once into `bookings.fare_snapshot` at confirmation, never updated:
 
   "split": {
     "commissionable_paise": 100000,
-    // The rate is one number. The company's share is the remainder, and both sides are frozen
-    // here as amounts so a later rate change cannot alter what was owed on this booking.
-    "driver_commission_bps": 7500,
+    // driver_amount_paise is what the package promised (day-multiplied on outstation); driver_paise
+    // is what was actually paid — they differ only if the fare could not cover the amount. Both
+    // frozen here so a later package edit cannot alter what was owed on this booking.
+    "driver_amount_paise": 75000,
     "driver_paise": 75000,
     "company_paise": 25000
   }

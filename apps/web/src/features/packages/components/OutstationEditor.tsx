@@ -40,7 +40,7 @@ import { DeactivatePackageDialog } from './DeactivatePackageDialog';
  * The outstation band editor.
  *
  * It used to carry a ten-row price grid and a coverage ladder. Both are gone: the band is two
- * fares and a percentage now, and the list it came from shows the coverage. What stays is the
+ * fares and a driver amount now, and the list it came from shows the coverage. What stays is the
  * live overlap warning, because that is the one thing the admin cannot see from this form alone.
  */
 
@@ -321,47 +321,28 @@ export function OutstationEditor() {
                   error={errors['roundTripFare']}
                   disabled={saving}
                 />
-                <FormField
-                  label="Driver's share"
-                  hint="The company keeps the rest."
+                <FareField
+                  label="Driver is paid"
+                  hint="A flat amount, per day. The company keeps the rest of the fare."
+                  value={draft.driverAmount}
+                  onChange={(value) => edit({ ...draft, driverAmount: value })}
+                  error={errors['driverAmount']}
+                  disabled={saving}
                   required
-                  {...(errors['driverCommission'] === undefined
-                    ? {}
-                    : { error: errors['driverCommission'] })}
-                >
-                  {({ id: fieldId, invalid, describedBy }) => (
-                    <div className="relative">
-                      <Input
-                        id={fieldId}
-                        inputMode="numeric"
-                        value={draft.driverCommission}
-                        onChange={(event) =>
-                          edit({ ...draft, driverCommission: event.target.value })
-                        }
-                        invalid={invalid}
-                        aria-describedby={describedBy}
-                        disabled={saving}
-                        className="pr-7"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-subtle text-sm">
-                        %
-                      </span>
-                    </div>
-                  )}
-                </FormField>
+                />
               </div>
 
               <div className="mt-4 flex flex-col gap-1.5">
                 <CommissionSplitLine
                   label="One-way"
                   fare={draft.oneWayFare}
-                  driverPercent={draft.driverCommission}
+                  driverAmount={draft.driverAmount}
                 />
                 {draft.roundTripFare.trim() !== '' && (
                   <CommissionSplitLine
                     label="Return"
                     fare={draft.roundTripFare}
-                    driverPercent={draft.driverCommission}
+                    driverAmount={draft.driverAmount}
                   />
                 )}
               </div>

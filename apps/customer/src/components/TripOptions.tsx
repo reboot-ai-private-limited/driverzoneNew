@@ -4,7 +4,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import type { Direction, ServiceType } from '@driverzone/contracts';
 import { DirectionToggle } from '@/components/DirectionToggle';
-import { ToggleSwitch } from '@/components/ToggleSwitch';
 import { formatWhen, returnProblem, scheduleProblem } from '@/features/booking/schedule';
 import { colors, radius, space, text } from '@/theme/theme';
 
@@ -34,16 +33,6 @@ interface TripOptionsProps {
   returnAt: Date | null;
   onPickReturn: () => void;
   onClearReturn: () => void;
-
-  /** On by default, matching the server's own default — see `useTripQuote`. Re-quotes on change. */
-  insurance: boolean;
-  onInsuranceChange: (insurance: boolean) => void;
-  /**
-   * `amount_display` off the current quote's INSURANCE line, when one exists — so the row can say
-   * what the charge actually is rather than a number the customer has to trust. Null while
-   * insurance is off (there is no line to read one from) or before the first quote answers.
-   */
-  insuranceAmount: string | null;
 }
 
 /**
@@ -71,9 +60,6 @@ export function TripOptions({
   returnAt,
   onPickReturn,
   onClearReturn,
-  insurance,
-  onInsuranceChange,
-  insuranceAmount,
 }: TripOptionsProps): ReactElement {
   const whenProblem = scheduleProblem(scheduledAt);
   const backProblem = returnProblem(returnAt, scheduledAt);
@@ -143,30 +129,10 @@ export function TripOptions({
       ) : null}
 
       {/*
-        Every OTHER control here changes which product or when — this one changes what is IN the
-        fare, so it gets a switch rather than a row that opens a picker. It still re-quotes on
-        change, same as the rest of the block: the amount below is only ever the server's own
-        line, never arithmetic done on the phone.
+        A RIDE-INSURANCE SWITCH USED TO SIT HERE. The feature is withdrawn, so the control went
+        with it and `useTripQuote` now prices every trip without the line — see the note there.
+        Nothing replaces it: the block is back to answering only when and which way.
       */}
-      <View style={styles.insuranceRow}>
-        <Feather name="shield" size={16} color={colors.muted} style={styles.rowIcon} />
-        <View style={styles.flex}>
-          <Text style={styles.insuranceLabel}>Ride insurance</Text>
-          <Text style={styles.insuranceHint}>
-            {insurance
-              ? insuranceAmount === null
-                ? 'Covers you and the driver on this trip'
-                : `${insuranceAmount} added to this trip`
-              : 'Not included on this trip'}
-          </Text>
-        </View>
-        <ToggleSwitch
-          value={insurance}
-          onChange={onInsuranceChange}
-          disabled={busy}
-          accessibilityLabel="Ride insurance"
-        />
-      </View>
     </Animated.View>
   );
 }
@@ -243,7 +209,6 @@ function OptionRow({
 
 const styles = StyleSheet.create({
   root: { marginBottom: space.sm },
-  flex: { flex: 1 },
   incity: {
     ...text.caption,
     color: colors.muted,
@@ -287,18 +252,4 @@ const styles = StyleSheet.create({
   problem: { ...text.caption, color: colors.danger, marginTop: space.xs, marginLeft: space.xs },
   note: { ...text.caption, color: colors.faint, marginTop: space.xs, marginLeft: space.xs },
 
-  insuranceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    minHeight: 46,
-    paddingHorizontal: space.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.bgSunken,
-    marginTop: space.xs,
-  },
-  insuranceLabel: { ...text.label, color: colors.fg },
-  insuranceHint: { ...text.caption, color: colors.muted, marginTop: 1 },
 });

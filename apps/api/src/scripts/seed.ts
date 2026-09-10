@@ -146,7 +146,7 @@ async function seedDriver(): Promise<void> {
          * dispatch. Every category and every transmission keeps the seeded driver a constant.
          */
         vehicleTypePreferences: ['AUTO', 'MANUAL', 'EV'],
-        vehicleCategoryPreference: ['HATCHBACK', 'SEDAN', 'SUV', 'LUXURY', 'EV'],
+        vehicleCategoryPreference: ['MINI', 'HATCHBACK', 'SEDAN', 'SUV', 'LUXURY'],
 
         // Approved and verified, so a developer can go on duty immediately rather than walking
         // the onboarding flow every time the database is reset. `verifiedBy` points at the

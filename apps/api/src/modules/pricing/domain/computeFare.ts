@@ -52,7 +52,13 @@ function pickupLine(zone: PickupZoneFare): FareLine | null {
 function assemble(
   serviceType: 'INCITY' | 'OUTSTATION',
   baseLine: FareLine,
-  input: { pickupZone: PickupZoneFare; scheduledAt: Date; driverCommissionBps: number },
+  /**
+   * `driverAmountPaise` arrives ALREADY MULTIPLIED where it needs to be. `assemble` knows nothing
+   * about days — the outstation path scales both the fare and the driver's amount by the same
+   * count before calling in, so there is one place that multiplication happens and no chance of
+   * the two sides being scaled differently.
+   */
+  input: { pickupZone: PickupZoneFare; scheduledAt: Date; driverAmountPaise: number },
   config: FareConfig,
 ): FareBreakdown {
   const lines: FareLine[] = [baseLine];
@@ -73,7 +79,7 @@ function assemble(
   const totalPaise = roundToRupee(subtotalPaise + Math.round((subtotalPaise * config.taxBps) / 10000));
   const taxPaise = totalPaise - subtotalPaise;
 
-  const split = splitFare(subtotalPaise, input.driverCommissionBps);
+  const split = splitFare(subtotalPaise, input.driverAmountPaise);
   assertFareReconciles(split, taxPaise, totalPaise);
 
   return {
@@ -136,7 +142,21 @@ export function computeOutstationFare(
   return assemble(
     'OUTSTATION',
     { code: 'BASE', label, amountPaise: input.farePaise * input.days },
-    input,
+    {
+      ...input,
+      /*
+       * THE DRIVER'S AMOUNT IS A DAY RATE TOO, and it is multiplied by the SAME `days` as the
+       * fare directly above. A driver away three days is paid three times — anything else pays
+       * them once for a job that took three days, which is the exact failure the day multiplier
+       * was introduced to fix on the customer's side (see the note above).
+       *
+       * The fixed lines — pickup, surcharge, insurance — deliberately do NOT scale: they are
+       * properties of the trip, not of each day, which is what `pricing.test.ts` already pins.
+       * So the company's share grows faster than the driver's across a long trip, which is the
+       * intended shape: the extra days are driving, and the extra lines are not.
+       */
+      driverAmountPaise: input.driverAmountPaise * input.days,
+    },
     config,
   );
 }

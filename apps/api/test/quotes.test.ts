@@ -98,7 +98,7 @@ const incityVariants = [
     label: '3 Hours',
     includedMinutes: 180,
     baseFarePaise: 90_000,
-    driverCommissionBps: 7_500,
+    driverAmountPaise: 67_500,
     isActive: true,
   },
   {
@@ -106,7 +106,7 @@ const incityVariants = [
     label: '6 Hours',
     includedMinutes: 360,
     baseFarePaise: 160_000,
-    driverCommissionBps: 7_500,
+    driverAmountPaise: 120_000,
     isActive: true,
   },
 ];
@@ -146,7 +146,7 @@ function outstationPackages(): PackageLookupContract {
           maxKm: 100,
           oneWayFarePaise: 450_000,
           roundTripFarePaise: 700_000,
-          driverCommissionBps: 7_000,
+          driverAmountPaise: 315_000,
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),

@@ -6,8 +6,8 @@
  *
  * PRICE DOES NOT VARY BY CAR CATEGORY. It used to: every package carried a `prices[]`
  * subdocument keyed by category, and for outstation by `(category, direction)` — ten rows per
- * distance band. Retired 2026-08-28 (docs/decision-log.md). A band is now two fares and a
- * commission split; a variant is a duration and a fare. `CAR_CATEGORIES` still exists, in
+ * distance band. Retired 2026-08-28 (docs/decision-log.md). A band is now two fares and a driver
+ * amount; a variant is a duration, a fare and a driver amount. `CAR_CATEGORIES` still exists, in
  * `identity.ts`, because dispatch and bookings still need it — it just no longer decides what
  * anything costs.
  *
@@ -38,15 +38,32 @@ export const TERRAINS = ['PLAIN', 'HILL'] as const;
 export type Terrain = (typeof TERRAINS)[number];
 
 /**
- * The driver's share, in BASIS POINTS — 7500 is 75%, and the API rejects anything above 10000.
+ * THE DRIVER'S SHARE IS AN AMOUNT, NOT A PERCENTAGE (2026-09-10).
  *
- * THE COMPANY'S SHARE IS DERIVED, never stored: `10000 − driver_commission_bps`. Storing both
- * let a form save 75% and 20% and quietly leave 5% of every trip in nobody's column; there is no
- * longer a pair that can disagree. Basis points rather than a float percent so the money rule
- * holds — integers everywhere (docs/engineering/coding-standards.md §Money).
+ * `driver_amount_paise` is what the driver is paid for the package, in paise. It was
+ * `driver_commission_bps` — 7500 meaning 75% of the subtotal — and the change is a business one:
+ * ops sets what a driver earns for a job, rather than a rate whose payout moved every time a
+ * pickup fee or a night surcharge landed on the same trip.
+ *
+ * TWO CONSEQUENCES WORTH BEING DELIBERATE ABOUT:
+ *
+ *   1. THE COMPANY ABSORBS ALL THE VARIANCE. The driver's figure is fixed for the package, so a
+ *      surcharge, a paid pickup zone or the insurance line now accrues entirely to the company —
+ *      under the old rate the driver took 75% of each of those too. That is the point of the
+ *      change, but it does mean the company's share is the derived side now.
+ *   2. IT IS A DAY RATE ON OUTSTATION. The band fare is multiplied by the IST days a journey
+ *      spans, and the driver's amount is multiplied by exactly the same count — a driver away
+ *      three days is paid three times. `computeOutstationFare` is where that happens.
+ *
+ * The company's share stays DERIVED and is still never stored: `subtotal − driver`. Storing both
+ * sides let a form save 75% and 20% and quietly leave 5% of every trip in nobody's column, and an
+ * amount is no safer against that than a rate was.
+ *
+ * The API refuses an amount above the package's own fare, so the company's share cannot be
+ * configured negative. See `packages.validation.ts`.
  */
-export function companyCommissionBps(driverCommissionBps: number): number {
-  return 10000 - driverCommissionBps;
+export function companySharePaise(subtotalPaise: number, driverAmountPaise: number): number {
+  return subtotalPaise - driverAmountPaise;
 }
 
 // ─── InCity ──────────────────────────────────────────────────────────────────────────────────
@@ -69,7 +86,12 @@ export interface IncityVariantDto {
   label: string;
   included_minutes: number;
   base_fare_paise: number;
-  driver_commission_bps: number;
+  /**
+   * What the driver is paid for this variant, in paise — a flat amount, not a share of the fare.
+   * Incity has no day multiplier: a 3-hour booking that runs long pays the same either way, which
+   * is the same decision `included_minutes` already records.
+   */
+  driver_amount_paise: number;
   is_active: boolean;
 }
 
@@ -128,7 +150,12 @@ export interface OutstationPackageDto {
    * `null` means the band does not sell a return trip at all. Never that the return is free.
    */
   round_trip_fare_paise: number | null;
-  driver_commission_bps: number;
+  /**
+   * What the driver is paid for this band, in paise, PER DAY — a flat amount, not a share of the
+   * fare. The band fare is itself a day rate, and this is multiplied by the same IST day count,
+   * so a driver away three days is paid three times.
+   */
+  driver_amount_paise: number;
   is_active: boolean;
 }
 
@@ -155,7 +182,7 @@ export interface IncityVariantInput {
   label: string;
   includedMinutes: number;
   baseFarePaise: number;
-  driverCommissionBps: number;
+  driverAmountPaise: number;
   isActive?: boolean | undefined;
 }
 
@@ -192,7 +219,7 @@ export interface CreateOutstationPackageRequest {
   oneWayFarePaise: number;
   /** Omit or send `null` for a band that does not sell a return trip. */
   roundTripFarePaise?: number | null | undefined;
-  driverCommissionBps: number;
+  driverAmountPaise: number;
   isActive?: boolean | undefined;
 }
 
@@ -204,7 +231,7 @@ export interface UpdateOutstationPackageRequest {
   maxKm?: number | undefined;
   oneWayFarePaise?: number | undefined;
   roundTripFarePaise?: number | null | undefined;
-  driverCommissionBps?: number | undefined;
+  driverAmountPaise?: number | undefined;
   isActive?: boolean | undefined;
 }
 

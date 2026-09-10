@@ -32,14 +32,81 @@ type FeatherName = ComponentProps<typeof Feather>['name'];
  * shows a name and nothing invented to go with it. No Call button either, for the same reason:
  * no phone number is ever exposed to a customer's device.
  */
-const TAGS: ReadonlyArray<{ value: string; label: string; icon: FeatherName }> = [
-  { value: 'Excellent', label: 'Excellent', icon: 'thumbs-up' },
-  { value: 'Professional', label: 'Professional', icon: 'briefcase' },
-  { value: 'Safe Driving', label: 'Safe Driving', icon: 'shield' },
-  { value: 'Friendly', label: 'Friendly', icon: 'smile' },
-  { value: 'Late Arrival', label: 'Late Arrival', icon: 'clock' },
-  { value: 'Poor Behaviour', label: 'Poor Behaviour', icon: 'frown' },
-];
+interface Tag {
+  value: string;
+  label: string;
+  icon: FeatherName;
+}
+
+/**
+ * THE CHIPS DEPEND ON THE STARS, and that is the whole point of this table.
+ *
+ * One fixed list served every rating before, which meant a customer giving one star was offered
+ * "Excellent" and "Friendly" — chips that cannot describe the trip they just had — while the
+ * words for what actually went wrong were missing. Worse, the value crossing the wire is the
+ * chip's own text, so those mismatched labels landed in ops' review queue as the reasons for a
+ * one-star trip.
+ *
+ * FOUR PER RATING, deliberately. The set has to be readable in one glance on a screen the
+ * customer is trying to leave; a longer list gets scrolled past rather than answered.
+ *
+ * Labels REPEAT ACROSS SETS on purpose — "Safe Driving" is offered at four and five stars, "Very
+ * Late" at one and two. They are the same fact reported at different severities, so keeping one
+ * spelling means ops can count a tag across ratings without normalising anything first.
+ *
+ * NOT A CONTRACT. `POST /:id/rate` takes `tags: string[]` and validates nothing about their
+ * content (`RateTripInput`), so this list can change without a server release — and an older
+ * build's tags stay valid after it does.
+ */
+const TAGS_BY_RATING: Readonly<Record<number, readonly Tag[]>> = {
+  5: [
+    { value: 'Excellent Service', label: 'Excellent Service', icon: 'thumbs-up' },
+    { value: 'Safe Driving', label: 'Safe Driving', icon: 'shield' },
+    { value: 'Professional', label: 'Professional', icon: 'briefcase' },
+    { value: 'Well Dressed', label: 'Well Dressed', icon: 'user-check' },
+  ],
+  4: [
+    { value: 'Good Service', label: 'Good Service', icon: 'thumbs-up' },
+    { value: 'Safe Driving', label: 'Safe Driving', icon: 'shield' },
+    { value: 'Slightly Late', label: 'Slightly Late', icon: 'clock' },
+    { value: 'Could Improve', label: 'Could Improve', icon: 'trending-up' },
+  ],
+  3: [
+    { value: 'Late Arrival', label: 'Late Arrival', icon: 'clock' },
+    { value: 'Average Service', label: 'Average Service', icon: 'meh' },
+    { value: 'Not Professional', label: 'Not Professional', icon: 'briefcase' },
+    { value: 'Poor Communication', label: 'Poor Communication', icon: 'message-circle' },
+  ],
+  2: [
+    { value: 'Very Late', label: 'Very Late', icon: 'clock' },
+    { value: 'Rash Driving', label: 'Rash Driving', icon: 'alert-triangle' },
+    { value: 'Poor Behaviour', label: 'Poor Behaviour', icon: 'frown' },
+    { value: 'Untidy Appearance', label: 'Untidy Appearance', icon: 'user-x' },
+  ],
+  1: [
+    { value: 'Rash Driving', label: 'Rash Driving', icon: 'alert-triangle' },
+    { value: 'Misbehaviour', label: 'Misbehaviour', icon: 'frown' },
+    { value: 'Very Late', label: 'Very Late', icon: 'clock' },
+    { value: 'Unprofessional', label: 'Unprofessional', icon: 'briefcase' },
+  ],
+};
+
+/** Four and five stars are praise; three and below are a complaint. Decides wording and colour. */
+const POSITIVE_AT_OR_ABOVE = 4;
+
+/**
+ * The chip block's own heading, which cannot be one sentence any more.
+ *
+ * "What did you like about your trip?" over a two-star set reads as sarcasm, so the question
+ * follows the stars exactly as the chips do.
+ */
+const TAG_PROMPTS: Record<number, { title: string; hint: string }> = {
+  5: { title: 'What went well?', hint: 'Select all that apply' },
+  4: { title: 'What went well?', hint: 'Select all that apply' },
+  3: { title: 'What could have been better?', hint: 'Select all that apply' },
+  2: { title: 'What went wrong?', hint: 'Select all that apply' },
+  1: { title: 'What went wrong?', hint: 'Select all that apply' },
+};
 
 const RATING_LABELS: Record<number, string> = {
   1: 'Poor',
@@ -78,6 +145,25 @@ export default function RateDriverScreen(): ReactElement {
       current.includes(value) ? current.filter((tag) => tag !== value) : [...current, value],
     );
   }
+
+  /**
+   * Re-rating DROPS the tags the new star count does not offer, and keeps the ones it does.
+   *
+   * Without this, a customer who ticks "Excellent Service" at five stars and then drops to one
+   * submits a one-star review tagged "Excellent Service" — a chip that is no longer on the screen
+   * they are looking at, and that they have no way to untick. Since the sets share labels, the
+   * filter also does the right thing in the ordinary case: moving five stars to four keeps "Safe
+   * Driving" ticked, because four stars offers it too.
+   */
+  function chooseRating(value: number): void {
+    setRating(value);
+    const offered = TAGS_BY_RATING[value] ?? [];
+    setTags((current) => current.filter((tag) => offered.some((option) => option.value === tag)));
+  }
+
+  const positive = rating >= POSITIVE_AT_OR_ABOVE;
+  const tagOptions = TAGS_BY_RATING[rating] ?? [];
+  const prompt = TAG_PROMPTS[rating];
 
   return (
     <View style={styles.root}>
@@ -133,7 +219,7 @@ export default function RateDriverScreen(): ReactElement {
               {[1, 2, 3, 4, 5].map((value) => (
                 <Pressable
                   key={value}
-                  onPress={() => setRating(value)}
+                  onPress={() => chooseRating(value)}
                   hitSlop={6}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: rating === value }}
@@ -149,40 +235,60 @@ export default function RateDriverScreen(): ReactElement {
             </View>
 
             {rating === 0 ? null : (
-              <Animated.Text entering={FadeIn.duration(150)} style={styles.ratingLabel}>
+              <Animated.Text
+                entering={FadeIn.duration(150)}
+                style={[styles.ratingLabel, !positive && styles.ratingLabelCritical]}
+              >
                 {RATING_LABELS[rating]}
               </Animated.Text>
             )}
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>What did you like about your trip?</Text>
-            <Text style={styles.cardHint}>Select all that apply</Text>
+          {/*
+            NO CHIPS BEFORE A STAR, because there is no set to show. Which four appear is decided
+            by the rating, so offering any of them first would mean showing one rating's words to
+            a customer who has not said which rating they mean — and then swapping them under the
+            finger that was about to tap.
+          */}
+          {rating === 0 || prompt === undefined ? null : (
+            <Animated.View entering={FadeIn.duration(180)} style={styles.card}>
+              <Text style={styles.cardTitle}>{prompt.title}</Text>
+              <Text style={styles.cardHint}>{prompt.hint}</Text>
 
-            <View style={styles.tagsGrid}>
-              {TAGS.map((tag) => {
-                const active = tags.includes(tag.value);
-                return (
-                  <Pressable
-                    key={tag.value}
-                    onPress={() => toggleTag(tag.value)}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: active }}
-                    style={[styles.tagChip, active && styles.tagChipActive]}
-                  >
-                    <Feather
-                      name={tag.icon}
-                      size={14}
-                      color={active ? colors.success : colors.muted}
-                    />
-                    <Text style={[styles.tagLabel, active && styles.tagLabelActive]}>
-                      {tag.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+              <View style={styles.tagsGrid}>
+                {tagOptions.map((tag) => {
+                  const active = tags.includes(tag.value);
+                  /*
+                    A TICKED CHIP TAKES THE TONE OF THE RATING, not one fixed green. "Rash
+                    Driving" highlighted in the same success green as "Safe Driving" reads as
+                    approval of the thing being reported.
+                  */
+                  const activeTint = positive ? colors.success : colors.danger;
+                  return (
+                    <Pressable
+                      key={tag.value}
+                      onPress={() => toggleTag(tag.value)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: active }}
+                      style={[
+                        styles.tagChip,
+                        active && (positive ? styles.tagChipActive : styles.tagChipActiveCritical),
+                      ]}
+                    >
+                      <Feather
+                        name={tag.icon}
+                        size={14}
+                        color={active ? activeTint : colors.muted}
+                      />
+                      <Text style={[styles.tagLabel, active && { color: activeTint }]}>
+                        {tag.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Animated.View>
+          )}
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>
@@ -297,6 +403,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: space.md,
   },
+  /** "Poor" and "Fair" set in success green read as the app disagreeing with the customer. */
+  ratingLabelCritical: { color: colors.danger },
 
   tagsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   tagChip: {
@@ -310,8 +418,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   tagChipActive: { borderColor: colors.success, backgroundColor: '#E7F5EC' },
+  /** The same chip at one to three stars — see the tone note where it is applied. */
+  tagChipActiveCritical: { borderColor: colors.danger, backgroundColor: colors.dangerSoft },
   tagLabel: { ...text.caption, color: colors.muted, fontFamily: fontFamily.semibold },
-  tagLabelActive: { color: colors.success },
 
   commentInput: {
     minHeight: 90,

@@ -17,14 +17,13 @@ import type { Terrain } from '@driverzone/geo';
 const paise = z.number().int().min(0);
 
 /**
- * The DRIVER's share, in basis points — 7500 is 75%, and 10000 is the whole fare.
+ * What the DRIVER is paid, in paise — a flat amount, not a share (2026-09-10).
  *
- * The company's share is not a field: it is `10000 - this`. The old shape stored both sides with
- * their own PERCENT/FLAT type, which let a form save 75% and 20% and leave 5% of every trip
- * unallocated — a cross-field `superRefine` used to guard half of that and could not guard the
- * rest. One bounded integer removes the failure mode instead of validating it.
+ * The company's share is not a field: it is `subtotal - this`. This only bounds it at zero; that
+ * it must not EXCEED the package's own fare is a cross-field rule, checked in the use case where
+ * the fare is also in hand (`validateIncityDriverAmounts` / `validateOutstationDriverAmount`).
  */
-const commissionBps = z.number().int().min(0).max(10000);
+const driverAmountPaise = paise;
 
 /**
  * `@driverzone/geo` exports `Terrain` as a bare type alias with no runtime companion, so the
@@ -45,7 +44,7 @@ const incityVariantSchema = z.object({
   label: z.string().min(1),
   includedMinutes: z.number().int().min(1),
   baseFarePaise: paise,
-  driverCommissionBps: commissionBps,
+  driverAmountPaise,
   isActive: z.boolean().optional().default(true),
 });
 
@@ -74,7 +73,7 @@ export const createOutstationPackageSchema = z.object({
    * one must not be the same value (docs/LLD/packages.md §Outstation is priced per direction).
    */
   roundTripFarePaise: paise.nullable().optional(),
-  driverCommissionBps: commissionBps,
+  driverAmountPaise,
   isActive: z.boolean().optional().default(true),
 });
 

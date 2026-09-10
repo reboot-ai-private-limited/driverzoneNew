@@ -20,7 +20,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { BookingDto, BookingStatus, CancelBookingResponse } from '@driverzone/contracts';
-import { CancelBookingSheet } from '@/components/CancelBookingSheet';
+import { CancelRide } from '@/components/CancelRide';
 import { DriverCard } from '@/components/DriverCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { formatTime } from '@/features/booking/schedule';
@@ -258,7 +258,7 @@ export default function TripScreen(): ReactElement {
         </>
       )}
 
-      <CancelBookingSheet
+      <CancelRide
         visible={cancelling}
         bookingId={id}
         driverAssigned={data !== undefined && hasDriverAssigned(data.status)}

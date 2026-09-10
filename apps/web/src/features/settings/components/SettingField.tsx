@@ -27,6 +27,7 @@ const UNIT_SUFFIX: Record<string, string> = {
   HOURS: 'hours',
   DAYS: 'days',
   METRES: 'metres',
+  KILOMETRES: 'km',
   BPS: 'bps',
   COUNT: '',
 };
@@ -103,7 +104,7 @@ export function SettingField({
               variant="ghost"
               icon={<RotateCcw className="size-4" />}
               label={`Reset ${setting.label} to its default`}
-              title={`Reset to default (${describeValue(setting.default_value)})`}
+              title={`Reset to default (${describeValue(setting.default_value, setting.display)})`}
               onClick={onReset}
               loading={resetting}
               disabled={disabled}
@@ -117,7 +118,7 @@ export function SettingField({
           </p>
         ) : (
           <p className="text-xs text-text-subtle">
-            Default: {describeValue(setting.default_value)}
+            Default: {describeValue(setting.default_value, setting.display)}
           </p>
         )}
       </div>
@@ -167,7 +168,15 @@ function Control({ id, setting, draft, onChange, invalid, describedBy, disabled 
   }
 
   const text = isWindowDraft(draft) ? '' : draft;
-  const suffix = UNIT_SUFFIX[setting.unit] ?? '';
+
+  /*
+   * The box is labelled with the DISPLAYED unit where one is declared, not the stored one — the
+   * admin is typing kilometres and must not be told they are metres. `lib/draft.ts` converts
+   * back, and this component still knows no setting by name: which keys are scaled is the
+   * registry's business, arriving on the payload.
+   */
+  const scale = setting.display;
+  const suffix = UNIT_SUFFIX[scale?.unit ?? setting.unit] ?? '';
 
   return (
     <div className="flex items-center gap-2 min-w-0">
@@ -185,7 +194,9 @@ function Control({ id, setting, draft, onChange, invalid, describedBy, disabled 
           // `inputMode` rather than `type="number"`: a number input's spinner and scroll-wheel
           // behaviour changes a fare by accident, and Safari accepts `1e3` in one. The value is
           // parsed and range-checked in `lib/draft.ts` either way.
-          inputMode="numeric"
+          //
+          // `decimal` on a scaled field, so a phone keyboard offers the point 2.5 km needs.
+          inputMode={scale !== undefined && scale.decimals > 0 ? 'decimal' : 'numeric'}
           value={text}
           onChange={(e) => onChange(e.target.value)}
           invalid={invalid}
@@ -199,8 +210,21 @@ function Control({ id, setting, draft, onChange, invalid, describedBy, disabled 
   );
 }
 
-/** Used for "Default: …" and the reset tooltip. Windows read as a range, money keeps its ₹. */
-export function describeValue(value: SettingDto['default_value']): string {
-  if (typeof value === 'number') return String(value);
-  return `${value.start}–${value.end}`;
+/**
+ * Used for "Default: …" and the reset tooltip. Windows read as a range, money keeps its ₹.
+ *
+ * A scaled key describes its default in the unit the admin is looking at, and SAYS the unit —
+ * "Default: 3 km", not a bare "3" under a box that would otherwise read as 3 metres. Only here:
+ * the input itself has the suffix beside it already.
+ */
+export function describeValue(
+  value: SettingDto['default_value'],
+  display?: SettingDto['display'],
+): string {
+  if (typeof value !== 'number') return `${value.start}–${value.end}`;
+  if (display === undefined) return String(value);
+
+  const scaled = Number((value / display.factor).toFixed(display.decimals));
+  const suffix = UNIT_SUFFIX[display.unit] ?? '';
+  return suffix === '' ? String(scaled) : `${String(scaled)} ${suffix}`;
 }

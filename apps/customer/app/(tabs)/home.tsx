@@ -179,16 +179,16 @@ export default function HomeScreen(): ReactElement {
    * price is asked for and every one of them changes what that price is. They travel forward as
    * route params so the fare screen quotes the same trip and reads the same cache entry.
    *
-   * `ONE_WAY` and `null` are the defaults precisely because they are also what the SERVER assumes
-   * when the fields are absent — so an untouched trip produces the same request, and the same
-   * query key, as one where the customer explicitly picked the defaults.
+   * `ROUND_TRIP` is the default because it is the trip most outstation customers are actually
+   * taking — they were selecting it by hand on nearly every booking. It is NOT the server's
+   * default (absence still means `ONE_WAY`), so an untouched outstation trip now sends `direction`
+   * explicitly; `useTripQuote` handles that. Incity has no return to sell, and the effect below
+   * puts those trips back to `ONE_WAY` as soon as the service type is known.
    */
-  const [direction, setDirection] = useState<Direction>('ONE_WAY');
+  const [direction, setDirection] = useState<Direction>('ROUND_TRIP');
   const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
   /** Local only — nothing on the wire carries a return time. See `RETURN_IS_LOCAL_ONLY`. */
   const [returnAt, setReturnAt] = useState<Date | null>(null);
-  /** On by default, matching what the server assumes when the field is left off the request. */
-  const [insurance, setInsurance] = useState(true);
   /** Which picker is open, if any. One at a time: they write to different fields. */
   const [timePicker, setTimePicker] = useState<'schedule' | 'return' | null>(null);
   /** The fare sheet. Opened by Continue, and the last step this screen owns. */
@@ -327,7 +327,6 @@ export default function HomeScreen(): ReactElement {
     scheduledAt,
     // The return leg is part of the price now — the band fare multiplies by the days it spans.
     returnAt,
-    insurance,
   );
 
   /**
@@ -367,12 +366,6 @@ export default function HomeScreen(): ReactElement {
    * long as the request takes.
    */
   const noPackage = trip.unavailable !== null && !trip.stale;
-  /** The INSURANCE line's own rendered amount, so the toggle states a real number, not a guess. */
-  const insuranceAmount =
-    trip.stale || trip.card === null
-      ? null
-      : (trip.card.options[0]?.fare.lines.find((line) => line.code === 'INSURANCE')?.amount
-          .amount_display ?? null);
   const pricing = trip.query.isFetching;
   /**
    * The app's OWN rules about its own pickers — a pickup at least an hour out, a return after the
@@ -1144,12 +1137,6 @@ export default function HomeScreen(): ReactElement {
                 returnAt={returnAt}
                 onPickReturn={() => setTimePicker('return')}
                 onClearReturn={() => setReturnAt(null)}
-                insurance={insurance}
-                onInsuranceChange={(next) => {
-                  void Haptics.selectionAsync();
-                  setInsurance(next);
-                }}
-                insuranceAmount={insuranceAmount}
               />
             ) : null}
 

@@ -29,7 +29,7 @@ function toIncityVariantDto(variant: IncityVariant): IncityVariantDto {
     label: variant.label,
     included_minutes: variant.includedMinutes,
     base_fare_paise: variant.baseFarePaise,
-    driver_commission_bps: variant.driverCommissionBps,
+    driver_amount_paise: variant.driverAmountPaise,
     is_active: variant.isActive,
   };
 }
@@ -58,7 +58,7 @@ export function toOutstationPackageDto(pkg: OutstationPackage): OutstationPackag
     // Passed through as `null`, never coerced to 0. The DTO's own comment carries the reason:
     // a band that does not sell a return trip is not a band that sells it for nothing.
     round_trip_fare_paise: pkg.roundTripFarePaise,
-    driver_commission_bps: pkg.driverCommissionBps,
+    driver_amount_paise: pkg.driverAmountPaise,
     is_active: pkg.isActive,
   };
 }

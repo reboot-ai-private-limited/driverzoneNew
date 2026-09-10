@@ -108,6 +108,9 @@ export default function AccountScreen(): ReactElement {
               label="Notifications"
               onPress={() => router.push('/info/notifications')}
             />
+            {/* The one row here with a real API behind it. Above Help & Support deliberately:
+                what a customer owes for food and stay is answered in the list, not by a call. */}
+            <Row icon="book-open" label="FAQs" onPress={() => router.push('/info/faqs')} />
             <Row
               icon="help-circle"
               label="Help & Support"

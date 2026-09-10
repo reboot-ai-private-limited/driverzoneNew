@@ -1,4 +1,4 @@
-import { hasApiKey, loadMapLibraries as loadLibraries } from '@/lib/googleMaps';
+import { DEFAULT_CENTER, hasApiKey, loadMapLibraries as loadLibraries } from '@/lib/googleMaps';
 
 /**
  * The zone editor's own map setup. The loader itself — `setOptions`, the API key, the singleton
@@ -10,7 +10,12 @@ import { hasApiKey, loadMapLibraries as loadLibraries } from '@/lib/googleMaps';
  * off the server — the API reaches for `window` immediately and there is no server-rendered map
  * worth having.
  */
-export { hasApiKey };
+/**
+ * Re-exported, not redeclared — both now live in `@/lib/googleMaps` because the dashboard's live
+ * map needs them too. Keeping them reachable from here means the editor's own imports read the
+ * same as they always did.
+ */
+export { hasApiKey, DEFAULT_CENTER };
 
 /**
  * The two libraries the editor uses.
@@ -31,8 +36,6 @@ export async function loadMapLibraries(): Promise<{
   return { maps: libs.maps as google.maps.MapsLibrary, places: libs.places as google.maps.PlacesLibrary };
 }
 
-/** Siliguri. The only city there is, so the editor opens on it rather than on the null island. */
-export const DEFAULT_CENTER = { lat: 26.7271, lng: 88.4276 };
 export const DEFAULT_ZOOM = 11;
 
 export const MAP_TYPES = ['roadmap', 'hybrid', 'terrain'] as const;

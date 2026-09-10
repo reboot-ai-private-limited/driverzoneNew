@@ -84,14 +84,30 @@ export const keys = {
    * tab grew filters. A settlement has to invalidate a driver's wallet from a different feature
    * entirely, and "invalidate the key the other file spelled" is not something a call site can
    * do safely with a literal.
+   *
+   * THE PREFIX IS `drivers`, NOT `admin/drivers` — worth stating, because the literals that came
+   * back were all `['admin', 'drivers', …]`. React Query matches by prefix, so the two families
+   * never met: driver mutations invalidated `['admin','drivers']` and could not reach the wallet,
+   * while `useSettleDriver` invalidated `['drivers']` and could not reach the list or the detail.
+   * Both looked correct in isolation and in a diff. Everything under one driver hangs off
+   * `all()`, and that is what makes a single invalidation enough.
    */
   drivers: {
     all: () => ['drivers'] as const,
+    /**
+     * The query is part of the key: the directory is filtered and paged server-side.
+     *
+     * `object` rather than `Record<string, unknown>` — the caller passes an interface, and a
+     * TypeScript interface has no implicit index signature, so the stricter type rejects exactly
+     * the shape this is for. React Query hashes the value structurally either way.
+     */
+    list: (query?: object) => ['drivers', 'list', query ?? {}] as const,
     detail: (id: string) => ['drivers', 'detail', id] as const,
     /** The query is part of the key: a filtered statement is a different resource. */
     wallet: (id: string, query?: LedgerQueryParams) =>
       ['drivers', 'wallet', id, query ?? {}] as const,
-    dutyHistory: (id: string) => ['drivers', 'duty-history', id] as const,
+    /** Paged like the wallet, and for the same reason — a driver accumulates shifts for ever. */
+    dutyHistory: (id: string, page = 1) => ['drivers', 'duty-history', id, page] as const,
   },
   finance: {
     all: () => ['finance'] as const,
@@ -102,6 +118,23 @@ export const keys = {
       ['finance', 'transactions', query ?? {}] as const,
     customerWallets: (query?: AdminCustomerWalletsQuery) =>
       ['finance', 'customer-wallets', query ?? {}] as const,
+  },
+  /**
+   * The landing screen's tiles.
+   *
+   * Their own namespace rather than hanging off `bookings`/`drivers`/`finance`, even though they
+   * read those same resources. A dashboard tile is a COUNT under a fixed filter, and the lists
+   * are pages of rows — sharing a prefix would mean every booking mutation invalidated the tiles
+   * and every tile refetch fought the list's own `keepPreviousData`. They are refreshed by their
+   * own staleness instead, which is what a dashboard wants.
+   */
+  dashboard: {
+    all: () => ['dashboard'] as const,
+    bookingCounts: (day: string) => ['dashboard', 'booking-counts', day] as const,
+    liveDrivers: () => ['dashboard', 'live-drivers'] as const,
+    queues: () => ['dashboard', 'queues'] as const,
+    debt: () => ['dashboard', 'debt'] as const,
+    recentBookings: () => ['dashboard', 'recent-bookings'] as const,
   },
   admin: {
     profile: () => ['admin', 'profile'] as const,
@@ -130,4 +163,16 @@ export const staleTime = {
   finance: 15_000,
   /** Bookings, dispatch, driver locations. No useful stale window at all. */
   live: 0,
+  /**
+   * The dashboard's driver-debt tile, and ONLY that. Far longer than `finance` on purpose.
+   *
+   * `pageDriverBalances` groups the entire `driverEarnings` collection — `allowDiskUse: true`, and
+   * its own comment says the real answer is a materialised balance. That is affordable on the
+   * finance screen, which somebody opens deliberately. On the landing screen it would run on every
+   * login and every navigation home, re-scanning all history to redraw one number.
+   *
+   * Five minutes means a working session pays for it once. Remove this the day the balance is
+   * materialised, not before.
+   */
+  dashboardDebt: 5 * 60_000,
 } as const;

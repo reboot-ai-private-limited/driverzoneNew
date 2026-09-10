@@ -25,6 +25,7 @@ const UNIT_SUFFIX: Record<string, string> = {
   MINUTES: 'minutes',
   SECONDS: 'seconds',
   HOURS: 'hours',
+  DAYS: 'days',
   METRES: 'metres',
   BPS: 'bps',
   COUNT: '',

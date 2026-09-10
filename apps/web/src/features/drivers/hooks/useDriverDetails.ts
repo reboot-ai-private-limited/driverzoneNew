@@ -11,7 +11,6 @@ import type {
   ReviewDocumentResponse,
   VerifyHillDrivingRequest,
   VerifyHillDrivingResponse,
-  SuspendDriverRequest,
   SuspendDriverResponse,
   AdminUpdateDriverRequest,
   DriverProfileDto,
@@ -24,8 +23,9 @@ import { withAuth } from '@/lib/auth/session';
 export function useDriverDetails(id: string | undefined, enabled = true) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', id ?? ''],
+      queryKey: keys.drivers.detail(id ?? ''),
       fetch: (token, signal) => request<AdminDriverDetailsDto>(`/admin/drivers/${id}`, { token, signal }),
+      staleTime: staleTime.directory,
       enabled: Boolean(id) && enabled,
     })
   );
@@ -57,11 +57,24 @@ export function useDriverWallet(id: string | undefined, query?: LedgerQueryParam
   );
 }
 
-export function useDriverDutyHistory(id: string | undefined) {
+/**
+ * One page of a driver's shifts.
+ *
+ * `page` is a real parameter, not a default nobody passes: the endpoint has always paged at ten
+ * per page, and asking without one returned page 1 and nothing else — so the tab showed a driver's
+ * ten most recent shifts and gave no sign there were more. The size stays the server's default.
+ */
+export function useDriverDutyHistory(id: string | undefined, page = 1) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', id ?? '', 'duty'],
-      fetch: (token, signal) => request<AdminDriverDutyHistoryDto>(`/admin/drivers/${id}/duty-history`, { token, signal }),
+      queryKey: keys.drivers.dutyHistory(id ?? '', page),
+      fetch: (token, signal) =>
+        request<AdminDriverDutyHistoryDto>(`/admin/drivers/${id}/duty-history`, {
+          token,
+          signal,
+          query: { page },
+        }),
+      staleTime: staleTime.directory,
       enabled: Boolean(id),
     })
   );
@@ -79,7 +92,7 @@ export function useApproveDriver(id: string) {
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      queryClient.invalidateQueries({ queryKey: keys.drivers.all() });
     },
   });
 }
@@ -97,7 +110,7 @@ export function useRejectDriver(id: string) {
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      queryClient.invalidateQueries({ queryKey: keys.drivers.all() });
     },
   });
 }
@@ -115,7 +128,7 @@ export function useReviewDocument(id: string) {
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+      queryClient.invalidateQueries({ queryKey: keys.drivers.all() });
     },
   });
 }
@@ -133,31 +146,19 @@ export function useVerifyHillDriving(id: string) {
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+      queryClient.invalidateQueries({ queryKey: keys.drivers.all() });
     },
   });
 }
 
-export function useSuspendDriver(id: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: SuspendDriverRequest) => {
-      return withAuth((token) =>
-        request<SuspendDriverResponse>(`/admin/drivers/${id}/suspend`, {
-          method: 'PATCH',
-          body: data,
-          token,
-        })
-      );
-    },
-    onSuccess: () => {
-      // Invalidate the list AND the specific driver's details
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
-    },
-  });
-}
-
+/**
+ * Suspend or reinstate, from either screen.
+ *
+ * The driver id travels in the variables rather than being bound at construction, because the
+ * list needs whichever row was clicked and the detail page can simply pass its own. There used to
+ * be a second hook — `useSuspendDriver(id)` — doing the identical PATCH with the identical body,
+ * purely because the two screens each grew their own. One endpoint, one hook.
+ */
 export function useToggleSuspendDriver() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -170,9 +171,8 @@ export function useToggleSuspendDriver() {
         })
       );
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', variables.id] });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.drivers.all() });
     },
   });
 }
@@ -190,8 +190,7 @@ export function useUpdateDriver(id: string) {
       );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'drivers', id] });
+      queryClient.invalidateQueries({ queryKey: keys.drivers.all() });
     },
   });
 }

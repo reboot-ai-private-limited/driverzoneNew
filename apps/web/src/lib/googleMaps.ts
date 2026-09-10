@@ -28,6 +28,16 @@ const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
 export const hasApiKey = API_KEY !== '';
 
+/**
+ * Siliguri. Where a map opens before it knows what it is showing.
+ *
+ * PROMOTED FROM `features/zones/lib/google-maps.ts` for the same reason the loader above was: the
+ * dashboard's live map is a second caller, and "where does a map centre when it has nothing to fit
+ * to" is not a zone-editor question. The zones module re-exports it, so its own call sites did not
+ * move.
+ */
+export const DEFAULT_CENTER = { lat: 26.7271, lng: 88.4276 };
+
 if (hasApiKey) {
   setOptions({
     key: API_KEY,

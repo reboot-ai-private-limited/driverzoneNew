@@ -31,16 +31,19 @@ export interface LocationPingDto {
   lng: number;
   /** ISO-8601. When the fix was TAKEN, not when it was sent. */
   recorded_at: string;
-  accuracy_m?: number | undefined;
-  heading?: number | undefined;
-  speed_mps?: number | undefined;
 }
 
 /**
  * `POST /driver/location` — a BATCH, never one request per fix.
  *
  * One HTTP call per GPS fix drains a driver's battery and, at scale, costs a driver base
- * (docs/LLD/api-contracts.md). The app sends 5–10 pings every 10–15 s, ordered oldest first.
+ * (docs/LLD/api-contracts.md).
+ *
+ * STEADY STATE IS ONE PING. The array is not a sampling window: the server keeps only the newest
+ * fix and picks it by `recorded_at`, so a batch of five is four rows discarded without ever being
+ * compared. `apps/driver` therefore takes one fix per flush. The array survives because the app
+ * buffers while offline and flushes what accumulated on reconnect — that is the case it exists
+ * for, and it is why the endpoint still accepts many. Ordered oldest first.
  */
 export interface SendLocationPingsRequest {
   pings: LocationPingDto[];

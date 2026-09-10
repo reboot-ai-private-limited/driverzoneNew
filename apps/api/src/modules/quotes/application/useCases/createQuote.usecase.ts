@@ -1,4 +1,5 @@
 import type { Direction, UnavailableResult } from '@driverzone/contracts';
+import { AppError } from '@/shared/errors/AppError.js';
 import type { LatLng } from '@driverzone/geo';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
 import { rupeesToPaise } from '../../../settings/settings.public.js';
@@ -7,6 +8,7 @@ import type { ZoneResolutionContract } from '../../../zones/zones.public.js';
 import {
   computeIncityFare,
   computeOutstationFare,
+  istCalendarDaysInclusive,
   type FareConfig,
   type PickupZoneFare,
 } from '../../../pricing/pricing.public.js';
@@ -21,6 +23,13 @@ export interface CreateQuoteInput {
   /** Omitted means now. The SERVER decides, so a device with a wrong clock cannot book backwards. */
   scheduledAt?: Date | undefined;
   direction?: Direction | undefined;
+  /**
+   * When the customer comes back. OUTSTATION ROUND TRIPS ONLY — a price input, not a note.
+   *
+   * The band fare is a day rate, so the days between this and `scheduledAt` multiply it. Absent,
+   * or the same IST day, prices exactly as every quote did before this field existed.
+   */
+  returnAt?: Date | undefined;
   /** Omitted (or `true`) keeps the INSURANCE line on; `false` prices the trip without it. */
   insurance?: boolean | undefined;
 }
@@ -171,6 +180,8 @@ export class CreateQuoteUseCase {
           ...common,
           serviceType: 'INCITY',
           direction: null,
+          // An in-city trip has no return leg and no day rate. Nothing to record.
+          returnAt: null,
           distanceKm: null,
           includedMinutes: variant.includedMinutes,
           source,
@@ -198,6 +209,31 @@ export class CreateQuoteUseCase {
     // An OUTSTATION match can only have come from the second `resolveForTrip` above, which runs
     // only after `distanceKm` was measured to a number — so it is never null here.
     const { package: pkg, farePaise, direction } = match.match;
+
+    /*
+     * HOW MANY DAYS THE BAND FARE IS BEING CHARGED FOR.
+     *
+     * Only a ROUND_TRIP can span days — a one-way has no return leg for a duration to sit
+     * between, and a `returnAt` arriving on one is a client sending a field it should not.
+     * Ignored rather than refused: it costs the customer nothing and fails no quote, and `days`
+     * is then structurally 1 on every path that is not a round trip.
+     */
+    const days =
+      direction === 'ROUND_TRIP' && input.returnAt !== undefined
+        ? istCalendarDaysInclusive(scheduledAt, input.returnAt)
+        : 1;
+
+    /*
+     * REFUSED, NOT CLAMPED. Clamping to the cap would charge for fifteen days and still send the
+     * driver away for thirty — the same error, pointed at the driver instead of the customer. A
+     * trip longer than this is a conversation with ops, and the message says so.
+     */
+    const maxDays = snapshot['outstation.max_trip_days'];
+    if (days > maxDays) {
+      throw AppError.badRequest(
+        `We can only book an outstation trip up to ${String(maxDays)} days. Please contact support for a longer journey.`,
+      );
+    }
     const source: QuoteSource = {
       ...baseSource,
       packageId: pkg.id,
@@ -211,6 +247,12 @@ export class CreateQuoteUseCase {
       ...common,
       serviceType: 'OUTSTATION',
       direction,
+      /*
+       * Only when it actually priced something. A `returnAt` that arrived on a ONE_WAY was ignored
+       * by the arithmetic above, and storing it would leave a record implying a return leg that
+       * was never quoted or paid for.
+       */
+      returnAt: direction === 'ROUND_TRIP' ? (input.returnAt ?? null) : null,
       distanceKm,
       includedMinutes: null,
       source,
@@ -220,6 +262,7 @@ export class CreateQuoteUseCase {
           terrain: pkg.terrain,
           direction,
           farePaise,
+          days,
           driverCommissionBps: pkg.driverCommissionBps,
           pickupZone,
           scheduledAt,

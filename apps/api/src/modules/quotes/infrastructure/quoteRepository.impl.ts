@@ -13,6 +13,7 @@ function toEntity(doc: QuoteDoc): Quote {
     drop: doc.drop,
     scheduledAt: doc.scheduledAt,
     direction: (doc.direction ?? null) as Quote['direction'],
+    returnAt: doc.returnAt ?? null,
     distanceKm: doc.distanceKm ?? null,
     includedMinutes: doc.includedMinutes ?? null,
     source: doc.source as QuoteSource,

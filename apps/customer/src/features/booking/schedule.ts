@@ -18,16 +18,17 @@
  */
 
 /**
- * `returnAt` HAS NO BACKEND AND IS NOT SENT. Nothing in `@driverzone/contracts` carries a return
- * time — a round trip is a flat fare that covers the whole journey however many days it runs
- * (`packages.ts`), so the price does not depend on when the customer comes back and no field was
- * ever needed for it.
+ * `returnAt` IS PART OF THE PRICE, and is sent.
  *
- * It is collected here so the screen and the flow exist, and it stays in memory on this device.
- * The moment a contract field appears, this constant is the thing to grep for: the picker, the
- * validation and the formatting are all done, and only the wiring is missing.
+ * This used to be `RETURN_IS_LOCAL_ONLY = true`: the return date was collected, validated and
+ * displayed, and never left the device, because a round trip was one flat fare "however many days
+ * it runs". The consequence was a customer picking a return three days out and being quoted the
+ * same-day price, with the driver away three days for one day's money.
+ *
+ * The band fare is now a day rate. `CreateQuoteRequest.returnAt` carries this instant, the server
+ * counts IST calendar days from the pickup and multiplies, and the fare card's base line names the
+ * count. A same-day return spans one day and prices exactly as it always did.
  */
-export const RETURN_IS_LOCAL_ONLY = true;
 
 /**
  * How soon a scheduled pickup may be. Below this it is not a scheduled trip in any useful sense —

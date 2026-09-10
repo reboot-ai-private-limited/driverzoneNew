@@ -71,3 +71,32 @@ export function inWindow(at: Date, window: TimeWindow): boolean {
   const minutes = istWallClockMinutes(at);
   return toIntervals(window).some(([start, end]) => minutes >= start && minutes < end);
 }
+
+/** Whole days, for the calendar arithmetic below. */
+const MS_IN_DAY = 24 * 60 * 60_000;
+
+/**
+ * How many IST calendar days a journey touches, counting both ends.
+ *
+ * CALENDAR DAYS, NOT ELAPSED TIME, and the difference is the whole point. A pickup at 23:00
+ * returning at 01:00 the next night is two hours of clock and TWO DAYS of the driver's life — they
+ * are away over a date boundary and cannot take other work on either one. Dividing the gap by
+ * 86,400,000 would call that one day, and the outstation fare would be short by half.
+ *
+ * INCLUSIVE, so a same-day return is `1`. That is what keeps every fare that exists today exactly
+ * where it is: a round trip that leaves and returns on one date multiplies by one.
+ *
+ * The IST offset is added BEFORE the floor, which is what makes this an IST calendar question
+ * rather than a UTC one. `2026-05-18T19:00:00Z` is already the 19th in India, and a driver leaving
+ * then and returning at `2026-05-19T06:00:00Z` — midday on the 19th IST — has been away one IST
+ * day, not two. Flooring the raw UTC instants would say two.
+ *
+ * Returns at least `1`. A `to` before `from` is refused upstream by the quote validator; if one
+ * reaches here anyway it must not produce a zero or negative multiplier on a fare.
+ */
+export function istCalendarDaysInclusive(from: Date, to: Date): number {
+  const istDayIndex = (at: Date): number =>
+    Math.floor((at.getTime() + IST_OFFSET_MINUTES * 60_000) / MS_IN_DAY);
+
+  return Math.max(1, istDayIndex(to) - istDayIndex(from) + 1);
+}

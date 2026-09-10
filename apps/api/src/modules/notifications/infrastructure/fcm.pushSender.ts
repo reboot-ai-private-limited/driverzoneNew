@@ -2,8 +2,10 @@ import type { DeliveryChannel } from '@driverzone/contracts';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, type BatchResponse, type Messaging } from 'firebase-admin/messaging';
 import { logger } from '../../../shared/logging/logger.js';
-import type { CustomerDeviceRepositoryPort } from '../../identity/domain/customerDevice.repository.port.js';
-import type { DriverDeviceRepositoryPort } from '../../identity/domain/driverDevice.repository.port.js';
+import type {
+  CustomerDeviceRepositoryPort,
+  DriverDeviceRepositoryPort,
+} from '../../identity/identity.public.js';
 import type {
   BookingUpdatePush,
   DriverOfferPush,

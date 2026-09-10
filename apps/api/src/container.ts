@@ -60,7 +60,12 @@ export function buildContainers(): AppContainers {
    * `notifications` reaches a person, `ledger` records what a driver is owed, `payments` collects
    * from a customer. Their adapters are mocks today; the ports are the real design.
    */
-  const notifications = buildNotificationsContainer();
+  /* Handed identity's device registries — tier 1, already built above. This module reaches a
+   * person; identity knows which handsets are theirs. */
+  const notifications = buildNotificationsContainer({
+    driverDevices: identity.driverDevices,
+    customerDevices: identity.customerDevices,
+  });
   const ledger = buildLedgerContainer({ settings: settings.contract });
   const payments = buildPaymentsContainer();
   /* Also tier 2. A CUSTOMER ledger where `ledger` above is a driver one; the two never speak. */

@@ -1,10 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { Clock, Route } from 'lucide-react';
 import type { DutySessionDto } from '@driverzone/contracts';
 import {
   DataState,
   DataTable,
+  Pagination,
   Panel,
   SkeletonTable,
   type Column,
@@ -15,6 +17,14 @@ import { useDriverDutyHistory } from '../hooks/useDriverDetails';
 
 const COLUMN_WIDTHS = ['w-48', 'w-32', 'w-24', 'w-32'];
 
+/**
+ * The server's own default, mirrored here so the pager can size itself.
+ *
+ * `useDriverDutyHistory` sends no `limit`, so this must stay in step with the default in
+ * `adminDriverDutyHistoryQuerySchema` — send one from here the moment the two need to differ.
+ */
+const PAGE_SIZE = 10;
+
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -23,7 +33,8 @@ function formatDuration(minutes: number): string {
 }
 
 export function DriverDutyHistoryTab({ driverId }: { driverId: string }) {
-  const query = useDriverDutyHistory(driverId);
+  const [page, setPage] = useState(1);
+  const query = useDriverDutyHistory(driverId, page);
 
   const columns: Column<DutySessionDto>[] = [
     {
@@ -95,7 +106,7 @@ export function DriverDutyHistoryTab({ driverId }: { driverId: string }) {
     );
   }
 
-  const { sessions } = query.data;
+  const { sessions, pagination } = query.data;
 
   return (
     <Panel title="Duty History">
@@ -113,6 +124,16 @@ export function DriverDutyHistoryTab({ driverId }: { driverId: string }) {
           columns={columns}
           rows={sessions}
           rowKey={(session) => session.id}
+          refetching={query.isFetching && !query.isLoading}
+        />
+        {/* The endpoint has always paged; without this the tab showed the ten most recent shifts
+            and nothing said there were more. Same component and placement as the wallet tab. */}
+        <Pagination
+          page={page}
+          pageCount={Math.max(1, pagination.total_pages)}
+          total={pagination.total_items}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
         />
       </DataState>
     </Panel>

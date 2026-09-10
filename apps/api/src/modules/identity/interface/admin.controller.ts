@@ -6,7 +6,6 @@ import type {
   AdminCustomerListItemDto,
   AdminDriverListDto,
   AdminDriverDetailsDto,
-  AdminDriverDutyHistoryDto,
   AdminLiveDriversResponse,
   DriverProfileDto,
   DriverDocumentDto,

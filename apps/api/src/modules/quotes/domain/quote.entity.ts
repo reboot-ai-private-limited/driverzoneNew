@@ -34,6 +34,14 @@ export interface Quote {
   drop: { lat: number; lng: number };
   scheduledAt: Date;
   direction: Direction | null;
+  /**
+   * Outstation round trips only. When the customer said they were coming back.
+   *
+   * STORED BECAUSE IT PRICED THE TRIP. The band fare is a day rate, so this is what multiplied it
+   * — a quote three times the band rate with nothing recording why is a number nobody can audit
+   * afterwards. `null` on one-way trips, on incity, and on any round trip returning the same day.
+   */
+  returnAt: Date | null;
   /** Outstation only. The ONE-WAY road distance the band was matched on. */
   distanceKm: number | null;
   includedMinutes: number | null;

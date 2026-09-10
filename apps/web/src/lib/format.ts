@@ -29,6 +29,26 @@ export function formatTime(iso: string): string {
   }).format(new Date(iso));
 }
 
+/**
+ * Today's date in IST as `YYYY-MM-DD` — the form every admin date filter takes.
+ *
+ * NOT `toISOString().split('T')[0]`, which is the obvious version and is wrong: that yields a UTC
+ * date, so between midnight and 05:30 IST it names YESTERDAY. A "bookings today" tile would sit
+ * at zero through the early morning and then jump, which reads as an outage rather than a
+ * timezone bug — the same trap `format.test.ts` documents for timestamps.
+ *
+ * `en-CA` is the locale trick: it formats as `2026-09-09` natively, so the parts never need
+ * reassembling by hand.
+ */
+export function istDateKey(at: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: IST,
+  }).format(at);
+}
+
 /** Metres in, the unit an admin thinks in out. */
 export function formatDistance(metres: number): string {
   return metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`;

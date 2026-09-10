@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { AdminDriverListDto, OnboardingStatus } from '@driverzone/contracts';
 import { request } from '@/lib/api/client';
 import { authedQueryOptions } from '@/lib/query/factory';
+import { keys } from '@/lib/query/keys';
 
 export interface UseDriversParams {
   page?: number;
@@ -14,7 +15,7 @@ export interface UseDriversParams {
 export function useDrivers(params: UseDriversParams) {
   return useQuery(
     authedQueryOptions({
-      queryKey: ['admin', 'drivers', params],
+      queryKey: keys.drivers.list(params),
       fetch: (token, signal) => {
         const query: Record<string, string | number | boolean | undefined> = {};
         if (params.page !== undefined) query.page = params.page;

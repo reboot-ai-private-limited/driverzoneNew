@@ -55,6 +55,8 @@ import { makeAdminControllers } from './interface/admin.controller.js';
 import { buildAdminRouter } from './interface/admin.routes.js';
 import { registerIdentitySwaggerPaths } from './interface/identity.swagger.js';
 import type { IdentityPublicContract } from './identity.public.js';
+import type { DriverDeviceRepositoryPort } from './domain/driverDevice.repository.port.js';
+import type { CustomerDeviceRepositoryPort } from './domain/customerDevice.repository.port.js';
 
 /**
  * THE COMPOSITION ROOT for this module — the one file allowed to name concrete classes.
@@ -86,6 +88,17 @@ export interface IdentityContainer {
    * reason.
    */
   sweepStalePresence: (cutoff: Date, limit: number) => Promise<string[]>;
+
+  /**
+   * The device registries, handed to `notifications` by the composition root.
+   *
+   * On the container rather than in `contract` for the same reason as `sweepStalePresence`: these
+   * are not something a module asks identity to *do*. They are ports identity implements and one
+   * specific consumer needs, and `container.ts` is where that wiring belongs — `notifications`
+   * importing the Mongo classes directly is what this exists to stop.
+   */
+  driverDevices: DriverDeviceRepositoryPort;
+  customerDevices: CustomerDeviceRepositoryPort;
 }
 
 export function buildIdentityContainer(): IdentityContainer {
@@ -264,6 +277,11 @@ export function buildIdentityContainer(): IdentityContainer {
     // The worker's presence sweep. See the note on `IdentityContainer` for why it sits here and
     // not on the public contract.
     sweepStalePresence: (cutoff, limit) => drivers.sweepStalePresence(cutoff, limit),
+
+    // The same two instances the routes above register handsets into — not new ones. `container.ts`
+    // hands these to `notifications`, which is the only other module that needs them.
+    driverDevices: devices,
+    customerDevices,
 
     contract: {
       // The read side and the rating cache. Consumed by `reviews`, which renders names in the

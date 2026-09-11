@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CreatePaymentUseCase } from '../src/modules/payments/application/useCases/createPayment.usecase.js';
 import { HandleWebhookUseCase } from '../src/modules/payments/application/useCases/handleWebhook.usecase.js';
 import { RefundPaymentUseCase } from '../src/modules/payments/application/useCases/refundPayment.usecase.js';
+import { VerifyCheckoutUseCase } from '../src/modules/payments/application/useCases/verifyCheckout.usecase.js';
 import { canTransition, type Payment, type PaymentStatus } from '../src/modules/payments/domain/payment.entity.js';
 import type {
   CreatePaymentData,
@@ -348,5 +349,96 @@ describe('RefundPaymentUseCase', () => {
         idempotencyKey: 'rfnd_4',
       }),
     ).rejects.toThrow(/Only a captured payment can be refunded/);
+  });
+});
+
+/**
+ * The checkout callback's own path to a capture. Same compare-and-swap as the webhook — they
+ * share `captureIfPending` — so the interesting cases here are the signature check and what
+ * happens when both messengers arrive.
+ */
+describe('VerifyCheckoutUseCase', () => {
+  const gateway = new MockPaymentGateway(false);
+
+  async function pending(): Promise<Payment> {
+    const { payment } = await new CreatePaymentUseCase(repo, gateway).execute(charge);
+    return payment;
+  }
+
+  function verify(payment: Payment, providerPaymentId: string, signature: string) {
+    return new VerifyCheckoutUseCase(repo, gateway).execute({
+      paymentId: payment.id,
+      providerPaymentId,
+      signature,
+    });
+  }
+
+  it('captures a pending payment when the signature verifies', async () => {
+    const payment = await pending();
+    const signed = MockPaymentGateway.signedCheckout(payment.gatewayRef ?? '', 'pay_rzp_1');
+
+    const result = await verify(payment, signed.paymentId, signed.signature);
+
+    expect(result.captured).toBe(true);
+    expect(repo.rows.get(payment.id)?.status).toBe('CAPTURED');
+    expect(repo.rows.get(payment.id)?.providerPaymentId).toBe('pay_rzp_1');
+  });
+
+  it('leaves the payment untouched when the signature does not verify', async () => {
+    const payment = await pending();
+
+    const result = await verify(payment, 'pay_rzp_1', 'forged');
+
+    expect(result.captured).toBe(false);
+    expect(repo.rows.get(payment.id)?.status).toBe('PENDING');
+  });
+
+  /*
+   * A signature over SOMEBODY ELSE'S order. The server signs with its own stored `gatewayRef`,
+   * never the one a caller hands it, so a correctly-signed message for a different order does not
+   * verify against this payment.
+   */
+  it('refuses a signature made against a different order', async () => {
+    const payment = await pending();
+    const signed = MockPaymentGateway.signedCheckout('order_somebody_else', 'pay_rzp_1');
+
+    const result = await verify(payment, signed.paymentId, signed.signature);
+
+    expect(result.captured).toBe(false);
+    expect(repo.rows.get(payment.id)?.status).toBe('PENDING');
+  });
+
+  /* Razorpay's documented UPI retry: failed, then captured for the same transaction. */
+  it('captures from FAILED, the one exit that state has', async () => {
+    const payment = await pending();
+    await repo.transition(payment.id, 'PENDING', 'FAILED', { failureReason: 'upi timeout' });
+    const signed = MockPaymentGateway.signedCheckout(payment.gatewayRef ?? '', 'pay_rzp_1');
+
+    const result = await verify(payment, signed.paymentId, signed.signature);
+
+    expect(result.captured).toBe(true);
+    expect(repo.rows.get(payment.id)?.status).toBe('CAPTURED');
+  });
+
+  /* The webhook got there first. The caller still hears "captured" — because it is. */
+  it('reports an already-captured payment as captured, without re-transitioning', async () => {
+    const payment = await pending();
+    await repo.transition(payment.id, 'PENDING', 'CAPTURED', {});
+    const signed = MockPaymentGateway.signedCheckout(payment.gatewayRef ?? '', 'pay_rzp_1');
+
+    const result = await verify(payment, signed.paymentId, signed.signature);
+
+    expect(result.captured).toBe(true);
+    expect(repo.rows.get(payment.id)?.status).toBe('CAPTURED');
+  });
+
+  it('reports an unknown payment as not captured rather than throwing', async () => {
+    const result = await new VerifyCheckoutUseCase(repo, gateway).execute({
+      paymentId: 'pay_nonexistent',
+      providerPaymentId: 'pay_rzp_1',
+      signature: 'anything',
+    });
+
+    expect(result.captured).toBe(false);
   });
 });

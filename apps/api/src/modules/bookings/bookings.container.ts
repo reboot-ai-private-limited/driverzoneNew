@@ -21,6 +21,10 @@ import {
   RespondToExtensionUseCase,
 } from './application/useCases/extendBooking.usecase.js';
 import { CreateBookingUseCase } from './application/useCases/createBooking.usecase.js';
+import { SelectPaymentMethodUseCase } from './application/useCases/selectPaymentMethod.usecase.js';
+import { ConfirmLatePaymentUseCase } from './application/useCases/confirmLatePayment.usecase.js';
+import { VerifyPaymentUseCase } from './application/useCases/verifyPayment.usecase.js';
+import { DriverSwitchToCashUseCase } from './application/useCases/driverSwitchToCash.usecase.js';
 import {
   ConfirmBookingPaymentUseCase,
   FailBookingPaymentUseCase,
@@ -103,12 +107,14 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
   const create = new CreateBookingUseCase(
     repo,
     deps.quotes,
-    deps.payments,
     deps.settings,
-    charges,
     deps.wallet,
     deps.scheduleDispatch,
   );
+  const selectPaymentMethod = new SelectPaymentMethodUseCase(repo, deps.payments, extensions);
+  const confirmLate = new ConfirmLatePaymentUseCase(repo, deps.notifications, deps.wallet, deps.payments);
+  const verifyPayment = new VerifyPaymentUseCase(repo, deps.payments, confirmLate);
+  const switchToCash = new DriverSwitchToCashUseCase(repo, deps.notifications);
   const confirm = new ConfirmBookingPaymentUseCase(
     repo,
     deps.notifications,
@@ -236,11 +242,30 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     },
 
     onPaymentCaptured: async (bookingId) => {
-      await confirm.execute(bookingId);
+      const booking = await repo.findById(bookingId);
+      if (booking?.status === 'PENDING_PAYMENT') {
+        await confirm.execute(bookingId);
+      } else {
+        await confirmLate.execute(bookingId);
+      }
     },
     onPaymentFailed: async (bookingId, reason) => {
-      const result = await failPayment.execute(bookingId, reason);
-      if (result === null) logger.warn({ bookingId }, 'payment failed for an unknown booking');
+      const booking = await repo.findById(bookingId);
+      if (booking?.status === 'PENDING_PAYMENT') {
+        const result = await failPayment.execute(bookingId, reason);
+        if (result === null) logger.warn({ bookingId }, 'payment failed for an unknown booking');
+      } else if (booking) {
+        logger.info({ bookingId, reason }, 'late online payment failed');
+        await deps.notifications.sendBookingUpdate(
+          { role: 'CUSTOMER', id: booking.customerId },
+          {
+            bookingId: booking.id,
+            reference: booking.reference,
+            status: booking.status,
+            message: 'Your payment did not go through. Please try again to complete online payment.',
+          },
+        );
+      }
     },
 
     expireStaleExtensions: (now, limit) => extensions.expireStale(now, limit),
@@ -277,6 +302,8 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         ),
         cancel: controllers.makeCancelByCustomerController(cancelByCustomer),
         extend: controllers.makeRequestExtensionController(requestExtension),
+        selectPaymentMethod: controllers.makeSelectPaymentMethodController(selectPaymentMethod),
+        verifyPayment: controllers.makeVerifyPaymentController(verifyPayment),
       }),
 
     buildDriverRouter: () =>
@@ -297,6 +324,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         cancel: controllers.makeCancelByDriverController(cancelByDriver),
         acceptExtension: controllers.makeRespondToExtensionController(respondToExtension, true),
         declineExtension: controllers.makeRespondToExtensionController(respondToExtension, false),
+        switchToCash: controllers.makeDriverSwitchToCashController(switchToCash),
       }),
 
     buildAdminRouter: () =>

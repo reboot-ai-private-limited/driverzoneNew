@@ -38,8 +38,10 @@ function toEntity(doc: BookingDoc): Booking {
     walletDebtPaise: doc.walletDebtPaise ?? 0,
     quoteId: String(doc.quoteId),
     fareSnapshot: doc.fareSnapshot as FareSnapshot,
-    paymentMode: doc.paymentMode as Booking['paymentMode'],
+    paymentMode: (doc.paymentMode ?? null) as Booking['paymentMode'],
+    paymentStatus: (doc.paymentStatus ?? (doc.paymentMode === 'CASH' ? 'CASH' : doc.paymentMode === 'UPI' ? 'AWAITING_PAYMENT' : 'NOT_SELECTED')) as Booking['paymentStatus'],
     paymentId: doc.paymentId ? String(doc.paymentId) : null,
+    paidExtensionPaise: doc.paidExtensionPaise ?? 0,
     isScheduled: doc.isScheduled,
     scheduledAt: doc.scheduledAt,
     dispatchAt: doc.dispatchAt,
@@ -279,6 +281,34 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     await BookingModel.findByIdAndUpdate(id, {
       $set: { paymentId: new mongoose.Types.ObjectId(paymentId) },
     });
+  }
+
+  async setPaymentMode(
+    id: string,
+    mode: Booking['paymentMode'],
+    status?: Booking['paymentStatus'],
+  ): Promise<Booking | null> {
+    const paymentStatus =
+      status ?? (mode === 'CASH' ? 'CASH' : mode === 'UPI' ? 'AWAITING_PAYMENT' : 'NOT_SELECTED');
+    const doc = await BookingModel.findByIdAndUpdate(
+      id,
+      { $set: { paymentMode: mode, paymentStatus } },
+      { new: true },
+    );
+    return doc ? toEntity(doc.toObject() as BookingDoc) : null;
+  }
+
+  async setPaymentStatus(id: string, status: Booking['paymentStatus']): Promise<Booking | null> {
+    const doc = await BookingModel.findByIdAndUpdate(
+      id,
+      { $set: { paymentStatus: status } },
+      { new: true },
+    );
+    return doc ? toEntity(doc.toObject() as BookingDoc) : null;
+  }
+
+  async setPaidExtensionPaise(id: string, amountPaise: number): Promise<void> {
+    await BookingModel.findByIdAndUpdate(id, { $set: { paidExtensionPaise: amountPaise } });
   }
 
   /**

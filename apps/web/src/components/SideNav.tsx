@@ -137,7 +137,27 @@ export function SideNav({ pinned }: SideNavProps) {
 
           return (
             <li key={item.href}>
-              <Link href={item.href} aria-current={active ? 'page' : undefined} className="block">
+              <Link
+                href={item.href}
+                aria-current={active ? 'page' : undefined}
+                className="block"
+                /*
+                 * CLOSES THE PANEL AFTER A NAVIGATION, and it takes a blur to do it: the clicked
+                 * link keeps DOM focus across the route change, `focus-within` above is still
+                 * satisfied, and the nav sits open over the content until something else is
+                 * clicked. On touch that is the ONLY expand trigger — `hover:hover` rules out the
+                 * other — so a tapped tab leaves the panel covering the page it just opened.
+                 *
+                 * `detail > 0` IS THE POINTER TEST. A click synthesised by pressing Enter on a
+                 * focused link reports `detail === 0`; a real mouse or touch click reports 1 or
+                 * more. Blurring unconditionally would drop a keyboard user's focus to `<body>`
+                 * mid-navigation and cost them their place in the tab order — which is the thing
+                 * `focus-within` is here to serve in the first place.
+                 */
+                onClick={(event) => {
+                  if (event.detail > 0) event.currentTarget.blur();
+                }}
+              >
                 {content}
               </Link>
             </li>

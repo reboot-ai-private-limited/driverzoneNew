@@ -28,7 +28,8 @@
           "locationWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area."
         }
       ],
-      "@react-native-firebase/app"
+      "@react-native-firebase/app",
+      "./plugins/withUpiQueries.js"
     ],
     "android": {
       "package": "in.driverzone.customer",

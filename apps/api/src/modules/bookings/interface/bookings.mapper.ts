@@ -1,4 +1,9 @@
-import type { BookingDto, BookingEventDto, BookingStatus } from '@driverzone/contracts';
+import type {
+  BookingDto,
+  BookingEventDto,
+  BookingPaymentStatus,
+  BookingStatus,
+} from '@driverzone/contracts';
 import type { CustomerContact, DriverCard } from '../../identity/identity.public.js';
 import { toMoney } from '../../../shared/money/format.js';
 import type { Booking } from '../domain/booking.entity.js';
@@ -89,6 +94,7 @@ export interface BookingView {
    * follows.
    */
   revealDriverEarnings?: boolean | undefined;
+  paymentStatus?: BookingPaymentStatus | undefined;
 }
 
 /**
@@ -131,6 +137,14 @@ export function toBookingDto(view: BookingView): BookingDto {
     status: booking.status,
     service_type: booking.serviceType,
     payment_mode: booking.paymentMode,
+    payment_status:
+      view.paymentStatus ??
+      booking.paymentStatus ??
+      (booking.paymentMode === null
+        ? 'NOT_SELECTED'
+        : booking.paymentMode === 'CASH'
+          ? 'CASH'
+          : 'AWAITING_PAYMENT'),
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },
     drop: { ...booking.drop, address: booking.dropAddress },

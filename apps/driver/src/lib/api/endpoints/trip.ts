@@ -7,6 +7,7 @@ import type {
   ListDriverTripsResponse,
   RateTripRequest,
   RateTripResponse,
+  SwitchToCashResponse,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { getAccessToken } from '../../auth/session';
@@ -114,6 +115,21 @@ export function completeTrip(bookingId: string): Promise<CompleteTripResponse> {
     method: 'POST',
     body: {},
     idempotencyKey: `complete-${bookingId}`,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * "They paid me cash instead." The way out of the online-payment gate when the customer's own app
+ * cannot get there — a dead phone, no signal, a card that keeps failing — and they hand over cash.
+ *
+ * Refused by the server while the customer carries wallet debt, which cash cannot clear. A payment
+ * that captures anyway after this is refunded server-side rather than collected twice.
+ */
+export function switchToCash(bookingId: string): Promise<SwitchToCashResponse> {
+  return request<SwitchToCashResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/switch-to-cash`, {
+    method: 'POST',
+    body: {},
     token: getAccessToken() ?? undefined,
   });
 }

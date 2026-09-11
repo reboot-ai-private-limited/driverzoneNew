@@ -38,6 +38,26 @@ export interface PaymentsContract {
 
   findById(paymentId: string): Promise<Payment | null>;
   listForBooking(bookingId: string): Promise<Payment[]>;
+
+  /**
+   * Verifies a checkout SDK's success callback and captures the payment immediately if it holds
+   * up — the accelerant to the webhook, never a replacement for it. `false` covers an unverified
+   * signature and an unknown payment alike; the caller's answer to both is "keep waiting for the
+   * webhook", not an error.
+   */
+  verifyAndCapture(input: {
+    paymentId: string;
+    providerPaymentId: string;
+    signature: string;
+  }): Promise<{ captured: boolean }>;
+
+  /**
+   * The checkout publishable key, static for the whole app — not per-charge. Exposed so a caller
+   * can resume a checkout (e.g. re-showing it for an order that already exists, on an idempotent
+   * retry) without calling `charge` again just to get this back. `null` under the mock gateway,
+   * same as `charge`'s own `publicKey` is on that path.
+   */
+  readonly publicKey: string | null;
 }
 
 export type PaymentsPublicContract = PaymentsContract;

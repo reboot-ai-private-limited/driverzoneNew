@@ -96,4 +96,13 @@ export interface PaymentGatewayPort {
    * payment provider, and the caller answers it with a 401.
    */
   verifyWebhook(request: WebhookRequest): GatewayEvent | null;
+
+  /**
+   * Verifies the signature a checkout SDK hands back on success, so the caller can confirm a
+   * payment instantly instead of waiting for `verifyWebhook`'s delivery. `orderId` must be OUR
+   * stored `gatewayRef`, never a client-supplied order id — a caller who controls both halves of
+   * the signed message can forge the signature too. Never the sole source of truth: a webhook
+   * still confirms independently, and this exists only to let a caller stop waiting sooner.
+   */
+  verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean;
 }

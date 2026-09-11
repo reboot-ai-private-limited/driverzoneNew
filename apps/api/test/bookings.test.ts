@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BOOKING_STATUSES, type BookingStatus } from '@driverzone/contracts';
+import {
+  BOOKING_STATUSES,
+  type BookingPaymentStatus,
+  type BookingStatus,
+  type PaymentMode,
+} from '@driverzone/contracts';
 import {
   canTransition,
   generateReference,
@@ -42,6 +47,10 @@ import {
   ConfirmBookingPaymentUseCase,
   FailBookingPaymentUseCase,
 } from '../src/modules/bookings/application/useCases/confirmBookingPayment.usecase.js';
+import { SelectPaymentMethodUseCase } from '../src/modules/bookings/application/useCases/selectPaymentMethod.usecase.js';
+import { ConfirmLatePaymentUseCase } from '../src/modules/bookings/application/useCases/confirmLatePayment.usecase.js';
+import { VerifyPaymentUseCase } from '../src/modules/bookings/application/useCases/verifyPayment.usecase.js';
+import { DriverSwitchToCashUseCase } from '../src/modules/bookings/application/useCases/driverSwitchToCash.usecase.js';
 import { buildSnapshot } from '../src/modules/settings/domain/setting.entity.js';
 import { adminBookingListQuerySchema } from '../src/modules/bookings/interface/bookings.validation.js';
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
@@ -117,7 +126,9 @@ function booking(over: Partial<Booking> = {}): Booking {
     walletDebtPaise: 0,
     fareSnapshot: fareSnapshot(),
     paymentMode: 'UPI',
+    paymentStatus: 'PAID',
     paymentId: 'pay_1',
+    paidExtensionPaise: 0,
     isScheduled: false,
     scheduledAt: new Date('2026-08-31T09:00:00Z'),
     dispatchAt: new Date('2026-08-31T09:00:00Z'),
@@ -157,6 +168,25 @@ function fakeRepo(seed: Booking, otp = '4821') {
       return current.otpAttempts;
     }),
     attachPayment: vi.fn(async () => undefined),
+    setPaymentMode: vi.fn(async (id: string, mode: PaymentMode, status?: BookingPaymentStatus) => {
+      if (id !== current.id) return null;
+      current = {
+        ...current,
+        paymentMode: mode,
+        ...(status !== undefined ? { paymentStatus: status } : {}),
+      };
+      return current;
+    }),
+    setPaymentStatus: vi.fn(async (id: string, status: BookingPaymentStatus) => {
+      if (id === current.id) {
+        current = { ...current, paymentStatus: status };
+      }
+    }),
+    setPaidExtensionPaise: vi.fn(async (id: string, amountPaise: number) => {
+      if (id === current.id) {
+        current = { ...current, paidExtensionPaise: amountPaise };
+      }
+    }),
 
     transition: vi.fn(
       async (input: {
@@ -388,6 +418,8 @@ function fakePayments(payment: Partial<Payment> = {}) {
     }),
     findById: vi.fn(async () => stored),
     listForBooking: vi.fn(async () => [stored]),
+    verifyAndCapture: vi.fn(async () => ({ captured: true })),
+    publicKey: 'rzp_test_mock',
   };
 
   return payments;
@@ -1669,6 +1701,80 @@ describe('CompleteTripUseCase — extensions', () => {
     );
   });
 
+  /*
+   * The customer already paid for this day at payment selection — `paidExtensionPaise` on the
+   * booking. Settling it again here would take ₹3,000 twice for one extra day.
+   */
+  it('does not re-bill an extension already collected in the payment-selection order', async () => {
+    const { useCase, charges, payments } = build(
+      finished({
+        paidExtensionPaise: 300_000,
+        arrivedAt: new Date('2026-08-31T09:00:00Z'),
+        startedAt: new Date('2026-08-31T09:40:00Z'),
+      }),
+      [acceptedExtension()],
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    // Waiting only — the ₹3,000 day is already paid for.
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ amountPaise: 5_000, idempotencyKey: 'settle-bkg_1' }),
+    );
+    // The receipt still shows the whole extension, however it was collected.
+    const extension = charges.adjustments().find((row) => row.type === 'DAY_EXTENSION');
+    expect(extension?.amountPaise).toBe(300_000);
+  });
+
+  /*
+   * The order carrying that extension was never paid — they switched to cash instead. Honouring
+   * `paidExtensionPaise` here would hand them the extra day for free.
+   */
+  it('still bills the extension when the booking switched to cash before paying', async () => {
+    const { useCase, ledger } = build(
+      finished({ paidExtensionPaise: 300_000, paymentMode: 'CASH', paymentStatus: 'CASH' }),
+      [acceptedExtension()],
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      idempotencyKey: 'idem_1',
+    });
+
+    const fare = finished().fareSnapshot.fare.totalPaise;
+    expect(result.totalPaise).toBe(fare + 300_000);
+    // The driver takes the extra day at the door along with the fare.
+    const collected = ledger.entries().find((entry) => entry.entryType === 'CASH_COLLECTED');
+    expect(collected?.amountPaise).toBe(-(fare + 300_000));
+  });
+
+  it('counts an already-paid extension in the total the customer has paid', async () => {
+    const { useCase } = build(finished({ paidExtensionPaise: 300_000 }), [acceptedExtension()]);
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      idempotencyKey: 'idem_1',
+    });
+
+    expect(result.totalPaise).toBe(finished().fareSnapshot.fare.totalPaise + 300_000);
+  });
+
+  it('bills only the part of an extension not already paid for', async () => {
+    const { useCase, payments } = build(
+      finished({ paidExtensionPaise: 300_000 }),
+      [acceptedExtension({ id: 'ext_1' }), acceptedExtension({ id: 'ext_2' })],
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    // Two accepted days at ₹3,000, one of which rode along in the earlier order.
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ amountPaise: 300_000 }),
+    );
+  });
+
   it('charges nothing for days the driver never agreed to', async () => {
     const { useCase, charges, payments } = build(finished(), [
       acceptedExtension({ status: 'DECLINED' }),
@@ -1693,5 +1799,575 @@ describe('CompleteTripUseCase — extensions', () => {
     // The frozen fare (₹1,050) plus the extra day (₹3,000). Without this the driver is recorded
     // as holding less than they actually took.
     expect(cash?.amountPaise).toBe(-405_000);
+  });
+});
+
+describe('SelectPaymentMethodUseCase', () => {
+  it('refuses if the booking does not exist or customer does not own it', async () => {
+    const repo = fakeRepo(booking({ customerId: 'cus_1' }));
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_nonexistent',
+        customerId: 'cus_1',
+        paymentMode: 'CASH',
+        idempotencyKey: 'idem_1',
+      }),
+    ).rejects.toThrow('That booking does not exist.');
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        customerId: 'cus_wrong',
+        paymentMode: 'CASH',
+        idempotencyKey: 'idem_1',
+      }),
+    ).rejects.toThrow('That booking does not exist.');
+  });
+
+  it('refuses if the trip has not STARTED yet', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'DRIVER_EN_ROUTE', paymentMode: null, paymentStatus: 'NOT_SELECTED' }),
+    );
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        customerId: 'cus_1',
+        paymentMode: 'CASH',
+        idempotencyKey: 'idem_1',
+      }),
+    ).rejects.toThrow('You can choose how to pay once your driver has started the trip.');
+  });
+
+  it('refuses CASH when the customer carries unpaid wallet debt', async () => {
+    const repo = fakeRepo(
+      booking({
+        status: 'STARTED',
+        paymentMode: null,
+        paymentStatus: 'NOT_SELECTED',
+        walletDebtPaise: 50_000,
+      }),
+    );
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        customerId: 'cus_1',
+        paymentMode: 'CASH',
+        idempotencyKey: 'idem_1',
+      }),
+    ).rejects.toThrow('You have an unpaid cancellation fee.');
+  });
+
+  it('sets paymentMode and paymentStatus to CASH on valid cash selection', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: null, paymentStatus: 'NOT_SELECTED' }),
+    );
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'CASH',
+      idempotencyKey: 'idem_1',
+    });
+
+    expect(result.booking.paymentMode).toBe('CASH');
+    expect(result.booking.paymentStatus).toBe('CASH');
+    expect(result.clientToken).toBeNull();
+    expect(result.amountPaise).toBeNull();
+    expect(repo.setPaymentMode).toHaveBeenCalledWith('bkg_1', 'CASH', 'CASH');
+  });
+
+  it('creates an online charge and sets AWAITING_PAYMENT on UPI selection', async () => {
+    const repo = fakeRepo(
+      booking({
+        status: 'STARTED',
+        paymentMode: null,
+        paymentStatus: 'NOT_SELECTED',
+        walletCreditPaise: 5_000,
+        walletDebtPaise: 2_000,
+      }),
+    );
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'UPI',
+      idempotencyKey: 'idem_upi',
+    });
+
+    expect(result.booking.paymentMode).toBe('UPI');
+    expect(result.booking.paymentStatus).toBe('AWAITING_PAYMENT');
+    // 105,000 fare - 5,000 credit + 2,000 debt = 102,000
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'bkg_1',
+        kind: 'BOOKING',
+        amountPaise: 102_000,
+        idempotencyKey: 'idem_upi',
+      }),
+    );
+    expect(repo.attachPayment).toHaveBeenCalledWith('bkg_1', 'pay_1');
+  });
+
+  it('is idempotent when re-selecting the same mode', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: 'CASH', paymentStatus: 'CASH' }),
+    );
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'CASH',
+      idempotencyKey: 'idem_retry',
+    });
+
+    expect(result.booking.paymentMode).toBe('CASH');
+    expect(payments.charge).not.toHaveBeenCalled();
+  });
+
+  it('refuses switching when payment is already PAID', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: 'UPI', paymentStatus: 'PAID' }),
+    );
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        customerId: 'cus_1',
+        paymentMode: 'CASH',
+        idempotencyKey: 'idem_switch',
+      }),
+    ).rejects.toThrow('This trip has already been paid for online.');
+  });
+});
+
+describe('CompleteTripUseCase — payment gates', () => {
+  function build(seed: Booking, paymentsList: Payment[] = []) {
+    const repo = fakeRepo(seed);
+    const charges = fakeCharges();
+    const ledger = fakeLedger();
+    const payments = fakePayments();
+    payments.listForBooking = vi.fn(async () => paymentsList);
+
+    return {
+      repo,
+      charges,
+      ledger,
+      payments,
+      useCase: new CompleteTripUseCase(
+        repo,
+        charges,
+        settings,
+        ledger,
+        payments,
+        fakeNotifications(),
+        fakeExtensions([]),
+      ),
+    };
+  }
+
+  const liveStarted = (over: Partial<Booking> = {}) =>
+    booking({
+      status: 'STARTED',
+      arrivedAt: new Date('2026-08-31T09:00:00Z'),
+      startedAt: new Date('2026-08-31T09:05:00Z'),
+      ...over,
+    });
+
+  it('refuses completion if paymentMode has not been selected yet', async () => {
+    const { useCase } = build(liveStarted({ paymentMode: null, paymentStatus: 'NOT_SELECTED' }));
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' }),
+    ).rejects.toThrow('The customer has not chosen how to pay yet.');
+  });
+
+  it('refuses completion if paymentMode is UPI but payment is not captured', async () => {
+    const pendingPayment: Payment = {
+      id: 'pay_1',
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      kind: 'BOOKING',
+      status: 'CREATED',
+      amountPaise: 105_000,
+      refundedPaise: 0,
+      gatewayRef: 'mock_order_1',
+      idempotencyKey: 'idem_1',
+      failureReason: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const { useCase } = build(
+      liveStarted({ paymentMode: 'UPI', paymentStatus: 'AWAITING_PAYMENT' }),
+      [pendingPayment],
+    );
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' }),
+    ).rejects.toThrow("Waiting for the customer's online payment to go through.");
+  });
+
+  it('allows completion when paymentMode is UPI and payment is CAPTURED', async () => {
+    const capturedPayment: Payment = {
+      id: 'pay_1',
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      kind: 'BOOKING',
+      status: 'CAPTURED',
+      amountPaise: 105_000,
+      refundedPaise: 0,
+      gatewayRef: 'mock_order_1',
+      idempotencyKey: 'idem_1',
+      failureReason: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const { useCase, ledger } = build(
+      liveStarted({ paymentMode: 'UPI', paymentStatus: 'PAID' }),
+      [capturedPayment],
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      idempotencyKey: 'idem_1',
+    });
+
+    expect(result.booking.status).toBe('COMPLETED');
+    const cashCollected = ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED');
+    expect(cashCollected).toBeUndefined();
+  });
+
+  it('allows completion when paymentMode is CASH and records CASH_COLLECTED', async () => {
+    const { useCase, ledger } = build(
+      liveStarted({ paymentMode: 'CASH', paymentStatus: 'CASH', paymentId: null }),
+      [],
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      idempotencyKey: 'idem_1',
+    });
+
+    expect(result.booking.status).toBe('COMPLETED');
+    const cashCollected = ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED');
+    expect(cashCollected).toBeDefined();
+  });
+});
+
+describe('ConfirmLatePaymentUseCase', () => {
+  it('marks booking as PAID and collects debt into customer wallet', async () => {
+    const repo = fakeRepo(
+      booking({
+        status: 'STARTED',
+        paymentMode: 'UPI',
+        paymentStatus: 'AWAITING_PAYMENT',
+        walletDebtPaise: 40_000,
+      }),
+    );
+    const notifications = fakeNotifications();
+    const wallet = fakeWallet();
+    const useCase = new ConfirmLatePaymentUseCase(repo, notifications, wallet, fakePayments());
+
+    await useCase.execute('bkg_1');
+
+    expect(repo.setPaymentStatus).toHaveBeenCalledWith('bkg_1', 'PAID');
+    expect(wallet.append).toHaveBeenCalledWith([
+      expect.objectContaining({
+        customerId: 'cus_1',
+        bookingId: 'bkg_1',
+        entryType: 'DEBT_COLLECTED',
+        amountPaise: 40_000,
+      }),
+    ]);
+    expect(notifications.sendBookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'CUSTOMER', id: 'cus_1' }),
+      expect.objectContaining({ message: expect.stringContaining('Payment received') }),
+    );
+    expect(notifications.sendBookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'DRIVER', id: 'drv_1' }),
+      expect.objectContaining({ message: expect.stringContaining('payment has cleared') }),
+    );
+  });
+});
+
+describe('SelectPaymentMethodUseCase — extensions already accepted', () => {
+  const startedOutstation = () =>
+    runningOutstation({
+      paymentMode: null,
+      paymentStatus: 'NOT_SELECTED',
+      walletCreditPaise: 0,
+      walletDebtPaise: 0,
+    });
+
+  it('folds an already-accepted extension into the UPI order and records how much', async () => {
+    const repo = fakeRepo(startedOutstation());
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(
+      repo,
+      payments,
+      fakeExtensions([acceptedExtension({ amountPaise: 300_000 })]),
+    );
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'UPI',
+      idempotencyKey: 'idem_upi',
+    });
+
+    const fare = startedOutstation().fareSnapshot.fare.totalPaise;
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ amountPaise: fare + 300_000 }),
+    );
+    expect(repo.setPaidExtensionPaise).toHaveBeenCalledWith('bkg_1', 300_000);
+  });
+
+  it('ignores an extension the driver has not accepted', async () => {
+    const repo = fakeRepo(startedOutstation());
+    const payments = fakePayments();
+    const useCase = new SelectPaymentMethodUseCase(
+      repo,
+      payments,
+      fakeExtensions([acceptedExtension({ status: 'PENDING' })]),
+    );
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'UPI',
+      idempotencyKey: 'idem_upi',
+    });
+
+    const fare = startedOutstation().fareSnapshot.fare.totalPaise;
+    expect(payments.charge).toHaveBeenCalledWith(expect.objectContaining({ amountPaise: fare }));
+    expect(repo.setPaidExtensionPaise).not.toHaveBeenCalled();
+  });
+
+  /*
+   * The whole point of reading the amount off the payment row: an extension accepted between the
+   * first attempt and this retry must not change the amount of an order the customer already has.
+   */
+  it('reopens the original order amount on a retry, not a recomputed one', async () => {
+    const repo = fakeRepo(
+      runningOutstation({ paymentMode: 'UPI', paymentStatus: 'AWAITING_PAYMENT' }),
+    );
+    const payments = fakePayments({
+      status: 'PENDING',
+      amountPaise: 111_000,
+      gatewayRef: 'order_original',
+    });
+    const useCase = new SelectPaymentMethodUseCase(
+      repo,
+      payments,
+      fakeExtensions([acceptedExtension({ amountPaise: 300_000 })]),
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'UPI',
+      idempotencyKey: 'idem_retry',
+    });
+
+    expect(result.amountPaise).toBe(111_000);
+    expect(result.clientToken).toBe('order_original');
+    expect(payments.charge).not.toHaveBeenCalled();
+  });
+});
+
+describe('VerifyPaymentUseCase', () => {
+  const awaitingPayment = () =>
+    booking({ status: 'STARTED', paymentMode: 'UPI', paymentStatus: 'AWAITING_PAYMENT' });
+
+  function build(seed: Booking) {
+    const repo = fakeRepo(seed);
+    const payments = fakePayments();
+    const notifications = fakeNotifications();
+    const confirmLate = new ConfirmLatePaymentUseCase(repo, notifications, fakeWallet(), payments);
+    return {
+      repo,
+      payments,
+      notifications,
+      useCase: new VerifyPaymentUseCase(repo, payments, confirmLate),
+    };
+  }
+
+  it('confirms the booking when the signature verifies', async () => {
+    const { repo, payments, useCase } = build(awaitingPayment());
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      providerPaymentId: 'pay_rzp_1',
+      signature: 'good_signature',
+    });
+
+    expect(payments.verifyAndCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentId: 'pay_1', providerPaymentId: 'pay_rzp_1' }),
+    );
+    expect(repo.setPaymentStatus).toHaveBeenCalledWith('bkg_1', 'PAID');
+  });
+
+  it('refuses an unverified signature and leaves the booking alone', async () => {
+    const { repo, payments, useCase } = build(awaitingPayment());
+    payments.verifyAndCapture = vi.fn(async () => ({ captured: false }));
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        customerId: 'cus_1',
+        providerPaymentId: 'pay_rzp_1',
+        signature: 'forged',
+      }),
+    ).rejects.toThrow('Payment could not be verified yet.');
+
+    expect(repo.setPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  /* The webhook got there first. Confirming twice would notify twice and re-collect the debt. */
+  it('is a no-op once the booking is already PAID', async () => {
+    const { repo, payments, useCase } = build(
+      booking({ status: 'STARTED', paymentMode: 'UPI', paymentStatus: 'PAID' }),
+    );
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      providerPaymentId: 'pay_rzp_1',
+      signature: 'good_signature',
+    });
+
+    expect(payments.verifyAndCapture).not.toHaveBeenCalled();
+    expect(repo.setPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it('refuses on a cash booking, which has no online payment to verify', async () => {
+    const { useCase } = build(
+      booking({ status: 'STARTED', paymentMode: 'CASH', paymentStatus: 'CASH' }),
+    );
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        customerId: 'cus_1',
+        providerPaymentId: 'pay_rzp_1',
+        signature: 'good_signature',
+      }),
+    ).rejects.toThrow('There is no online payment on this trip to verify.');
+  });
+});
+
+describe('DriverSwitchToCashUseCase', () => {
+  const stuckOnline = (over: Partial<Booking> = {}) =>
+    booking({ status: 'STARTED', paymentMode: 'UPI', paymentStatus: 'AWAITING_PAYMENT', ...over });
+
+  function build(seed: Booking) {
+    const repo = fakeRepo(seed);
+    const notifications = fakeNotifications();
+    return { repo, notifications, useCase: new DriverSwitchToCashUseCase(repo, notifications) };
+  }
+
+  it('switches a stuck online payment to cash', async () => {
+    const { repo, notifications, useCase } = build(stuckOnline());
+
+    const result = await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' });
+
+    expect(result.paymentMode).toBe('CASH');
+    expect(result.paymentStatus).toBe('CASH');
+    expect(repo.setPaymentMode).toHaveBeenCalledWith('bkg_1', 'CASH', 'CASH');
+    expect(notifications.sendBookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'CUSTOMER' }),
+      expect.objectContaining({ message: expect.stringContaining('cash') }),
+    );
+  });
+
+  it('refuses before the trip is under way', async () => {
+    const { useCase } = build(stuckOnline({ status: 'ARRIVED' }));
+
+    await expect(useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' })).rejects.toThrow(
+      'You can only do this while the trip is under way.',
+    );
+  });
+
+  it('refuses once the customer has already paid online', async () => {
+    const { useCase } = build(stuckOnline({ paymentStatus: 'PAID' }));
+
+    await expect(useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' })).rejects.toThrow(
+      'This trip has already been paid for online.',
+    );
+  });
+
+  /* Cash cannot clear a wallet debt — the same rule the customer's own cash branch enforces. */
+  it('refuses while the customer carries wallet debt', async () => {
+    const { repo, useCase } = build(stuckOnline({ walletDebtPaise: 40_000 }));
+
+    await expect(useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' })).rejects.toThrow(
+      'unpaid cancellation fee',
+    );
+
+    expect(repo.setPaymentMode).not.toHaveBeenCalled();
+  });
+
+  it('refuses a booking belonging to another driver', async () => {
+    const { useCase } = build(stuckOnline({ driverId: 'drv_other' }));
+
+    await expect(useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' })).rejects.toThrow();
+  });
+});
+
+describe('ConfirmLatePaymentUseCase — a capture that arrives after the switch to cash', () => {
+  it('refunds it rather than collecting twice', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: 'CASH', paymentStatus: 'CASH' }),
+    );
+    const notifications = fakeNotifications();
+    const payments = fakePayments({ status: 'CAPTURED' });
+    const useCase = new ConfirmLatePaymentUseCase(repo, notifications, fakeWallet(), payments);
+
+    await useCase.execute('bkg_1');
+
+    expect(payments.refund).toHaveBeenCalledWith(expect.objectContaining({ paymentId: 'pay_1' }));
+    expect(repo.setPaymentStatus).not.toHaveBeenCalled();
+    expect(notifications.sendBookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'CUSTOMER' }),
+      expect.objectContaining({ message: expect.stringContaining('refunded') }),
+    );
+  });
+
+  it('does nothing for a cash booking whose payment never captured', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: 'CASH', paymentStatus: 'CASH' }),
+    );
+    const payments = fakePayments({ status: 'PENDING' });
+    const useCase = new ConfirmLatePaymentUseCase(
+      repo,
+      fakeNotifications(),
+      fakeWallet(),
+      payments,
+    );
+
+    await useCase.execute('bkg_1');
+
+    expect(payments.refund).not.toHaveBeenCalled();
   });
 });

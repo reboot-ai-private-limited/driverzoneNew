@@ -150,11 +150,8 @@ export function FareSheet({
   }, [selected?.quote_id]);
 
   /**
-   * CASH ONLY, FOR NOW. `PaymentMode` also has `'UPI'`, which needs a real checkout SDK this app
-   * does not carry yet — see the decision to keep this a demo without one. Cash is not a
-   * placeholder standing in for that: it is a first-class path the API confirms synchronously,
-   * with no gateway, no client token and no webhook to wait on, so this is the whole booking flow
-   * working for real, just without a payment screen.
+   * The booking confirms and dispatches immediately without upfront payment.
+   * The payment method (Cash or Online) is selected once the ride has STARTED.
    */
   const confirmBooking = useMutation<CreateBookingResponse, Error, void>({
     mutationFn: () => {
@@ -171,7 +168,6 @@ export function FareSheet({
           quoteId: selected.quote_id,
           pickupAddress: pickup.address,
           dropAddress: drop.address,
-          paymentMode: 'CASH',
           carCategory,
           vehicleType,
           preferFavouriteDrivers,

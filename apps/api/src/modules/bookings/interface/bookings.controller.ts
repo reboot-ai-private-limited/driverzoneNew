@@ -34,6 +34,9 @@ import type {
   ForceArriveUseCase,
   ReportPickupPinUseCase,
 } from '../application/useCases/driverProgress.usecase.js';
+import type { SelectPaymentMethodUseCase } from '../application/useCases/selectPaymentMethod.usecase.js';
+import type { VerifyPaymentUseCase } from '../application/useCases/verifyPayment.usecase.js';
+import type { DriverSwitchToCashUseCase } from '../application/useCases/driverSwitchToCash.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
 import {
   adminBookingListQuerySchema,
@@ -44,7 +47,9 @@ import {
   driverArrivedSchema,
   forceArriveSchema,
   reportPinSchema,
+  selectPaymentMethodSchema,
   startTripSchema,
+  verifyPaymentSchema,
 } from './bookings.validation.js';
 
 /**
@@ -107,10 +112,80 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
         public_key: result.publicKey,
         amount: result.amountPaise === null ? null : toMoney(result.amountPaise),
       },
-      result.booking.paymentMode === 'CASH'
-        ? 'Booking confirmed — pay the driver at the end of your trip'
-        : 'Booking created — awaiting payment',
+      'Booking confirmed',
       201,
+    );
+  });
+}
+
+export function makeSelectPaymentMethodController(
+  useCase: SelectPaymentMethodUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = selectPaymentMethodSchema.parse(req.body);
+
+    const result = await useCase.execute({
+      bookingId: id,
+      customerId: principalOf(req),
+      paymentMode: body.payment_mode,
+      idempotencyKey: idempotencyKeyOf(req),
+    });
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking: toBookingDto({ booking: result.booking, adjustments: [] }),
+        client_token: result.clientToken,
+        public_key: result.publicKey,
+        amount: result.amountPaise === null ? null : toMoney(result.amountPaise),
+      },
+      result.booking.paymentMode === 'CASH'
+        ? 'Cash payment selected — pay the driver at the end of your trip'
+        : 'Online payment selected — proceed to checkout',
+      200,
+    );
+  });
+}
+
+export function makeVerifyPaymentController(useCase: VerifyPaymentUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = verifyPaymentSchema.parse(req.body);
+
+    const booking = await useCase.execute({
+      bookingId: id,
+      customerId: principalOf(req),
+      providerPaymentId: body.razorpay_payment_id,
+      signature: body.razorpay_signature,
+    });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Payment confirmed',
+    );
+  });
+}
+
+export function makeDriverSwitchToCashController(
+  useCase: DriverSwitchToCashUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const booking = await useCase.execute({
+      bookingId: id,
+      driverId: principalOf(req),
+    });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Switched to cash — collect the fare from the customer',
     );
   });
 }

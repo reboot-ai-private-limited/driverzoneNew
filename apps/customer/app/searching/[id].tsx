@@ -213,22 +213,48 @@ const RING_COUNT = 3;
 const RING_DELAY_MS = 550;
 const RING_DURATION_MS = 1800;
 
+const ORBIT_DOT_COUNT = 2;
+const ORBIT_DURATION_MS = 3400;
+
 /**
  * Three rings, staggered rather than started together — a single pulsing ring reads as a
  * heartbeat monitor; three overlapping ones, each a beat behind the last, read as something
- * actively searching outward. The centre glyph stays still: it is the one fixed point everything
- * else radiates from.
+ * actively searching outward. Two small dots orbit the whole ring stack in the opposite sense of
+ * the outward pulse, so the eye has a second, independent motion to track — the pulse alone reads
+ * as a beacon; the orbit on top of it reads as a live radar sweep. The core glyph breathes (a
+ * slow, small scale-up/down) and turns continuously, like a compass needle settling on a signal
+ * rather than a static icon dropped in the middle.
  */
 function Radar(): ReactElement {
+  const breathe = useSharedValue(0);
+  const spin = useSharedValue(0);
+
+  useEffect(() => {
+    breathe.value = withRepeat(withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }), -1, true);
+    spin.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.linear }), -1, false);
+  }, [breathe, spin]);
+
+  const coreStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + breathe.value * 0.06 }],
+  }));
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${spin.value * 360}deg` }],
+  }));
+
   return (
     <View style={styles.radarWrap}>
       <View style={styles.radarBackdrop} />
       {Array.from({ length: RING_COUNT }, (_, index) => (
         <RadarRing key={index} delayMs={index * RING_DELAY_MS} />
       ))}
-      <View style={styles.radarCore}>
-        <Feather name="navigation" size={30} color={colors.fg} />
-      </View>
+      {Array.from({ length: ORBIT_DOT_COUNT }, (_, index) => (
+        <OrbitDot key={index} delayMs={(index * ORBIT_DURATION_MS) / ORBIT_DOT_COUNT} />
+      ))}
+      <Animated.View style={[styles.radarCore, coreStyle]}>
+        <Animated.View style={iconStyle}>
+          <Feather name="navigation" size={30} color={colors.fg} />
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 }
@@ -253,6 +279,28 @@ function RadarRing({ delayMs }: { delayMs: number }): ReactElement {
   }));
 
   return <Animated.View style={[styles.radarRing, ringStyle]} />;
+}
+
+/** A small dot sweeping around the outside of the ring stack — orbit radius sits just past them. */
+function OrbitDot({ delayMs }: { delayMs: number }): ReactElement {
+  const angle = useSharedValue(0);
+
+  useEffect(() => {
+    angle.value = withDelay(
+      delayMs,
+      withRepeat(withTiming(360, { duration: ORBIT_DURATION_MS, easing: Easing.linear }), -1, false),
+    );
+  }, [delayMs, angle]);
+
+  const orbitStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${angle.value}deg` }],
+  }));
+
+  return (
+    <Animated.View style={[styles.orbitPivot, orbitStyle]}>
+      <View style={styles.orbitDot} />
+    </Animated.View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -306,6 +354,22 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: colors.bg,
     ...shadow.card,
+  },
+  // Fills the same 180x180 box as radarWrap so rotating it turns around the exact same centre
+  // point as the rings and core — the dot itself just sits near the top edge of that box.
+  orbitPivot: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    alignItems: 'center',
+  },
+  orbitDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 2,
+    backgroundColor: colors.brand,
+    ...shadow.soft,
   },
 
   textBlock: { alignItems: 'center', marginBottom: space.xl },

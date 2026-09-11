@@ -16,8 +16,8 @@ export const createBookingSchema = z
     quoteId: z.string().min(1),
     pickupAddress: z.string().min(1).max(500),
     dropAddress: z.string().min(1).max(500),
-    /** Required, with no default: which way a customer pays is their choice, not ours. */
-    paymentMode: z.enum(PAYMENT_MODES),
+    /** Optional: payment mode is now chosen after the ride has STARTED. */
+    paymentMode: z.enum(PAYMENT_MODES).optional(),
     /*
      * REQUIRED, and deliberately without a default. These decide which drivers are rung, so a
      * defaulted SEDAN would quietly send a customer with an SUV a driver who never agreed to
@@ -32,6 +32,24 @@ export const createBookingSchema = z
      * it has always had. `.strict()` still rejects anything else.
      */
     preferFavouriteDrivers: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export const selectPaymentMethodSchema = z
+  .object({
+    payment_mode: z.enum(PAYMENT_MODES),
+  })
+  .strict();
+
+/**
+ * What a checkout SDK hands back on success. The ORDER id is deliberately NOT accepted here — it
+ * is read from the booking's own payment row instead, because a caller who can choose both halves
+ * of the signed `order_id|payment_id` message can sign it themselves.
+ */
+export const verifyPaymentSchema = z
+  .object({
+    razorpay_payment_id: z.string().min(1).max(200),
+    razorpay_signature: z.string().min(1).max(500),
   })
   .strict();
 

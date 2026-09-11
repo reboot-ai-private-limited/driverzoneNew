@@ -1,9 +1,10 @@
+import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
 import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
 import { computeWaitingCharge } from '../../../pricing/pricing.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../../../ledger/ledger.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
-import type { PaymentsContract } from '../../../payments/payments.public.js';
+import { isCaptured, type PaymentsContract } from '../../../payments/payments.public.js';
 import type { DriverStatsContract } from '../../../identity/identity.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
@@ -55,6 +56,22 @@ export class CompleteTripUseCase {
 
   async execute(input: CompleteTripInput): Promise<CompletedTrip> {
     const booking = await loadForDriver(this.repo, input.bookingId, input.driverId);
+
+    if (booking.paymentMode === null) {
+      throw AppError.conflict(
+        'The customer has not chosen how to pay yet. Ask them to select a payment method in their app before you can end the trip.',
+      );
+    }
+    if (booking.paymentMode === 'UPI') {
+      const payments = await this.payments.listForBooking(booking.id);
+      const bookingPayment = payments.find((p) => p.kind === 'BOOKING');
+      if (bookingPayment === undefined || !isCaptured(bookingPayment.status)) {
+        throw AppError.conflict(
+          "Waiting for the customer's online payment to go through. You can end the trip once it clears.",
+        );
+      }
+    }
+
     const now = new Date();
     const snapshot = await this.settings.snapshot();
 
@@ -139,8 +156,20 @@ export class CompleteTripUseCase {
      * booking precisely so a retried completion cannot charge twice — which means two separate
      * charges under that key would silently collect only the first. Waiting and extensions are
      * summed and taken together.
+     *
+     * `paidExtensionPaise` is whatever `SelectPaymentMethodUseCase` already folded into the
+     * booking-confirmation order for an extension accepted before the customer paid — billing it
+     * again here would double-charge exactly that portion. The adjustment row above still records
+     * the FULL extension amount; only the amount actually collected now is reduced.
+     *
+     * ONLY WHILE THE BOOKING IS STILL `UPI`. That order is the only thing that collected it, and
+     * a booking that has since switched to cash — the customer's own choice, or
+     * `DriverSwitchToCashUseCase` — never paid it. The payment gate at the top of this method has
+     * already established that a `UPI` booking's charge captured, so this needs no second check.
      */
-    const owedPaise = waiting.amountPaise + extras.amountPaise;
+    const prepaidExtrasPaise = booking.paymentMode === 'UPI' ? booking.paidExtensionPaise : 0;
+    const uncollectedExtrasPaise = Math.max(0, extras.amountPaise - prepaidExtrasPaise);
+    const owedPaise = waiting.amountPaise + uncollectedExtrasPaise;
 
     if (owedPaise > 0) {
       if (settleThroughGateway) {
@@ -271,7 +300,13 @@ export class CompleteTripUseCase {
     return {
       booking: completed,
       waitingChargePaise: waiting.amountPaise,
-      totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise,
+      /*
+       * What the customer has ACTUALLY paid — `settledPaise` stays 0 when the settlement charge
+       * failed and the extras became a receivable, and that must keep showing through here.
+       * `paidExtensionPaise` is added because that money moved earlier, at payment selection, so
+       * it is neither in the frozen fare nor in this settlement.
+       */
+      totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise + prepaidExtrasPaise,
     };
   }
 }

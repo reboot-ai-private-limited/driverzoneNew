@@ -11,6 +11,10 @@ export interface CustomerControllers {
   cancel: RequestHandler;
   /** `POST /customer/bookings/:id/extend` — asks the driver for one more day. */
   extend: RequestHandler;
+  /** `POST /customer/bookings/:id/payment-method` — selects payment method once STARTED. */
+  selectPaymentMethod: RequestHandler;
+  /** `POST /customer/bookings/:id/payment/verify` — confirms a checkout instantly, ahead of the webhook. */
+  verifyPayment: RequestHandler;
 }
 
 export interface DriverControllers {
@@ -27,6 +31,8 @@ export interface DriverControllers {
   cancel: RequestHandler;
   acceptExtension: RequestHandler;
   declineExtension: RequestHandler;
+  /** `POST /driver/bookings/:id/switch-to-cash` — the fallback when the customer cannot pay online. */
+  switchToCash: RequestHandler;
 }
 
 export interface AdminControllers {
@@ -52,6 +58,11 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
   /* Buying one more day on an outstation trip already under way. The driver has to agree — see
      `extendBooking.usecase.ts` — so this opens a request rather than charging anything. */
   router.post('/:id/extend', handlers.extend);
+  router.post('/:id/payment-method', handlers.selectPaymentMethod);
+  /* The app's own checkout result, signature and all. Confirms sooner than the webhook would, and
+     verifies that signature server-side rather than taking the client's word — see
+     `VerifyCheckoutUseCase`. */
+  router.post('/:id/payment/verify', handlers.verifyPayment);
 
   return router;
 }
@@ -83,6 +94,9 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
      cannot be produced by the same malformed request. */
   router.post('/:id/extension/accept', handlers.acceptExtension);
   router.post('/:id/extension/decline', handlers.declineExtension);
+  /* The way out of the payment gate when the customer's own app cannot get there — a dead phone,
+     no signal — and they pay the driver in cash instead. */
+  router.post('/:id/switch-to-cash', handlers.switchToCash);
 
   return router;
 }

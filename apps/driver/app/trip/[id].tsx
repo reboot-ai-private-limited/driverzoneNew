@@ -42,6 +42,7 @@ import {
   markArrived,
   reportPickupPin,
   startTrip,
+  switchToCash,
 } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
@@ -233,6 +234,13 @@ export default function TripScreen(): ReactElement {
     onError: (cause) => fail(cause, 'Could not complete the trip.'),
   });
 
+  const takeCash = useMutation({
+    mutationFn: () => switchToCash(id),
+    onMutate: () => setError(null),
+    onSuccess: (result) => adopt(result.booking),
+    onError: (cause) => fail(cause, 'Could not switch this trip to cash.'),
+  });
+
   const reportPin = useMutation({
     mutationFn: async () => {
       const fix = await currentFix();
@@ -270,6 +278,10 @@ export default function TripScreen(): ReactElement {
   }
 
   const cash = booking.payment_mode === 'CASH';
+  const paymentPending =
+    booking.payment_mode === null ||
+    (booking.payment_mode === 'UPI' && booking.payment_status !== 'PAID');
+  const canEndTrip = !paymentPending;
 
   return (
     <View style={styles.root}>
@@ -373,10 +385,61 @@ export default function TripScreen(): ReactElement {
         ) : null}
 
         {/*
-          The cash reminder, and only on a cash trip. A driver who forgets to collect is holding a
-          debt against their own wallet by the time they find out — `CASH_COLLECTED` is a negative
-          ledger row — so this says the number plainly while they are still with the customer.
+          The payment status banner during an active ride.
+          Trip completion is gated on payment:
+            - If no mode selected yet: driver must wait for rider to choose in app.
+            - If online (UPI): driver must wait until payment clears (payment_status === 'PAID').
+            - If cash: driver is reminded to collect cash at destination.
         */}
+        {booking.status === 'STARTED' && booking.payment_mode === null ? (
+          <Animated.View entering={FadeIn} style={styles.paymentWarning}>
+            <Feather name="alert-circle" size={16} color="#B45309" />
+            <Text style={styles.paymentWarningText}>
+              Waiting for rider to choose payment method. Ask the customer to select Cash or Online in their app before ending the trip.
+            </Text>
+          </Animated.View>
+        ) : null}
+
+        {booking.status === 'STARTED' &&
+        booking.payment_mode === 'UPI' &&
+        booking.payment_status !== 'PAID' ? (
+          <Animated.View entering={FadeIn} style={styles.paymentWarningColumn}>
+            <View style={styles.paymentWarningRow}>
+              <Feather name="clock" size={16} color="#B45309" />
+              <Text style={styles.paymentWarningText}>
+                Waiting for customer online payment ({booking.fare.total.amount_display}). The ride cannot be ended until payment is received.
+              </Text>
+            </View>
+            {/* The way through when their phone is dead, out of signal, or their card keeps
+                failing and they hand over cash instead. Refused server-side if they carry wallet
+                debt, which cash cannot clear. */}
+            <Pressable
+              onPress={() => takeCash.mutate()}
+              disabled={takeCash.isPending}
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.takeCashBtn,
+                pressed && styles.takeCashBtnPressed,
+                takeCash.isPending && styles.takeCashBtnDisabled,
+              ]}
+            >
+              <Feather name="dollar-sign" size={15} color="#92400E" />
+              <Text style={styles.takeCashBtnText}>Customer paid me cash instead</Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
+
+        {booking.status === 'STARTED' &&
+        booking.payment_mode === 'UPI' &&
+        booking.payment_status === 'PAID' ? (
+          <Animated.View entering={FadeIn} style={styles.paymentSuccess}>
+            <Feather name="check-circle" size={16} color="#166534" />
+            <Text style={styles.paymentSuccessText}>
+              Payment received online ({booking.fare.total.amount_display}). Your share will be added to your wallet upon ending the trip.
+            </Text>
+          </Animated.View>
+        ) : null}
+
         {cash && booking.status === 'STARTED' ? (
           <Animated.View entering={FadeIn} style={styles.cashNote}>
             <Feather name="dollar-sign" size={16} color={colors.warning} />
@@ -492,7 +555,8 @@ export default function TripScreen(): ReactElement {
         {booking.status === 'STARTED' ? (
           <Animated.View entering={FadeInDown} style={styles.actions}>
             <SlideToConfirm
-              label="Slide to end trip"
+              label={canEndTrip ? 'Slide to end trip' : 'Payment pending…'}
+              disabled={!canEndTrip}
               onConfirm={() => finish.mutate()}
               loading={finish.isPending}
             />
@@ -903,6 +967,66 @@ const styles = StyleSheet.create({
     marginTop: space.md,
   },
   cashNoteText: { ...text.caption, color: colors.fg, marginLeft: space.xs, flex: 1 },
+
+  paymentWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    padding: space.sm,
+    marginTop: space.md,
+    gap: space.xs,
+  },
+  paymentWarningText: {
+    ...text.caption,
+    color: '#92400E',
+    flex: 1,
+    fontWeight: '500',
+  },
+  // Same card as `paymentWarning`, stacked rather than in one row, because it carries an action
+  // under the sentence rather than only an icon beside it.
+  paymentWarningColumn: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    padding: space.sm,
+    marginTop: space.md,
+    gap: space.sm,
+  },
+  paymentWarningRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  takeCashBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#B45309',
+  },
+  takeCashBtnPressed: { opacity: 0.7 },
+  takeCashBtnDisabled: { opacity: 0.5 },
+  takeCashBtnText: { ...text.caption, color: '#92400E', fontWeight: '600' },
+  paymentSuccess: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    padding: space.sm,
+    marginTop: space.md,
+    gap: space.xs,
+  },
+  paymentSuccessText: {
+    ...text.caption,
+    color: '#166534',
+    flex: 1,
+    fontWeight: '500',
+  },
 
   riderCard: {
     flexDirection: 'row',

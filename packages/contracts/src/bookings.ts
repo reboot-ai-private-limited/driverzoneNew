@@ -16,11 +16,15 @@ import type { Money } from './http.js';
 /**
  * `DRAFT` and `QUOTED` are deliberately absent. They describe a customer who has not bought
  * anything yet, and that lives on the `quotes` collection — a booking row comes into existence
- * only once there is money to collect.
+ * only once the quote is consumed.
  *
- * `PENDING_PAYMENT` is where one now starts: the quote is consumed and the fare frozen, but the
- * driver is not looked for until the payment is captured. A booking abandoned here is swept to
- * `EXPIRED`.
+ * `PENDING_PAYMENT` is where one starts, but no booking waits there any more: it moves to
+ * `CONFIRMED` synchronously, in the same request, and a driver is dispatched immediately —
+ * payment method (cash or online) is chosen later, once the ride has STARTED, and paying online
+ * at that point never re-visits this status. Kept as the entry point anyway so the very first
+ * `bookingEvents` row stays consistent with every booking that came before this changed. The old
+ * "swept to `EXPIRED`" sweeper still exists as a defensive no-op for anything that somehow gets
+ * stuck here, but nothing produces that state in the ordinary flow any more.
  */
 export const BOOKING_STATUSES = [
   'PENDING_PAYMENT',
@@ -47,18 +51,28 @@ export const SERVICE_TYPES = ['INCITY', 'OUTSTATION'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
 /**
- * How the customer pays.
+ * How the customer pays. Chosen after the ride has STARTED, not at booking time — every booking
+ * dispatches immediately regardless of this field, which is `null` until then
+ * (`selectPaymentMethod.usecase.ts`).
  *
- * `UPI` is prepaid: the booking waits at `PENDING_PAYMENT` until Razorpay confirms, so a driver is
- * never sent to someone who has not paid. `CASH` collects nothing up front and confirms
- * immediately — the driver takes the fare at the end, which is why a cash trip is the only one
- * that puts a driver into debt to the company.
+ * `UPI` charges through Razorpay right when it is selected; the driver cannot complete the trip
+ * until that charge captures (`completeTrip.usecase.ts`). `CASH` needs no charge at all — the
+ * driver takes the fare at the end, which is why a cash trip is the only one that puts a driver
+ * into debt to the company.
  *
  * There is no card or netbanking mode. Checkout is restricted to UPI, and the Collect flow is
  * deprecated by NPCI as of 28 February 2026, so it is UPI Intent specifically.
  */
 export const PAYMENT_MODES = ['UPI', 'CASH'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
+
+export const BOOKING_PAYMENT_STATUSES = [
+  'NOT_SELECTED',
+  'CASH',
+  'AWAITING_PAYMENT',
+  'PAID',
+] as const;
+export type BookingPaymentStatus = (typeof BOOKING_PAYMENT_STATUSES)[number];
 
 /**
  * `Idempotency-Key` is REQUIRED on this request — one tap, one key, however many network retries
@@ -68,7 +82,7 @@ export interface CreateBookingRequest {
   quoteId: string;
   pickupAddress: string;
   dropAddress: string;
-  paymentMode: PaymentMode;
+  paymentMode?: PaymentMode | undefined;
   /**
    * The car the driver will be driving — the CUSTOMER's own car, since that is the whole service
    * (docs/LLD/open-questions.md Q5). Chosen at booking rather than at quote time because neither
@@ -88,6 +102,34 @@ export interface CreateBookingRequest {
    * busy.
    */
   preferFavouriteDrivers?: boolean;
+}
+
+/** Request to choose how to pay once the trip has STARTED. */
+export interface SelectPaymentMethodRequest {
+  payment_mode: PaymentMode;
+}
+
+export type SelectPaymentMethodResponse = CreateBookingResponse;
+
+/**
+ * The checkout SDK's success callback, posted back for server-side verification so the trip can
+ * confirm without waiting on the webhook.
+ *
+ * NO ORDER ID. The signature covers `order_id|payment_id`, and the server reads the order id from
+ * the booking's own payment row — a caller who supplied both halves could sign them too.
+ */
+export interface VerifyPaymentRequest {
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+export interface VerifyPaymentResponse {
+  booking: BookingDto;
+}
+
+/** The driver's fallback when the customer cannot pay online and hands over cash instead. */
+export interface SwitchToCashResponse {
+  booking: BookingDto;
 }
 
 /** One day-extension request, as `POST .../extend` and the driver's accept/decline answer with. */
@@ -123,7 +165,8 @@ export interface BookingDto {
   reference: string;
   status: BookingStatus;
   service_type: ServiceType;
-  payment_mode: PaymentMode;
+  payment_mode: PaymentMode | null;
+  payment_status: BookingPaymentStatus;
 
   pickup: { lat: number; lng: number; address: string };
   drop: { lat: number; lng: number; address: string };

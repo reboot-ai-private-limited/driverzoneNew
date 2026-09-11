@@ -129,6 +129,26 @@ export interface BookingRepositoryPort {
   attachPayment(id: string, paymentId: string): Promise<void>;
 
   /**
+   * Sets the customer's chosen payment method (CASH or UPI) after the ride has STARTED.
+   */
+  setPaymentMode(
+    id: string,
+    mode: Booking['paymentMode'],
+    status?: Booking['paymentStatus'],
+  ): Promise<Booking | null>;
+
+  /**
+   * Updates the payment status on the booking (e.g. when an online payment captures).
+   */
+  setPaymentStatus(id: string, status: Booking['paymentStatus']): Promise<Booking | null>;
+
+  /**
+   * Records how much of an already-accepted day extension rode along in the UPI order created at
+   * payment-selection time, so `CompleteTripUseCase` can settle only the remainder.
+   */
+  setPaidExtensionPaise(id: string, amountPaise: number): Promise<void>;
+
+  /**
    * THE ONE WAY A STATUS CHANGES (invariant B-3).
    *
    * Compare-and-swap on `from`, plus the `bookingEvents` insert, in one multi-document

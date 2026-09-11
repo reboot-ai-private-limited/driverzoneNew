@@ -7,8 +7,11 @@ import type {
   CreateBookingResponse,
   CurrentCustomerBookingResponse,
   ListBookingsResponse,
+  PaymentMode,
   RateTripRequest,
   RateTripResponse,
+  SelectPaymentMethodResponse,
+  VerifyPaymentResponse,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { request } from '../client';
@@ -136,6 +139,43 @@ export function rateTrip(bookingId: string, body: RateTripRequest): Promise<Rate
   return request<RateTripResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/rate`, {
     method: 'POST',
     body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `POST /customer/bookings/:id/payment-method` — selects CASH or UPI once the trip has STARTED.
+ */
+export function selectPaymentMethod(
+  bookingId: string,
+  paymentMode: PaymentMode,
+  idempotencyKey: string,
+): Promise<SelectPaymentMethodResponse> {
+  return request<SelectPaymentMethodResponse>(
+    `${ROLE_PREFIX}/bookings/${bookingId}/payment-method`,
+    {
+      method: 'POST',
+      body: { payment_mode: paymentMode },
+      idempotencyKey,
+      token: getAccessToken() ?? undefined,
+    },
+  );
+}
+
+/**
+ * `POST /customer/bookings/:id/payment/verify` — hands the checkout SDK's signed result back for
+ * server-side verification, so the trip confirms without waiting out the webhook.
+ *
+ * The order id is deliberately not sent: the server reads it from the booking's own payment row.
+ */
+export function verifyPayment(
+  bookingId: string,
+  razorpayPaymentId: string,
+  razorpaySignature: string,
+): Promise<VerifyPaymentResponse> {
+  return request<VerifyPaymentResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/payment/verify`, {
+    method: 'POST',
+    body: { razorpay_payment_id: razorpayPaymentId, razorpay_signature: razorpaySignature },
     token: getAccessToken() ?? undefined,
   });
 }

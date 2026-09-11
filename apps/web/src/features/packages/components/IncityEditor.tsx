@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Building2, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import {
   Button,
   DataState,
@@ -21,14 +21,11 @@ import { useCreateIncityPackage, useUpdateIncityPackage } from '../hooks/usePack
 import {
   buildIncityBody,
   emptyIncityDraft,
-  emptyVariantDraft,
   toIncityDraft,
   type FieldErrors,
   type IncityDraft,
-  type VariantDraft,
 } from '../lib/draft';
-import { CommissionSplitLine } from './CommissionSplitLine';
-import { FareField } from './FareField';
+import { VariantsPanel } from './VariantsPanel';
 
 /**
  * The InCity package editor — a full page, because the form is two levels deep: a package holds
@@ -237,219 +234,16 @@ export function IncityEditor() {
                 </p>
               </Panel>
 
-              <Panel
-                title="Variants"
-                actions={
-                  <div className="flex items-center gap-3">
-                    {errors['variants'] !== undefined && (
-                      <span className="text-xs text-danger">{errors['variants']}</span>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={<Plus className="size-4" />}
-                      disabled={saving}
-                      onClick={() =>
-                        edit({ ...draft, variants: [...draft.variants, emptyVariantDraft()] })
-                      }
-                    >
-                      Add variant
-                    </Button>
-                  </div>
-                }
-              >
-                <p className="text-xs text-text-subtle mb-4 max-w-3xl">
-                  A variant is a duration option — 3 hours, 10 hours. The customer picks one, so a
-                  quote returns every active variant, not just the cheapest. The fare does not
-                  depend on the car, and there is no overage: running past the included time is an
-                  operations conversation, not a fare line.
-                </p>
-
-                <div className="flex flex-col gap-3">
-                  {draft.variants.map((variant, index) => (
-                    <VariantCard
-                      key={variant.key}
-                      variant={variant}
-                      index={index}
-                      errors={errors}
-                      disabled={saving}
-                      onChange={(next) =>
-                        edit({
-                          ...draft,
-                          variants: draft.variants.map((current) =>
-                            current.key === variant.key ? next : current,
-                          ),
-                        })
-                      }
-                      onRemove={
-                        draft.variants.length > 1
-                          ? () =>
-                              edit({
-                                ...draft,
-                                variants: draft.variants.filter(
-                                  (current) => current.key !== variant.key,
-                                ),
-                              })
-                          : undefined
-                      }
-                    />
-                  ))}
-                </div>
-              </Panel>
+              <VariantsPanel
+                variants={draft.variants}
+                errors={errors}
+                disabled={saving}
+                minVariants={1}
+                onChange={(variants) => edit({ ...draft, variants })}
+              />
             </div>
           )}
         </DataState>
-      )}
-    </div>
-  );
-}
-
-interface VariantCardProps {
-  variant: VariantDraft;
-  index: number;
-  errors: FieldErrors;
-  disabled: boolean;
-  onChange: (next: VariantDraft) => void;
-  onRemove?: (() => void) | undefined;
-}
-
-/**
- * One variant, collapsed to a summary line and expandable to its fields.
- *
- * The summary is what a variant IS — a duration and a price. Both fit on the collapsed row, which
- * is what a variant has been reduced to: the included-km cap, the two overage rates, the
- * destination flag and the sort order all went on 2026-08-28.
- */
-function VariantCard({ variant, index, errors, disabled, onChange, onRemove }: VariantCardProps) {
-  // New rows open, saved rows closed: an empty variant exists only to be filled in.
-  const [open, setOpen] = useState(variant.label === '');
-  const scope = `variants.${variant.key}`;
-  const hasError = Object.keys(errors).some((key) => key.startsWith(`${scope}.`));
-
-  const set = <K extends keyof VariantDraft>(key: K, value: VariantDraft[K]) =>
-    onChange({ ...variant, [key]: value });
-
-  return (
-    <div className="border border-border rounded-md">
-      <div className="flex items-center gap-3 px-3 h-11">
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="flex items-center gap-1.5 text-sm text-text min-w-0"
-          aria-expanded={open}
-        >
-          {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-          <span className="font-medium truncate">
-            {variant.label === '' ? `Variant ${index + 1}` : variant.label}
-          </span>
-        </button>
-
-        <span className="text-xs text-text-subtle truncate">
-          {variant.includedMinutes === '' ? '—' : `${variant.includedMinutes} min`} ·{' '}
-          {variant.baseFare === '' ? 'unpriced' : `₹${variant.baseFare}`}
-        </span>
-
-        {hasError && !open && <span className="text-xs text-danger">needs fixing</span>}
-        {!variant.isActive && <span className="text-xs text-text-subtle">inactive</span>}
-
-        <div className="ml-auto">
-          {onRemove !== undefined && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Trash2 className="size-4" />}
-              disabled={disabled}
-              onClick={onRemove}
-            >
-              Remove
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {open && (
-        <div className="border-t border-border p-3 flex flex-col gap-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <FormField
-              label="Label"
-              required
-              {...(errors[`${scope}.label`] === undefined
-                ? {}
-                : { error: errors[`${scope}.label`] })}
-            >
-              {({ id, invalid, describedBy }) => (
-                <Input
-                  id={id}
-                  value={variant.label}
-                  onChange={(event) => set('label', event.target.value)}
-                  invalid={invalid}
-                  aria-describedby={describedBy}
-                  disabled={disabled}
-                  placeholder="3 Hours"
-                />
-              )}
-            </FormField>
-
-            <FormField
-              label="Included time"
-              hint="Minutes. There is no overage charge past it."
-              required
-              {...(errors[`${scope}.includedMinutes`] === undefined
-                ? {}
-                : { error: errors[`${scope}.includedMinutes`] })}
-            >
-              {({ id, invalid, describedBy }) => (
-                <Input
-                  id={id}
-                  inputMode="numeric"
-                  value={variant.includedMinutes}
-                  onChange={(event) => set('includedMinutes', event.target.value)}
-                  invalid={invalid}
-                  aria-describedby={describedBy}
-                  disabled={disabled}
-                />
-              )}
-            </FormField>
-
-            <FareField
-              label="Base fare"
-              value={variant.baseFare}
-              onChange={(value) => set('baseFare', value)}
-              error={errors[`${scope}.baseFare`]}
-              disabled={disabled}
-              required
-            />
-
-            <FareField
-              label="Driver is paid"
-              hint="A flat amount. The company keeps the rest of the fare."
-              value={variant.driverAmount}
-              onChange={(value) => set('driverAmount', value)}
-              error={errors[`${scope}.driverAmount`]}
-              disabled={disabled}
-              required
-            />
-          </div>
-
-          <label className="flex items-center gap-2 text-xs text-text">
-            <input
-              type="checkbox"
-              checked={variant.isActive}
-              onChange={(event) => set('isActive', event.target.checked)}
-              disabled={disabled}
-              className="size-4 accent-interactive"
-            />
-            Active
-          </label>
-
-          <div className="border-t border-border pt-3">
-            <CommissionSplitLine
-              label="Base fare"
-              fare={variant.baseFare}
-              driverAmount={variant.driverAmount}
-            />
-          </div>
-        </div>
       )}
     </div>
   );

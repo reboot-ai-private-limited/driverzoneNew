@@ -48,16 +48,27 @@ export class CachingRoadDistance implements RoadDistancePort {
     return fresh;
   }
 
-  /** `undefined` — not cached; `null` — cached "no route"; a number — cached distance. */
+  async travelDurationMinutes(from: LatLng, to: LatLng): Promise<number | null> {
+    const key = durationCacheKey(from, to);
+
+    const cached = await this.read(key);
+    if (cached !== undefined) return cached;
+
+    const fresh = await this.inner.travelDurationMinutes(from, to);
+    await this.write(key, fresh);
+    return fresh;
+  }
+
+  /** `undefined` — not cached; `null` — cached "no route"; a number — cached distance or duration. */
   private async read(key: string): Promise<number | null | undefined> {
     try {
       const raw = await withTimeout(this.redis.get(key), REDIS_TIMEOUT_MS);
       if (raw === null) return undefined;
       if (raw === NO_ROUTE) return null;
-      const km = Number(raw);
-      return Number.isFinite(km) ? km : undefined;
+      const num = Number(raw);
+      return Number.isFinite(num) ? num : undefined;
     } catch (err) {
-      logger.warn({ err }, 'road-distance cache read failed; computing fresh');
+      logger.warn({ err, key }, 'road-distance cache read failed; computing fresh');
       return undefined;
     }
   }
@@ -67,7 +78,7 @@ export class CachingRoadDistance implements RoadDistancePort {
     try {
       await withTimeout(this.redis.set(key, payload, 'EX', ttl), REDIS_TIMEOUT_MS);
     } catch (err) {
-      logger.warn({ err }, 'road-distance cache write failed');
+      logger.warn({ err, key }, 'road-distance cache write failed');
     }
   }
 }
@@ -76,6 +87,10 @@ const NO_ROUTE = 'NO_ROUTE';
 
 function cacheKey(from: LatLng, to: LatLng): string {
   return `roaddist:${round(from)}:${round(to)}`;
+}
+
+function durationCacheKey(from: LatLng, to: LatLng): string {
+  return `routedur:${round(from)}:${round(to)}`;
 }
 
 function round(p: LatLng): string {

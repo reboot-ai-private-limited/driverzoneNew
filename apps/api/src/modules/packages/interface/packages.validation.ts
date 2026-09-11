@@ -58,6 +58,15 @@ export const createIncityPackageSchema = z.object({
 
 // ─── Outstation ────────────────────────────────────────────────────────────────────────────
 
+const outstationVariantSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().min(1),
+  includedMinutes: z.number().int().min(1),
+  baseFarePaise: paise,
+  driverAmountPaise,
+  isActive: z.boolean().optional().default(true),
+});
+
 export const createOutstationPackageSchema = z.object({
   name: z.string().min(1).max(200),
   terrain: z.enum(TERRAINS),
@@ -73,7 +82,9 @@ export const createOutstationPackageSchema = z.object({
    * one must not be the same value (docs/LLD/packages.md §Outstation is priced per direction).
    */
   roundTripFarePaise: paise.nullable().optional(),
-  driverAmountPaise,
+  oneWayDriverAmountPaise: driverAmountPaise,
+  roundTripDriverAmountPaise: driverAmountPaise.nullable().optional(),
+  variants: z.array(outstationVariantSchema).optional(),
   isActive: z.boolean().optional().default(true),
 });
 

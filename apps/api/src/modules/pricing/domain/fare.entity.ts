@@ -21,6 +21,7 @@ import type { Direction, Terrain, TimeWindow } from '@driverzone/contracts';
  */
 export const FARE_LINE_CODES = [
   'BASE',
+  'RETURN_DRIVER_ALLOWANCE',
   'PICKUP_FEE',
   'NIGHT',
   'EARLY_MORNING',
@@ -123,7 +124,7 @@ export interface PickupZoneFare {
   defaultChargePaise: number;
 }
 
-export interface IncityFareInput {
+export interface FlatFareInput {
   variantLabel: string;
   baseFarePaise: number;
   driverAmountPaise: number;
@@ -131,6 +132,8 @@ export interface IncityFareInput {
   /** The scheduled pickup instant. The surcharge is decided from this and nothing else. */
   scheduledAt: Date;
 }
+
+export type IncityFareInput = FlatFareInput;
 
 export interface OutstationFareInput {
   packageName: string;
@@ -142,12 +145,17 @@ export interface OutstationFareInput {
    */
   farePaise: number;
   /**
-   * IST calendar days the journey covers, both ends included — `1` for a same-day trip.
+   * Forward driving days the journey covers (`1` for a same-day or short trip).
    *
-   * The band fare is a DAY RATE, so this multiplies it. One-way trips and incity are always `1`:
-   * neither has a return leg for a duration to be measured against.
+   * The band fare is a DAY RATE, so this multiplies it. For round trips, derived from calendar days;
+   * for one-way trips, derived from travel duration via `oneWayDrivingDays`.
    */
   days: number;
+  /**
+   * Extra return days paid entirely to the driver (at `driverAmountPaise`) to compensate for
+   * returning with an empty seat on long one-way outstation trips. `0` or undefined when none applies.
+   */
+  extraDays?: number;
   driverAmountPaise: number;
   pickupZone: PickupZoneFare;
   scheduledAt: Date;

@@ -201,7 +201,16 @@ function TerrainLadder({ terrain, packages, refetching, onSplit }: TerrainLadder
       width: COLUMN_WIDTHS[1] as string,
       numeric: true,
       align: 'right',
-      render: (row) => (row.kind === 'band' ? formatPaise(row.band.one_way_fare_paise) : <Dash />),
+      render: (row) =>
+        row.kind === 'band' ? (
+          <CellStack
+            primary={formatPaise(row.band.one_way_fare_paise)}
+            secondary={`Driver: ${formatPaise(row.band.one_way_driver_amount_paise)}`}
+            numeric
+          />
+        ) : (
+          <Dash />
+        ),
     },
     {
       key: 'return',
@@ -217,18 +226,29 @@ function TerrainLadder({ terrain, packages, refetching, onSplit }: TerrainLadder
             —
           </span>
         ) : (
-          formatPaise(row.band.round_trip_fare_paise)
+          <CellStack
+            primary={formatPaise(row.band.round_trip_fare_paise)}
+            secondary={
+              row.band.round_trip_driver_amount_paise === null
+                ? '—'
+                : `Driver: ${formatPaise(row.band.round_trip_driver_amount_paise)}`
+            }
+            numeric
+          />
         );
       },
     },
     {
-      key: 'driver',
-      header: 'Driver',
+      key: 'variants',
+      header: 'Variants',
       width: COLUMN_WIDTHS[3] as string,
       numeric: true,
       align: 'right',
-      render: (row) =>
-        row.kind === 'band' ? formatPaise(row.band.driver_amount_paise) : <Dash />,
+      render: (row) => {
+        if (row.kind !== 'band') return <Dash />;
+        const count = (row.band.variants ?? []).filter((v) => v.is_active).length;
+        return count > 0 ? <span>{count}</span> : <span className="text-text-subtle">—</span>;
+      },
     },
     {
       key: 'actions',

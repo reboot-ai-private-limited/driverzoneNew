@@ -3,12 +3,14 @@ import { AppError } from '@/shared/errors/AppError.js';
 import type { LatLng } from '@driverzone/geo';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
 import { rupeesToPaise } from '../../../settings/settings.public.js';
-import type { PackageLookupContract } from '../../../packages/packages.public.js';
+import { type PackageLookupContract, driverAmountFor } from '../../../packages/packages.public.js';
 import type { ZoneResolutionContract } from '../../../zones/zones.public.js';
 import {
   computeIncityFare,
   computeOutstationFare,
+  computeOutstationVariantFare,
   istCalendarDaysInclusive,
+  oneWayDrivingDays,
   type FareConfig,
   type PickupZoneFare,
 } from '../../../pricing/pricing.public.js';
@@ -213,15 +215,25 @@ export class CreateQuoteUseCase {
     /*
      * HOW MANY DAYS THE BAND FARE IS BEING CHARGED FOR.
      *
-     * Only a ROUND_TRIP can span days — a one-way has no return leg for a duration to sit
-     * between, and a `returnAt` arriving on one is a client sending a field it should not.
-     * Ignored rather than refused: it costs the customer nothing and fails no quote, and `days`
-     * is then structurally 1 on every path that is not a round trip.
+     * A ROUND_TRIP spans days based on the calendar interval between `scheduledAt` and `returnAt`.
+     * A ONE_WAY trip scales forward days by the route's travel duration in 10-hour increments,
+     * and adds extra days for driver return travel when the drive is long (or exceeds 8h on day 1).
      */
-    const days =
-      direction === 'ROUND_TRIP' && input.returnAt !== undefined
-        ? istCalendarDaysInclusive(scheduledAt, input.returnAt)
-        : 1;
+    let days = 1;
+    let extraDays = 0;
+
+    if (direction === 'ROUND_TRIP' && input.returnAt !== undefined) {
+      days = istCalendarDaysInclusive(scheduledAt, input.returnAt);
+    } else if (direction === 'ONE_WAY') {
+      const minutes = await this.distance.travelDurationMinutes(input.pickup, input.drop);
+      if (minutes !== null) {
+        const hoursPerDay = snapshot['outstation.hours_per_day'];
+        ({ forwardDays: days, extraDays } = oneWayDrivingDays(minutes / 60, hoursPerDay));
+      }
+      // `minutes === null` (route measured for distance but not for duration) leaves days at 1,
+      // extraDays at 0 — today's single-day price, rather than failing a quote whose distance was
+      // already measured successfully.
+    }
 
     /*
      * REFUSED, NOT CLAMPED. Clamping to the cap would charge for fifteen days and still send the
@@ -263,7 +275,8 @@ export class CreateQuoteUseCase {
           direction,
           farePaise,
           days,
-          driverAmountPaise: pkg.driverAmountPaise,
+          extraDays,
+          driverAmountPaise: driverAmountFor(pkg, direction) ?? 0,
           pickupZone,
           scheduledAt,
         },
@@ -271,9 +284,40 @@ export class CreateQuoteUseCase {
       ),
     };
 
+    const variantQuotes: NewQuote[] = (match.match.variants ?? []).map((variant): NewQuote => {
+      const variantSource: QuoteSource = {
+        ...baseSource,
+        packageId: pkg.id,
+        packageName: pkg.name,
+        variantId: variant.id,
+        variantLabel: variant.label,
+        terrain: pkg.terrain,
+      };
+
+      return {
+        ...common,
+        serviceType: 'OUTSTATION',
+        direction: null,
+        returnAt: null,
+        distanceKm,
+        includedMinutes: variant.includedMinutes,
+        source: variantSource,
+        fare: computeOutstationVariantFare(
+          {
+            variantLabel: variant.label,
+            baseFarePaise: variant.baseFarePaise,
+            driverAmountPaise: variant.driverAmountPaise,
+            pickupZone,
+            scheduledAt,
+          },
+          config,
+        ),
+      };
+    });
+
     return {
       available: true,
-      quotes: await this.repo.createMany([quote]),
+      quotes: await this.repo.createMany([quote, ...variantQuotes]),
       distanceKm,
       // Display-only policy text. Carried on the response so the fare card can state it; nothing
       // in the arithmetic above reads it.

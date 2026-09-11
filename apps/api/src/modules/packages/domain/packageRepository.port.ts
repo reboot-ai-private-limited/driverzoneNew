@@ -34,8 +34,17 @@ export interface CreateOutstationPackageData {
   maxKm: number;
   oneWayFarePaise: number;
   roundTripFarePaise?: number | null | undefined;
-  driverAmountPaise: number;
-  isActive?: boolean;
+  oneWayDriverAmountPaise: number;
+  roundTripDriverAmountPaise?: number | null | undefined;
+  variants?: Array<{
+    id?: string | undefined;
+    label: string;
+    includedMinutes: number;
+    baseFarePaise: number;
+    driverAmountPaise: number;
+    isActive?: boolean | undefined;
+  }> | undefined;
+  isActive?: boolean | undefined;
 }
 
 /** What `updateIncityPackage` writes. Sending `variants` REPLACES the array — see the use case. */
@@ -43,7 +52,7 @@ export type IncityPackagePatch = {
   [K in keyof CreateIncityPackageData]?: CreateIncityPackageData[K] | undefined;
 };
 
-/** What `updateOutstationPackage` writes. Flat fields only — there is no nested array left. */
+/** What `updateOutstationPackage` writes. Sending `variants` REPLACES the array. */
 export type OutstationPackagePatch = {
   [K in keyof CreateOutstationPackageData]?: CreateOutstationPackageData[K] | undefined;
 };

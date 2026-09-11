@@ -43,6 +43,12 @@ export class HaversineRoadDistance implements RoadDistancePort {
     // Ceiling to match the OSRM adapter exactly — bands are half-open over whole kilometres.
     return Math.ceil(metres / 1000);
   }
+
+  async travelDurationMinutes(from: LatLng, to: LatLng): Promise<number> {
+    const km = await this.roadDistanceKm(from, to);
+    // Dev-only fallback: approximate driving duration assuming 45 km/h average speed
+    return Math.ceil((km / 45) * 60);
+  }
 }
 
 function haversineMetres(from: LatLng, to: LatLng): number {

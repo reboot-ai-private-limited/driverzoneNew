@@ -5,6 +5,17 @@ import { Schema, model } from 'mongoose';
  * `(carCategory, direction)` — ten rows per band — retired 2026-08-28
  * (docs/decision-log.md). Two fares and a flat per-day driver amount remain.
  */
+const outstationVariantSchema = new Schema(
+  {
+    label: { type: String, required: true },
+    includedMinutes: { type: Number, required: true, min: 1 },
+    baseFarePaise: { type: Number, required: true, min: 0 },
+    driverAmountPaise: { type: Number, required: true, min: 0 },
+    isActive: { type: Boolean, default: true },
+  },
+  { _id: true },
+);
+
 const outstationPackageSchema = new Schema(
   {
     name: { type: String, required: true },
@@ -17,10 +28,10 @@ const outstationPackageSchema = new Schema(
     // `default: 0`, because a missing fare and a free trip must not look the same.
     roundTripFarePaise: { type: Number, default: null, min: 0 },
 
-    // What the driver is paid, in paise — a flat amount, not a share (2026-09-10). The company
-    // keeps the remainder. No upper bound here: the ceiling is the package own fare, which this
-    // schema cannot see, so  enforces it where both numbers are in hand.
-    driverAmountPaise: { type: Number, required: true, min: 0 },
+    oneWayDriverAmountPaise: { type: Number, required: true, min: 0 },
+    roundTripDriverAmountPaise: { type: Number, default: null, min: 0 },
+
+    variants: [outstationVariantSchema],
 
     // An outstation package references no zone at all — it is sold against terrain and a
     // distance band. `pickupZoneIds` went with invariant P-1 (docs/decision-log.md, 2026-08-25).

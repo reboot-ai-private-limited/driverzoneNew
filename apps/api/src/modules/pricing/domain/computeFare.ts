@@ -11,6 +11,7 @@ import type {
   FareConfig,
   FareDayRate,
   FareLine,
+  FlatFareInput,
   IncityFareInput,
   OutstationFareInput,
   PickupZoneFare,
@@ -63,8 +64,9 @@ function assemble(
   config: FareConfig,
   /** The single-day rate, for a fare that has one. Null on incity — see `FareBreakdown.perDay`. */
   perDay: FareDayRate | null,
+  extraLines: FareLine[] = [],
 ): FareBreakdown {
-  const lines: FareLine[] = [baseLine];
+  const lines: FareLine[] = [baseLine, ...extraLines];
 
   const pickup = pickupLine(input.pickupZone);
   if (pickup !== null) lines.push(pickup);
@@ -98,6 +100,25 @@ function assemble(
 }
 
 /**
+ * A flat fare is the variant's price plus the shared lines. Shared between incity packages and
+ * outstation hourly-package variants. There is no day multiplier on flat fares.
+ */
+function computeFlatFare(
+  serviceType: 'INCITY' | 'OUTSTATION',
+  input: FlatFareInput,
+  config: FareConfig,
+): FareBreakdown {
+  return assemble(
+    serviceType,
+    { code: 'BASE', label: input.variantLabel, amountPaise: input.baseFarePaise },
+    input,
+    config,
+    // An hourly package has no day to sell. See `FareBreakdown.perDay`.
+    null,
+  );
+}
+
+/**
  * An incity fare is the variant's price plus the shared lines. There is no overage term and no
  * recompute at completion: the quoted total IS the total, and a 3-hour booking that runs 3h 40m
  * costs what the customer was told (open question Q2, closed 2026-08-28). `includedMinutes` is
@@ -105,14 +126,18 @@ function assemble(
  * no fare consequence when it is exceeded.
  */
 export function computeIncityFare(input: IncityFareInput, config: FareConfig): FareBreakdown {
-  return assemble(
-    'INCITY',
-    { code: 'BASE', label: input.variantLabel, amountPaise: input.baseFarePaise },
-    input,
-    config,
-    // An hourly package has no day to sell. See `FareBreakdown.perDay`.
-    null,
-  );
+  return computeFlatFare('INCITY', input, config);
+}
+
+/**
+ * An outstation hourly variant fare: flat base fare, flat driver payout, and shared trip lines.
+ * No day multiplier applies to hourly package variants on outstation bands.
+ */
+export function computeOutstationVariantFare(
+  input: FlatFareInput,
+  config: FareConfig,
+): FareBreakdown {
+  return computeFlatFare('OUTSTATION', input, config);
 }
 
 /**
@@ -150,6 +175,20 @@ export function computeOutstationFare(
       ? `${input.packageName} — ${direction} × ${String(input.days)} days`
       : `${input.packageName} — ${direction}`;
 
+  const extraDays = input.extraDays ?? 0;
+  const returnAllowancePaise = extraDays > 0 ? input.driverAmountPaise * extraDays : 0;
+
+  const extraLines: FareLine[] =
+    returnAllowancePaise > 0
+      ? [
+          {
+            code: 'RETURN_DRIVER_ALLOWANCE',
+            label: `Return trip allowance for your driver × ${String(extraDays)} day${extraDays > 1 ? 's' : ''}`,
+            amountPaise: returnAllowancePaise,
+          },
+        ]
+      : [];
+
   return assemble(
     'OUTSTATION',
     { code: 'BASE', label, amountPaise: input.farePaise * input.days },
@@ -161,12 +200,11 @@ export function computeOutstationFare(
        * them once for a job that took three days, which is the exact failure the day multiplier
        * was introduced to fix on the customer's side (see the note above).
        *
-       * The fixed lines — pickup, surcharge, insurance — deliberately do NOT scale: they are
-       * properties of the trip, not of each day, which is what `pricing.test.ts` already pins.
-       * So the company's share grows faster than the driver's across a long trip, which is the
-       * intended shape: the extra days are driving, and the extra lines are not.
+       * The return trip allowance (if any) is passed 100% to the driver with zero company commission.
+       * Adding returnAllowancePaise to both driverAmountPaise and the subtotal (via extraLines) leaves
+       * the company's margin unchanged: splitFare(subtotal, driverAmount) yields company = subtotal - driver.
        */
-      driverAmountPaise: input.driverAmountPaise * input.days,
+      driverAmountPaise: input.driverAmountPaise * input.days + returnAllowancePaise,
     },
     config,
     /*
@@ -179,5 +217,6 @@ export function computeOutstationFare(
       farePaise: input.farePaise,
       driverAmountPaise: input.driverAmountPaise,
     },
+    extraLines,
   );
 }

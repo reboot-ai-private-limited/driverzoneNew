@@ -2,7 +2,8 @@ import type { PackageRepositoryPort, CreateOutstationPackageData } from '../../d
 import type { OutstationPackage } from '../../domain/outstationPackage.entity.js';
 import {
   validateOutstationBand,
-  validateOutstationDriverAmount,
+  validateOutstationDriverAmounts,
+  validateOutstationVariantAmounts,
 } from '../../domain/outstationPackage.entity.js';
 import { DriverAmountError, InvalidBandError, OverlappingBandError } from '../../domain/package.errors.js';
 
@@ -14,12 +15,18 @@ export class CreateOutstationPackageUseCase {
     if (bandError) throw new InvalidBandError(bandError);
 
     // `roundTripFarePaise` absent means the band does not sell a return — the same as `null`.
-    const amountError = validateOutstationDriverAmount({
+    const amountError = validateOutstationDriverAmounts({
       oneWayFarePaise: data.oneWayFarePaise,
       roundTripFarePaise: data.roundTripFarePaise ?? null,
-      driverAmountPaise: data.driverAmountPaise,
+      oneWayDriverAmountPaise: data.oneWayDriverAmountPaise,
+      roundTripDriverAmountPaise: data.roundTripDriverAmountPaise ?? null,
     });
     if (amountError) throw new DriverAmountError(amountError);
+
+    const variantError = validateOutstationVariantAmounts({
+      variants: data.variants,
+    });
+    if (variantError) throw new DriverAmountError(variantError);
 
     // No P-3 check: `oneWayFarePaise` is required, so an outstation band cannot be active and
     // unsellable. See the note where `validateOutstationPackageActivation` used to live.

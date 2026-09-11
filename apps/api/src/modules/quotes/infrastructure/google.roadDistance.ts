@@ -11,13 +11,12 @@ const ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
  * Replaced self-hosted OSRM: the pilot VM could not spare the RAM for the India extract
  * (docs/decision-log.md). Cost is held down at three points and every one of them matters:
  *
- *   1. THE FIELD MASK is `routes.distanceMeters` and nothing else. Asking for a duration, a
- *      polyline or legs moves the call from the Essentials SKU ($5 / 1000, 10k/month free) to
- *      Pro ($10 / 1000, 5k free) — for numbers we would throw away, since terrain is decided at
- *      the drop point now, not measured along the route.
- *   2. `routingPreference` is TRAFFIC_UNAWARE. TRAFFIC_AWARE is a Pro SKU, and a fare band that
+ *   1. THE FIELD MASK for distance is `routes.distanceMeters` and nothing else.
+ *   2. `travelDurationMinutes` uses `routes.duration` ONLY for outstation ONE_WAY trips where
+ *      driving duration is priced on. Round trips and in-city trips never call this.
+ *   3. `routingPreference` is TRAFFIC_UNAWARE. TRAFFIC_AWARE is a Pro SKU, and a fare band that
  *      shifted because of a traffic jam would be a support ticket, not a feature.
- *   3. `CachingRoadDistance` wraps this, and `CreateQuoteUseCase` never calls it for an in-city
+ *   4. `CachingRoadDistance` wraps this, and `CreateQuoteUseCase` never calls it for an in-city
  *      trip. Most quotes never reach this class.
  *
  * COORDINATES: `{lat, lng}` in, `{latitude, longitude}` out — Google wants them named and in
@@ -39,7 +38,7 @@ export class GoogleRoadDistance implements RoadDistancePort {
       units: 'METRIC',
     });
 
-    const response = await this.postWithOneRetry(body);
+    const response = await this.postWithOneRetry(body, 'routes.distanceMeters');
     const parsed = readRoute(await response.json());
 
     if (parsed === 'NO_ROUTE') return null;
@@ -57,21 +56,49 @@ export class GoogleRoadDistance implements RoadDistancePort {
   }
 
   /**
+   * One-way driving duration in minutes.
+   *
+   * Made ONLY for outstation ONE_WAY trips to compute multi-day driving and return allowances.
+   * Requests field mask `routes.duration`.
+   */
+  async travelDurationMinutes(from: LatLng, to: LatLng): Promise<number | null> {
+    const body = JSON.stringify({
+      origin: waypoint(from),
+      destination: waypoint(to),
+      travelMode: 'DRIVE',
+      routingPreference: 'TRAFFIC_UNAWARE',
+      units: 'METRIC',
+    });
+
+    const response = await this.postWithOneRetry(body, 'routes.duration');
+    const parsed = readDuration(await response.json());
+
+    if (parsed === 'NO_ROUTE') return null;
+    if (parsed === null) {
+      throw AppError.internal('INTERNAL', {
+        reason: 'Google Routes returned a response we cannot read',
+      });
+    }
+
+    return parsed;
+  }
+
+  /**
    * Retries ONCE, and only for a transient failure — a 5xx or a dropped socket. A 4xx is a bug
    * in this request (bad key, malformed body); retrying it just spends the quota twice.
    */
-  private async postWithOneRetry(body: string): Promise<Response> {
+  private async postWithOneRetry(body: string, fieldMask: string): Promise<Response> {
     try {
-      return await this.post(body);
+      return await this.post(body, fieldMask);
     } catch (error) {
       if (!isRetryable(error)) throw error;
       logger.warn({ err: error }, 'Google Routes request failed; retrying once');
       await delay(this.retryDelayMs);
-      return this.post(body);
+      return this.post(body, fieldMask);
     }
   }
 
-  private async post(body: string): Promise<Response> {
+  private async post(body: string, fieldMask: string): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -81,9 +108,7 @@ export class GoogleRoadDistance implements RoadDistancePort {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': this.apiKey,
-          // The cost control — only the distance comes back, which is what keeps the call in
-          // the Essentials SKU's price.
-          'X-Goog-FieldMask': 'routes.distanceMeters',
+          'X-Goog-FieldMask': fieldMask,
         },
         body,
         signal: controller.signal,
@@ -132,4 +157,22 @@ function readRoute(body: unknown): number | 'NO_ROUTE' | null {
 
   const distance = (routes[0] as { distanceMeters?: unknown }).distanceMeters;
   return typeof distance === 'number' && Number.isFinite(distance) ? distance : null;
+}
+
+/** Minutes, the string `'NO_ROUTE'`, or `null` when the body is not something we recognise. */
+function readDuration(body: unknown): number | 'NO_ROUTE' | null {
+  if (typeof body !== 'object' || body === null) return null;
+
+  const routes = (body as { routes?: unknown }).routes;
+  if (routes === undefined) return 'NO_ROUTE';
+  if (!Array.isArray(routes) || routes.length === 0) return 'NO_ROUTE';
+
+  const duration = (routes[0] as { duration?: unknown }).duration;
+  if (typeof duration !== 'string') return null;
+
+  const match = /^(\d+(?:\.\d+)?)s$/.exec(duration);
+  if (match === null) return null;
+
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) ? Math.ceil(seconds / 60) : null;
 }

@@ -1,6 +1,6 @@
 import type { Direction, UnavailableReason } from '@driverzone/contracts';
 import type { IncityPackage, IncityVariant } from './domain/incityPackage.entity.js';
-import type { OutstationPackage } from './domain/outstationPackage.entity.js';
+import type { OutstationPackage, OutstationVariant } from './domain/outstationPackage.entity.js';
 
 /**
  * PUBLIC CONTRACT — the only surface other modules may import from `packages`.
@@ -60,6 +60,7 @@ export interface OutstationMatch {
   /** The band's fare for `direction`. Never null — a band that cannot sell it did not match. */
   farePaise: number;
   direction: Direction;
+  variants: OutstationVariant[];
 }
 
 export type PackageMatch = IncityMatch | OutstationMatch;
@@ -89,5 +90,6 @@ export interface PackageLookupContract {
 export type PackagesPublicContract = PackageLookupContract;
 
 export type { IncityPackage, IncityVariant } from './domain/incityPackage.entity.js';
-export type { OutstationPackage } from './domain/outstationPackage.entity.js';
+export type { OutstationPackage, OutstationVariant } from './domain/outstationPackage.entity.js';
+export { fareFor, driverAmountFor } from './domain/outstationPackage.entity.js';
 export type { Direction };

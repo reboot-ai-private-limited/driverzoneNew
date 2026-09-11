@@ -163,6 +163,8 @@ function packageIcon(option: QuoteOptionDto): FeatherName {
  */
 function lineIcon(code: string): FeatherName {
   switch (code) {
+    case 'RETURN_DRIVER_ALLOWANCE':
+      return 'corner-up-left';
     case 'PICKUP_FEE':
       return 'map-pin';
     case 'NIGHT':

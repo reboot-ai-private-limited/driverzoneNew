@@ -86,6 +86,29 @@ describe('GoogleRoadDistance', () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it('asks for routes.duration and parses duration in minutes for travelDurationMinutes', async () => {
+    const fetchMock = stubFetch(() => json({ routes: [{ duration: '36000s' }] }));
+
+    const minutes = await new GoogleRoadDistance('key-123').travelDurationMinutes(SILIGURI, GANGTOK);
+
+    expect(minutes).toBe(600); // 36,000s / 60 = 600m (10 hours)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://routes.googleapis.com/directions/v2:computeRoutes');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Goog-FieldMask']).toBe('routes.duration');
+  });
+
+  it('ceils fractional duration seconds up to whole minutes', async () => {
+    stubFetch(() => json({ routes: [{ duration: '65s' }] }));
+    const minutes = await new GoogleRoadDistance('k', 3000, 0).travelDurationMinutes(SILIGURI, GANGTOK);
+    expect(minutes).toBe(2); // 65s -> 1m 5s -> ceils to 2 minutes
+  });
+
+  it('returns null when Google reports no route for duration', async () => {
+    stubFetch(() => json({}));
+    const minutes = await new GoogleRoadDistance('k', 3000, 0).travelDurationMinutes(SILIGURI, GANGTOK);
+    expect(minutes).toBeNull();
+  });
 });
 
 /** An in-memory stand-in for the two Redis commands the cache uses. */
@@ -101,36 +124,46 @@ function fakeRedis() {
   };
 }
 
-const fixedInner = (km: number | null): RoadDistancePort => ({
+const fixedInner = (km: number | null, durationMinutes: number | null = 60): RoadDistancePort => ({
   roadDistanceKm: vi.fn(async () => km),
+  travelDurationMinutes: vi.fn(async () => durationMinutes),
 });
 
 describe('CachingRoadDistance', () => {
   it('calls the wrapped adapter once for a route, then serves the rest from cache', async () => {
     const redis = fakeRedis();
-    const inner = fixedInner(88);
+    const inner = fixedInner(88, 120);
     const cache = new CachingRoadDistance(inner, redis);
 
     expect(await cache.roadDistanceKm(SILIGURI, GANGTOK)).toBe(88);
     expect(await cache.roadDistanceKm(SILIGURI, GANGTOK)).toBe(88);
 
     expect(inner.roadDistanceKm).toHaveBeenCalledTimes(1);
+
+    expect(await cache.travelDurationMinutes(SILIGURI, GANGTOK)).toBe(120);
+    expect(await cache.travelDurationMinutes(SILIGURI, GANGTOK)).toBe(120);
+
+    expect(inner.travelDurationMinutes).toHaveBeenCalledTimes(1);
+    expect(redis.store.has('routedur:26.727,88.395:27.331,88.614')).toBe(true);
   });
 
   it('caches a no-route answer too, so an unroutable pair is not re-billed on every retry', async () => {
     const redis = fakeRedis();
-    const inner = fixedInner(null);
+    const inner = fixedInner(null, null);
     const cache = new CachingRoadDistance(inner, redis);
 
     expect(await cache.roadDistanceKm(SILIGURI, GANGTOK)).toBeNull();
     expect(await cache.roadDistanceKm(SILIGURI, GANGTOK)).toBeNull();
-
     expect(inner.roadDistanceKm).toHaveBeenCalledTimes(1);
+
+    expect(await cache.travelDurationMinutes(SILIGURI, GANGTOK)).toBeNull();
+    expect(await cache.travelDurationMinutes(SILIGURI, GANGTOK)).toBeNull();
+    expect(inner.travelDurationMinutes).toHaveBeenCalledTimes(1);
   });
 
   it('keys on rounded coordinates — a metre of jitter is still a cache hit', async () => {
     const redis = fakeRedis();
-    const inner = fixedInner(50);
+    const inner = fixedInner(50, 90);
     const cache = new CachingRoadDistance(inner, redis);
 
     await cache.roadDistanceKm(SILIGURI, GANGTOK);
@@ -145,11 +178,15 @@ describe('CachingRoadDistance', () => {
   it('falls through to the adapter when Redis reads fail — never throws', async () => {
     const redis = fakeRedis();
     redis.get.mockRejectedValue(new Error('redis down'));
-    const inner = fixedInner(12);
+    const inner = fixedInner(12, 30);
 
-    const km = await new CachingRoadDistance(inner, redis).roadDistanceKm(SILIGURI, GANGTOK);
+    const cache = new CachingRoadDistance(inner, redis);
+    const km = await cache.roadDistanceKm(SILIGURI, GANGTOK);
+    const mins = await cache.travelDurationMinutes(SILIGURI, GANGTOK);
 
     expect(km).toBe(12);
+    expect(mins).toBe(30);
     expect(inner.roadDistanceKm).toHaveBeenCalledTimes(1);
+    expect(inner.travelDurationMinutes).toHaveBeenCalledTimes(1);
   });
 });

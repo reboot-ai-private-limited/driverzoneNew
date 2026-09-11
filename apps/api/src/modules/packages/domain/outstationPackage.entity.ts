@@ -12,6 +12,15 @@ import type { Terrain } from '@driverzone/geo';
 
 export type { Direction };
 
+export interface OutstationVariant {
+  id: string;
+  label: string;
+  includedMinutes: number;
+  baseFarePaise: number;
+  driverAmountPaise: number;
+  isActive: boolean;
+}
+
 export interface OutstationPackage {
   id: string;
   name: string;
@@ -27,12 +36,18 @@ export interface OutstationPackage {
    */
   roundTripFarePaise: number | null;
   /**
-   * What the driver is paid for this band, in paise, PER DAY — a flat amount, not a share
-   * (2026-09-10). The band fare is a day rate and this is multiplied by the same IST day count in
-   * `computeOutstationFare`. `validateOutstationDriverAmount` refuses a value above the one-way
-   * fare (and the round-trip fare, when the band sells one).
+   * What the driver is paid for a one-way trip on this band, in paise, PER DAY.
    */
-  driverAmountPaise: number;
+  oneWayDriverAmountPaise: number;
+  /**
+   * What the driver is paid for a round trip on this band, in paise, PER DAY.
+   * `null` exactly when `roundTripFarePaise` is `null` — the band doesn't sell that direction.
+   */
+  roundTripDriverAmountPaise: number | null;
+  /**
+   * Hourly-package variants offered on this band (e.g. "8 Hours", "12 Hours").
+   */
+  variants: OutstationVariant[];
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -43,6 +58,11 @@ export function fareFor(pkg: OutstationPackage, direction: Direction): number | 
   return direction === 'ROUND_TRIP' ? pkg.roundTripFarePaise : pkg.oneWayFarePaise;
 }
 
+/** The driver amount for a direction, or `null` when the band does not sell that direction. */
+export function driverAmountFor(pkg: OutstationPackage, direction: Direction): number | null {
+  return direction === 'ROUND_TRIP' ? pkg.roundTripDriverAmountPaise : pkg.oneWayDriverAmountPaise;
+}
+
 export function validateOutstationBand(minKm: number, maxKm: number): string | null {
   if (minKm < 0) return 'minKm must be >= 0';
   if (maxKm <= minKm) return 'maxKm must be greater than minKm';
@@ -50,38 +70,43 @@ export function validateOutstationBand(minKm: number, maxKm: number): string | n
 }
 
 /**
- * THE DRIVER AMOUNT MAY NOT EXCEED THE FARE IT IS PAID OUT OF.
+ * THE DRIVER AMOUNTS MAY NOT EXCEED THE FARES THEY ARE PAID OUT OF.
  *
- * Same reasoning as the incity twin: `driverAmountPaise` is subtracted from the commissionable
- * subtotal, whose tightest value is the band fare alone. Both the fare and this amount are
- * day rates multiplied by the same day count, so the per-day comparison is the one that has to
- * hold — a value that fits one day fits three.
- *
- * Checked against BOTH directions the band sells. A band with a cheap round-trip fare and a
- * driver amount tuned to the one-way could still go negative on the return.
+ * Each direction is checked independently against its own fare:
+ * - One-way driver amount <= one-way fare
+ * - If a round-trip fare is offered, round-trip driver amount is required and <= round-trip fare.
  */
-export function validateOutstationDriverAmount(pkg: {
+export function validateOutstationDriverAmounts(pkg: {
   oneWayFarePaise: number;
   roundTripFarePaise: number | null;
-  driverAmountPaise: number;
+  oneWayDriverAmountPaise: number;
+  roundTripDriverAmountPaise: number | null;
 }): string | null {
-  const floor =
-    pkg.roundTripFarePaise === null
-      ? pkg.oneWayFarePaise
-      : Math.min(pkg.oneWayFarePaise, pkg.roundTripFarePaise);
-  if (pkg.driverAmountPaise > floor) {
-    return `The driver amount (₹${String(pkg.driverAmountPaise / 100)}) cannot exceed the fare (₹${String(floor / 100)})`;
+  if (pkg.oneWayDriverAmountPaise > pkg.oneWayFarePaise) {
+    return `The one-way driver amount (₹${String(pkg.oneWayDriverAmountPaise / 100)}) cannot exceed the one-way fare (₹${String(pkg.oneWayFarePaise / 100)})`;
+  }
+  if (pkg.roundTripFarePaise !== null) {
+    if (pkg.roundTripDriverAmountPaise === null) {
+      return 'This band sells a round trip — set what the driver is paid for it.';
+    }
+    if (pkg.roundTripDriverAmountPaise > pkg.roundTripFarePaise) {
+      return `The round-trip driver amount (₹${String(pkg.roundTripDriverAmountPaise / 100)}) cannot exceed the round-trip fare (₹${String(pkg.roundTripFarePaise / 100)})`;
+    }
   }
   return null;
 }
 
 /**
- * P-3 is RETIRED for outstation, and this note is the hole where
- * `validateOutstationPackageActivation` used to be.
- *
- * The invariant said an active package must hold at least one active price row, because the
- * price rows were a separate array that could be empty or entirely switched off. A band now
- * carries `oneWayFarePaise` as a required field, so "active but impossible to sell" is not a
- * state this type can represent. An invariant that cannot be violated is not a guard, it is a
- * comment — so it is one.
+ * Validates that each outstation hourly variant's driver payout does not exceed its base fare.
  */
+export function validateOutstationVariantAmounts(pkg: {
+  variants?: Array<{ label: string; baseFarePaise: number; driverAmountPaise: number }> | undefined;
+}): string | null {
+  if (!pkg.variants) return null;
+  for (const variant of pkg.variants) {
+    if (variant.driverAmountPaise > variant.baseFarePaise) {
+      return `Variant "${variant.label}": the driver amount (₹${String(variant.driverAmountPaise / 100)}) cannot exceed the fare (₹${String(variant.baseFarePaise / 100)})`;
+    }
+  }
+  return null;
+}

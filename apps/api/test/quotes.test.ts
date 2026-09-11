@@ -90,7 +90,10 @@ function fakeRepo(): QuoteRepositoryPort & { written: NewQuote[] } {
   };
 }
 
-const distance = (km: number): RoadDistancePort => ({ roadDistanceKm: vi.fn(async () => km) });
+const distance = (km: number, durationMinutes: number | null = 120): RoadDistancePort => ({
+  roadDistanceKm: vi.fn(async () => km),
+  travelDurationMinutes: vi.fn(async () => durationMinutes),
+});
 
 const incityVariants = [
   {
@@ -146,13 +149,16 @@ function outstationPackages(): PackageLookupContract {
           maxKm: 100,
           oneWayFarePaise: 450_000,
           roundTripFarePaise: 700_000,
-          driverAmountPaise: 315_000,
+          oneWayDriverAmountPaise: 315_000,
+          roundTripDriverAmountPaise: 490_000,
+          variants: [],
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
         farePaise: 450_000,
         direction: 'ONE_WAY' as const,
+        variants: [],
       },
     })),
   };
@@ -412,5 +418,217 @@ describe('CreateQuoteUseCase — outstation', () => {
     expect(packages.resolveForTrip).toHaveBeenCalledWith(
       expect.objectContaining({ toSameCityZone: true, fromCityZoneId: cityZone.id }),
     );
+  });
+
+  it('prices a one-way trip <= 8 hours as single-day with no extra return line', async () => {
+    const packages = outstationPackages();
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: hillZone }),
+      packages,
+      settings,
+      distance(88, 300), // 5 hours (300 mins) <= 8 hours
+      repo,
+    );
+
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+      direction: 'ONE_WAY',
+    });
+
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+
+    const quote = result.quotes[0]!;
+    expect(quote.fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE')).toBeUndefined();
+    expect(quote.fare.lines[0]?.amountPaise).toBe(450_000); // 1 day base fare
+    expect(quote.direction).toBe('ONE_WAY');
+    expect(quote.distanceKm).toBe(88);
+  });
+
+  it('adds 1 day return allowance to a one-way trip taking between 8 and 10 hours', async () => {
+    const packages = outstationPackages();
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: hillZone }),
+      packages,
+      settings,
+      distance(88, 540), // 9 hours (540 mins) > 8h and <= 10h
+      repo,
+    );
+
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+      direction: 'ONE_WAY',
+    });
+
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+
+    const quote = result.quotes[0]!;
+    const returnLine = quote.fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE');
+    expect(returnLine).toBeDefined();
+    expect(returnLine?.amountPaise).toBe(315_000); // 1 day driverAmountPaise (315k on pkg_2)
+    expect(quote.fare.lines[0]?.amountPaise).toBe(450_000); // 1 day base fare
+  });
+
+  it('prices a 16-hour one-way trip as 2 forward days plus 2 days return allowance', async () => {
+    const packages = outstationPackages();
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: hillZone }),
+      packages,
+      settings,
+      distance(88, 960), // 16 hours (960 mins) -> forward 2, extra 2
+      repo,
+    );
+
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+      direction: 'ONE_WAY',
+    });
+
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+
+    const quote = result.quotes[0]!;
+    expect(quote.fare.lines[0]?.amountPaise).toBe(900_000); // 450,000 * 2
+    expect(quote.fare.lines[0]?.label).toBe('PKG-3 — One way × 2 days');
+    const returnLine = quote.fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE');
+    expect(returnLine?.amountPaise).toBe(630_000); // 315,000 * 2
+    expect(returnLine?.label).toBe('Return trip allowance for your driver × 2 days');
+    expect(quote.distanceKm).toBe(88);
+    expect(quote.direction).toBe('ONE_WAY');
+  });
+
+  it('refuses a one-way trip whose computed forward days exceeds outstation.max_trip_days', async () => {
+    const packages = outstationPackages();
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: hillZone }),
+      packages,
+      settings,
+      distance(88, 160 * 60), // 160 hours -> 16 forward days > 15 max days
+      repo,
+    );
+
+    await expect(
+      useCase.execute({
+        customerId: 'cus_1',
+        pickup: SILIGURI,
+        drop: DARJEELING,
+        direction: 'ONE_WAY',
+      }),
+    ).rejects.toThrow('We can only book an outstation trip up to 15 days.');
+  });
+
+  it('gracefully falls back to single-day price when travelDurationMinutes returns null', async () => {
+    const packages = outstationPackages();
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: hillZone }),
+      packages,
+      settings,
+      distance(88, null), // distance measured, duration returned null
+      repo,
+    );
+
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+      direction: 'ONE_WAY',
+    });
+
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+
+    const quote = result.quotes[0]!;
+    expect(quote.fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE')).toBeUndefined();
+    expect(quote.fare.lines[0]?.amountPaise).toBe(450_000);
+  });
+
+  it('generates options for active outstation variants alongside the distance option', async () => {
+    const packagesWithVariants: PackageLookupContract = {
+      resolveForTrip: vi.fn(async () => ({
+        available: true as const,
+        match: {
+          type: 'OUTSTATION' as const,
+          package: {
+            id: 'pkg_out_var',
+            name: 'PKG-VAR',
+            terrain: 'PLAIN' as const,
+            minKm: 50,
+            maxKm: 100,
+            oneWayFarePaise: 300_000,
+            roundTripFarePaise: 500_000,
+            oneWayDriverAmountPaise: 200_000,
+            roundTripDriverAmountPaise: 350_000,
+            variants: [
+              {
+                id: 'var_8h',
+                label: '8 Hours',
+                includedMinutes: 480,
+                baseFarePaise: 250_000,
+                driverAmountPaise: 180_000,
+                isActive: true,
+              },
+            ],
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+          farePaise: 300_000,
+          direction: 'ONE_WAY' as const,
+          variants: [
+            {
+              id: 'var_8h',
+              label: '8 Hours',
+              includedMinutes: 480,
+              baseFarePaise: 250_000,
+              driverAmountPaise: 180_000,
+              isActive: true,
+            },
+          ],
+        },
+      })),
+    };
+
+    const useCase = new CreateQuoteUseCase(
+      fakeZones({ city: cityZone, pickup: freePickup }, { hill: null }),
+      packagesWithVariants,
+      settings,
+      distance(60, 180),
+      repo,
+    );
+
+    const result = await useCase.execute({
+      customerId: 'cus_1',
+      pickup: SILIGURI,
+      drop: DARJEELING,
+      direction: 'ONE_WAY',
+    });
+
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+
+    expect(result.quotes).toHaveLength(2);
+
+    // 1st quote: distance band quote
+    const distQuote = result.quotes[0]!;
+    expect(distQuote.includedMinutes).toBeNull();
+    expect(distQuote.fare.split.driverAmountPaise).toBe(200_000);
+    expect(distQuote.fare.lines[0]?.amountPaise).toBe(300_000);
+    expect(distQuote.fare.subtotalPaise).toBe(303_000);
+
+    // 2nd quote: hourly variant quote
+    const varQuote = result.quotes[1]!;
+    expect(varQuote.includedMinutes).toBe(480);
+    expect(varQuote.source.variantId).toBe('var_8h');
+    expect(varQuote.source.variantLabel).toBe('8 Hours');
+    expect(varQuote.fare.split.driverAmountPaise).toBe(180_000);
+    expect(varQuote.fare.lines[0]?.amountPaise).toBe(250_000);
+    expect(varQuote.fare.subtotalPaise).toBe(253_000);
   });
 });

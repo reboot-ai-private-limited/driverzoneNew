@@ -13,8 +13,18 @@ import type {
   NewOffer,
   OfferRepositoryPort,
 } from '../src/modules/dispatch/domain/ports.js';
-import { RunDispatchWaveUseCase } from '../src/modules/dispatch/application/useCases/runWave.usecase.js';
-import { AcceptOfferUseCase } from '../src/modules/dispatch/application/useCases/respondToOffer.usecase.js';
+import {
+  ExpireWaveUseCase,
+  RunDispatchWaveUseCase,
+} from '../src/modules/dispatch/application/useCases/runWave.usecase.js';
+import {
+  AcceptOfferUseCase,
+  DeclineOfferUseCase,
+} from '../src/modules/dispatch/application/useCases/respondToOffer.usecase.js';
+import type { FavouriteDriversContract } from '../src/modules/favourites/favourites.public.js';
+import type { AssignableDriversContract } from '../src/modules/identity/identity.public.js';
+import { TransferBookingUseCase } from '../src/modules/dispatch/application/useCases/transferBooking.usecase.js';
+import { REASSIGNABLE_STATUSES } from '../src/modules/bookings/bookings.public.js';
 import type {
   Booking,
   BookingDispatchContract,
@@ -44,6 +54,11 @@ function booking(over: Partial<Booking> = {}): Booking {
     dropAddress: 'Sevoke Road',
     direction: null,
     distanceKm: null,
+    // `null` — "no requirement" — is the correct default here, not an omission: these two were
+    // added to `Booking` after this fixture, and the vehicle-compatibility tests below rely on
+    // `undefined` never masquerading as a real requirement.
+    carCategory: null,
+    vehicleType: null,
     quoteId: 'qot_1',
     paymentId: 'pay_1',
     isScheduled: false,
@@ -129,6 +144,18 @@ function fakeOffers() {
     listForBooking: vi.fn(async () => [...rows.values()]),
     driverIdsOffered: vi.fn(async () => [...rows.values()].map((r) => r.driverId)),
 
+    hasLiveOffersInWave: vi.fn(
+      async (bookingId: string, wave: number) =>
+        [...rows.values()].some(
+          (r) => r.bookingId === bookingId && r.wave === wave && r.status === 'SENT',
+        ),
+    ),
+
+    hasOffersAfterWave: vi.fn(
+      async (bookingId: string, wave: number) =>
+        [...rows.values()].some((r) => r.bookingId === bookingId && r.wave > wave),
+    ),
+
     respond: vi.fn(async (id: string, to: OfferStatus, now: Date) => {
       const row = rows.get(id);
       if (row === undefined || row.status !== 'SENT' || row.expiresAt <= now) return null;
@@ -161,6 +188,8 @@ function fakeOffers() {
       return live;
     }),
 
+    recordManualAssignment: vi.fn(async () => undefined),
+
     recordDelivery: vi.fn(async (id: string, via) => {
       const row = rows.get(id);
       if (row !== undefined) rows.set(id, { ...row, deliveredVia: via, deliveredAt: new Date() });
@@ -170,13 +199,30 @@ function fakeOffers() {
   return repo;
 }
 
+/**
+ * Keyed by radius, so a test says who is reachable at each ring of the ladder. The favourite
+ * wave's radius (`dispatch.favourite_radius_m`, 15 km by default) is just another key.
+ *
+ * `restrictToDriverIds` is honoured here rather than ignored, because the thing most worth
+ * asserting about the favourite wave is that it NARROWS: a stranger standing next to a favourite
+ * must not be rung by it.
+ */
 function fakePool(candidatesByRadius: Record<number, DriverCandidate[]>): DriverPoolPort {
   return {
     findEligible: vi.fn(async (query) => {
       const found = candidatesByRadius[query.radiusMetres] ?? [];
-      return found.filter((c) => !query.excludeDriverIds.includes(c.driverId));
+      const restricted =
+        query.restrictToDriverIds === undefined
+          ? found
+          : found.filter((c) => query.restrictToDriverIds?.includes(c.driverId));
+      return restricted.filter((c) => !query.excludeDriverIds.includes(c.driverId));
     }),
   };
+}
+
+/** A customer's favourites, as `dispatch` sees them: ids and nothing else. */
+function fakeFavourites(ids: string[] = []): FavouriteDriversContract {
+  return { favouriteDriverIds: vi.fn(async () => ids) };
 }
 
 function fakeBookings(seed: Booking, claim: ClaimResult | null = null) {
@@ -281,7 +327,11 @@ describe('RunDispatchWaveUseCase', () => {
     scheduled = [];
   });
 
-  function build(pool: DriverPoolPort, bookings = fakeBookings(booking())) {
+  function build(
+    pool: DriverPoolPort,
+    bookings = fakeBookings(booking()),
+    favourites = fakeFavourites(),
+  ) {
     return {
       bookings,
       useCase: new RunDispatchWaveUseCase(
@@ -293,6 +343,7 @@ describe('RunDispatchWaveUseCase', () => {
         async (input) => {
           scheduled.push(input);
         },
+        favourites,
       ),
     };
   }
@@ -416,6 +467,20 @@ describe('AcceptOfferUseCase — the race', () => {
 
     expect(results.filter((r) => r.claimed)).toHaveLength(1);
     expect(results.filter((r) => !r.claimed)).toHaveLength(4);
+  });
+
+  it('claims as the driver themself, with no actor override — unaffected by manual transfer', async () => {
+    // `TransferBookingUseCase` passes a third `actor` argument to attribute a manual assignment
+    // to the admin who made it. This is the path that argument must never reach: a driver
+    // accepting their own offer stays a 2-argument call, so the resulting event keeps saying
+    // `actorType: 'DRIVER'` exactly as it always has.
+    const created = await ringFive();
+    const bookings = fakeBookings(booking());
+    const useCase = new AcceptOfferUseCase(offers, bookings, fakeNotifications());
+
+    await useCase.execute(created[0]!.id, 'drv_0');
+
+    expect(bookings.claimForDriver).toHaveBeenCalledWith('bkg_1', 'drv_0');
   });
 
   it('withdraws the losers’ ringing offers so nobody stares at a dead screen', async () => {
@@ -570,5 +635,518 @@ describe('queue job ids', () => {
     // late gets the same id back, not a second dispatch that rings every driver twice.
     expect(jobIdFor('dispatch', 'bkg_1')).toBe(jobIdFor('dispatch', 'bkg_1'));
     expect(jobIdFor('wave', 'bkg_1', 2)).not.toBe(jobIdFor('wave', 'bkg_1', 3));
+  });
+});
+
+describe('RunDispatchWaveUseCase — the favourite wave', () => {
+  let offers: ReturnType<typeof fakeOffers>;
+  let scheduled: Array<{ bookingId: string; wave: number; delayMs: number }>;
+
+  beforeEach(() => {
+    offers = fakeOffers();
+    scheduled = [];
+  });
+
+  function build(
+    pool: DriverPoolPort,
+    bookings = fakeBookings(booking({ preferFavouriteDrivers: true })),
+    favourites = fakeFavourites(['drv_fav']),
+  ) {
+    return {
+      bookings,
+      favourites,
+      useCase: new RunDispatchWaveUseCase(
+        offers,
+        pool,
+        bookings,
+        settings,
+        fakeNotifications(),
+        async (input) => {
+          scheduled.push(input);
+        },
+        favourites,
+      ),
+    };
+  }
+
+  it('rings the favourites as wave 0, on their own radius and ring time', async () => {
+    // 15 km and 60 s are the defaults of the two favourite settings; 3 km is wave 1's.
+    const pool = fakePool({ 15_000: [candidate('drv_fav')], 3_000: [candidate('drv_near')] });
+
+    const { useCase } = build(pool);
+    const outcome = await useCase.execute('bkg_1');
+
+    expect(outcome).toEqual({ rang: true, wave: 0, driverCount: 1 });
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_fav']);
+    expect(scheduled).toEqual([{ bookingId: 'bkg_1', wave: 0, delayMs: 60_000 }]);
+  });
+
+  it('rings nobody but a favourite, however close a stranger is standing', async () => {
+    const pool = fakePool({ 15_000: [candidate('drv_stranger'), candidate('drv_fav')] });
+
+    const { useCase } = build(pool);
+    await useCase.execute('bkg_1');
+
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_fav']);
+  });
+
+  it('leaves dispatch exactly as it was when the booking did not ask for favourites', async () => {
+    const pool = fakePool({ 15_000: [candidate('drv_fav')], 3_000: [candidate('drv_near')] });
+
+    const { useCase, favourites } = build(pool, fakeBookings(booking()));
+    const outcome = await useCase.execute('bkg_1');
+
+    expect(outcome).toEqual({ rang: true, wave: 1, driverCount: 1 });
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_near']);
+    // Not even looked up: an unasked-for favourite list is not a query worth making.
+    expect(favourites.favouriteDriverIds).not.toHaveBeenCalled();
+  });
+
+  it('goes straight to the ordinary search when the customer has no favourites', async () => {
+    const pool = fakePool({ 3_000: [candidate('drv_near')] });
+
+    const { useCase } = build(pool, undefined, fakeFavourites([]));
+    const outcome = await useCase.execute('bkg_1');
+
+    expect(outcome).toEqual({ rang: true, wave: 1, driverCount: 1 });
+  });
+
+  it('does not burn the favourite ring time when no favourite is available', async () => {
+    // The favourite exists but is nowhere near, off duty, or otherwise ineligible, so the pool
+    // returns nothing for wave 0. The customer must not wait 60 s to learn that.
+    const pool = fakePool({ 15_000: [], 3_000: [candidate('drv_near')] });
+
+    const { useCase } = build(pool);
+    const outcome = await useCase.execute('bkg_1');
+
+    expect(outcome).toEqual({ rang: true, wave: 1, driverCount: 1 });
+    expect(scheduled).toEqual([{ bookingId: 'bkg_1', wave: 1, delayMs: 45_000 }]);
+  });
+
+  it('does not ring a favourite again in the ordinary waves', async () => {
+    const pool = fakePool({
+      15_000: [candidate('drv_fav')],
+      3_000: [candidate('drv_fav'), candidate('drv_near')],
+    });
+
+    const { useCase } = build(pool);
+    await useCase.execute('bkg_1');
+    // What the wave-0 timeout does: lapse it and widen.
+    await useCase.execute('bkg_1', 1);
+
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_fav', 'drv_near']);
+  });
+
+  it('skips the favourite wave entirely once the search has moved past it', async () => {
+    const pool = fakePool({ 15_000: [candidate('drv_fav')], 3_000: [candidate('drv_near')] });
+
+    const { useCase, favourites } = build(pool);
+    await useCase.execute('bkg_1', 1);
+
+    expect(favourites.favouriteDriverIds).not.toHaveBeenCalled();
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_near']);
+  });
+});
+
+describe('a wave whose last offer is answered', () => {
+  let offers: ReturnType<typeof fakeOffers>;
+  let scheduled: Array<{ bookingId: string; wave: number; delayMs: number }>;
+
+  beforeEach(() => {
+    offers = fakeOffers();
+    scheduled = [];
+  });
+
+  function build(pool: DriverPoolPort, bookings = fakeBookings(booking())) {
+    const runWave = new RunDispatchWaveUseCase(
+      offers,
+      pool,
+      bookings,
+      settings,
+      fakeNotifications(),
+      async (input) => {
+        scheduled.push(input);
+      },
+      fakeFavourites(),
+    );
+
+    return {
+      bookings,
+      runWave,
+      expireWave: new ExpireWaveUseCase(offers, bookings, runWave),
+      decline: new DeclineOfferUseCase(offers, bookings, (bookingId, wave) =>
+        runWave.execute(bookingId, wave),
+      ),
+    };
+  }
+
+  it('widens immediately rather than sitting out the rest of the TTL', async () => {
+    const pool = fakePool({ 3_000: [candidate('drv_1')], 6_000: [candidate('drv_2')] });
+    const { runWave, decline } = build(pool);
+
+    await runWave.execute('bkg_1');
+    await decline.execute(offers.all()[0]?.id ?? '', 'drv_1');
+
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_1', 'drv_2']);
+    expect(scheduled.map((s) => s.wave)).toEqual([1, 2]);
+  });
+
+  it('waits when somebody in the wave is still ringing', async () => {
+    const pool = fakePool({
+      3_000: [candidate('drv_1'), candidate('drv_2')],
+      6_000: [candidate('drv_3')],
+    });
+    const { runWave, decline } = build(pool);
+
+    await runWave.execute('bkg_1');
+    await decline.execute(offers.all()[0]?.id ?? '', 'drv_1');
+
+    // drv_2 still has their TTL. Cutting it short because one person said no would waste it.
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_1', 'drv_2']);
+    expect(scheduled.map((s) => s.wave)).toEqual([1]);
+  });
+
+  it('makes the superseded wave timeout a no-op when it eventually fires', async () => {
+    const pool = fakePool({ 3_000: [candidate('drv_1')], 6_000: [candidate('drv_2')] });
+    const { runWave, decline, expireWave } = build(pool);
+
+    await runWave.execute('bkg_1');
+    await decline.execute(offers.all()[0]?.id ?? '', 'drv_1');
+
+    // Wave 1's BullMQ job is still in Redis and fires on schedule. Without the guard it would
+    // widen a second time and ring a wave nobody asked for.
+    await expireWave.execute('bkg_1', 1);
+
+    expect(offers.all().map((o) => o.driverId)).toEqual(['drv_1', 'drv_2']);
+    expect(scheduled.map((s) => s.wave)).toEqual([1, 2]);
+  });
+});
+
+describe('TransferBookingUseCase — manual assignment', () => {
+  let offers: ReturnType<typeof fakeOffers>;
+
+  beforeEach(() => {
+    offers = fakeOffers();
+  });
+
+  /**
+   * `fakeBookings` models the accept race but knows nothing about releasing. This wraps it with
+   * the two methods the transfer needs, so the release-then-claim pair is exercised end to end
+   * rather than stubbed as one step.
+   */
+  function transferableBookings(seed: Booking, busyDrivers: string[] = []) {
+    const base = fakeBookings(seed);
+
+    return Object.assign(base, {
+      releaseDriver: vi.fn(async () => {
+        const current = base.current();
+        if (!REASSIGNABLE_STATUSES.includes(current.status)) return null;
+
+        // What the real one does: back to SEARCHING with no driver, which is exactly the state
+        // `claimForDriver` demands.
+        base.current = () => ({ ...current, status: 'SEARCHING', driverId: null });
+        return base.current();
+      }),
+      hasActiveBooking: vi.fn(async (driverId: string) => busyDrivers.includes(driverId)),
+    });
+  }
+
+  /** A driver stub for `assignable()` — a bare id defaults to "compatible with anything". */
+  interface AssignableStub {
+    id: string;
+    vehicleCategoryPreference?: string[];
+    vehicleTypePreferences?: string[];
+    canDriveHillVerified?: boolean;
+  }
+
+  const ALL_CATEGORIES = ['MINI', 'HATCHBACK', 'SEDAN', 'SUV', 'LUXURY'];
+  const ALL_VEHICLE_TYPES = ['AUTO', 'MANUAL', 'EV'];
+
+  const toAssignable = (d: AssignableStub) => ({
+    id: d.id,
+    fullName: 'Ramesh Chettri',
+    phone: '+919800000000',
+    isOnDuty: false,
+    vehicleCategoryPreference: d.vehicleCategoryPreference ?? ALL_CATEGORIES,
+    vehicleTypePreferences: d.vehicleTypePreferences ?? ALL_VEHICLE_TYPES,
+    canDriveHillVerified: d.canDriveHillVerified ?? true,
+  });
+
+  const assignable = (drivers: Array<string | AssignableStub>): AssignableDriversContract => {
+    const stubs = drivers.map((d): AssignableStub => (typeof d === 'string' ? { id: d } : d));
+
+    return {
+      assignableDrivers: vi.fn(async (search: string) =>
+        stubs.filter((d) => d.id === search || search === '').map(toAssignable),
+      ),
+      // A real id lookup, unlike `assignableDrivers` above — the bug this fake exists to catch
+      // (`assertAssignable` mis-calling the search method with a raw id) can't reproduce here if
+      // both methods secretly did the same thing.
+      assignableDriverById: vi.fn(async (id: string) => {
+        const found = stubs.find((d) => d.id === id);
+        return found === undefined ? null : toAssignable(found);
+      }),
+    };
+  };
+
+  function build(
+    seed: Booking,
+    options: { drivers?: Array<string | AssignableStub>; busy?: string[] } = {},
+  ) {
+    const bookings = transferableBookings(seed, options.busy ?? []);
+    const claimForDriver = vi.fn(
+      async (
+        _bookingId: string,
+        driverId: string,
+        _actor?: { type: string; id: string | null; reason?: string },
+      ) => {
+        const now = bookings.current();
+        if (now.driverId !== null || now.status !== 'SEARCHING') {
+          return { claimed: false as const, reason: 'ALREADY_ASSIGNED' as const };
+        }
+        const next = { ...now, status: 'ASSIGNED' as const, driverId };
+        bookings.current = () => next;
+        return { claimed: true as const, booking: next };
+      },
+    );
+
+    // ONE OBJECT, not a spread copy: the use case is handed `bookings` itself, so a test that
+    // later reassigns `bookings.releaseDriver` (to model a lost claim) changes what the use case
+    // calls too. A `{ ...bookings, ... }` snapshot here would freeze today's `releaseDriver` into
+    // the use case's own copy, silently defeating exactly that kind of override.
+    Object.assign(bookings, { findById: async () => bookings.current(), claimForDriver });
+
+    return {
+      bookings,
+      useCase: new TransferBookingUseCase(
+        bookings,
+        assignable(options.drivers ?? ['drv_new']),
+        offers,
+        fakeNotifications(),
+      ),
+    };
+  }
+
+  it('moves an assigned trip to the chosen driver', async () => {
+    const { useCase, bookings } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }));
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Driver broke down',
+      adminId: 'adm_1',
+    });
+
+    expect(result.releasedDriverId).toBe('drv_old');
+    expect(bookings.current().driverId).toBe('drv_new');
+    expect(bookings.current().status).toBe('ASSIGNED');
+  });
+
+  it('records the assignment as an offer, so a later wave cannot ring them again', async () => {
+    const { useCase } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }));
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Driver broke down',
+      adminId: 'adm_1',
+    });
+
+    expect(offers.recordManualAssignment).toHaveBeenCalledWith('bkg_1', 'drv_new');
+  });
+
+  it('refuses to transfer a trip that has already started', async () => {
+    // Not a reassignment at all — it is a cancellation plus a new booking, and blurring the two
+    // breaks the fare, the ledger and the receipt. docs/LLD/dispatch-and-assignment.md is explicit.
+    const { useCase, bookings } = build(booking({ status: 'STARTED', driverId: 'drv_old' }));
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Customer asked',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/already started/i);
+
+    expect(bookings.current().driverId).toBe('drv_old');
+  });
+
+  it('refuses a driver who is already on a trip, WITHOUT releasing the current one first', async () => {
+    // The ordering that matters: discovering the target is ineligible after the release would
+    // have taken a trip off a working driver to achieve nothing.
+    const { useCase, bookings } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }), {
+      busy: ['drv_new'],
+    });
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Driver broke down',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/already on a trip/i);
+
+    expect(bookings.releaseDriver).not.toHaveBeenCalled();
+    expect(bookings.current().driverId).toBe('drv_old');
+  });
+
+  it('refuses a driver who is not assignable, and does not say which reason', async () => {
+    const { useCase, bookings } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }), {
+      drivers: [],
+    });
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_unverified',
+        reason: 'Driver broke down',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/cannot be assigned/i);
+
+    expect(bookings.releaseDriver).not.toHaveBeenCalled();
+  });
+
+  it('refuses to assign the driver who already has it', async () => {
+    const { useCase } = build(booking({ status: 'ASSIGNED', driverId: 'drv_new' }));
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Driver broke down',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/already has this booking/i);
+  });
+
+  it('assigns an unassigned booking that found nobody', async () => {
+    // The other half of manual assignment: dispatch gave up, and ops has phoned somebody.
+    const { useCase, bookings } = build(booking({ status: 'SEARCHING', driverId: null }));
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Found one by phone',
+      adminId: 'adm_1',
+    });
+
+    expect(result.releasedDriverId).toBeNull();
+    expect(bookings.current().driverId).toBe('drv_new');
+  });
+
+  it('claims the booking as the ADMIN, with the transfer reason, not as the driver', async () => {
+    const { useCase, bookings } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }));
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Driver broke down',
+      adminId: 'adm_1',
+    });
+
+    expect(bookings.claimForDriver).toHaveBeenCalledWith('bkg_1', 'drv_new', {
+      type: 'ADMIN',
+      id: 'adm_1',
+      reason: 'Driver broke down',
+    });
+  });
+
+  it('refuses a driver whose vehicle category does not match the trip', async () => {
+    const { useCase, bookings } = build(
+      booking({ status: 'ASSIGNED', driverId: 'drv_old', carCategory: 'SUV' }),
+      { drivers: [{ id: 'drv_new', vehicleCategoryPreference: ['SEDAN'] }] },
+    );
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Driver broke down',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/does not match/i);
+
+    expect(bookings.releaseDriver).not.toHaveBeenCalled();
+    expect(bookings.current().driverId).toBe('drv_old');
+  });
+
+  it('assigns a driver whose vehicle category matches the trip', async () => {
+    const { useCase, bookings } = build(
+      booking({ status: 'ASSIGNED', driverId: 'drv_old', carCategory: 'SUV' }),
+      { drivers: [{ id: 'drv_new', vehicleCategoryPreference: ['SUV'] }] },
+    );
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Driver broke down',
+      adminId: 'adm_1',
+    });
+
+    expect(bookings.current().driverId).toBe('drv_new');
+  });
+
+  it('refuses a driver who is not hill-verified for a hill-terrain trip', async () => {
+    const hillBooking = booking({ status: 'ASSIGNED', driverId: 'drv_old' });
+    hillBooking.fareSnapshot.source.terrain = 'HILL';
+
+    const { useCase, bookings } = build(hillBooking, {
+      drivers: [{ id: 'drv_new', canDriveHillVerified: false }],
+    });
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Driver broke down',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/hill driving/i);
+
+    expect(bookings.current().driverId).toBe('drv_old');
+  });
+
+  it('leaves the booking with whoever won the race, not reverted to the old driver, on a lost claim', async () => {
+    const { useCase, bookings } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }));
+
+    const realRelease = bookings.releaseDriver;
+    bookings.releaseDriver = vi.fn(async (...args: Parameters<typeof realRelease>) => {
+      const released = await realRelease(...args);
+      // A concurrent dispatch wave claims the booking in the gap between release and the admin's
+      // own claim call. Captured as a fixed object, not a closure over `bookings.current` — that
+      // would call the very function being replaced and recurse forever.
+      const wonByWave = { ...bookings.current(), status: 'ASSIGNED' as const, driverId: 'drv_wave_winner' };
+      bookings.current = () => wonByWave;
+      return released;
+    });
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Driver broke down',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/another driver took it first/i);
+
+    expect(bookings.current().driverId).toBe('drv_wave_winner');
+  });
+
+  it('still returns success when recording the manual-assignment offer row throws', async () => {
+    const { useCase, bookings } = build(booking({ status: 'ASSIGNED', driverId: 'drv_old' }));
+    offers.recordManualAssignment.mockRejectedValueOnce(new Error('mongo blip'));
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Driver broke down',
+      adminId: 'adm_1',
+    });
+
+    expect(result.releasedDriverId).toBe('drv_old');
+    expect(bookings.current().driverId).toBe('drv_new');
   });
 });

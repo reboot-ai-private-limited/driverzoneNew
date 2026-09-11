@@ -14,6 +14,7 @@ export interface NewBooking {
   distanceKm: number | null;
   carCategory: Booking['carCategory'];
   vehicleType: Booking['vehicleType'];
+  preferFavouriteDrivers: boolean;
   walletCreditPaise: number;
   walletDebtPaise: number;
   fareSnapshot: FareSnapshot;
@@ -40,7 +41,8 @@ export interface BookingEvent {
 /** Fields a transition may set alongside the status. Nothing else may be written with one. */
 export interface TransitionPatch {
   driverId?: string | null;
-  assignedAt?: Date;
+  /** Nullable, so an admin reassignment can clear it — see `releaseDriver`. */
+  assignedAt?: Date | null;
   enRouteAt?: Date;
   arrivedAt?: Date;
   startedAt?: Date;
@@ -153,8 +155,16 @@ export interface BookingRepositoryPort {
    * Separate from `transition()` because it swaps on two fields rather than one, and because it
    * is the single place invariant B-2 lives: `driverId` goes from null to non-null exactly once.
    * Returns `null` when the race was lost.
+   *
+   * `actor` OMITTED means what it always has: the driver claimed their own offer, and the
+   * resulting event says so (`actorType: 'DRIVER'`). Manual assignment is the one caller that
+   * claims on someone else's behalf and must say so instead — see `TransferBookingUseCase`.
    */
-  claimForDriver(bookingId: string, driverId: string): Promise<Booking | null>;
+  claimForDriver(
+    bookingId: string,
+    driverId: string,
+    actor?: (Actor & { reason?: string }) | undefined,
+  ): Promise<Booking | null>;
 
   /**
    * The one trip this driver is in the middle of, or null.
@@ -199,4 +209,14 @@ export interface BookingRepositoryPort {
 
   /** Bookings stuck at PENDING_PAYMENT past a cutoff, for expiry. */
   findAbandonedPayments(before: Date, limit: number): Promise<Booking[]>;
+
+  /**
+   * Has this pair actually finished a trip together?
+   *
+   * EXISTENCE, NOT A LIST, because that is the whole question `favourites` asks: a customer may
+   * only favourite a driver who has really driven them. Returning the bookings instead would hand
+   * a caller outside this module a set of trips it has no business reading, and would cost more
+   * to answer — this one stops at the first match.
+   */
+  hasCompletedTripTogether(customerId: string, driverId: string): Promise<boolean>;
 }

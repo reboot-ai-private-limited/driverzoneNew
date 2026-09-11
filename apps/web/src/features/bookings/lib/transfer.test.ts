@@ -1,0 +1,101 @@
+import { describe, expect, it } from 'vitest';
+import type { BookingDto } from '@driverzone/contracts';
+import {
+  buildAssignPayload,
+  canTransfer,
+  isTransferSubmitDisabled,
+  transferDialogCopy,
+} from './transfer';
+
+const ALL_STATUSES: BookingDto['status'][] = [
+  'PENDING_PAYMENT',
+  'CONFIRMED',
+  'SEARCHING',
+  'ASSIGNED',
+  'DRIVER_EN_ROUTE',
+  'ARRIVED',
+  'STARTED',
+  'COMPLETED',
+  'CANCELLED_BY_CUSTOMER',
+  'CANCELLED_BY_DRIVER',
+  'CANCELLED_BY_ADMIN',
+  'NO_DRIVER_FOUND',
+  'EXPIRED',
+];
+
+describe('canTransfer', () => {
+  it('allows exactly the statuses a driver can still be moved or added on', () => {
+    const allowed = ALL_STATUSES.filter(canTransfer);
+    expect(allowed.sort()).toEqual(['ARRIVED', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'SEARCHING'].sort());
+  });
+
+  it('refuses a started trip — that is a cancellation plus a new booking, not a transfer', () => {
+    expect(canTransfer('STARTED')).toBe(false);
+  });
+
+  it('refuses every finished or never-dispatched status', () => {
+    for (const status of ['COMPLETED', 'CANCELLED_BY_CUSTOMER', 'NO_DRIVER_FOUND', 'EXPIRED'] as const) {
+      expect(canTransfer(status)).toBe(false);
+    }
+  });
+});
+
+describe('isTransferSubmitDisabled', () => {
+  it('is disabled with no driver selected', () => {
+    expect(isTransferSubmitDisabled({ selected: null, reason: 'Vehicle broke down', isPending: false })).toBe(true);
+  });
+
+  it('is disabled with an empty or whitespace-only reason', () => {
+    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: '', isPending: false })).toBe(true);
+    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: '   ', isPending: false })).toBe(true);
+  });
+
+  it('is disabled while the mutation is pending', () => {
+    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: 'Vehicle broke down', isPending: true })).toBe(true);
+  });
+
+  it('is enabled once a driver is selected and a reason is typed', () => {
+    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: 'Vehicle broke down', isPending: false })).toBe(false);
+  });
+});
+
+describe('buildAssignPayload', () => {
+  it('trims the reason and maps the fields the API expects', () => {
+    expect(
+      buildAssignPayload({ bookingId: 'bkg_1', driverId: 'drv_1', reason: '  Vehicle broke down  ' }),
+    ).toEqual({ id: 'bkg_1', driverId: 'drv_1', reason: 'Vehicle broke down' });
+  });
+});
+
+describe('transferDialogCopy', () => {
+  it('offers a straight assignment when nobody has the booking yet', () => {
+    const copy = transferDialogCopy(null);
+    expect(copy.title).toBe('Assign a driver');
+    expect(copy.description).toMatch(/bypassing the search/i);
+  });
+
+  it('names the outgoing driver when handing off an existing assignment', () => {
+    const copy = transferDialogCopy({
+      id: 'drv_1',
+      name: 'Ramesh Chettri',
+      photo_url: null,
+      rating: null,
+      rating_count: 0,
+      phone: '+919800000000',
+    });
+    expect(copy.title).toBe('Transfer to another driver');
+    expect(copy.description).toContain('Ramesh Chettri');
+  });
+
+  it('falls back to a generic name when the outgoing driver has none on file', () => {
+    const copy = transferDialogCopy({
+      id: 'drv_1',
+      name: null,
+      photo_url: null,
+      rating: null,
+      rating_count: 0,
+      phone: '+919800000000',
+    });
+    expect(copy.description).toContain('The current driver');
+  });
+});

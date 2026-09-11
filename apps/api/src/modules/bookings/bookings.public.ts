@@ -1,4 +1,4 @@
-import type { Booking } from './domain/booking.entity.js';
+import type { Actor, Booking } from './domain/booking.entity.js';
 
 /**
  * PUBLIC CONTRACT — the only surface other modules may import from `bookings`.
@@ -29,8 +29,44 @@ export interface BookingDispatchContract {
   /**
    * The accept race, as one conditional update: `driverId: null` AND `status: SEARCHING` are both
    * in the filter, so exactly one of five simultaneous accepts can win.
+   *
+   * `actor` OMITTED means the driver claimed their own offer, exactly as before. Manual
+   * assignment passes `{ type: 'ADMIN', id, reason }` so the resulting event names who actually
+   * put the driver on the trip, instead of naming the driver.
    */
-  claimForDriver(bookingId: string, driverId: string): Promise<ClaimResult>;
+  claimForDriver(
+    bookingId: string,
+    driverId: string,
+    actor?: (Actor & { reason?: string }) | undefined,
+  ): Promise<ClaimResult>;
+
+  /**
+   * ADMIN REASSIGNMENT, first half: takes the trip off its current driver and returns it to
+   * `SEARCHING` with `driverId` back to null.
+   *
+   * THE SECOND HALF IS `claimForDriver`, UNCHANGED. That method already refuses anything but a
+   * `SEARCHING` booking with no driver, which is exactly the state this one produces — so a
+   * manual transfer is release-then-claim rather than a third way to write `driverId`, and the
+   * one compare-and-swap that guarantees invariant B-2 stays the only one there is.
+   *
+   * If the claim then loses to a dispatch wave that landed in the gap, the booking is `SEARCHING`
+   * and dispatch carries on. The failure mode is "ops's pick did not stick", never a lost trip.
+   *
+   * Refuses anything but `ASSIGNED`, `DRIVER_EN_ROUTE` and `ARRIVED` — a `STARTED` trip is not
+   * reassignable, it is a cancellation plus a new booking
+   * (docs/LLD/dispatch-and-assignment.md §Reassignment).
+   */
+  releaseDriver(bookingId: string, reason: string, adminId: string): Promise<Booking | null>;
+
+  /**
+   * Is this driver already committed to a trip?
+   *
+   * Manual assignment is the one path that bypasses `MongoDriverPool`, and the pool is where every
+   * other eligibility question is answered. This is the one of those questions that still has to
+   * be asked — handing an admin a driver who is mid-trip is how one person ends up owing two
+   * customers a journey at the same time.
+   */
+  hasActiveBooking(driverId: string): Promise<boolean>;
 
   /** No driver was found after every wave. Requires a reason, like every terminal state. */
   markNoDriverFound(bookingId: string, reason: string): Promise<Booking | null>;
@@ -52,7 +88,20 @@ export interface BookingReviewContract {
   findById(bookingId: string): Promise<Booking | null>;
 }
 
+/**
+ * One question, for `favourites`: have this customer and this driver finished a trip together?
+ *
+ * ITS OWN CONTRACT, and it deliberately cannot answer anything else. A customer may only
+ * favourite a driver who has really driven them — without that rule
+ * `POST /customer/favourite-drivers` would tell anyone holding a customer token whether an
+ * arbitrary driver id exists, and then hand back that driver's name and face. Enforcing it needs
+ * exactly this boolean and nothing else, so this is exactly what `favourites` is given.
+ */
+export interface BookingFavouritesContract {
+  hasCompletedTripTogether(customerId: string, driverId: string): Promise<boolean>;
+}
+
 export type BookingsPublicContract = BookingDispatchContract;
 
 export type { Booking, FareSnapshot, GeoPoint } from './domain/booking.entity.js';
-export { COMMITTED_STATUSES } from './domain/booking.entity.js';
+export { COMMITTED_STATUSES, REASSIGNABLE_STATUSES } from './domain/booking.entity.js';

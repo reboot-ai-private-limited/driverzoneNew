@@ -1,5 +1,6 @@
 import type {
   BookingDto,
+  BookingExtensionDto,
   CancelBookingResponse,
   CompleteTripResponse,
   CurrentDriverTripResponse,
@@ -144,6 +145,27 @@ export function reportPickupPin(
  * back only ever lived in navigation state, which dies with the process. Asked on every launch;
  * `null` most of the time, and that is a normal answer rather than an error.
  */
+/**
+ * `POST /driver/bookings/:id/extension/{accept,decline}` — the driver's answer to a customer
+ * asking them to stay one more day.
+ *
+ * TWO URLS RATHER THAN A BODY FLAG, so a yes and a no cannot be produced by the same malformed
+ * request. Accepting is what makes the day billable: the customer pays for it at completion and
+ * this driver is credited the per-day amount the booking was priced at.
+ *
+ * Declining costs nobody anything, and neither does letting it lapse — the request has a window,
+ * after which it expires on its own.
+ */
+export function respondToExtension(
+  bookingId: string,
+  accept: boolean,
+): Promise<BookingExtensionDto> {
+  return request<BookingExtensionDto>(
+    `${ROLE_PREFIX}/bookings/${bookingId}/extension/${accept ? 'accept' : 'decline'}`,
+    { method: 'POST', token: getAccessToken() ?? undefined },
+  );
+}
+
 export function getCurrentTrip(signal?: AbortSignal): Promise<CurrentDriverTripResponse> {
   return request<CurrentDriverTripResponse>(`${ROLE_PREFIX}/bookings/current`, {
     token: getAccessToken() ?? undefined,

@@ -37,6 +37,7 @@ import { formatTime } from '@/lib/format';
 import { useCustomer } from '@/features/customers/hooks/useCustomer';
 import { useDriverDetails } from '@/features/drivers/hooks/useDriverDetails';
 import { useBooking, useBookingEvents } from '../hooks/useBookings';
+import { BookingActions } from './BookingActions';
 import { formatBookingDate, formatBookingMobile } from '../lib/format';
 import {
   paymentStatusLabel,
@@ -89,6 +90,7 @@ export function BookingDetailsScreen() {
               cannot exist yet is worse than one that was never drawn (the same rule the bookings
               table already applies to Edit).
             */}
+            {booking !== undefined && <BookingActions booking={booking} />}
           </div>
         }
       />

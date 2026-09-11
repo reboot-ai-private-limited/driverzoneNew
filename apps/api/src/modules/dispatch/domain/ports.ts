@@ -33,6 +33,27 @@ export interface OfferRepositoryPort {
   driverIdsOffered(bookingId: string): Promise<string[]>;
 
   /**
+   * Is anything still ringing in this wave?
+   *
+   * FALSE MEANS THE WAVE IS SPENT and there is nothing left to wait for. Declining used to do
+   * nothing but write a row: the booking then sat out the whole TTL ringing nobody, which is most
+   * visible on the favourite wave, where one driver saying no could cost a customer a full minute
+   * of "Searching…" for a decision that was already made.
+   */
+  hasLiveOffersInWave(bookingId: string, wave: number): Promise<boolean>;
+
+  /**
+   * Has a LATER wave already been rung for this booking?
+   *
+   * The guard on a stale wave timeout. Once the last decline in a wave advances the search, that
+   * wave's BullMQ job is still sitting in Redis and will fire on schedule — and without this it
+   * would widen the search a second time, ringing an extra wave nobody asked for. Deliberately a
+   * repository question rather than a job deletion: it stays true even if the Redis delete fails,
+   * and there is no second place for the two to disagree.
+   */
+  hasOffersAfterWave(bookingId: string, wave: number): Promise<boolean>;
+
+  /**
    * Answers an offer, but only if it is still `SENT` and unexpired.
    *
    * A compare-and-swap: a driver tapping Accept as the TTL expires must resolve to exactly one
@@ -56,6 +77,20 @@ export interface OfferRepositoryPort {
   lapseWave(bookingId: string, wave: number, now: Date): Promise<DispatchOffer[]>;
 
   recordDelivery(offerId: string, via: DeliveryChannel): Promise<void>;
+
+  /**
+   * Records that an admin handed this booking to this driver by hand.
+   *
+   * WRITTEN STRAIGHT AS `ACCEPTED`, because it already has been — the booking claim committed
+   * before this is called. There was no ring, so there is nothing to expire and no TTL that could
+   * mean anything; `expiresAt` is set to now for the same reason.
+   *
+   * It exists for two jobs: the assignment is visible in the same place every other assignment is,
+   * and `driverIdsOffered` covers this driver so a later wave cannot ring them for a booking they
+   * were already given. Idempotent against the `{ bookingId, driverId }` unique index — assigning
+   * the same driver twice records one row, not an error.
+   */
+  recordManualAssignment(bookingId: string, driverId: string): Promise<void>;
 }
 
 export interface DriverPoolQuery {
@@ -75,6 +110,19 @@ export interface DriverPoolQuery {
   vehicleType: VehicleTypePreference | null;
   /** Drivers already rung for this booking. */
   excludeDriverIds: readonly string[];
+  /**
+   * When present, NOBODY OUTSIDE THIS LIST is considered. The favourite wave, and nothing else —
+   * every ordinary wave leaves it undefined.
+   *
+   * It NARROWS and never widens. Every other gate in this query still applies to the drivers in
+   * it: a favourite who is off duty, unverified, in debt, out of position or not competent for
+   * this car is no more eligible than a stranger in the same state. Being chosen by a customer
+   * is a preference about people, not an exemption from being able to do the job.
+   *
+   * An EMPTY ARRAY means nobody, which is why the caller skips the query entirely rather than
+   * passing one — see `runWave.usecase.ts`.
+   */
+  restrictToDriverIds?: readonly string[] | undefined;
   /** A driver owing more than this is not offered work until they settle. */
   maxNegativeBalancePaise: number;
   now: Date;

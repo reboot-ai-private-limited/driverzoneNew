@@ -9,6 +9,8 @@ export interface CustomerControllers {
   current: RequestHandler;
   get: RequestHandler;
   cancel: RequestHandler;
+  /** `POST /customer/bookings/:id/extend` — asks the driver for one more day. */
+  extend: RequestHandler;
 }
 
 export interface DriverControllers {
@@ -23,6 +25,8 @@ export interface DriverControllers {
   start: RequestHandler;
   complete: RequestHandler;
   cancel: RequestHandler;
+  acceptExtension: RequestHandler;
+  declineExtension: RequestHandler;
 }
 
 export interface AdminControllers {
@@ -30,6 +34,7 @@ export interface AdminControllers {
   get: RequestHandler;
   events: RequestHandler;
   forceArrive: RequestHandler;
+  cancel: RequestHandler;
 }
 
 /** Mounted at `/api/customer/bookings`. */
@@ -44,6 +49,9 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
   router.get('/current', handlers.current);
   router.get('/:id', handlers.get);
   router.post('/:id/cancel', handlers.cancel);
+  /* Buying one more day on an outstation trip already under way. The driver has to agree — see
+     `extendBooking.usecase.ts` — so this opens a request rather than charging anything. */
+  router.post('/:id/extend', handlers.extend);
 
   return router;
 }
@@ -71,6 +79,10 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
   router.post('/:id/start', handlers.start);
   router.post('/:id/complete', handlers.complete);
   router.post('/:id/cancel', handlers.cancel);
+  /* The driver's answer to a day extension. Two URLs rather than a body flag, so a yes and a no
+     cannot be produced by the same malformed request. */
+  router.post('/:id/extension/accept', handlers.acceptExtension);
+  router.post('/:id/extension/decline', handlers.declineExtension);
 
   return router;
 }
@@ -84,6 +96,11 @@ export function buildAdminRouter(handlers: AdminControllers): Router {
   router.get('/:id', handlers.get);
   router.get('/:id/events', handlers.events);
   router.post('/:id/force-arrive', handlers.forceArrive);
+  /*
+   * Ops killing a trip. Charges nobody — see `CancelBookingByAdminUseCase` — which is why it does
+   * not share a handler with the customer's cancel despite taking the identical body.
+   */
+  router.post('/:id/cancel', handlers.cancel);
 
   return router;
 }

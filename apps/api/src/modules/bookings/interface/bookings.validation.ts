@@ -25,6 +25,13 @@ export const createBookingSchema = z
      */
     carCategory: z.enum(CAR_CATEGORIES),
     vehicleType: z.enum(VEHICLE_TYPE_PREFERENCES),
+    /*
+     * OPTIONAL WITH A DEFAULT, unlike the two above, and for the opposite reason. A missing car
+     * category is a question nobody answered; a missing favourites flag is an answer — the app
+     * that did not send it is one that predates the feature, and it wants the dispatch behaviour
+     * it has always had. `.strict()` still rejects anything else.
+     */
+    preferFavouriteDrivers: z.boolean().optional().default(false),
   })
   .strict();
 

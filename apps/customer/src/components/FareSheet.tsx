@@ -16,12 +16,14 @@ import { CarChoice } from '@/components/CarChoice';
 import { Checkbox } from '@/components/Checkbox';
 import { FareOptionCard } from '@/components/FareOptionCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { ToggleSwitch } from '@/components/ToggleSwitch';
 import {
   needsDriverExpenseAgreement,
   tripFacts,
   unavailableTitle,
   useQuoteCountdown,
 } from '@/features/booking/quote';
+import { useFavouriteDrivers } from '@/features/favourites/useFavouriteDrivers';
 import type { TripPoint } from '@/features/booking/tripPoint';
 import type { TripQuote } from '@/features/booking/useTripQuote';
 import { ApiError } from '@/lib/api/ApiError';
@@ -95,6 +97,18 @@ export function FareSheet({
    */
   const [carCategory, setCarCategory] = useState<CarCategory | null>(null);
   const [vehicleType, setVehicleType] = useState<VehicleTypePreference | null>(null);
+  /**
+   * Ring this customer's own drivers before anyone else.
+   *
+   * OFF BY DEFAULT AND NOT REMEMBERED between bookings. A favourite is worth a slightly longer
+   * wait for the trip a customer chose it for; defaulting it on would quietly make every booking
+   * slower for a preference they set once, months ago, about one driver.
+   *
+   * NOTHING HERE RE-QUOTES. Unlike every control in `TripOptions`, this does not touch the price —
+   * which is exactly why it lives beside the car choice rather than up there with the ones that do.
+   */
+  const [preferFavouriteDrivers, setPreferFavouriteDrivers] = useState(false);
+  const favourites = useFavouriteDrivers();
   const carChosen = carCategory !== null && vehicleType !== null;
 
   /**
@@ -160,6 +174,7 @@ export function FareSheet({
           paymentMode: 'CASH',
           carCategory,
           vehicleType,
+          preferFavouriteDrivers,
         },
         idempotencyKey.current,
       );
@@ -330,6 +345,40 @@ export function FareSheet({
           onCategory={setCarCategory}
           onVehicleType={setVehicleType}
         />
+      ) : null}
+
+      {/*
+        OFFERED ONLY TO A CUSTOMER WHO HAS FAVOURITES. A switch that can do nothing is worse than
+        no switch: it promises a feature and then behaves identically either way. Someone who has
+        never added one finds this row after their first trip, next to the driver they just rode
+        with, which is where the heart is.
+      */}
+      {favourites.favourites.length > 0 &&
+      card !== null &&
+      unavailable === null &&
+      !query.isError &&
+      !countdown.expired ? (
+        <Pressable
+          onPress={() => setPreferFavouriteDrivers((on) => !on)}
+          style={styles.favouriteRow}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: preferFavouriteDrivers }}
+        >
+          <Feather name="heart" size={15} color={colors.fg} style={styles.noticeIcon} />
+          <View style={styles.flex}>
+            <Text style={styles.favouriteLabel}>Ring my favourite drivers first</Text>
+            {/* Says what happens when they do NOT take it, because that is the question a
+                customer actually has about a switch like this. */}
+            <Text style={styles.favouriteHint}>
+              If none of them takes it, we look for everyone else straight away.
+            </Text>
+          </View>
+          <ToggleSwitch
+            value={preferFavouriteDrivers}
+            onChange={setPreferFavouriteDrivers}
+            accessibilityLabel="Ring my favourite drivers first"
+          />
+        </Pressable>
       ) : null}
 
       {/*
@@ -511,6 +560,18 @@ const styles = StyleSheet.create({
   },
   noticeBad: { backgroundColor: '#FDECEC', borderColor: '#F5C2C2' },
   noticeIcon: { marginRight: space.sm, marginTop: 1 },
+
+  favouriteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgSunken,
+    borderRadius: radius.md,
+    padding: space.md,
+    marginTop: space.md,
+    gap: space.sm,
+  },
+  favouriteLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.semibold },
+  favouriteHint: { ...text.caption, color: colors.muted, marginTop: 2 },
   noticeTitle: { ...text.label, color: colors.fg },
   noticeTitleBad: { ...text.label, color: colors.danger },
   noticeBody: { ...text.caption, color: colors.fg, marginTop: 2 },

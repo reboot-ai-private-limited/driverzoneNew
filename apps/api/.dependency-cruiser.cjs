@@ -56,6 +56,12 @@ const MODULE_TIERS = [
   ['packages'], //                     packages, variants, prices
   ['quotes'], //                       zones + packages + pricing
   ['bookings'], //                     quotes + pricing + identity + notifications + ledger
+  // Between the two, and it has to be both. It reads `bookings` because a customer may only
+  // favourite a driver they have really ridden with — without that proof the endpoint is an
+  // oracle for arbitrary driver ids — and `dispatch` reads IT because the favourite wave is the
+  // first thing that rings. That pair is why favourites is a module and not an array on the
+  // customer document: `identity` is at tier 1 and cannot see a booking from there.
+  ['favourites'], //                   identity (driver cards) + bookings (proof of a shared trip)
   // Same tier, and they never speak: dispatch finds a driver for a booking, reviews reads one
   // that is already over. Both need `bookings` below them and nothing needs either.
   ['dispatch', 'reviews'], //          dispatch: the only module permitted to set bookings.driverId

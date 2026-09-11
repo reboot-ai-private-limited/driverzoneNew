@@ -11,7 +11,15 @@ import mongoose, { Schema } from 'mongoose';
 
 // ─── Fare adjustments ────────────────────────────────────────────────────────────────────────
 
-export const ADJUSTMENT_TYPES = ['WAITING_CHARGE'] as const;
+/**
+ * `DAY_EXTENSION` holds the TOTAL of every accepted extension on the booking, in one row.
+ *
+ * That is forced by the `{ bookingId, type }` unique index below, and it is the right shape
+ * anyway: the receipt wants one line saying "Extended — 2 extra days", not two identical rows a
+ * customer has to add up. The individual days live in `bookingExtensions`, each with the driver's
+ * answer against it, which is where a dispute would actually be settled.
+ */
+export const ADJUSTMENT_TYPES = ['WAITING_CHARGE', 'DAY_EXTENSION'] as const;
 
 export interface FareAdjustmentDoc {
   _id: mongoose.Types.ObjectId;

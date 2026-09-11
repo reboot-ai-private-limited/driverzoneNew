@@ -1,7 +1,9 @@
 import { logger } from '../../../../shared/logging/logger.js';
 import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
-import type { BookingDispatchContract } from '../../../bookings/bookings.public.js';
+import type { Booking, BookingDispatchContract } from '../../../bookings/bookings.public.js';
+import type { FavouriteDriversContract } from '../../../favourites/favourites.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
+import type { DriverCandidate } from '../../domain/offer.entity.js';
 import { radiusForWave, rankCandidates } from '../../domain/offer.entity.js';
 import type { DriverPoolPort, NewOffer, OfferRepositoryPort } from '../../domain/ports.js';
 
@@ -17,6 +19,16 @@ export type WaveOutcome =
   | { rang: false; reason: 'NO_CANDIDATES' | 'NOT_SEARCHING' | 'NOT_FOUND' | 'GAVE_UP' };
 
 /**
+ * WAVE 0 — the customer's own drivers, rung before the radius ladder starts.
+ *
+ * NUMBERED ZERO RATHER THAN SHIFTING EVERY OTHER WAVE UP, which is what makes it almost free: the
+ * offer rows, the BullMQ timeout job, the `driverIdsOffered` exclusion that stops a favourite who
+ * ignored it being rung again, and `ExpireWaveUseCase`'s `wave + 1` all work unchanged, and
+ * `wave + 1` from here lands exactly on the ordinary first wave.
+ */
+const FAVOURITE_WAVE = 0;
+
+/**
  * Rings one wave of drivers.
  *
  * THE TIMER IS NEVER A `setTimeout`. A wave's TTL has to survive a deploy, and an in-memory timer
@@ -26,7 +38,8 @@ export type WaveOutcome =
  *
  * WIDENING IS IMMEDIATE WHEN NOBODY IS FOUND. A wave with no candidates does not sit out its TTL
  * ringing nobody; it goes straight to the next radius. Only a wave that actually rang someone
- * spends the time.
+ * spends the time. The favourite wave follows the same rule: a customer whose favourites are all
+ * off duty waits no longer than one who named none.
  */
 export class RunDispatchWaveUseCase {
   constructor(
@@ -36,9 +49,16 @@ export class RunDispatchWaveUseCase {
     private readonly settings: SettingsReadContract,
     private readonly notifications: NotificationsContract,
     private readonly scheduleTimeout: WaveTimeoutScheduler,
+    /** Read live, not frozen onto the booking — see `Booking.preferFavouriteDrivers`. */
+    private readonly favourites: FavouriteDriversContract,
   ) {}
 
-  async execute(bookingId: string, startWave = 1): Promise<WaveOutcome> {
+  /**
+   * `startWave` defaults to the FAVOURITE wave, so the dispatch job, the sweeper and an admin
+   * retry all enter at the same door. Anything above 0 skips favourites entirely, which is what a
+   * wave timeout wants: that wave has already been rung and answered.
+   */
+  async execute(bookingId: string, startWave = FAVOURITE_WAVE): Promise<WaveOutcome> {
     const booking = await this.bookings.findById(bookingId);
     if (booking === null) return { rang: false, reason: 'NOT_FOUND' };
 
@@ -56,10 +76,22 @@ export class RunDispatchWaveUseCase {
     const maxWaves = snapshot['dispatch.max_waves'];
     const ttlSeconds = snapshot['dispatch.offer_ttl_seconds'];
     const waveSize = snapshot['dispatch.wave_size'];
+    const maxNegativeBalancePaise = rupeesToPaise(snapshot['driver.max_negative_balance']);
 
     const alreadyOffered = await this.offers.driverIdsOffered(bookingId);
 
-    for (let wave = startWave; wave <= maxWaves; wave += 1) {
+    if (startWave <= FAVOURITE_WAVE) {
+      const rang = await this.ringFavourites(current, {
+        alreadyOffered,
+        maxNegativeBalancePaise,
+        radiusMetres: snapshot['dispatch.favourite_radius_m'],
+        ttlSeconds: snapshot['dispatch.favourite_offer_ttl_seconds'],
+      });
+
+      if (rang !== null) return rang;
+    }
+
+    for (let wave = Math.max(1, startWave); wave <= maxWaves; wave += 1) {
       const radiusMetres = radiusForWave(wave, snapshot['dispatch.wave_base_radius_m']);
 
       const candidates = await this.pool.findEligible({
@@ -69,7 +101,7 @@ export class RunDispatchWaveUseCase {
         carCategory: current.carCategory,
         vehicleType: current.vehicleType,
         excludeDriverIds: alreadyOffered,
-        maxNegativeBalancePaise: rupeesToPaise(snapshot['driver.max_negative_balance']),
+        maxNegativeBalancePaise,
         now: new Date(),
       });
 
@@ -79,51 +111,8 @@ export class RunDispatchWaveUseCase {
       }
 
       const chosen = rankCandidates(candidates, radiusMetres).slice(0, waveSize);
-      const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
 
-      const created = await this.offers.createMany(
-        chosen.map(
-          (candidate): NewOffer => ({
-            bookingId,
-            driverId: candidate.driverId,
-            wave,
-            score: candidate.score,
-            distanceMetres: candidate.distanceMetres,
-            expiresAt,
-          }),
-        ),
-      );
-
-      /*
-       * Rung one at a time and tolerant of failure. A stale device token must not abandon the
-       * whole wave — the others still need ringing, and the driver who could not be reached is
-       * recorded as `NONE` so the lapse is attributed to us rather than to them.
-       */
-      await Promise.all(
-        created.map(async (offer) => {
-          try {
-            const via = await this.notifications.sendOffer(offer.driverId, {
-              offerId: offer.id,
-              bookingId,
-              reference: current.reference,
-              expiresAt,
-              earningPaise: current.fareSnapshot.fare.split.driverPaise,
-              pickupAddress: current.pickupAddress,
-              dropAddress: current.dropAddress,
-              scheduledAt: current.scheduledAt,
-              serviceType: current.serviceType,
-            });
-            await this.offers.recordDelivery(offer.id, via);
-          } catch (error) {
-            logger.warn({ err: error, offerId: offer.id }, 'could not deliver an offer');
-            await this.offers.recordDelivery(offer.id, 'NONE');
-          }
-        }),
-      );
-
-      await this.scheduleTimeout({ bookingId, wave, delayMs: ttlSeconds * 1000 });
-
-      return { rang: true, wave, driverCount: created.length };
+      return this.ring(current, wave, chosen, ttlSeconds);
     }
 
     /*
@@ -144,6 +133,121 @@ export class RunDispatchWaveUseCase {
 
     return { rang: false, reason: 'GAVE_UP' };
   }
+
+  /**
+   * Wave 0, or `null` meaning "nothing rung, carry on with the ordinary search".
+   *
+   * NULL RATHER THAN A `WaveOutcome` for the skip cases, because none of them is an outcome the
+   * booking has reached — the search has not failed, it has simply not started. Every one of them
+   * falls straight through to the radius ladder with no delay:
+   *
+   *   - the customer did not ask for favourites on this booking;
+   *   - they asked but have none;
+   *   - they have some, and not one of them is eligible and in range right now.
+   *
+   * The whole list is offered, NOT `wave_size` of it. The cap on favourites (`MAX_FAVOURITES`) is
+   * what bounds this, and truncating a customer's own chosen drivers by a ranking they cannot see
+   * would be the one place in dispatch where the score decides something a person already decided.
+   */
+  private async ringFavourites(
+    booking: Booking,
+    context: {
+      alreadyOffered: readonly string[];
+      maxNegativeBalancePaise: number;
+      radiusMetres: number;
+      ttlSeconds: number;
+    },
+  ): Promise<WaveOutcome | null> {
+    if (!booking.preferFavouriteDrivers) return null;
+
+    const favouriteIds = await this.favourites.favouriteDriverIds(booking.customerId);
+    if (favouriteIds.length === 0) return null;
+
+    const candidates = await this.pool.findEligible({
+      pickup: booking.pickup,
+      radiusMetres: context.radiusMetres,
+      requireHillVerified: booking.fareSnapshot.source.terrain === 'HILL',
+      carCategory: booking.carCategory,
+      vehicleType: booking.vehicleType,
+      excludeDriverIds: context.alreadyOffered,
+      restrictToDriverIds: favouriteIds,
+      maxNegativeBalancePaise: context.maxNegativeBalancePaise,
+      now: new Date(),
+    });
+
+    if (candidates.length === 0) {
+      logger.info(
+        { bookingId: booking.id, favourites: favouriteIds.length },
+        'no favourite driver is available — going straight to the ordinary search',
+      );
+      return null;
+    }
+
+    return this.ring(
+      booking,
+      FAVOURITE_WAVE,
+      rankCandidates(candidates, context.radiusMetres),
+      context.ttlSeconds,
+    );
+  }
+
+  /**
+   * Creates the offers, rings them, and starts the clock. Shared by wave 0 and every radius wave
+   * so the two cannot drift — the favourite wave differs only in WHO is in `chosen` and for how
+   * long, never in what happens to them.
+   */
+  private async ring(
+    booking: Booking,
+    wave: number,
+    chosen: ReadonlyArray<DriverCandidate & { score: number }>,
+    ttlSeconds: number,
+  ): Promise<WaveOutcome> {
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+
+    const created = await this.offers.createMany(
+      chosen.map(
+        (candidate): NewOffer => ({
+          bookingId: booking.id,
+          driverId: candidate.driverId,
+          wave,
+          score: candidate.score,
+          distanceMetres: candidate.distanceMetres,
+          expiresAt,
+        }),
+      ),
+    );
+
+    /*
+     * Rung one at a time and tolerant of failure. A stale device token must not abandon the
+     * whole wave — the others still need ringing, and the driver who could not be reached is
+     * recorded as `NONE` so the lapse is attributed to us rather than to them.
+     */
+    await Promise.all(
+      created.map(async (offer) => {
+        try {
+          const via = await this.notifications.sendOffer(offer.driverId, {
+            offerId: offer.id,
+            bookingId: booking.id,
+            reference: booking.reference,
+            expiresAt,
+            earningPaise: booking.fareSnapshot.fare.split.driverPaise,
+            pickupAddress: booking.pickupAddress,
+            dropAddress: booking.dropAddress,
+            scheduledAt: booking.scheduledAt,
+            serviceType: booking.serviceType,
+          });
+          await this.offers.recordDelivery(offer.id, via);
+        } catch (error) {
+          logger.warn({ err: error, offerId: offer.id }, 'could not deliver an offer');
+          await this.offers.recordDelivery(offer.id, 'NONE');
+        }
+      }),
+    );
+
+    await this.scheduleTimeout({ bookingId: booking.id, wave, delayMs: ttlSeconds * 1000 });
+
+    return { rang: true, wave, driverCount: created.length };
+  }
 }
 
 /**
@@ -162,6 +266,15 @@ export class ExpireWaveUseCase {
   async execute(bookingId: string, wave: number): Promise<void> {
     const booking = await this.bookings.findById(bookingId);
     if (booking === null || booking.status !== 'SEARCHING') return;
+
+    /*
+     * THE STALE-TIMEOUT GUARD. A wave whose drivers all declined has already been superseded by
+     * the next one (`DeclineOfferUseCase`), but its BullMQ job is still in Redis and fires on
+     * schedule regardless. Without this it would widen the search a second time, ringing a wave
+     * nobody asked for — most visibly after the favourite wave, whose one driver saying no is the
+     * common case.
+     */
+    if (await this.offers.hasOffersAfterWave(bookingId, wave)) return;
 
     const lapsed = await this.offers.lapseWave(bookingId, wave, new Date());
 

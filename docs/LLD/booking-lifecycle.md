@@ -178,6 +178,80 @@ field is what makes that mechanical rather than a convention.
 Cancellation charges go to a separate `cancellation_charges` table. They never modify
 `fare_snapshot` (invariant **B-1**).
 
+## Admin cancellation
+
+`POST /admin/bookings/:id/cancel { reason }` → `CANCELLED_BY_ADMIN`.
+
+**NOBODY IS CHARGED.** Not the customer, not the driver. An admin cancellation is the company
+deciding a trip will not happen: there is no misbehaviour to deter on either side, so there is no
+fee ladder to read, no `cancellationCharges` row, no wallet debt and no ledger penalty. The
+customer is refunded in full through the same helper the customer cancellation uses with a fee of
+zero; a cash booking refunds nothing because nothing was collected.
+
+**The reason is mandatory and reaches both parties verbatim.** A trip that vanishes unexplained is
+a support call from the customer and a second from the driver — the work ops was trying to save.
+The driver's message says explicitly that it does not count against them, because they cannot
+otherwise tell it from their own cancellation, which does carry a penalty.
+
+**The transition table is checked explicitly here**, unlike every other cancellation. Those pass a
+LITERAL `from` (`'STARTED'`, `'ARRIVED'`), so the compare-and-swap refuses anything else and the
+table is enforced by the caller naming the one legal source status. An admin may cancel from six
+different statuses, so `from` is whatever the booking is in — and the swap would then match ANY
+status, including `COMPLETED`, un-finishing a trip already paid for and settled into a driver's
+ledger. `canTransition()` is called before the swap for exactly that reason.
+
+## Day extensions
+
+An outstation trip already under way can buy another day. Four states, on their own collection
+(`bookingExtensions`), one row per day:
+
+```
+PENDING ──accept──→ ACCEPTED     billable, settles at completion
+   │
+   ├────decline───→ DECLINED     charges nobody
+   └────the sweep─→ EXPIRED      charges nobody
+```
+
+**The customer asks; the driver agrees.** An extra day commits somebody else's next 24 hours, so
+an extension is a request and not a purchase. Nothing is charged and nothing is promised until the
+driver accepts. Both of their answers are free — declining costs them nothing and does not touch
+their acceptance rate.
+
+**Priced from the frozen snapshot, frozen again onto the row.** `fareSnapshot.fare.perDay` carries
+the un-multiplied band fare and driver amount the booking was agreed at; the request copies both
+onto its own row. A package repriced mid-trip therefore moves neither what the customer was shown
+nor what the driver was promised. A booking with no `perDay` — every outstation booking predating
+the field, and every incity one — is refused rather than having a price derived from its total.
+
+**One pending request at a time**, enforced by a partial unique index on `{ bookingId }` scoped to
+`status: 'PENDING'`. A plain unique would allow only one extension ever, which is wrong; the real
+rule is "you may ask again, but not while an earlier ask is unanswered", and it is also what makes
+a double-tapped button one day rather than two.
+
+**Expiry is the sweep, not a queue job** — the same shape `reviews` uses to publish a review whose
+blind window closed. Nothing needs a per-request timer, and one indexed query a minute survives a
+Redis flush that a scheduled job would not. The window is
+`booking.extension_request_ttl_minutes` (30 by default): much longer than a dispatch offer's ring
+time, because this reaches a driver who is driving, eating or asleep in another town rather than
+one waiting for work.
+
+**It settles at completion**, alongside the waiting charge:
+
+- one `DAY_EXTENSION` adjustment row holding the TOTAL of the accepted days, labelled
+  `Extended — 2 extra days`. Forced by the `{ bookingId, type }` unique index, and better anyway:
+  one receipt line beats two identical ones.
+- ONE settlement charge covering waiting **and** extensions together. `settle-${bookingId}` is
+  derived from the booking so a retried completion cannot charge twice — which means two separate
+  charges under that key would silently collect only the first.
+- an `EXTENSION_EARNING` ledger row for the driver, at the per-day amount frozen on the request.
+  Unlike `WAITING_EARNING` it IS commissioned: an extra day is a day of the package, not
+  compensation for time the company did nothing to earn.
+- a cash driver's `CASH_COLLECTED` figure includes it, or they are recorded as holding less than
+  they actually took.
+
+**What it does not do:** move the booking's return date. `Booking` has no `returnAt` — the return
+instant is a quote input only — so an extension adds days and money, not a new date.
+
 ## Scheduled bookings
 
 `is_scheduled = true` when `scheduled_at > now() + 60 minutes`.

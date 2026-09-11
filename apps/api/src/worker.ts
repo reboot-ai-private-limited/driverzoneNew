@@ -175,6 +175,15 @@ async function runSweep(containers: AppContainers): Promise<void> {
       if (published > 0) logger.info({ published }, 'published reviews whose window elapsed');
 
       /*
+       * Day-extension requests the driver never answered. Like the reviews above and unlike the
+       * two before them, this is not a safety net for a job that failed — nothing was ever
+       * scheduled. A request lapses on the clock alone, and the sweep is the clock. Nobody is
+       * charged for one that lapses.
+       */
+      const lapsed = await containers.bookings.expireStaleExtensions(now, 100);
+      if (lapsed > 0) logger.info({ lapsed }, 'day extension requests lapsed unanswered');
+
+      /*
        * Drivers whose handset stopped reporting — docs/LLD/driver-app.md S-1.
        *
        * The only failure in this sweep that no amount of client code can prevent: a force-stop, an

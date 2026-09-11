@@ -26,6 +26,7 @@ import {
   type RideHistoryRow,
   type RideStatus,
 } from '@/features/rides/rideHistory';
+import { rebookParamsForPoints } from '@/features/booking/rebook';
 import { listBookings } from '@/lib/api/endpoints/bookings';
 import { formatPaise } from '@/lib/money';
 import { keys } from '@/lib/query/keys';
@@ -440,6 +441,29 @@ function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
       <View style={styles.rideRight}>
         <Text style={styles.ridePrice}>{ride.totalDisplay}</Text>
         <Feather name="chevron-right" size={16} color={colors.faint} />
+
+        {/*
+          BOOK AGAIN, INSIDE THE ROW'S OWN PRESSABLE. `Pressable` nests, and the inner one wins —
+          so this takes the tap without also opening the detail screen behind it. Hidden while a
+          trip is RUNNING: rebooking the ride you are sitting in is not a thing to offer.
+        */}
+        {ride.status === 'RUNNING' ? null : (
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/home',
+                params: rebookParamsForPoints(ride.pickupPoint, ride.dropPoint),
+              })
+            }
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Book this trip again, ${ride.pickup} to ${ride.drop}`}
+            style={({ pressed }) => [styles.rebookChip, pressed && styles.rebookChipPressed]}
+          >
+            <Feather name="repeat" size={12} color={colors.fg} />
+            <Text style={styles.rebookChipLabel}>Book again</Text>
+          </Pressable>
+        )}
       </View>
     </Pressable>
   );
@@ -599,8 +623,22 @@ const styles = StyleSheet.create({
   rideRouteText: { flex: 1, justifyContent: 'space-between' },
   ridePlace: { ...text.caption, color: colors.muted },
 
-  rideRight: { alignItems: 'flex-end', justifyContent: 'space-between', marginLeft: space.sm },
+  rideRight: { alignItems: 'flex-end', justifyContent: 'space-between', marginLeft: space.sm, gap: space.sm },
   ridePrice: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
+
+  rebookChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: space.sm,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bgSunken,
+  },
+  rebookChipPressed: { backgroundColor: colors.brandSoft, borderColor: colors.borderStrong },
+  rebookChipLabel: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
 
   sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.sm },
   sortOption: {

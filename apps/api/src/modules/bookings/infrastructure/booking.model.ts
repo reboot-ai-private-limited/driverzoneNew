@@ -28,6 +28,7 @@ export interface BookingDoc {
   distanceKm?: number | null;
   carCategory?: string | null;
   vehicleType?: string | null;
+  preferFavouriteDrivers?: boolean;
   walletCreditPaise?: number;
   walletDebtPaise?: number;
   quoteId: mongoose.Types.ObjectId;
@@ -83,6 +84,16 @@ const bookingSchema = new Schema<BookingDoc>(
      */
     carCategory: { type: String, enum: [...CAR_CATEGORIES, null], default: null },
     vehicleType: { type: String, enum: [...VEHICLE_TYPE_PREFERENCES, null], default: null },
+
+    /*
+     * Ring this customer's favourites first (dispatch's wave 0).
+     *
+     * DEFAULTS TO FALSE, NOT NULL, unlike the two above. Those are nullable because "never asked"
+     * and "no requirement" are genuinely different answers for a competency filter. This one has
+     * no such ambiguity: a booking that did not ask for favourites and a booking made before the
+     * feature existed want exactly the same behaviour, which is the one dispatch has always had.
+     */
+    preferFavouriteDrivers: { type: Boolean, default: false },
 
     /*
      * What the wallet did to this trip's price, frozen at creation. Never both non-zero — a

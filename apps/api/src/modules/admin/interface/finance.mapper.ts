@@ -93,6 +93,8 @@ const DIRECTION_BY_TYPE: Record<TransactionType, FinanceTransactionDto['directio
   DEBT_COLLECTED: 'IN',
   /** The driver's share of a fare. */
   TRIP_EARNING: 'OUT',
+  /** The driver's share of an extra day the customer bought mid-trip. */
+  EXTENSION_EARNING: 'OUT',
   WAITING_EARNING: 'OUT',
   BONUS: 'OUT',
   /** Cash leaving the company for the driver. */

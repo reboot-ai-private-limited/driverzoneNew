@@ -124,12 +124,29 @@ export class AcceptOfferUseCase {
 /**
  * A driver declines.
  *
- * Counted against their acceptance rate, unlike a loss — declining is a choice. It does not
- * advance the wave: the other drivers rung in this wave still have their TTL, and cutting it
- * short because one person said no would waste the others' chance to accept.
+ * Counted against their acceptance rate, unlike a loss — declining is a choice.
+ *
+ * ONE DECLINE DOES NOT ADVANCE THE WAVE; THE LAST ONE DOES. The other drivers rung in this wave
+ * still have their TTL, and cutting it short because one person said no would waste the others'
+ * chance to accept. But once nobody is left ringing, the wave has no one to wait for, and sitting
+ * out the rest of the TTL is a customer watching "Searching…" for a decision that has already
+ * been made. That was always slightly wrong; the favourite wave is what made it obvious, because
+ * a customer who names one driver gets a wave of one, and a single tap of Decline used to cost
+ * them the whole ring time.
+ *
+ * The superseded wave's timeout job is STILL IN REDIS and will fire on schedule. `ExpireWaveUseCase`
+ * is where that is made harmless — see the stale-timeout guard there.
  */
 export class DeclineOfferUseCase {
-  constructor(private readonly offers: OfferRepositoryPort) {}
+  constructor(
+    private readonly offers: OfferRepositoryPort,
+    private readonly bookings: BookingDispatchContract,
+    /**
+     * Injected as a thunk rather than the use case itself, because `RunDispatchWaveUseCase` is
+     * built after this one in the container and the two would otherwise be a construction cycle.
+     */
+    private readonly advanceToWave: (bookingId: string, wave: number) => Promise<unknown>,
+  ) {}
 
   async execute(offerId: string, driverId: string): Promise<void> {
     const offer = await this.offers.findById(offerId);
@@ -142,6 +159,30 @@ export class DeclineOfferUseCase {
       });
     }
 
-    await this.offers.respond(offerId, 'DECLINED', new Date());
+    const declined = await this.offers.respond(offerId, 'DECLINED', new Date());
+
+    /*
+     * `respond` is a compare-and-swap and returns null when it did not apply — the offer had
+     * already lapsed or been superseded. Nothing changed, so there is nothing to advance, and the
+     * job that DID resolve it owns what happens next.
+     */
+    if (declined === null) return;
+
+    if (await this.offers.hasLiveOffersInWave(offer.bookingId, offer.wave)) return;
+
+    /*
+     * Re-read rather than trusting the wave: another driver in this same wave may have accepted
+     * in the meantime, which also leaves nothing ringing. `runWave` checks this again for itself,
+     * so this is a cheap way to avoid the call, not the thing that makes it safe.
+     */
+    const booking = await this.bookings.findById(offer.bookingId);
+    if (booking === null || booking.status !== 'SEARCHING') return;
+
+    logger.info(
+      { bookingId: offer.bookingId, wave: offer.wave },
+      'every offer in the wave is answered — widening now rather than waiting out the TTL',
+    );
+
+    await this.advanceToWave(offer.bookingId, offer.wave + 1);
   }
 }

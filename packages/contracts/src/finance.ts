@@ -28,6 +28,15 @@ export const TRANSACTION_TYPES = [
   'TRIP_EARNING',
   /** Waiting time the customer paid for, credited to the driver IN FULL, uncommissioned. Positive. */
   'WAITING_EARNING',
+  /**
+   * An extra day the customer bought mid-trip and the driver agreed to. Positive.
+   *
+   * ITS OWN TYPE RATHER THAN A SECOND `TRIP_EARNING`, so a driver reading their earnings can see
+   * they were paid for the day they stayed on. Unlike `WAITING_EARNING` it IS commissioned — an
+   * extra day is a day of the package, priced at the same per-day driver amount the booking was
+   * agreed at, not compensation for time the company did nothing to earn.
+   */
+  'EXTENSION_EARNING',
   /** Commission taken separately, where it was not already netted off. Negative. */
   'COMMISSION_DEBIT',
   /** Cash the driver took from a customer. Negative — they are holding company money. */
@@ -68,6 +77,7 @@ export type TransactionType = (typeof TRANSACTION_TYPES)[number];
  */
 export const TRANSACTION_TYPE_LABELS: Record<TransactionType, string> = {
   TRIP_EARNING: 'Trip earning',
+  EXTENSION_EARNING: 'Extra day',
   WAITING_EARNING: 'Waiting time',
   COMMISSION_DEBIT: 'Commission',
   CASH_COLLECTED: 'Cash collected',

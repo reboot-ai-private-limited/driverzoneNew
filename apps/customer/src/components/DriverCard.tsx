@@ -2,6 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import type { BookingDto } from '@driverzone/contracts';
 import { type ReactElement, useState } from 'react';
 import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FavouriteHeart } from '@/components/FavouriteHeart';
 import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
@@ -25,7 +26,20 @@ type Driver = NonNullable<BookingDto['driver']>;
  * demo data this app used to carry, and each one that had no honest source was deleted rather
  * than filled in.
  */
-export function DriverCard({ driver }: { driver: Driver }): ReactElement {
+export function DriverCard({
+  driver,
+  /**
+   * Show the heart that adds this driver to the customer's favourites.
+   *
+   * A PROP RATHER THAN SOMETHING THIS CARD WORKS OUT, and false by default, because the rule
+   * behind it is the caller's to know: the API only accepts a driver the customer has COMPLETED a
+   * trip with. A heart on a trip still in progress would be a button that always failed.
+   */
+  favouritable = false,
+}: {
+  driver: Driver;
+  favouritable?: boolean;
+}): ReactElement {
   const [photoFailed, setPhotoFailed] = useState(false);
   const name = driver.name ?? 'Your driver';
   const showPhoto = driver.photo_url !== null && !photoFailed;
@@ -81,6 +95,8 @@ export function DriverCard({ driver }: { driver: Driver }): ReactElement {
           The call button sits beside the identity rather than under it, so the tap target is
           exactly where a thumb already is when the customer has decided to ring.
         */}
+        {favouritable ? <FavouriteHeart driverId={driver.id} /> : null}
+
         {driver.phone === null ? null : (
           <Pressable
             onPress={() => {

@@ -65,6 +65,16 @@ export default function SearchingScreen(): ReactElement {
 
   const copy = status === undefined ? null : tripStatusCopy(status);
 
+  /**
+   * The favourite wave is the first thing that rings, so while the booking is still SEARCHING and
+   * the customer asked for their own drivers, say so.
+   *
+   * ONLY WHILE SEARCHING, and it says the fall-through out loud. This is not a promise about who
+   * ends up driving — the search opens to everyone within the minute — and a line that read like
+   * one would be a broken promise most of the time.
+   */
+  const ringingFavourites = status === 'SEARCHING' && booking.data?.prefer_favourite_drivers === true;
+
   return (
     <View style={styles.root}>
       {booking.isPending ? (
@@ -89,8 +99,14 @@ export default function SearchingScreen(): ReactElement {
             <Radar />
 
             <Animated.View entering={FadeInDown.duration(260).delay(100)} style={styles.textBlock}>
-              <Text style={styles.title}>{copy?.title ?? 'Confirming your booking'}</Text>
-              <Text style={styles.body}>{copy?.body ?? 'This only takes a moment.'}</Text>
+              <Text style={styles.title}>
+                {ringingFavourites ? 'Ringing your favourite drivers' : (copy?.title ?? 'Confirming your booking')}
+              </Text>
+              <Text style={styles.body}>
+                {ringingFavourites
+                  ? 'If none of them takes it, we will look for everyone else straight away.'
+                  : (copy?.body ?? 'This only takes a moment.')}
+              </Text>
               <ElapsedChip />
             </Animated.View>
 

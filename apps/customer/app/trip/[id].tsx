@@ -22,6 +22,7 @@ import Animated, {
 import type { BookingDto, BookingStatus, CancelBookingResponse } from '@driverzone/contracts';
 import { CancelRide } from '@/components/CancelRide';
 import { DriverCard } from '@/components/DriverCard';
+import { ExtendDayCard } from '@/components/ExtendDayCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { formatTime } from '@/features/booking/schedule';
 import {
@@ -176,12 +177,20 @@ export default function TripScreen(): ReactElement {
               <Stagger index={2}>
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Your driver</Text>
-                  <DriverCard driver={data.driver} />
+                  {/* Only once the trip is over: a favourite needs a completed trip behind it,
+                      which is the same rule the API enforces. */}
+                  <DriverCard driver={data.driver} favouritable={data.status === 'COMPLETED'} />
                 </View>
               </Stagger>
             )}
 
+            {/* Above the booking details, because it is an ACTION on a live trip and those are a
+                read-only record of one. Renders nothing at all when there is nothing to say. */}
             <Stagger index={3}>
+              <ExtendDayCard booking={data} />
+            </Stagger>
+
+            <Stagger index={4}>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Booking details</Text>
                 <DetailRow
@@ -194,14 +203,14 @@ export default function TripScreen(): ReactElement {
               </View>
             </Stagger>
 
-            <Stagger index={4}>
+            <Stagger index={5}>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Trip progress</Text>
                 <ProgressTimeline booking={data} />
               </View>
             </Stagger>
 
-            <Stagger index={5}>
+            <Stagger index={6}>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Fare</Text>
                 {data.fare.lines.map((line) => (

@@ -77,6 +77,30 @@ export interface CreateBookingRequest {
    */
   carCategory: CarCategory;
   vehicleType: VehicleTypePreference;
+  /**
+   * Ring this customer's favourite drivers before anyone else.
+   *
+   * OPTIONAL AND FALSE BY DEFAULT, so a client that has never heard of favourites books exactly
+   * as it always did. When true, dispatch runs a wave 0 over the customer's favourites — wider
+   * than the first normal radius and with its own ring time — then falls through to the ordinary
+   * ladder the moment those drivers decline, ignore, or turn out not to be eligible. It is a
+   * PREFERENCE, never a restriction: no booking is left without a driver because a favourite was
+   * busy.
+   */
+  preferFavouriteDrivers?: boolean;
+}
+
+/** One day-extension request, as `POST .../extend` and the driver's accept/decline answer with. */
+export interface BookingExtensionDto {
+  id: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED';
+  /** What the customer pays for this one day, settled at completion. */
+  amount: Money;
+  /** What the DRIVER earns from it — rendered by the driver app when they are asked to confirm. */
+  driver_amount: Money;
+  /** When it lapses if the driver has not answered. A lapsed request charges nobody. */
+  expires_at: string;
+  requested_at: string;
 }
 
 export interface CreateBookingResponse {
@@ -123,6 +147,18 @@ export interface BookingDto {
    */
   car_category: CarCategory | null;
   vehicle_type: VehicleTypePreference | null;
+
+  /**
+   * Whether this booking asked for the customer's favourite drivers to be rung first.
+   *
+   * The apps use it for one thing: while a booking is still SEARCHING with no driver, the wait
+   * screen can say it is ringing the customer's own drivers rather than the generic line. It is
+   * NOT a promise about who ends up on the trip — the favourite wave falls through to everyone
+   * else within the minute — so no screen should render it as one after a driver is assigned.
+   *
+   * Always present, `false` on every booking made before favourites existed.
+   */
+  prefer_favourite_drivers: boolean;
 
   /**
    * Incity only, frozen at booking time. Outstation is null — a package there is a package
@@ -193,8 +229,48 @@ export interface BookingDto {
     total: Money;
   };
 
-  /** Charges decided after the quote — waiting time so far. Never edits `fare`. */
+  /** Charges decided after the quote — waiting time, extra days. Never edits `fare`. */
   adjustments: Array<{ type: string; label: string; amount: Money }>;
+
+  /**
+   * Buying another day on an outstation trip already under way.
+   *
+   * `null` ON EVERY BOOKING THAT IS NOT ONE — incity, not yet started, already finished. The apps
+   * render the whole block or none of it, so a null is "there is nothing to say here" rather than
+   * a state either of them has to reason about.
+   *
+   * `can_extend` IS THE SERVER'S ANSWER, not a hint. Five conditions decide it — started,
+   * outstation, has a driver, has a frozen day rate, nothing already pending — and an app
+   * re-deriving them is an app that eventually shows a button the server refuses. `reason` says
+   * why not, in words meant for the customer.
+   *
+   * `pending` is the request waiting on the driver. While it is set the customer is waiting, not
+   * charged: an extension costs nothing until the driver accepts, and nothing at all if they
+   * decline or never answer.
+   */
+  extension: {
+    can_extend: boolean;
+    /** Null when `can_extend` is true. */
+    reason: string | null;
+    /** What one more day would cost, when there is a day rate to quote it from. */
+    price: Money | null;
+  pending: {
+      id: string;
+      amount: Money;
+      expires_at: string;
+      /**
+       * What the DRIVER earns from this day. Present on a driver's read of their own trip and
+       * `null` on the customer's, for the same reason the two phone numbers come and go: it is
+       * the commission split, and a customer has no business being shown what their driver's cut
+       * of a package is. The server decides, not the screen — a figure withheld cannot be read
+       * out of a cached response.
+       */
+      driver_amount: Money | null;
+    } | null;
+    /** Extra days already agreed. `0` until a driver has accepted one. */
+    extra_days: number;
+    extra_amount: Money;
+  } | null;
 
   /**
    * What the customer's wallet did to this trip, frozen when it was booked.

@@ -47,7 +47,22 @@ export class MongoDriverPool implements DriverPoolPort {
       walletBalancePaise: { $gte: -query.maxNegativeBalancePaise },
     };
 
-    if (excluded.length > 0) match['_id'] = { $nin: excluded };
+    /*
+     * `$nin` (already rung this booking) and `$in` (the favourite wave's shortlist) can both apply
+     * at once, so they are merged into ONE `_id` clause rather than assigned over each other — a
+     * second `match['_id'] = …` would silently drop the first, and the one it would drop is the
+     * exclusion that stops a driver being rung twice.
+     */
+    const idClause: Record<string, unknown> = {};
+    if (excluded.length > 0) idClause['$nin'] = excluded;
+
+    if (query.restrictToDriverIds !== undefined) {
+      idClause['$in'] = query.restrictToDriverIds
+        .filter((id) => mongoose.isValidObjectId(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+    }
+
+    if (Object.keys(idClause).length > 0) match['_id'] = idClause;
 
     /*
      * `canDriveHillVerified`, NOT `canDriveHill`.

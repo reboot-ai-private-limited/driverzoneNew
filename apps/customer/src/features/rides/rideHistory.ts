@@ -1,4 +1,5 @@
 import type { BookingDto, BookingStatus } from '@driverzone/contracts';
+import type { TripPoint } from '@/features/booking/tripPoint';
 import { formatPaise } from '@/lib/money';
 
 /**
@@ -34,6 +35,16 @@ export interface RideHistoryRow {
   driverName: string | null;
   pickup: string;
   drop: string;
+  /**
+   * The two ends as COORDINATES, for "Book again".
+   *
+   * `pickup`/`drop` above are labels and nothing is ever decided from them — see `TripPoint`. A
+   * rebook has to hand home a real point, because `POST /quotes` resolves zones from lat/lng and
+   * re-geocoding an address string would be a second guess at a question this row already knows
+   * the answer to.
+   */
+  pickupPoint: TripPoint;
+  dropPoint: TripPoint;
   /** Fare plus adjustments, in paise. Sorting needs a number, not a formatted string. */
   totalPaise: number;
   /**
@@ -106,6 +117,12 @@ export function toRideHistoryRow(booking: BookingDto): RideHistoryRow {
     driverName: booking.driver?.name ?? null,
     pickup: booking.pickup.address,
     drop: booking.drop.address,
+    pickupPoint: {
+      lat: booking.pickup.lat,
+      lng: booking.pickup.lng,
+      address: booking.pickup.address,
+    },
+    dropPoint: { lat: booking.drop.lat, lng: booking.drop.lng, address: booking.drop.address },
     totalPaise,
     paidPaise: Math.max(
       0,

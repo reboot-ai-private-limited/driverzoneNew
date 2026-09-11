@@ -57,6 +57,27 @@ export interface FareSplit {
   companyPaise: number;
 }
 
+/**
+ * The day rate this fare was built from, kept so another day can be bought later.
+ *
+ * WHY IT HAS TO BE STORED. Everything else here is already MULTIPLIED — the BASE line is
+ * `farePaise × days` and `split.driverAmountPaise` likewise — so a frozen snapshot cannot be
+ * divided back into a day without knowing the count, and integer rounding means it could not be
+ * divided reliably even then. A booking that wants to buy one more day needs the price of one
+ * day exactly as it was agreed, and this is it.
+ *
+ * PER DAY, NOT MULTIPLIED. Both figures here are the single-day rate; `days` says how many the
+ * fare above actually charged for.
+ */
+export interface FareDayRate {
+  /** IST calendar days this fare charged for, both ends included. */
+  days: number;
+  /** The band's fare for ONE day. */
+  farePaise: number;
+  /** What the driver is paid for ONE day. */
+  driverAmountPaise: number;
+}
+
 export interface FareBreakdown {
   serviceType: 'INCITY' | 'OUTSTATION';
   /** Only the lines that are actually non-zero, except BASE. A ₹0 row on a receipt is noise. */
@@ -66,6 +87,14 @@ export interface FareBreakdown {
   taxPaise: number;
   totalPaise: number;
   split: FareSplit;
+  /**
+   * `null` ON INCITY, and that is not an omission. An hourly package has no day to sell — its
+   * unit is the variant ("3 Hours"), and inventing a day rate for it would be a number nobody
+   * agreed to. It is also `undefined` on every fare computed before day extensions existed, which
+   * reads the same way: that booking cannot be extended, and the endpoint says so rather than
+   * guessing a price.
+   */
+  perDay: FareDayRate | null;
 }
 
 /**

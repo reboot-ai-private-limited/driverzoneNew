@@ -93,6 +93,22 @@ export const COMMITTED_STATUSES: readonly BookingStatus[] = [
   'STARTED',
 ];
 
+/**
+ * The statuses an admin may move a booking OFF its driver from.
+ *
+ * `COMMITTED_STATUSES` MINUS `STARTED`, and the missing one is the whole point. A trip already
+ * under way cannot be handed to somebody else: the fare was quoted for one journey, the ledger
+ * pays one driver for it, and the customer's receipt names one. Ops moving a started trip is a
+ * cancellation and a new booking, and docs/LLD/dispatch-and-assignment.md says so explicitly —
+ * blurring the two breaks all three of those at once.
+ *
+ * Derived from the list above rather than typed out again, so a status added to one is a
+ * deliberate decision about the other rather than a copy somebody forgot.
+ */
+export const REASSIGNABLE_STATUSES: readonly BookingStatus[] = COMMITTED_STATUSES.filter(
+  (status) => status !== 'STARTED',
+);
+
 export interface Actor {
   type: BookingActorType;
   /** Null for SYSTEM — a sweeper and a wave timeout have no person behind them. */
@@ -153,6 +169,23 @@ export interface Booking {
    */
   carCategory: CarCategory | null;
   vehicleType: VehicleTypePreference | null;
+
+  /**
+   * The customer asked for their favourite drivers to be rung before anybody else.
+   *
+   * A PREFERENCE, NOT A RESTRICTION, and the distinction is the whole design: dispatch rings the
+   * favourites as wave 0 and then falls through to the ordinary radius ladder the moment they
+   * decline, ignore, or turn out to be ineligible. No booking is ever left without a driver
+   * because a favourite was busy.
+   *
+   * STORED ON THE BOOKING rather than read off the customer at dispatch time, because it is a
+   * decision the customer made about THIS trip. The list of favourites it resolves against is
+   * read live — that one is a preference about people, and the newest answer is the right one.
+   *
+   * False on every booking made before favourites existed, which is the correct reading: nobody
+   * asked for it.
+   */
+  preferFavouriteDrivers: boolean;
 
   /**
    * What the customer's wallet did to this trip's price, frozen at creation.

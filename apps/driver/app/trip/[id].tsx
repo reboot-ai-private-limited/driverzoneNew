@@ -26,6 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { CancelTripSheet } from '@/components/CancelTripSheet';
+import { ExtensionRequestCard } from '@/components/ExtensionRequestCard';
 import { OtpInput } from '@/components/OtpInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { RateCustomer } from '@/components/RateCustomer';
@@ -326,6 +327,10 @@ export default function TripScreen(): ReactElement {
             onNavigate={() => openMaps(booking.drop.lat, booking.drop.lng, booking.drop.address)}
           />
         </Animated.View>
+
+        {/* Directly under where they are going, because it is the one thing on this screen that
+            needs an answer. Renders nothing unless a request is actually waiting. */}
+        <ExtensionRequestCard booking={booking} />
 
         <View style={styles.metaRow}>
           <Meta icon="tag" label="Fare" value={booking.fare.total.amount_display} />

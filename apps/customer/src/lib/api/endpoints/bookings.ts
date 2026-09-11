@@ -1,5 +1,6 @@
 import type {
   BookingDto,
+  BookingExtensionDto,
   CancelBookingRequest,
   CancelBookingResponse,
   CreateBookingRequest,
@@ -111,6 +112,26 @@ export function cancelBooking(id: string, reason: string): Promise<CancelBooking
  * that second client: it rates the customer through the same endpoint mounted on `/driver`, and
  * two hand-written copies of one wire format is how they drift.
  */
+/**
+ * `POST /customer/bookings/:id/extend` — asks the driver to stay one more day.
+ *
+ * IT ASKS; IT DOES NOT BUY. Nothing is charged here and nothing is promised: the driver has to
+ * accept, and an extra day commits their next 24 hours. A declined or unanswered request costs
+ * the customer nothing at all.
+ *
+ * SETTLES AT THE END, not now. An accepted day is added to the bill at completion alongside any
+ * waiting charge — one settlement on UPI, or cash at the door.
+ *
+ * Only on an OUTSTATION trip that has STARTED. `BookingDto.extension.can_extend` is the server's
+ * own answer to that, and the screen renders the button from it rather than re-deriving it.
+ */
+export function requestDayExtension(bookingId: string): Promise<BookingExtensionDto> {
+  return request<BookingExtensionDto>(`${ROLE_PREFIX}/bookings/${bookingId}/extend`, {
+    method: 'POST',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
 export function rateTrip(bookingId: string, body: RateTripRequest): Promise<RateTripResponse> {
   return request<RateTripResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/rate`, {
     method: 'POST',

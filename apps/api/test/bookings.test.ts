@@ -24,10 +24,20 @@ import type {
   ChargeRepositoryPort,
   FareAdjustment,
 } from '../src/modules/bookings/domain/chargeRepository.port.js';
+import type { BookingExtension } from '../src/modules/bookings/domain/bookingExtension.entity.js';
+import type { ExtensionRepositoryPort } from '../src/modules/bookings/domain/extensionRepository.port.js';
 import { DriverArrivedUseCase } from '../src/modules/bookings/application/useCases/driverArrived.usecase.js';
 import { StartTripUseCase } from '../src/modules/bookings/application/useCases/startTrip.usecase.js';
 import { CompleteTripUseCase } from '../src/modules/bookings/application/useCases/completeTrip.usecase.js';
-import { CancelBookingByCustomerUseCase } from '../src/modules/bookings/application/useCases/cancelBooking.usecase.js';
+import {
+  CancelBookingByAdminUseCase,
+  CancelBookingByCustomerUseCase,
+} from '../src/modules/bookings/application/useCases/cancelBooking.usecase.js';
+import {
+  RequestBookingExtensionUseCase,
+  RespondToExtensionUseCase,
+} from '../src/modules/bookings/application/useCases/extendBooking.usecase.js';
+import { totalExtension } from '../src/modules/bookings/domain/bookingExtension.entity.js';
 import {
   ConfirmBookingPaymentUseCase,
   FailBookingPaymentUseCase,
@@ -230,6 +240,83 @@ function fakeCharges() {
 
   return charges;
 }
+
+/**
+ * The day-extension rows on a booking. Seeded with whatever a test wants already agreed, so the
+ * completion tests can assert what an extra day does to the bill and the ledger without driving
+ * the request/accept flow first — that flow has its own tests.
+ */
+function fakeExtensions(seed: BookingExtension[] = []) {
+  const rows = [...seed];
+
+  const repo: ExtensionRepositoryPort & { all: () => BookingExtension[] } = {
+    all: () => rows,
+
+    open: vi.fn(async (input) => {
+      // The partial unique index, in memory: one PENDING request per booking, never two.
+      if (rows.some((r) => r.bookingId === input.bookingId && r.status === 'PENDING')) return null;
+
+      const row: BookingExtension = {
+        id: `ext_${String(rows.length + 1)}`,
+        bookingId: input.bookingId,
+        customerId: input.customerId,
+        driverId: input.driverId,
+        status: 'PENDING',
+        amountPaise: input.amountPaise,
+        driverAmountPaise: input.driverAmountPaise,
+        requestedAt: new Date(),
+        expiresAt: input.expiresAt,
+        respondedAt: null,
+      };
+      rows.push(row);
+      return row;
+    }),
+
+    findPending: vi.fn(
+      async (bookingId: string) =>
+        rows.find((r) => r.bookingId === bookingId && r.status === 'PENDING') ?? null,
+    ),
+
+    listForBooking: vi.fn(async (bookingId: string) =>
+      rows.filter((r) => r.bookingId === bookingId),
+    ),
+
+    respond: vi.fn(async (id: string, to, now: Date) => {
+      const at = rows.findIndex((r) => r.id === id);
+      const row = rows[at];
+      if (row === undefined || row.status !== 'PENDING' || row.expiresAt <= now) return null;
+
+      const updated: BookingExtension = { ...row, status: to, respondedAt: now };
+      rows[at] = updated;
+      return updated;
+    }),
+
+    expireStale: vi.fn(async (now: Date, limit: number) => {
+      const stale = rows.filter((r) => r.status === 'PENDING' && r.expiresAt <= now).slice(0, limit);
+      for (const row of stale) {
+        rows[rows.indexOf(row)] = { ...row, status: 'EXPIRED', respondedAt: now };
+      }
+      return stale.length;
+    }),
+  };
+
+  return repo;
+}
+
+/** One accepted extra day, for the completion tests. */
+const acceptedExtension = (over: Partial<BookingExtension> = {}): BookingExtension => ({
+  id: 'ext_1',
+  bookingId: 'bkg_1',
+  customerId: 'cus_1',
+  driverId: 'drv_1',
+  status: 'ACCEPTED',
+  amountPaise: 300_000,
+  driverAmountPaise: 225_000,
+  requestedAt: new Date(),
+  expiresAt: new Date(Date.now() + 30 * 60_000),
+  respondedAt: new Date(),
+  ...over,
+});
 
 function fakeLedger() {
   const entries: NewLedgerEntry[] = [];
@@ -574,6 +661,7 @@ describe('CompleteTripUseCase — settlement', () => {
         ledger,
         payments,
         fakeNotifications(),
+        fakeExtensions(),
       ),
     };
   }
@@ -795,7 +883,8 @@ describe('the event log', () => {
 // ─── Cash ────────────────────────────────────────────────────────────────────────────────────
 
 describe('CompleteTripUseCase — cash', () => {
-  function build(seed: Booking) {
+  /** `extensions` seeds days the driver already agreed to — see `acceptedExtension`. */
+  function build(seed: Booking, extensions: BookingExtension[] = []) {
     const repo = fakeRepo(seed);
     const charges = fakeCharges();
     const ledger = fakeLedger();
@@ -805,7 +894,15 @@ describe('CompleteTripUseCase — cash', () => {
       charges,
       ledger,
       payments,
-      useCase: new CompleteTripUseCase(repo, charges, settings, ledger, payments, fakeNotifications()),
+      useCase: new CompleteTripUseCase(
+        repo,
+        charges,
+        settings,
+        ledger,
+        payments,
+        fakeNotifications(),
+        fakeExtensions(extensions),
+      ),
     };
   }
 
@@ -1201,5 +1298,400 @@ describe('adminBookingListQuerySchema — the booking table filters', () => {
 
   it('accepts a real YYYY-MM-DD', () => {
     expect(adminBookingListQuerySchema.parse({ from: '2026-09-04' }).from).toBe('2026-09-04');
+  });
+});
+
+// ─── Admin cancellation ──────────────────────────────────────────────────────────────────────
+
+describe('CancelBookingByAdminUseCase', () => {
+  function build(seed: Booking) {
+    const repo = fakeRepo(seed);
+    const payments = fakePayments();
+    const charges = fakeCharges();
+    const wallet = fakeWallet();
+    const ledger = fakeLedger();
+
+    return {
+      repo,
+      payments,
+      charges,
+      wallet,
+      ledger,
+      useCase: new CancelBookingByAdminUseCase(repo, payments, fakeNotifications()),
+    };
+  }
+
+  it('charges nobody, whatever the ladder would have said', async () => {
+    // ARRIVED is the most expensive rung on both ladders — the customer's fee and the driver's
+    // penalty are both at their highest here. An admin cancellation reads neither.
+    const { useCase, charges, wallet, ledger } = build(
+      booking({ status: 'ARRIVED', arrivedAt: new Date() }),
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      actorId: 'adm_1',
+      reason: 'Driver broke down and nobody else is free',
+    });
+
+    expect(result.feePaise).toBe(0);
+    expect(charges.cancellation()).toBeNull();
+    expect(wallet.rows()).toHaveLength(0);
+    expect(ledger.entries()).toHaveLength(0);
+  });
+
+  it('refunds a prepaid booking in full', async () => {
+    const { useCase, payments } = build(booking({ status: 'ASSIGNED' }));
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      actorId: 'adm_1',
+      reason: 'Ops cancelled',
+    });
+
+    // The whole captured amount, with nothing kept back — there is no fee to keep.
+    expect(payments.refunds()).toEqual([{ amountPaise: 105_000 }]);
+    expect(result.refundedPaise).toBe(105_000);
+  });
+
+  it('refunds nothing on a cash booking, because nothing was ever collected', async () => {
+    const { useCase, payments } = build(
+      booking({ status: 'ASSIGNED', paymentMode: 'CASH', paymentId: null }),
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      actorId: 'adm_1',
+      reason: 'Ops cancelled',
+    });
+
+    expect(payments.refunds()).toHaveLength(0);
+    expect(result.refundedPaise).toBe(0);
+  });
+
+  it('records the zero fee on the event, rather than leaving the field out', async () => {
+    // An absent field reads as "nobody wrote it down", which is the same shape as a bug. The
+    // event log is what answers "was I charged for this" weeks later.
+    const { useCase, repo } = build(booking({ status: 'ASSIGNED' }));
+
+    await useCase.execute({ bookingId: 'bkg_1', actorId: 'adm_1', reason: 'Ops cancelled' });
+
+    const event = repo.events().at(-1);
+    expect(event?.toStatus).toBe('CANCELLED_BY_ADMIN');
+    expect(event?.metadata).toMatchObject({ feePaise: 0 });
+    expect(event?.actorId).toBe('adm_1');
+  });
+
+  it('demands a reason', async () => {
+    const { useCase } = build(booking({ status: 'ASSIGNED' }));
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', actorId: 'adm_1', reason: '   ' }),
+    ).rejects.toThrow();
+  });
+
+  it('refuses a booking that is already finished', async () => {
+    const { useCase } = build(booking({ status: 'COMPLETED' }));
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', actorId: 'adm_1', reason: 'Too late' }),
+    ).rejects.toThrow();
+  });
+});
+
+// ─── Day extensions ──────────────────────────────────────────────────────────────────────────
+
+/** An outstation snapshot carrying the frozen day rate an extension is priced from. */
+function outstationSnapshot(): FareSnapshot {
+  const base = fareSnapshot();
+  return {
+    ...base,
+    serviceType: 'OUTSTATION',
+    fare: {
+      ...base.fare,
+      serviceType: 'OUTSTATION',
+      perDay: { days: 2, farePaise: 300_000, driverAmountPaise: 225_000 },
+    },
+  };
+}
+
+/** A running outstation trip — the only shape that can be extended. */
+const runningOutstation = (over: Partial<Booking> = {}): Booking =>
+  booking({
+    status: 'STARTED',
+    serviceType: 'OUTSTATION',
+    fareSnapshot: outstationSnapshot(),
+    startedAt: new Date(),
+    ...over,
+  });
+
+describe('RequestBookingExtensionUseCase', () => {
+  function build(seed: Booking, extensions: BookingExtension[] = []) {
+    const repo = fakeRepo(seed);
+    const rows = fakeExtensions(extensions);
+    return {
+      repo,
+      rows,
+      useCase: new RequestBookingExtensionUseCase(repo, rows, settings, fakeNotifications()),
+    };
+  }
+
+  it('opens a pending request priced at exactly one day', async () => {
+    const { useCase } = build(runningOutstation());
+
+    const extension = await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' });
+
+    expect(extension.status).toBe('PENDING');
+    // One day's BAND FARE — not a share of the pickup fee, surcharge or insurance, which are
+    // properties of the trip and were charged once.
+    expect(extension.amountPaise).toBe(300_000);
+    expect(extension.driverAmountPaise).toBe(225_000);
+  });
+
+  it('charges nothing at the moment it is asked for', async () => {
+    // The whole point of driver consent: a request is not a purchase.
+    const { useCase, rows } = build(runningOutstation());
+
+    await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' });
+
+    expect(rows.all().every((row) => row.status === 'PENDING')).toBe(true);
+  });
+
+  it('refuses a trip that has not started yet', async () => {
+    const { useCase } = build(runningOutstation({ status: 'ASSIGNED' }));
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' }),
+    ).rejects.toThrow(/started/i);
+  });
+
+  it('refuses an incity trip, which has no day to sell', async () => {
+    const { useCase } = build(booking({ status: 'STARTED', startedAt: new Date() }));
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' }),
+    ).rejects.toThrow(/outstation/i);
+  });
+
+  it('refuses a booking with no frozen day rate rather than inventing one', async () => {
+    // Every outstation booking made before `perDay` existed. Deriving a price from the total
+    // would charge a number nobody ever quoted.
+    const stale = runningOutstation();
+    const { useCase } = build({
+      ...stale,
+      fareSnapshot: {
+        ...stale.fareSnapshot,
+        fare: { ...stale.fareSnapshot.fare, perDay: null },
+      },
+    });
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' }),
+    ).rejects.toThrow(/support/i);
+  });
+
+  it('refuses a second request while the first is unanswered', async () => {
+    const { useCase } = build(runningOutstation(), [acceptedExtension({ status: 'PENDING' })]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' }),
+    ).rejects.toThrow(/has not answered/i);
+  });
+
+  it('refuses to read somebody else’s booking', async () => {
+    const { useCase } = build(runningOutstation());
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_someone_else' }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('RespondToExtensionUseCase', () => {
+  function build(extensions: BookingExtension[]) {
+    const repo = fakeRepo(runningOutstation());
+    const rows = fakeExtensions(extensions);
+    return {
+      rows,
+      useCase: new RespondToExtensionUseCase(repo, rows, fakeNotifications()),
+    };
+  }
+
+  it('accepts, which is what makes the day billable', async () => {
+    const { useCase } = build([acceptedExtension({ status: 'PENDING' })]);
+
+    const answered = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      accept: true,
+    });
+
+    expect(answered.status).toBe('ACCEPTED');
+    expect(answered.respondedAt).not.toBeNull();
+  });
+
+  it('declines without charging anything', async () => {
+    const { useCase, rows } = build([acceptedExtension({ status: 'PENDING' })]);
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', accept: false });
+
+    expect(totalExtension(rows.all())).toEqual({
+      days: 0,
+      amountPaise: 0,
+      driverAmountPaise: 0,
+    });
+  });
+
+  it('refuses a request that already lapsed', async () => {
+    // The compare-and-swap: expiry is in the filter, so a driver tapping Accept as the sweep
+    // fires resolves one way, never both.
+    const { useCase } = build([
+      acceptedExtension({ status: 'PENDING', expiresAt: new Date(Date.now() - 60_000) }),
+    ]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', accept: true }),
+    ).rejects.toThrow(/expired/i);
+  });
+
+  it('refuses when there is nothing waiting', async () => {
+    const { useCase } = build([]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', accept: true }),
+    ).rejects.toThrow();
+  });
+
+  it('refuses a driver who is not on this trip', async () => {
+    const { useCase } = build([acceptedExtension({ status: 'PENDING' })]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_someone_else', accept: true }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('totalExtension', () => {
+  it('counts only what the driver agreed to', () => {
+    const rows = [
+      acceptedExtension({ id: 'ext_1' }),
+      acceptedExtension({ id: 'ext_2', status: 'DECLINED' }),
+      acceptedExtension({ id: 'ext_3', status: 'EXPIRED' }),
+      acceptedExtension({ id: 'ext_4', status: 'PENDING' }),
+    ];
+
+    expect(totalExtension(rows)).toEqual({
+      days: 1,
+      amountPaise: 300_000,
+      driverAmountPaise: 225_000,
+    });
+  });
+
+  it('adds two accepted days together', () => {
+    const rows = [acceptedExtension({ id: 'ext_1' }), acceptedExtension({ id: 'ext_2' })];
+
+    expect(totalExtension(rows)).toMatchObject({ days: 2, amountPaise: 600_000 });
+  });
+});
+
+describe('CompleteTripUseCase — extensions', () => {
+  function build(seed: Booking, extensions: BookingExtension[]) {
+    const repo = fakeRepo(seed);
+    const charges = fakeCharges();
+    const ledger = fakeLedger();
+    const payments = fakePayments();
+
+    return {
+      charges,
+      ledger,
+      payments,
+      useCase: new CompleteTripUseCase(
+        repo,
+        charges,
+        settings,
+        ledger,
+        payments,
+        fakeNotifications(),
+        fakeExtensions(extensions),
+      ),
+    };
+  }
+
+  /** A finished outstation trip with no waiting, so the extension is the only extra. */
+  const finished = (over: Partial<Booking> = {}) =>
+    runningOutstation({
+      arrivedAt: new Date('2026-08-31T09:00:00Z'),
+      startedAt: new Date('2026-08-31T09:05:00Z'),
+      ...over,
+    });
+
+  it('bills two accepted days as ONE receipt line', async () => {
+    // Forced by the `{ bookingId, type }` unique index, and better anyway: a customer reads one
+    // line rather than adding up two identical ones.
+    const { useCase, charges } = build(finished(), [
+      acceptedExtension({ id: 'ext_1' }),
+      acceptedExtension({ id: 'ext_2' }),
+    ]);
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    const extension = charges.adjustments().filter((row) => row.type === 'DAY_EXTENSION');
+    expect(extension).toHaveLength(1);
+    expect(extension[0]?.amountPaise).toBe(600_000);
+    expect(extension[0]?.label).toBe('Extended — 2 extra days');
+  });
+
+  it('pays the driver their frozen per-day share, commissioned', async () => {
+    const { useCase, ledger } = build(finished(), [acceptedExtension()]);
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    const earning = ledger.entries().find((entry) => entry.entryType === 'EXTENSION_EARNING');
+    // The per-day driver amount from the extension row, NOT the whole day's fare — an extra day
+    // is a day of the package, unlike the uncommissioned waiting earning.
+    expect(earning?.amountPaise).toBe(225_000);
+  });
+
+  it('takes waiting and the extension in ONE settlement charge', async () => {
+    // `settle-${bookingId}` is derived from the booking so a retried completion cannot charge
+    // twice — which means two separate charges under that key would silently collect only one.
+    const { useCase, payments } = build(
+      finished({ arrivedAt: new Date('2026-08-31T09:00:00Z'), startedAt: new Date('2026-08-31T09:40:00Z') }),
+      [acceptedExtension()],
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    expect(payments.charge).toHaveBeenCalledTimes(1);
+    // 25 chargeable minutes at ₹2 = ₹50, plus one ₹3,000 day.
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ amountPaise: 305_000, idempotencyKey: 'settle-bkg_1' }),
+    );
+  });
+
+  it('charges nothing for days the driver never agreed to', async () => {
+    const { useCase, charges, payments } = build(finished(), [
+      acceptedExtension({ status: 'DECLINED' }),
+      acceptedExtension({ id: 'ext_2', status: 'EXPIRED' }),
+    ]);
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    expect(charges.adjustments()).toHaveLength(0);
+    expect(payments.charge).not.toHaveBeenCalled();
+  });
+
+  it('adds the extra day to what a cash driver collects at the door', async () => {
+    const { useCase, ledger } = build(
+      finished({ paymentMode: 'CASH', paymentId: null }),
+      [acceptedExtension()],
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
+
+    const cash = ledger.entries().find((entry) => entry.entryType === 'CASH_COLLECTED');
+    // The frozen fare (₹1,050) plus the extra day (₹3,000). Without this the driver is recorded
+    // as holding less than they actually took.
+    expect(cash?.amountPaise).toBe(-405_000);
   });
 });

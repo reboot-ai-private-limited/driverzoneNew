@@ -9,6 +9,7 @@
 import type {
   FareBreakdown,
   FareConfig,
+  FareDayRate,
   FareLine,
   IncityFareInput,
   OutstationFareInput,
@@ -60,6 +61,8 @@ function assemble(
    */
   input: { pickupZone: PickupZoneFare; scheduledAt: Date; driverAmountPaise: number },
   config: FareConfig,
+  /** The single-day rate, for a fare that has one. Null on incity — see `FareBreakdown.perDay`. */
+  perDay: FareDayRate | null,
 ): FareBreakdown {
   const lines: FareLine[] = [baseLine];
 
@@ -90,6 +93,7 @@ function assemble(
     taxPaise,
     totalPaise,
     split,
+    perDay,
   };
 }
 
@@ -106,6 +110,8 @@ export function computeIncityFare(input: IncityFareInput, config: FareConfig): F
     { code: 'BASE', label: input.variantLabel, amountPaise: input.baseFarePaise },
     input,
     config,
+    // An hourly package has no day to sell. See `FareBreakdown.perDay`.
+    null,
   );
 }
 
@@ -128,6 +134,11 @@ export function computeIncityFare(input: IncityFareInput, config: FareConfig): F
  * it is also how the driver learns they are accepting three days rather than one.
  *
  * `outstation.hours_per_day` is still a policy shown to both sides and read by nothing here.
+ *
+ * THE DAY RATE IS KEPT ON THE BREAKDOWN as `perDay`, un-multiplied. Everything else here is
+ * already scaled, so a frozen snapshot cannot be divided back into one day — and a customer
+ * buying one more day mid-trip needs the price of one day exactly as it was agreed. See
+ * `FareDayRate` and docs/LLD/booking-lifecycle.md §Day extensions.
  */
 export function computeOutstationFare(
   input: OutstationFareInput,
@@ -158,5 +169,15 @@ export function computeOutstationFare(
       driverAmountPaise: input.driverAmountPaise * input.days,
     },
     config,
+    /*
+     * THE UNMULTIPLIED RATES, taken from the inputs above BEFORE either is scaled. This is what a
+     * day extension is later priced from: the customer buys one more day at exactly the rate this
+     * booking was agreed at, not at whatever the package costs by then.
+     */
+    {
+      days: input.days,
+      farePaise: input.farePaise,
+      driverAmountPaise: input.driverAmountPaise,
+    },
   );
 }

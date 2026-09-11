@@ -28,6 +28,12 @@ export interface CreateBookingInput {
    */
   carCategory: CarCategory;
   vehicleType: VehicleTypePreference;
+  /**
+   * Ring this customer's favourites first. Frozen onto the booking, not consulted here — `bookings`
+   * sits below `favourites` and below `dispatch`, and neither the list nor the wave is its
+   * business. All this module does is record what the customer asked for.
+   */
+  preferFavouriteDrivers: boolean;
   /** One tap, one key. Passed to the gateway so a retried request charges once. */
   idempotencyKey: string;
 }
@@ -158,6 +164,7 @@ export class CreateBookingUseCase {
       distanceKm: quote.distanceKm,
       carCategory: input.carCategory,
       vehicleType: input.vehicleType,
+      preferFavouriteDrivers: input.preferFavouriteDrivers,
       walletCreditPaise: plan.creditAppliedPaise,
       walletDebtPaise: plan.debtAddedPaise,
       fareSnapshot,

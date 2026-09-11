@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 import { DELIVERY_CHANNELS } from '@driverzone/contracts';
-import { OFFER_STATUSES } from '../domain/offer.entity.js';
+import { MANUAL_ASSIGNMENT_WAVE, OFFER_STATUSES } from '../domain/offer.entity.js';
 
 export interface DispatchOfferDoc {
   _id: mongoose.Types.ObjectId;
@@ -21,7 +21,14 @@ const dispatchOfferSchema = new Schema<DispatchOfferDoc>(
   {
     bookingId: { type: Schema.Types.ObjectId, ref: 'Booking', required: true },
     driverId: { type: Schema.Types.ObjectId, ref: 'Driver', required: true },
-    wave: { type: Number, required: true, min: 1 },
+    /*
+     * `min: 0`, NOT 1. Wave 0 is the favourite-driver wave — the customer's own drivers, rung
+     * before the radius ladder starts. Numbering it zero rather than shifting every other wave up
+     * is what lets it reuse the whole machinery unchanged: `lapseWave`, the timeout job id, the
+     * `driverIdsOffered` exclusion, and `ExpireWaveUseCase`'s `wave + 1`, which lands exactly on
+     * the ordinary first wave.
+     */
+    wave: { type: Number, required: true, min: MANUAL_ASSIGNMENT_WAVE },
     status: { type: String, enum: OFFER_STATUSES, required: true, default: 'SENT' },
     score: { type: Number, required: true },
     distanceMetres: { type: Number, required: true },

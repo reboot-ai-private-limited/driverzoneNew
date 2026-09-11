@@ -87,7 +87,13 @@ export class ResolveForTripUseCase {
       if (farePaise !== null) {
         return {
           available: true,
-          match: { type: 'OUTSTATION', package: selectedOutstation, farePaise, direction },
+          match: {
+            type: 'OUTSTATION',
+            package: selectedOutstation,
+            farePaise,
+            direction,
+            variants: (selectedOutstation.variants ?? []).filter((v) => v.isActive),
+          },
         };
       }
     }

@@ -34,6 +34,7 @@ import {
 import { findOverlap, ladderFor } from '../lib/band';
 import { CommissionSplitLine } from './CommissionSplitLine';
 import { FareField } from './FareField';
+import { VariantsPanel } from './VariantsPanel';
 import { DeactivatePackageDialog } from './DeactivatePackageDialog';
 
 /**
@@ -304,7 +305,7 @@ export function OutstationEditor() {
                 the one-way.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <FareField
                   label="One-way fare"
                   value={draft.oneWayFare}
@@ -314,21 +315,30 @@ export function OutstationEditor() {
                   required
                 />
                 <FareField
+                  label="Driver paid (one-way)"
+                  hint="Per day. The company keeps the rest."
+                  value={draft.oneWayDriverAmount}
+                  onChange={(value) => edit({ ...draft, oneWayDriverAmount: value })}
+                  error={errors['oneWayDriverAmount']}
+                  disabled={saving}
+                  required
+                />
+                <FareField
                   label="Return fare"
-                  hint="The whole two-way journey. Blank if this band does not sell one."
+                  hint="The whole two-way journey. Blank if not offered."
                   value={draft.roundTripFare}
                   onChange={(value) => edit({ ...draft, roundTripFare: value })}
                   error={errors['roundTripFare']}
                   disabled={saving}
                 />
                 <FareField
-                  label="Driver is paid"
-                  hint="A flat amount, per day. The company keeps the rest of the fare."
-                  value={draft.driverAmount}
-                  onChange={(value) => edit({ ...draft, driverAmount: value })}
-                  error={errors['driverAmount']}
-                  disabled={saving}
-                  required
+                  label="Driver paid (return)"
+                  hint="Per day. Blank if no return sold."
+                  value={draft.roundTripDriverAmount}
+                  onChange={(value) => edit({ ...draft, roundTripDriverAmount: value })}
+                  error={errors['roundTripDriverAmount']}
+                  disabled={saving || draft.roundTripFare.trim() === ''}
+                  required={draft.roundTripFare.trim() !== ''}
                 />
               </div>
 
@@ -336,17 +346,27 @@ export function OutstationEditor() {
                 <CommissionSplitLine
                   label="One-way"
                   fare={draft.oneWayFare}
-                  driverAmount={draft.driverAmount}
+                  driverAmount={draft.oneWayDriverAmount}
                 />
                 {draft.roundTripFare.trim() !== '' && (
                   <CommissionSplitLine
                     label="Return"
                     fare={draft.roundTripFare}
-                    driverAmount={draft.driverAmount}
+                    driverAmount={draft.roundTripDriverAmount}
                   />
                 )}
               </div>
             </Panel>
+
+            <VariantsPanel
+              title="Hourly packages"
+              description="Optional hourly variants offered on this band (e.g. 8 Hours, 12 Hours). When configured, customers can choose an hourly package variant instead of the flat distance rate."
+              variants={draft.variants}
+              errors={errors}
+              disabled={saving}
+              minVariants={0}
+              onChange={(variants) => edit({ ...draft, variants })}
+            />
           </div>
         )}
       </DataState>

@@ -12,6 +12,7 @@ import {
   HandleWebhookUseCase,
   type WebhookOutcome,
 } from './application/useCases/handleWebhook.usecase.js';
+import { VerifyCheckoutUseCase } from './application/useCases/verifyCheckout.usecase.js';
 import { makeWebhookController } from './interface/payments.controller.js';
 import { buildWebhookRouter } from './interface/payments.routes.js';
 
@@ -62,6 +63,7 @@ export function buildPaymentsContainer(): PaymentsContainer {
   const create = new CreatePaymentUseCase(repo, gateway);
   const refund = new RefundPaymentUseCase(repo, gateway);
   const webhook = new HandleWebhookUseCase(repo, gateway);
+  const verifyCheckout = new VerifyCheckoutUseCase(repo, gateway);
 
   return {
     contract: {
@@ -69,6 +71,9 @@ export function buildPaymentsContainer(): PaymentsContainer {
       refund: (input) => refund.execute(input),
       findById: (id) => repo.findById(id),
       listForBooking: (bookingId) => repo.listForBooking(bookingId),
+      verifyAndCapture: (input) => verifyCheckout.execute(input),
+      // Same env var `selectGateway` above already gates on — null under the mock gateway.
+      publicKey: env.RAZORPAY_KEY_ID ?? null,
     },
     buildWebhookRouter: (onSettled) =>
       buildWebhookRouter({ webhook: makeWebhookController(webhook, onSettled) }),

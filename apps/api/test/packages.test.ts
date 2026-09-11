@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { validateIncityPackageActivation } from '../src/modules/packages/domain/incityPackage.entity.js';
-import { fareFor, validateOutstationBand } from '../src/modules/packages/domain/outstationPackage.entity.js';
+import {
+  fareFor,
+  validateOutstationBand,
+  validateOutstationDriverAmounts,
+  validateOutstationVariantAmounts,
+} from '../src/modules/packages/domain/outstationPackage.entity.js';
 import { CreateIncityPackageUseCase } from '../src/modules/packages/application/useCases/createIncityPackage.usecase.js';
 import { CreateOutstationPackageUseCase } from '../src/modules/packages/application/useCases/createOutstationPackage.usecase.js';
 import { ResolveForTripUseCase } from '../src/modules/packages/application/useCases/resolveForTrip.usecase.js';
@@ -86,6 +91,67 @@ describe('Packages Module', () => {
         // The distinction the nullable field exists for: `null` is "not offered", `0` would be
         // "the return trip costs nothing".
         expect(fareFor(band, 'ROUND_TRIP')).not.toBe(0);
+      });
+
+      it('validates one-way and round-trip driver amounts independently', () => {
+        // Valid case
+        expect(
+          validateOutstationDriverAmounts({
+            oneWayFarePaise: 500000,
+            roundTripFarePaise: 800000,
+            oneWayDriverAmountPaise: 400000,
+            roundTripDriverAmountPaise: 700000,
+          }),
+        ).toBeNull();
+
+        // One-way driver amount exceeds one-way fare
+        expect(
+          validateOutstationDriverAmounts({
+            oneWayFarePaise: 500000,
+            roundTripFarePaise: 800000,
+            oneWayDriverAmountPaise: 550000,
+            roundTripDriverAmountPaise: 700000,
+          }),
+        ).toContain('one-way driver amount');
+
+        // Round-trip sells, but round-trip driver amount is missing
+        expect(
+          validateOutstationDriverAmounts({
+            oneWayFarePaise: 500000,
+            roundTripFarePaise: 800000,
+            oneWayDriverAmountPaise: 400000,
+            roundTripDriverAmountPaise: null,
+          }),
+        ).toContain('set what the driver is paid for it');
+
+        // Round-trip driver amount exceeds round-trip fare
+        expect(
+          validateOutstationDriverAmounts({
+            oneWayFarePaise: 500000,
+            roundTripFarePaise: 800000,
+            oneWayDriverAmountPaise: 400000,
+            roundTripDriverAmountPaise: 850000,
+          }),
+        ).toContain('round-trip driver amount');
+      });
+
+      it('validates that outstation variant driver payout does not exceed base fare', () => {
+        expect(
+          validateOutstationVariantAmounts({
+            variants: [
+              { label: '8h', baseFarePaise: 300000, driverAmountPaise: 250000 },
+              { label: '12h', baseFarePaise: 450000, driverAmountPaise: 350000 },
+            ],
+          }),
+        ).toBeNull();
+
+        expect(
+          validateOutstationVariantAmounts({
+            variants: [
+              { label: '8h', baseFarePaise: 300000, driverAmountPaise: 350000 },
+            ],
+          }),
+        ).toContain('cannot exceed the fare');
       });
     });
   });
@@ -192,10 +258,10 @@ describe('Packages Module', () => {
           useCase.execute({
             name: 'Weekend Getaway',
             terrain: 'PLAIN',
-              minKm: 100,
+            minKm: 100,
             maxKm: 200,
             oneWayFarePaise: 1000,
-            driverAmountPaise: 750,
+            oneWayDriverAmountPaise: 750,
           })
         ).rejects.toThrow(OverlappingBandError);
 
@@ -220,7 +286,7 @@ describe('Packages Module', () => {
           minKm: 100,
           maxKm: 200,
           oneWayFarePaise: 1000,
-          driverAmountPaise: 750,
+          oneWayDriverAmountPaise: 750,
         };
 
         const result = await useCase.execute(data);
@@ -229,7 +295,7 @@ describe('Packages Module', () => {
         expect(mockRepo.createOutstation).toHaveBeenCalledWith(data);
       });
 
-      it('refuses a driver amount above the fare, and against the CHEAPER of the two directions', async () => {
+      it('refuses a driver amount above the fare for one-way or round-trip', async () => {
         const mockRepo = {
           createOutstation: vi.fn(),
           findOverlappingBands: vi.fn().mockResolvedValue(null),
@@ -243,9 +309,51 @@ describe('Packages Module', () => {
             minKm: 100,
             maxKm: 200,
             oneWayFarePaise: 5000,
-            // Below the one-way fare, but above a round-trip fare that undercuts it.
-            roundTripFarePaise: 3000,
-            driverAmountPaise: 4000,
+            roundTripFarePaise: 8000,
+            oneWayDriverAmountPaise: 5500, // exceeds 5000
+            roundTripDriverAmountPaise: 7000,
+          } as any),
+        ).rejects.toThrow(DriverAmountError);
+
+        await expect(
+          useCase.execute({
+            name: 'Weekend Getaway',
+            terrain: 'PLAIN',
+            minKm: 100,
+            maxKm: 200,
+            oneWayFarePaise: 5000,
+            roundTripFarePaise: 8000,
+            oneWayDriverAmountPaise: 4000,
+            roundTripDriverAmountPaise: 8500, // exceeds 8000
+          } as any),
+        ).rejects.toThrow(DriverAmountError);
+
+        expect(mockRepo.createOutstation).not.toHaveBeenCalled();
+      });
+
+      it('refuses an outstation variant whose driver amount exceeds its base fare', async () => {
+        const mockRepo = {
+          createOutstation: vi.fn(),
+          findOverlappingBands: vi.fn().mockResolvedValue(null),
+        } as unknown as PackageRepositoryPort;
+        const useCase = new CreateOutstationPackageUseCase(mockRepo);
+
+        await expect(
+          useCase.execute({
+            name: 'Weekend Getaway',
+            terrain: 'PLAIN',
+            minKm: 100,
+            maxKm: 200,
+            oneWayFarePaise: 5000,
+            oneWayDriverAmountPaise: 4000,
+            variants: [
+              {
+                label: '8 Hours',
+                includedMinutes: 480,
+                baseFarePaise: 3000,
+                driverAmountPaise: 3500, // exceeds 3000
+              },
+            ],
           } as any),
         ).rejects.toThrow(DriverAmountError);
 
@@ -301,7 +409,9 @@ describe('Packages Module', () => {
         updatedAt: new Date('2026-01-01'),
         oneWayFarePaise: 500000,
         roundTripFarePaise: null,
-        driverAmountPaise: 375000,
+        oneWayDriverAmountPaise: 375000,
+        roundTripDriverAmountPaise: null,
+        variants: [],
         ...overrides,
       };
     }

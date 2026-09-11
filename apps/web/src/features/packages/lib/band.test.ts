@@ -25,7 +25,9 @@ function pkg(over: Partial<OutstationPackageDto> & { id: string }): OutstationPa
     max_km: 70,
     one_way_fare_paise: 180000,
     round_trip_fare_paise: 320000,
-    driver_amount_paise: 120000,
+    one_way_driver_amount_paise: 120000,
+    round_trip_driver_amount_paise: 200000,
+    variants: [],
     is_active: true,
     ...over,
   };

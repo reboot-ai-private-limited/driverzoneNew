@@ -1,13 +1,17 @@
 import type {
   BookingDto,
+  BookingExtensionDto,
   CancelBookingRequest,
   CancelBookingResponse,
   CreateBookingRequest,
   CreateBookingResponse,
   CurrentCustomerBookingResponse,
   ListBookingsResponse,
+  PaymentMode,
   RateTripRequest,
   RateTripResponse,
+  SelectPaymentMethodResponse,
+  VerifyPaymentResponse,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { request } from '../client';
@@ -111,10 +115,67 @@ export function cancelBooking(id: string, reason: string): Promise<CancelBooking
  * that second client: it rates the customer through the same endpoint mounted on `/driver`, and
  * two hand-written copies of one wire format is how they drift.
  */
+/**
+ * `POST /customer/bookings/:id/extend` — asks the driver to stay one more day.
+ *
+ * IT ASKS; IT DOES NOT BUY. Nothing is charged here and nothing is promised: the driver has to
+ * accept, and an extra day commits their next 24 hours. A declined or unanswered request costs
+ * the customer nothing at all.
+ *
+ * SETTLES AT THE END, not now. An accepted day is added to the bill at completion alongside any
+ * waiting charge — one settlement on UPI, or cash at the door.
+ *
+ * Only on an OUTSTATION trip that has STARTED. `BookingDto.extension.can_extend` is the server's
+ * own answer to that, and the screen renders the button from it rather than re-deriving it.
+ */
+export function requestDayExtension(bookingId: string): Promise<BookingExtensionDto> {
+  return request<BookingExtensionDto>(`${ROLE_PREFIX}/bookings/${bookingId}/extend`, {
+    method: 'POST',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
 export function rateTrip(bookingId: string, body: RateTripRequest): Promise<RateTripResponse> {
   return request<RateTripResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/rate`, {
     method: 'POST',
     body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `POST /customer/bookings/:id/payment-method` — selects CASH or UPI once the trip has STARTED.
+ */
+export function selectPaymentMethod(
+  bookingId: string,
+  paymentMode: PaymentMode,
+  idempotencyKey: string,
+): Promise<SelectPaymentMethodResponse> {
+  return request<SelectPaymentMethodResponse>(
+    `${ROLE_PREFIX}/bookings/${bookingId}/payment-method`,
+    {
+      method: 'POST',
+      body: { payment_mode: paymentMode },
+      idempotencyKey,
+      token: getAccessToken() ?? undefined,
+    },
+  );
+}
+
+/**
+ * `POST /customer/bookings/:id/payment/verify` — hands the checkout SDK's signed result back for
+ * server-side verification, so the trip confirms without waiting out the webhook.
+ *
+ * The order id is deliberately not sent: the server reads it from the booking's own payment row.
+ */
+export function verifyPayment(
+  bookingId: string,
+  razorpayPaymentId: string,
+  razorpaySignature: string,
+): Promise<VerifyPaymentResponse> {
+  return request<VerifyPaymentResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/payment/verify`, {
+    method: 'POST',
+    body: { razorpay_payment_id: razorpayPaymentId, razorpay_signature: razorpaySignature },
     token: getAccessToken() ?? undefined,
   });
 }

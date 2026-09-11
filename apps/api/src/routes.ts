@@ -92,8 +92,27 @@ export function buildApiRouter(c: AppContainers): Router {
   /** Same fall-through again: these miss identity's role routers and land here. */
   router.use('/customer/quotes', c.quotes.buildCustomerRouter());
   router.use('/customer/wallet', c.wallet.buildCustomerRouter());
+  /*
+   * The drivers this customer wants rung first. A sibling of the mounts around it rather than
+   * something hung off `/customer/bookings`: a favourite outlives any one trip, which is exactly
+   * what makes it worth storing.
+   */
+  router.use('/customer/favourite-drivers', c.favourites.buildCustomerRouter());
   router.use('/customer/bookings', c.bookings.buildCustomerRouter());
   router.use('/driver/bookings', c.bookings.buildDriverRouter());
+  /*
+   * Manual assignment, on the same prefix as the bookings admin router below and mounted FIRST —
+   * it has to be. The bookings router registers `GET /:id`, and Express matches routes in
+   * registration order: mounted second, `GET /admin/bookings/assignable-drivers` would be read as
+   * `GET /:id` with `id="assignable-drivers"` and answer 404 "no such booking" before dispatch's
+   * own, more specific route ever saw the request — which is exactly what happened here until this
+   * was caught by hand in Chrome, not by any test, because every existing test calls the use case
+   * directly and never goes through Express routing at all. `POST /:id/assign` has no such
+   * collision either way — the bookings router defines no route for that suffix — so this ordering
+   * costs it nothing. It is `dispatch` that answers despite the path saying bookings, because
+   * assigning a driver writes `bookings.driverId` and dispatch is the only module permitted to.
+   */
+  router.use('/admin/bookings', c.dispatch.buildAdminRouter());
   router.use('/admin/bookings', c.bookings.buildAdminRouter());
   router.use('/driver/offers', c.dispatch.buildDriverRouter());
   /** The driver's own earnings. Same rows, same mapper as `/admin/drivers/:id/wallet` above. */

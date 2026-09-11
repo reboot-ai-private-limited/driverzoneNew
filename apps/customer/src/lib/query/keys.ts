@@ -59,6 +59,18 @@ export const keys = {
     all: () => ['faqs'] as const,
   },
 
+  /**
+   * The customer's favourite drivers.
+   *
+   * ONE KEY, NO PARAMETERS, and every screen with a heart on it reads the same entry. That is the
+   * whole point: the rate screen, the live trip card, a past ride and the manage page all decide
+   * whether their heart is filled from this one list, so a tap on any of them fills the heart on
+   * all four without a re-fetch per screen.
+   */
+  favourites: {
+    all: () => ['favourites'] as const,
+  },
+
   bookings: {
     all: () => ['bookings'] as const,
     /**

@@ -84,6 +84,13 @@ export const keys = {
     detail: (id: string) => ['bookings', 'detail', id] as const,
     /** The timeline. Its own key because it is its own request, made only when the page loads. */
     events: (id: string) => ['bookings', 'events', id] as const,
+    /**
+     * The manual-transfer driver picker. Keyed on the search term AND the booking, so each typed
+     * query is its own cache entry (backspacing returns instantly to the previous result) and a
+     * result carrying one booking's `vehicle_compatible` flags is never served for another's.
+     */
+    assignableDrivers: (search: string, bookingId?: string) =>
+      ['bookings', 'assignable-drivers', search, bookingId ?? null] as const,
   },
   /**
    * The driver directory and everything hanging off one driver.

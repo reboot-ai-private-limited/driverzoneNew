@@ -20,6 +20,7 @@
 export {
   computeIncityFare,
   computeOutstationFare,
+  computeOutstationVariantFare,
 } from './domain/computeFare.js';
 
 export { splitFare, assertFareReconciles } from './domain/splitFare.js';
@@ -27,6 +28,8 @@ export { splitFare, assertFareReconciles } from './domain/splitFare.js';
 export { surchargeFor } from './domain/surcharge.js';
 
 export { inWindow, istCalendarDaysInclusive, istWallClockMinutes } from './domain/istClock.js';
+
+export { oneWayDrivingDays } from './domain/oneWayDrivingDays.js';
 
 export {
   computeWaitingCharge,
@@ -41,6 +44,7 @@ export type {
   FareLine,
   FareLineCode,
   FareSplit,
+  FlatFareInput,
   IncityFareInput,
   OutstationFareInput,
   PickupZoneFare,

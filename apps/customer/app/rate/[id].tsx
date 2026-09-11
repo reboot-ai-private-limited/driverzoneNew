@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { FavouriteHeart } from '@/components/FavouriteHeart';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { getBooking, rateTrip } from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
@@ -208,6 +209,16 @@ export default function RateDriverScreen(): ReactElement {
                   {booking.data.driver.name ?? 'Your driver'}
                 </Text>
               </View>
+
+              {/*
+                THE NATURAL MOMENT TO ADD ONE. The trip has just ended, the customer is already
+                being asked what they thought of this driver, and they know right now whether they
+                would want them again. Separate from the rating and not implied by it: five stars
+                is a judgement about one trip, a favourite is a request about the next one.
+              */}
+              <View style={styles.favouriteRow}>
+                <FavouriteHeart driverId={booking.data.driver.id} withLabel />
+              </View>
             </View>
           )}
 
@@ -394,6 +405,7 @@ const styles = StyleSheet.create({
     marginRight: space.sm,
   },
   driverName: { ...text.body, color: colors.fg, fontFamily: fontFamily.bold, flex: 1 },
+  favouriteRow: { marginTop: space.md },
 
   starsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.sm },
   ratingLabel: {

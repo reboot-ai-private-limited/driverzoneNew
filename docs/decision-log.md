@@ -20,6 +20,117 @@ entry links to it.
 
 ---
 
+## 2026-09-10 — An admin cancellation charges nobody, and a transfer is release-then-claim
+
+**Decision:** Ops gets two actions on a live booking. `POST /admin/bookings/:id/cancel` moves it to
+`CANCELLED_BY_ADMIN` with **no fee to the customer and no penalty to the driver**, refunding a
+prepaid trip in full. `POST /admin/bookings/:id/assign` hands the trip to a driver an admin
+chose — releasing whoever had it, without penalising them.
+
+**Why no fee:** the fee ladder exists to deter a customer who would otherwise no-show and a driver
+who would otherwise drop a trip they had taken out of dispatch. An admin cancellation is neither:
+it is the company deciding the trip will not happen, and charging somebody for our decision is a
+support ticket we wrote ourselves. So the use case has no fee ladder, no charge row, no wallet
+debt and no ledger entry — the absence of that code IS the feature, which is why it is a third
+class rather than a flag on the customer's.
+
+**Why transfer is two existing moves:** `claimForDriver` already refuses anything but a `SEARCHING`
+booking with no driver, and that compare-and-swap is the sole guarantee behind invariant B-2. A
+third way to write `driverId` would have been a second thing to get right. `releaseDriver` produces
+exactly the state the claim demands, so the pair composes and the guarantee keeps one
+implementation.
+
+**Consequences:**
+
+- `CancelBookingByAdminUseCase` calls `canTransition()` explicitly. Every other cancellation passes
+  a literal `from`, so the swap enforces the table for free; this one passes the booking's current
+  status and would otherwise have matched `COMPLETED` — un-finishing a paid, settled trip.
+- `bookings.public.ts` grows `releaseDriver` and `hasActiveBooking`. `TransitionPatch.assignedAt`
+  becomes nullable so a release can clear it.
+- A new tier-1 read, `identity.assignableDrivers`, backs the picker. **On duty is returned, not
+  filtered** — the LLD is explicit that an admin may override it after phoning the driver, and the
+  common reason to reach for manual assignment is that nobody nearby is online.
+- Manual assignments are recorded as a `dispatchOffers` row at `wave: -1`, so they are visible
+  where every other assignment is and are covered by `driverIdsOffered`, without polluting the
+  metrics that judge the ranker.
+- **Rejected: reassigning a `STARTED` trip.** It is a cancellation plus a new booking; the fare,
+  the ledger and the receipt all differ, and blurring them breaks all three.
+
+---
+
+## 2026-09-10 — A day extension needs the driver's consent and settles at completion
+
+**Decision:** An outstation trip already under way can buy one more day, at the per-day rate the
+booking was priced with. The customer asks (`POST /customer/bookings/:id/extend`), the driver
+accepts or declines, and an accepted day is billed at COMPLETION as a `DAY_EXTENSION` adjustment
+plus an `EXTENSION_EARNING` ledger row.
+
+**Why consent:** the band fare is a day rate precisely because a day is a day of somebody's life —
+that is the reasoning that made a three-day trip cost three times on 2026-09-10. Letting a customer
+buy the driver's next 24 hours by tapping a button contradicts it. Both driver answers are free,
+including silence.
+
+**Why settlement waits:** charging mid-trip means a Razorpay call per extension and a refund path
+for a trip that is then cancelled. Completion already has the machinery — the waiting charge is an
+adjustment settled through one gateway call or taken in cash — so the extension rides it.
+
+**Consequences:**
+
+- `FareBreakdown` grows `perDay` (`days`, `farePaise`, `driverAmountPaise`, all un-multiplied), and
+  it had to: everything else on a snapshot is already multiplied, so a frozen fare could not be
+  divided back into one day. `null` on incity, absent on fares computed before this — both read as
+  "cannot be extended", and the endpoint says so rather than deriving a price nobody quoted.
+- ONE settlement charge now covers waiting and extensions together. `settle-${bookingId}` is
+  derived from the booking so a retry cannot double-charge, which means two separate charges under
+  that key would have silently collected only the first.
+- `EXTENSION_EARNING` is commissioned, unlike `WAITING_EARNING`. An extra day is a day of the
+  package, not compensation for time the company did nothing to earn.
+- Expiry is the sweeper, not a queue job — the precedent `reviews` set. One indexed query a minute
+  survives a Redis flush that a scheduled job would not.
+- **Rejected: `is_extension_pending` style flags on the booking.** A trip can be extended more than
+  once, at different amounts, each with its own answer. A counter loses all of that.
+- **Not done:** the booking's return date does not move. `Booking` has no `returnAt` — the return
+  instant is a quote input only — so an extension adds days and money, not a new date.
+
+---
+
+## 2026-09-10 — Favourite drivers ring first, as their own dispatch module
+
+**Decision:** A customer may favourite drivers they have completed a trip with, and ask for them
+per booking (`prefer_favourite_drivers`). Dispatch then rings that list as **wave 0** — its own
+wider radius (`dispatch.favourite_radius_m`, 15 km) and longer ring time
+(`dispatch.favourite_offer_ttl_seconds`, 60 s) — before the ordinary radius ladder. Favourites
+live in a new `favourites` module and a `customerFavouriteDrivers` collection, on a new tier
+between `bookings` and `dispatch`.
+
+**Why the module rather than an array on `customers`:** adding a favourite has to be provable — a
+customer may only favourite a driver who has really driven them. Without that check
+`POST /customer/favourite-drivers` tells anyone holding a customer token whether an arbitrary
+driver id exists and then returns that driver's name and photograph. The proof lives in
+`bookings`, and `identity` is at tier 1 and cannot see a booking from there. So the rule decided
+the tier, and the tier decided the module.
+
+**Consequences:**
+
+- A wave now advances as soon as its last offer is answered, rather than always waiting out the
+  TTL. That was always slightly wrong; a favourite wave of one driver made it obvious, since a
+  single Decline used to cost the customer the full minute. The superseded wave's BullMQ job is
+  neutralised by a repository guard (`hasOffersAfterWave`) rather than by deleting the job, so it
+  holds when a Redis delete fails.
+- `dispatchOffers.wave` allows 0. Numbering the favourite wave zero rather than shifting the
+  ladder up is what let it reuse the offer rows, the deterministic timeout job id, the
+  already-offered exclusion and the timeout's `wave + 1` unchanged.
+- **Rejected: making it a restriction.** "Only ring my favourites" would leave a customer with no
+  driver because one person was busy. Every path out of wave 0 falls through to the ordinary
+  search with no added delay.
+- **Rejected: `is_favourite` on `BookingDto`.** `bookings` sits below `favourites` and must not
+  read it. The customer app already holds the list, so the heart's state is a set lookup rather
+  than a field on every booking read.
+- Favourites are capped at 20 per customer. Uncapped, "ring my drivers first" slowly becomes
+  "ring everyone".
+
+---
+
 ## 2026-09-10 — The driver's package share is a flat amount, not a percentage
 
 **Decision:** `driverCommissionBps` (7500 = 75% of the subtotal) becomes `driverAmountPaise` — a

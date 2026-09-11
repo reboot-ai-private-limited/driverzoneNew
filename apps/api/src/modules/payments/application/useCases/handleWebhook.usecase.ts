@@ -76,22 +76,7 @@ export class HandleWebhookUseCase {
     }
 
     if (event.type === 'PAYMENT_CAPTURED') {
-      /*
-       * FROM `PENDING` **OR** `FROM FAILED`, and the second one is not defensive programming.
-       *
-       * Razorpay documents that a UPI retry can deliver `payment.failed` and then
-       * `payment.captured` for the same transaction. If capture could only follow `PENDING`, the
-       * customer's money would have moved and this row would sit at `FAILED` forever — money out,
-       * no ride. The payment state machine has one exit from `FAILED` for exactly this.
-       */
-      const patch = event.providerPaymentId === undefined
-        ? {}
-        : { providerPaymentId: event.providerPaymentId };
-
-      const captured =
-        (await this.repo.transition(paymentId, 'PENDING', 'CAPTURED', patch)) ??
-        (await this.repo.transition(paymentId, 'FAILED', 'CAPTURED', patch));
-
+      const captured = await captureIfPending(this.repo, paymentId, event.providerPaymentId);
       if (captured === null) return { handled: false, reason: 'NOT_APPLICABLE' };
       return { handled: true, kind: 'CAPTURED', paymentId, bookingId };
     }
@@ -121,4 +106,29 @@ export class HandleWebhookUseCase {
 
     return { handled: true, kind: 'REFUNDED', paymentId, bookingId };
   }
+}
+
+/**
+ * FROM `PENDING` **OR** FROM `FAILED`, and the second one is not defensive programming.
+ *
+ * Razorpay documents that a UPI retry can deliver `payment.failed` and then `payment.captured`
+ * for the same transaction. If capture could only follow `PENDING`, the customer's money would
+ * have moved and this row would sit at `FAILED` forever — money out, no ride. The payment state
+ * machine has one exit from `FAILED` for exactly this.
+ *
+ * Shared by `HandleWebhookUseCase` above and `VerifyCheckoutUseCase` — both learn of a capture
+ * from a different messenger (the provider's server vs. the app's own checkout callback) but
+ * apply the exact same compare-and-swap, so there is one place this logic can be gotten wrong
+ * instead of two that can drift apart.
+ */
+export async function captureIfPending(
+  repo: PaymentRepositoryPort,
+  paymentId: string,
+  providerPaymentId: string | undefined,
+) {
+  const patch = providerPaymentId === undefined ? {} : { providerPaymentId };
+  return (
+    (await repo.transition(paymentId, 'PENDING', 'CAPTURED', patch)) ??
+    (await repo.transition(paymentId, 'FAILED', 'CAPTURED', patch))
+  );
 }

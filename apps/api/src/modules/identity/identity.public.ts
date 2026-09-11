@@ -1,4 +1,4 @@
-import type { Role } from '@driverzone/contracts';
+import type { CarCategory, Role, VehicleTypePreference } from '@driverzone/contracts';
 
 /**
  * PUBLIC CONTRACT — the only surface other modules may import from `identity`.
@@ -160,12 +160,61 @@ export interface DriverStatsContract {
  * Authentication is deliberately absent: it is consumed over HTTP and through the shared JWT
  * verifier rather than through a module contract, so nothing here issues or checks a token.
  */
+/**
+ * A driver an admin may hand a trip to directly, for the manual-assignment picker.
+ *
+ * `isOnDuty` IS RETURNED, NOT FILTERED ON, and that is deliberate.
+ * docs/LLD/dispatch-and-assignment.md §Manual assignment is explicit that an admin may override
+ * duty status after phoning the driver — which is the entire reason a manual override exists,
+ * since the common case for using it is that nobody nearby is online. The panel shows it as a
+ * warning beside the name; the server does not refuse it.
+ *
+ * VERIFIED AND UNBLOCKED ARE FILTERED, because neither is an ops judgement call: an unverified
+ * driver has not had their licence checked, and a blocked one was blocked for a reason.
+ */
+export interface AssignableDriver {
+  id: string;
+  fullName: string | null;
+  phone: string;
+  isOnDuty: boolean;
+  /**
+   * The two competencies dispatch matches against, and hill verification — carried along so
+   * `dispatch` can apply the same compatibility gate `MongoDriverPool` applies during a wave (see
+   * `vehicleCompatibility.ts`). Manual assignment is the one path that bypasses the pool, and this
+   * is what lets it stop bypassing the vehicle check along with it.
+   */
+  vehicleCategoryPreference: CarCategory[];
+  vehicleTypePreferences: VehicleTypePreference[];
+  canDriveHillVerified: boolean;
+}
+
+export interface AssignableDriversContract {
+  /**
+   * Verified, unblocked drivers matching a search term. `dispatch` is the only consumer.
+   *
+   * A SEARCH RATHER THAN A LIST, because the picker is a search box: returning every driver on
+   * the platform to render a dropdown is a page nobody can use and a query nobody should run.
+   */
+  assignableDrivers(search: string, limit: number): Promise<AssignableDriver[]>;
+
+  /**
+   * The one driver `TransferBookingUseCase` is being asked to assign, looked up BY ID rather than
+   * through `assignableDrivers` — `search` there is a name/phone regex, and a driver's own
+   * ObjectId is never a substring of either, so passing it as `search` (which the use case did,
+   * before this method existed) always came back empty and refused every manual transfer with
+   * "That driver cannot be assigned work", regardless of who was picked. Returns `null` on an
+   * unverified, blocked, or nonexistent id — same "no such driver" shape as an empty search.
+   */
+  assignableDriverById(id: string): Promise<AssignableDriver | null>;
+}
+
 export type IdentityPublicContract = CustomerBookingProfileContract &
   AccountDirectoryContract &
   DriverCardContract &
   CustomerContactContract &
   RatingCacheContract &
-  DriverStatsContract;
+  DriverStatsContract &
+  AssignableDriversContract;
 
 /**
  * Where a person's handsets are reachable — published because `notifications` sends to them.

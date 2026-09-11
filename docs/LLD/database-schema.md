@@ -462,6 +462,12 @@ const bookingSchema = new Schema({
   carCategoryId:    { type: Schema.Types.ObjectId, ref: 'CarCategory', required: true },
   customerCarPlate: String,
 
+  // Ring this customer's favourite drivers before anyone else (dispatch's wave 0). Defaults to
+  // false, which is what every booking made before the feature existed correctly reads as: it
+  // was not asked for. Whose drivers is read LIVE at dispatch time from
+  // `customerFavouriteDrivers` — this flag records only the decision made about THIS trip.
+  preferFavouriteDrivers: { type: Boolean, default: false },
+
   scheduledAt: { type: Date, required: true },
   isScheduled: { type: Boolean, default: false },
   dispatchAt:  { type: Date, required: true },
@@ -506,6 +512,51 @@ be requested explicitly, which means it cannot leak into an API response by acci
 
 ---
 
+## `bookingExtensions`
+
+One more day on an outstation trip already under way, and the driver's answer
+([booking-lifecycle.md](./booking-lifecycle.md) §Day extensions).
+
+```ts
+const bookingExtensionSchema = new Schema({
+  bookingId:  { type: Schema.Types.ObjectId, ref: 'Booking',  required: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
+  // Frozen too: the driver who agreed is the driver who is paid, even after a reassignment.
+  driverId:   { type: Schema.Types.ObjectId, ref: 'Driver',   required: true },
+
+  status: { type: String, required: true, default: 'PENDING',
+            enum: ['PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED'] },
+
+  // Both FROZEN AT REQUEST TIME from the booking's own fareSnapshot.fare.perDay, never read live
+  // at settlement. Invariant B-1's reasoning one level down: the customer was shown a price and
+  // the driver an earning, and a package repriced mid-trip must move neither.
+  amountPaise:       { type: Number, required: true, min: 0 },
+  driverAmountPaise: { type: Number, required: true, min: 0 },
+
+  expiresAt:   { type: Date, required: true },
+  respondedAt: Date,
+}, { timestamps: { createdAt: true, updatedAt: false } });
+
+// AT MOST ONE PENDING REQUEST PER BOOKING, and it has to be PARTIAL. A plain unique on bookingId
+// would allow only one extension ever, which is wrong — a trip can legitimately be extended
+// twice. Scoping it to PENDING says the real rule: ask again, but not while an earlier ask is
+// unanswered. It is also what makes a double-tapped button one day rather than two.
+bookingExtensionSchema.index({ bookingId: 1 }, { unique: true,
+  partialFilterExpression: { status: 'PENDING' } });
+
+bookingExtensionSchema.index({ bookingId: 1, status: 1 });  // the receipt and the settlement
+bookingExtensionSchema.index({ status: 1, expiresAt: 1 });  // the sweep
+```
+
+**One row per day bought**, not a counter on the booking. A trip can be extended more than once,
+each time at its own amount and each with its own answer from the driver — a counter would record
+the total and lose every one of those facts, including which extension the driver agreed to.
+
+**Nothing here is deleted.** A DECLINED or EXPIRED row is the record that the customer asked and
+did not get it, which is exactly what a "why was I not charged" question needs.
+
+---
+
 ## `bookingEvents` — append-only
 
 ```ts
@@ -538,6 +589,45 @@ db.createRole({
 This is the direct equivalent of `REVOKE UPDATE, DELETE`. When a customer disputes a fare six
 weeks on, this collection is the only thing that settles it — so the application must not be
 able to rewrite it, however convenient that might seem at the time.
+
+---
+
+## `customerFavouriteDrivers`
+
+The drivers a customer wants rung before anybody else — dispatch's wave 0
+([dispatch-and-assignment.md](./dispatch-and-assignment.md)).
+
+```ts
+const favouriteDriverSchema = new Schema({
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
+  driverId:   { type: Schema.Types.ObjectId, ref: 'Driver',   required: true },
+}, { timestamps: { createdAt: true, updatedAt: false } });
+
+// One row per pair. This is what makes adding a favourite twice a no-op rather than a
+// duplicate: the repository catches the duplicate-key error, so a double tap of the heart in
+// the app never has to be guarded client-side.
+favouriteDriverSchema.index({ customerId: 1, driverId: 1 }, { unique: true });
+
+// The list read, and dispatch's wave 0.
+favouriteDriverSchema.index({ customerId: 1, createdAt: -1 });
+```
+
+**Its own collection, not an array on `customers`.** `savedAddresses` and `vehicles` are rewritten
+whole because an invariant spans the whole list ("only one default"), and a per-item update could
+interleave and break it. Favourites have no such invariant — they are added and removed one at a
+time from four different screens, and a whole-document rewrite would make two hearts tapped at
+once lose one of them.
+
+**No `updatedAt`.** A favourite is created and deleted; there is nothing about one to update, so
+the field would only ever repeat `createdAt`.
+
+**Capped at 20 per customer**, enforced in the application. Every favourite is an id in the
+dispatch `$in` and, when in range, a handset that rings before the ordinary search starts — an
+uncapped list would slowly turn "ring my drivers first" back into "ring everyone".
+
+**A favourite may only be added for a driver the customer has COMPLETED a trip with.** Without
+that rule `POST /customer/favourite-drivers` answers whether an arbitrary driver id exists, and
+then hands back that driver's name and photograph.
 
 ---
 

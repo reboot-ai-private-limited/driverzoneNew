@@ -20,6 +20,7 @@ import type { Payout } from '../domain/payout.entity.js';
 const FALLBACK_DESCRIPTION: Record<TransactionType, string> = {
   TRIP_EARNING: 'Trip earnings',
   WAITING_EARNING: 'Waiting time',
+  EXTENSION_EARNING: 'Extra day on a trip',
   COMMISSION_DEBIT: 'Commission',
   CASH_COLLECTED: 'Cash collected from customer',
   PAYOUT: 'Payout',

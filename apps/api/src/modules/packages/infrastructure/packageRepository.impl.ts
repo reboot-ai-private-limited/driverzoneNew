@@ -38,19 +38,55 @@ function toIncityEntity(doc: InstanceType<typeof IncityPackageModel>): IncityPac
   };
 }
 
+interface LegacyOutstationDoc {
+  _id: unknown;
+  name: string;
+  terrain: Terrain;
+  minKm: number;
+  maxKm: number;
+  oneWayFarePaise: number;
+  roundTripFarePaise?: number | null | undefined;
+  oneWayDriverAmountPaise?: number | undefined;
+  roundTripDriverAmountPaise?: number | null | undefined;
+  driverAmountPaise?: number | undefined;
+  variants?: Array<{
+    _id: unknown;
+    label: string;
+    includedMinutes: number;
+    baseFarePaise: number;
+    driverAmountPaise: number;
+    isActive: boolean;
+  }> | undefined;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 function toOutstationEntity(doc: InstanceType<typeof OutstationPackageModel>): OutstationPackage {
-  const obj = doc.toObject();
+  const obj = doc.toObject() as unknown as LegacyOutstationDoc;
   return {
     id: String(obj._id),
     name: obj.name,
-    terrain: obj.terrain as Terrain,
+    terrain: obj.terrain,
     minKm: obj.minKm,
     maxKm: obj.maxKm,
     oneWayFarePaise: obj.oneWayFarePaise,
     // `?? null` and not `?? 0`: a document written before this field existed, or one where ops
     // cleared it, means "no same-day return offered" — never "the return trip is free".
     roundTripFarePaise: obj.roundTripFarePaise ?? null,
-    driverAmountPaise: obj.driverAmountPaise,
+    oneWayDriverAmountPaise: obj.oneWayDriverAmountPaise ?? obj.driverAmountPaise ?? 0,
+    roundTripDriverAmountPaise:
+      obj.roundTripDriverAmountPaise !== undefined
+        ? obj.roundTripDriverAmountPaise
+        : (obj.roundTripFarePaise === null ? null : (obj.driverAmountPaise ?? null)),
+    variants: (obj.variants ?? []).map((v) => ({
+      id: String(v._id),
+      label: v.label,
+      includedMinutes: v.includedMinutes,
+      baseFarePaise: v.baseFarePaise,
+      driverAmountPaise: v.driverAmountPaise,
+      isActive: v.isActive,
+    })),
     isActive: obj.isActive,
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,

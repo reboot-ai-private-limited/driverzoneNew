@@ -17,4 +17,12 @@ export interface RoadDistancePort {
    * a pin dropped in a lake.
    */
   roadDistanceKm(from: LatLng, to: LatLng): Promise<number | null>;
+
+  /**
+   * One-way driving duration in minutes, or `null` when no route exists between the points.
+   *
+   * Used exclusively for outstation one-way trips to calculate multi-day driving days
+   * and driver return allowance.
+   */
+  travelDurationMinutes(from: LatLng, to: LatLng): Promise<number | null>;
 }

@@ -21,6 +21,7 @@ import type { Direction, Terrain, TimeWindow } from '@driverzone/contracts';
  */
 export const FARE_LINE_CODES = [
   'BASE',
+  'RETURN_DRIVER_ALLOWANCE',
   'PICKUP_FEE',
   'NIGHT',
   'EARLY_MORNING',
@@ -57,6 +58,27 @@ export interface FareSplit {
   companyPaise: number;
 }
 
+/**
+ * The day rate this fare was built from, kept so another day can be bought later.
+ *
+ * WHY IT HAS TO BE STORED. Everything else here is already MULTIPLIED — the BASE line is
+ * `farePaise × days` and `split.driverAmountPaise` likewise — so a frozen snapshot cannot be
+ * divided back into a day without knowing the count, and integer rounding means it could not be
+ * divided reliably even then. A booking that wants to buy one more day needs the price of one
+ * day exactly as it was agreed, and this is it.
+ *
+ * PER DAY, NOT MULTIPLIED. Both figures here are the single-day rate; `days` says how many the
+ * fare above actually charged for.
+ */
+export interface FareDayRate {
+  /** IST calendar days this fare charged for, both ends included. */
+  days: number;
+  /** The band's fare for ONE day. */
+  farePaise: number;
+  /** What the driver is paid for ONE day. */
+  driverAmountPaise: number;
+}
+
 export interface FareBreakdown {
   serviceType: 'INCITY' | 'OUTSTATION';
   /** Only the lines that are actually non-zero, except BASE. A ₹0 row on a receipt is noise. */
@@ -66,6 +88,14 @@ export interface FareBreakdown {
   taxPaise: number;
   totalPaise: number;
   split: FareSplit;
+  /**
+   * `null` ON INCITY, and that is not an omission. An hourly package has no day to sell — its
+   * unit is the variant ("3 Hours"), and inventing a day rate for it would be a number nobody
+   * agreed to. It is also `undefined` on every fare computed before day extensions existed, which
+   * reads the same way: that booking cannot be extended, and the endpoint says so rather than
+   * guessing a price.
+   */
+  perDay: FareDayRate | null;
 }
 
 /**
@@ -94,7 +124,7 @@ export interface PickupZoneFare {
   defaultChargePaise: number;
 }
 
-export interface IncityFareInput {
+export interface FlatFareInput {
   variantLabel: string;
   baseFarePaise: number;
   driverAmountPaise: number;
@@ -102,6 +132,8 @@ export interface IncityFareInput {
   /** The scheduled pickup instant. The surcharge is decided from this and nothing else. */
   scheduledAt: Date;
 }
+
+export type IncityFareInput = FlatFareInput;
 
 export interface OutstationFareInput {
   packageName: string;
@@ -113,12 +145,17 @@ export interface OutstationFareInput {
    */
   farePaise: number;
   /**
-   * IST calendar days the journey covers, both ends included — `1` for a same-day trip.
+   * Forward driving days the journey covers (`1` for a same-day or short trip).
    *
-   * The band fare is a DAY RATE, so this multiplies it. One-way trips and incity are always `1`:
-   * neither has a return leg for a duration to be measured against.
+   * The band fare is a DAY RATE, so this multiplies it. For round trips, derived from calendar days;
+   * for one-way trips, derived from travel duration via `oneWayDrivingDays`.
    */
   days: number;
+  /**
+   * Extra return days paid entirely to the driver (at `driverAmountPaise`) to compensate for
+   * returning with an empty seat on long one-way outstation trips. `0` or undefined when none applies.
+   */
+  extraDays?: number;
   driverAmountPaise: number;
   pickupZone: PickupZoneFare;
   scheduledAt: Date;

@@ -93,10 +93,28 @@ export class MockPaymentGateway implements PaymentGatewayPort {
     const body = JSON.stringify(event);
     return { body, signature: sign(body) };
   }
+
+  verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean {
+    return signCheckout(orderId, paymentId) === signature;
+  }
+
+  /**
+   * The checkout-side counterpart to `signedWebhook` — lets a test or a local walkthrough produce
+   * the `razorpay_payment_id`/`razorpay_signature` pair a real checkout SDK would hand back, so
+   * `VerifyCheckoutUseCase` can be driven end to end without a real Razorpay account.
+   */
+  static signedCheckout(orderId: string, paymentId: string): { paymentId: string; signature: string } {
+    return { paymentId, signature: signCheckout(orderId, paymentId) };
+  }
 }
 
 function sign(rawBody: string): string {
   return createHmac('sha256', env.PAYMENT_WEBHOOK_SECRET).update(rawBody).digest('hex');
+}
+
+/** Same secret as the webhook signature — the mock has only the one, unlike Razorpay's two. */
+function signCheckout(orderId: string, paymentId: string): string {
+  return createHmac('sha256', env.PAYMENT_WEBHOOK_SECRET).update(`${orderId}|${paymentId}`).digest('hex');
 }
 
 /**

@@ -136,6 +136,15 @@ export interface ListIncityPackagesQuery {
  * needs many narrow bands, which is why splitting a band is a first-class action in the admin
  * panel rather than an edit-then-create dance.
  */
+export interface OutstationVariantDto {
+  id: string;
+  label: string;
+  included_minutes: number;
+  base_fare_paise: number;
+  driver_amount_paise: number;
+  is_active: boolean;
+}
+
 export interface OutstationPackageDto {
   id: string;
   name: string;
@@ -151,11 +160,16 @@ export interface OutstationPackageDto {
    */
   round_trip_fare_paise: number | null;
   /**
-   * What the driver is paid for this band, in paise, PER DAY — a flat amount, not a share of the
-   * fare. The band fare is itself a day rate, and this is multiplied by the same IST day count,
-   * so a driver away three days is paid three times.
+   * What the driver is paid for a one-way trip on this band, in paise, PER DAY.
    */
-  driver_amount_paise: number;
+  one_way_driver_amount_paise: number;
+  /**
+   * What the driver is paid for a round trip on this band, in paise, PER DAY.
+   * `null` exactly when `round_trip_fare_paise` is null.
+   */
+  round_trip_driver_amount_paise: number | null;
+  /** Hourly-package variants offered on this band (e.g. 8 Hours, 12 Hours). */
+  variants: OutstationVariantDto[];
   is_active: boolean;
 }
 
@@ -179,6 +193,15 @@ export interface ListOutstationPackagesQuery {
  * anything. Aligning the request bodies is a separate change with its own caller migration.
  */
 export interface IncityVariantInput {
+  label: string;
+  includedMinutes: number;
+  baseFarePaise: number;
+  driverAmountPaise: number;
+  isActive?: boolean | undefined;
+}
+
+export interface OutstationVariantInput {
+  id?: string | undefined;
   label: string;
   includedMinutes: number;
   baseFarePaise: number;
@@ -219,7 +242,9 @@ export interface CreateOutstationPackageRequest {
   oneWayFarePaise: number;
   /** Omit or send `null` for a band that does not sell a return trip. */
   roundTripFarePaise?: number | null | undefined;
-  driverAmountPaise: number;
+  oneWayDriverAmountPaise: number;
+  roundTripDriverAmountPaise?: number | null | undefined;
+  variants?: OutstationVariantInput[] | undefined;
   isActive?: boolean | undefined;
 }
 
@@ -231,7 +256,9 @@ export interface UpdateOutstationPackageRequest {
   maxKm?: number | undefined;
   oneWayFarePaise?: number | undefined;
   roundTripFarePaise?: number | null | undefined;
-  driverAmountPaise?: number | undefined;
+  oneWayDriverAmountPaise?: number | undefined;
+  roundTripDriverAmountPaise?: number | null | undefined;
+  variants?: OutstationVariantInput[] | undefined;
   isActive?: boolean | undefined;
 }
 

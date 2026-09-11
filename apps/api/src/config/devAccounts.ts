@@ -35,16 +35,32 @@ export const DEV_ADMIN: DevAccount = {
 /**
  * Seeded already APPROVED and verified, so a developer can go on duty immediately.
  *
- * Note this is one driver, where docs/setup-development.md asks for about three — varied duty
- * states and vehicle classes, one suspended — because dispatch waves need several candidates to
- * be worth testing. There is no dispatch module yet, so one is enough today; whoever builds
- * dispatch should extend this rather than rediscovering the need.
+ * The one the demo booking is assigned to — see `DEMO_BOOKING` below.
  */
 export const DEV_DRIVER: DevAccount = {
   id: '000000000000000000000002',
   role: 'DRIVER',
   phone: '+919000000002',
   fullName: 'Dev Driver',
+};
+
+/**
+ * A SECOND approved driver, holding no trip.
+ *
+ * It exists because half the things worth testing need somewhere for a booking to GO: a manual
+ * transfer needs a driver to transfer to, a dispatch wave needs more than one candidate to rank,
+ * and "driver …0002 never got the offer" is only a meaningful sentence when there is an …0005 who
+ * did. One driver made every one of those untestable without hand-building a second account
+ * differently on each machine — the exact drift `devAccounts.ts` exists to prevent.
+ *
+ * Seeded OFF DUTY, deliberately. That is the state the manual-assignment picker has to warn about
+ * rather than hide, so the default seed exercises the interesting case.
+ */
+export const DEV_DRIVER_TWO: DevAccount = {
+  id: '000000000000000000000005',
+  role: 'DRIVER',
+  phone: '+919000000005',
+  fullName: 'Dev Driver Two',
 };
 
 /** Full profile, saved addresses, a vehicle — the populated case. */
@@ -72,9 +88,32 @@ export const DEV_CUSTOMER_EMPTY: DevAccount = {
 export const DEV_ACCOUNTS: DevAccount[] = [
   DEV_ADMIN,
   DEV_DRIVER,
+  DEV_DRIVER_TWO,
   DEV_CUSTOMER,
   DEV_CUSTOMER_EMPTY,
 ];
+
+/**
+ * A booking sitting at `ASSIGNED` on `DEV_DRIVER`, so the admin panel's ops actions have
+ * something to act on the moment the database is seeded.
+ *
+ * WHY A FIXED BOOKING AND NOT "JUST MAKE ONE IN THE APP". Reaching `ASSIGNED` by hand means a
+ * quote, a payment, a driver on duty inside the pickup radius with a fresh GPS fix, and a
+ * dispatch wave that actually rings — five moving parts, any of which can fail for reasons
+ * unrelated to what is being tested. Transferring a booking to another driver, or cancelling one
+ * as an admin, needs none of that; it needs a booking with a driver on it.
+ *
+ * The `_id`, the reference and the OTP are all fixed for the same reason every other id here is:
+ * so a bug found on one machine can be described on another.
+ */
+export const DEMO_BOOKING = {
+  id: '00000000000000000000000b',
+  /** The `DZ-` alphabet excludes 0/O and 1/I — these are read down a phone line. */
+  reference: 'DZ-DEMO01',
+  /** No `quotes` row is seeded, so this points at nothing. Nothing reads it back. */
+  quoteId: '00000000000000000000000c',
+  startOtp: '4821',
+} as const;
 
 /**
  * The allowlist the OTP bypass is scoped to.

@@ -195,6 +195,29 @@ export const SETTING_REGISTRY = {
       'The longest round trip that can be quoted. The band fare is multiplied by the days, so this bounds what one booking can charge.',
   },
 
+  /**
+   * How long a driver has to answer a customer's request for one more day.
+   *
+   * MINUTES, NOT SECONDS, and much longer than a dispatch offer's ring time. The two look similar
+   * and are not: an offer interrupts a driver who is waiting for work, so 45 s is generous. This
+   * reaches a driver who is mid-trip — driving, eating, or asleep in another town — and is very
+   * often settled face to face with the customer who just asked. A window short enough to lapse
+   * while they are at the wheel would turn a yes into a silent no.
+   *
+   * Nothing is charged when it lapses. See `bookingExtension.entity.ts`.
+   */
+  'booking.extension_request_ttl_minutes': {
+    schema: minutes,
+    default: 30,
+    group: 'PRICING',
+    label: 'Day extension response time',
+    unit: 'MINUTES',
+    audiences: ['ADMIN', 'DRIVER', 'CUSTOMER'],
+    description:
+      'How long a driver has to accept or decline a request for an extra day before it lapses. ' +
+      'A lapsed request charges nobody.',
+  },
+
   // ─── Waiting / customer late fee ───────────────────────────────────────────────────────────
   // This clock starts when the driver reaches ARRIVED (docs/LLD/booking-lifecycle.md). It is NOT
   // the overage grace inside the fare, which measures the trip running past its included minutes
@@ -330,6 +353,48 @@ export const SETTING_REGISTRY = {
     audiences: ['ADMIN'],
     description:
       'How far the first wave looks for a driver. Each subsequent wave doubles this distance.',
+  },
+  /**
+   * The FAVOURITE wave's radius — dispatch's wave 0, run only when the customer asked for it.
+   *
+   * DELIBERATELY MUCH WIDER THAN `wave_base_radius_m`. The two answer different questions. The
+   * ordinary first wave asks "who can be here soonest", and 3 km is the right answer to that. This
+   * one asks "is the driver this customer actually wants anywhere near", and a customer waits a
+   * little longer for a person they chose. It is still a limit and not "anyone": a favourite forty
+   * kilometres away is not a trip, it is a complaint.
+   */
+  'dispatch.favourite_radius_m': {
+    schema: metres,
+    default: 15000,
+    group: 'DISPATCH',
+    label: 'Favourite driver radius',
+    unit: 'METRES',
+    // Same reasoning as `wave_base_radius_m` above: stored in metres because the query compares
+    // it against a distance, shown in kilometres because that is how an admin thinks about reach.
+    display: { unit: 'KILOMETRES', factor: 1000, decimals: 1 },
+    audiences: ['ADMIN'],
+    description:
+      'How far to look when a customer asked for their favourite drivers to be rung first. Only ' +
+      'used on that first wave; the ordinary search that follows is unaffected.',
+  },
+  /**
+   * How long the favourite wave rings before the search opens to everyone.
+   *
+   * LONGER THAN `offer_ttl_seconds` ON PURPOSE, and it is the one number in this feature a
+   * customer actually feels. Too short and asking for a favourite achieves nothing; too long and
+   * every booking that names one is slower for it. A driver who declines does not burn this at
+   * all — the wave advances the moment its last offer is answered.
+   */
+  'dispatch.favourite_offer_ttl_seconds': {
+    schema: seconds,
+    default: 60,
+    group: 'DISPATCH',
+    label: 'Favourite driver ring time',
+    unit: 'SECONDS',
+    audiences: ['ADMIN', 'DRIVER'],
+    description:
+      'How long a favourite driver has to accept before the booking is offered to every nearby ' +
+      'driver instead.',
   },
   'dispatch.scheduled_lead_minutes': {
     schema: minutes,

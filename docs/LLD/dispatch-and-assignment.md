@@ -65,6 +65,75 @@ worse served than one told in 3.
 not sit through 45 s of silence — jump straight to wave 2. Only burn the TTL when offers
 were actually sent.
 
+## Favourite drivers — wave 0
+
+A customer may mark drivers they have completed a trip with as **favourites**, and ask for them
+when they book (`CreateBookingRequest.preferFavouriteDrivers`, frozen onto the booking as
+`preferFavouriteDrivers`). When they do, dispatch runs one extra wave **before** the radius ladder.
+
+```
+dispatch(booking):
+  if booking.preferFavouriteDrivers:
+      favourites = favourites.favouriteDriverIds(booking.customerId)   -- read LIVE, not frozen
+      if favourites is not empty:
+          candidates = findEligibleDrivers(booking, settings['dispatch.favourite_radius_m'])
+                         restricted to favourites
+                         minus drivers already offered this booking
+          if candidates is not empty:
+              ring ALL of them as wave 0,
+                   ttl = settings['dispatch.favourite_offer_ttl_seconds']
+              return                       -- the ordinary ladder runs only if this wave lapses
+  -- fall through to wave 1 immediately in every other case
+```
+
+**It is a preference, never a restriction.** Every path out of wave 0 leads to the ordinary
+search, with no delay added:
+
+| Case | What happens |
+|---|---|
+| Booking did not ask for favourites | Wave 1, exactly as before. The list is not even read. |
+| Asked, but the customer has none | Wave 1 immediately. |
+| Asked, but no favourite is eligible or in range | Wave 1 immediately — the favourite TTL is not burned. |
+| Rung, and they all decline | Wave 1 the moment the last one answers (see below). |
+| Rung, and they ignore it | Wave 1 when the wave-0 timeout fires. |
+
+**Numbered 0 rather than shifting the ladder up.** Everything the ordinary waves already do works
+unchanged for it: the `dispatch_offers` rows, the deterministic BullMQ timeout job id, the
+"already offered" exclusion that stops a favourite being rung again in wave 1, and the timeout's
+`wave + 1`, which lands exactly on the ordinary first wave.
+
+**Every eligibility gate still applies.** The favourite shortlist NARROWS the query and never
+widens it: a favourite who is off duty, unverified, in debt, out of position, or not competent for
+this car category is no more eligible than a stranger in the same state. Being chosen by a
+customer is a preference about people, not an exemption from being able to do the job.
+
+**Its own radius and TTL, and both are wider than wave 1's.** `dispatch.favourite_radius_m`
+(15 km) and `dispatch.favourite_offer_ttl_seconds` (60 s) answer a different question from
+`dispatch.wave_base_radius_m` (3 km) and `dispatch.offer_ttl_seconds` (45 s). The ordinary first
+wave asks "who can be here soonest"; this one asks "is the driver this customer actually wants
+anywhere near", and a customer waits a little longer for a person they chose. Both are admin
+settings, so the trade is tunable without a deploy.
+
+**The whole list is rung, not the top `wave_size` of it.** The cap on favourites (20) is what
+bounds the wave. Truncating a customer's own chosen drivers by a ranking they cannot see would be
+the one place in dispatch where the score overrules a decision a person already made.
+
+### A wave advances when its last offer is answered
+
+Declining used to write the offer row and nothing else: the booking then sat out the whole TTL
+ringing nobody. That was always slightly wrong, and the favourite wave makes it obvious — a
+customer who names one driver gets a wave of one, and a single tap of Decline cost them the full
+60 s.
+
+So: **when no offer in a wave is still `SENT` and the booking is still `SEARCHING`, the next wave
+starts immediately.** One decline out of five does not do this — the other four still have their
+TTL, and cutting it short would waste their chance to accept.
+
+The superseded wave's timeout job is still in Redis and fires on schedule. It is made harmless by
+a guard rather than by deleting the job: the timeout returns early if any offer exists at a later
+wave. That check holds even when a Redis delete fails, and leaves no second place for the two to
+disagree.
+
 ## Eligibility
 
 ```sql
@@ -209,36 +278,58 @@ at T-2h: push "Confirm you're still taking this 6:00 AM trip"
 The reconfirm step is what makes pre-assignment safe. Without it, a driver who took a trip
 yesterday and forgot it leaves you discovering the problem at 6:00 am with no fallback.
 
-## Reassignment
+## Reassignment and manual assignment
 
-Admin-initiated, from the ops dashboard, with a mandatory reason:
+Both are one endpoint — `POST /admin/bookings/:id/assign { driver_id, reason }` — because they are
+one act: put this booking on this driver. Whether somebody has to be taken off it first is a
+detail of the booking's current state, not a different feature.
+
+**Served by `dispatch`, despite the path saying bookings.** Assigning a driver writes
+`bookings.driverId`, and dispatch is the only module permitted to (`.dependency-cruiser.cjs`
+enforces it by tier, `bookings.public.ts` by shape). The route reaches it by the same
+overlapping-prefix fall-through `/admin/drivers` already uses for `ledger`.
 
 ```
-reassign(booking, reason, actor):
-  transaction:
-    UPDATE bookings SET driver_id = NULL, status = 'SEARCHING', assigned_at = NULL
-    WHERE id = $b AND status IN ('ASSIGNED','DRIVER_EN_ROUTE','ARRIVED')
-    INSERT booking_events (from, to='SEARCHING', actor, reason)
-    if reason ∈ DRIVER_FAULT_REASONS:
-        INSERT driver_earnings (PENALTY, -amount)
-  after commit:
-    notify previous driver — trip removed, with the reason
-    exclude that driver from all future waves for this booking
-    dispatch(booking) from wave 1
+assign(booking, toDriver, reason, admin):
+  refuse unless toDriver is verified, unblocked, and not already on a trip
+  if booking has a driver:
+      refuse unless status ∈ {ASSIGNED, DRIVER_EN_ROUTE, ARRIVED}
+      releaseDriver()          -- → SEARCHING, driver_id = NULL, assigned_at = NULL
+  else:
+      refuse unless status = SEARCHING
+  claimForDriver(toDriver)     -- the EXISTING accept-race CAS, unchanged
+  record a dispatchOffers row: wave = -1, status = ACCEPTED
+  notify the outgoing driver, the incoming driver, and the customer
 ```
 
-Reassignment after `STARTED` is not a reassignment — it's a cancellation plus a new
-booking. Don't blur them; the fare, the ledger, and the customer's receipt all differ.
+**RELEASE THEN CLAIM, not a third write path.** `claimForDriver` already refuses anything but a
+`SEARCHING` booking with no driver — which is exactly the state `releaseDriver` produces. So the
+one compare-and-swap that guarantees invariant B-2 ("`driverId` goes from null to non-null exactly
+once") keeps having exactly one implementation. If a dispatch wave lands in the gap between the
+two, the wave's winner keeps the trip and the admin is told their pick did not stick; the booking
+is assigned either way.
 
-## Manual assignment
+**Eligibility is checked BEFORE the release.** Discovering the target is ineligible afterwards
+would have taken a trip off a working driver to achieve nothing.
 
-When dispatch exhausts its waves, the booking lands in an ops queue. An admin can assign
-any eligible driver directly, bypassing the ranker but **not** the eligibility rules —
-except `is_on_duty`, which an admin may override after phoning the driver.
+**`STARTED` is refused.** Reassigning a running trip is a cancellation plus a new booking — the
+fare, the ledger and the customer's receipt all differ — and blurring them breaks all three.
 
-The queue view needs, per booking: time waiting, pickup zone, car category, how many
-drivers were offered, and how many declined. That last number is the diagnosis — five
-lapses means nobody's online; five declines means your price is wrong for that route.
+**The released driver is not penalised**: no ledger row, no acceptance-rate effect
+(`COUNTS_AGAINST_ACCEPTANCE` is untouched), and the push they receive says so, because a driver
+has no way to tell an ops reassignment from their own cancellation and that one does carry a
+penalty.
+
+**The picker does not filter on duty.** `GET /admin/bookings/assignable-drivers?search=` returns
+verified, unblocked drivers with `is_on_duty` alongside, and the panel renders it as a warning. An
+admin using manual assignment has usually just phoned the driver, and the common reason to reach
+for it is that nobody nearby is online — a duty filter would refuse precisely the case the feature
+exists for.
+
+**The offer row** is written at `wave: -1` (`MANUAL_ASSIGNMENT_WAVE`). Negative so it cannot
+collide with a real wave — 0 is the favourite wave, 1 upwards the radius ladder — which keeps a
+hand-picked driver out of the metrics that judge the ranker, while still putting the assignment
+where every other one lives and covering that driver with `driverIdsOffered`.
 
 ## Notification delivery
 

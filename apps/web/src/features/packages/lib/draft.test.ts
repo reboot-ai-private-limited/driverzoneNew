@@ -19,7 +19,9 @@ function sellableBand(over: Partial<OutstationDraft> = {}): OutstationDraft {
     maxKm: '100',
     oneWayFare: '2100',
     roundTripFare: '3700',
-    driverAmount: '1500',
+    oneWayDriverAmount: '1500',
+    roundTripDriverAmount: '2500',
+    variants: [],
     ...over,
   };
 }
@@ -37,7 +39,9 @@ describe('buildOutstationBody', () => {
       maxKm: 100,
       oneWayFarePaise: 210000,
       roundTripFarePaise: 370000,
-      driverAmountPaise: 150000,
+      oneWayDriverAmountPaise: 150000,
+      roundTripDriverAmountPaise: 250000,
+      variants: [],
       isActive: true,
     });
   });
@@ -50,14 +54,18 @@ describe('buildOutstationBody', () => {
     const result = buildOutstationBody(sellableBand({ roundTripFare: '' }));
 
     expect(result.ok && result.body.roundTripFarePaise).toBeNull();
+    expect(result.ok && result.body.roundTripDriverAmountPaise).toBeNull();
   });
 
   it('sends a return fare of ZERO as 0 — a free return trip is not the same thing', () => {
-    // driverAmount 0 too: a ₹0 return fare cannot pay out anything, and the amount-vs-fare
-    // check would otherwise reject the fixture's default ₹1500.
-    const result = buildOutstationBody(sellableBand({ roundTripFare: '0', driverAmount: '0' }));
+    // roundTripDriverAmount 0 too: a ₹0 return fare cannot pay out anything, and the amount-vs-fare
+    // check would otherwise reject the fixture's default ₹2500.
+    const result = buildOutstationBody(
+      sellableBand({ roundTripFare: '0', roundTripDriverAmount: '0' }),
+    );
 
     expect(result.ok && result.body.roundTripFarePaise).toBe(0);
+    expect(result.ok && result.body.roundTripDriverAmountPaise).toBe(0);
   });
 
   it('refuses a zero-width band, on the field the admin fixes', () => {
@@ -77,32 +85,54 @@ describe('buildOutstationBody', () => {
   });
 
   it('refuses a driver amount above the fare', () => {
-    // Over the one-way fare of ₹2100, though it would fit inside the return fare.
-    const result = buildOutstationBody(sellableBand({ driverAmount: '2500' }));
+    // Over the one-way fare of ₹2100.
+    const result = buildOutstationBody(sellableBand({ oneWayDriverAmount: '2500' }));
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.errors['driverAmount']).toMatch(/more than the fare/);
+    expect(result.errors['oneWayDriverAmount']).toMatch(/cannot exceed the one-way fare/);
   });
 
   it('allows a driver amount equal to the fare', () => {
-    const result = buildOutstationBody(sellableBand({ oneWayFare: '2100', driverAmount: '2100' }));
+    const result = buildOutstationBody(
+      sellableBand({ oneWayFare: '2100', oneWayDriverAmount: '2100' }),
+    );
     expect(result.ok).toBe(true);
   });
 
   it('collects every bad field at once rather than one per save', () => {
     const result = buildOutstationBody(
-      sellableBand({ name: '', minKm: 'abc', oneWayFare: '', driverAmount: '' }),
+      sellableBand({ name: '', minKm: 'abc', oneWayFare: '', oneWayDriverAmount: '' }),
     );
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(Object.keys(result.errors).sort()).toEqual([
-      'driverAmount',
       'minKm',
       'name',
+      'oneWayDriverAmount',
       'oneWayFare',
     ]);
+  });
+
+  it('validates outstation variants if present', () => {
+    const bandWithVariants = sellableBand({
+      variants: [
+        {
+          key: 'v1',
+          label: '8 Hours',
+          includedMinutes: '480',
+          baseFare: '3000',
+          driverAmount: '3500', // exceeds 3000
+          isActive: true,
+        },
+      ],
+    });
+
+    const result = buildOutstationBody(bandWithVariants);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors['variants.v1.driverAmount']).toMatch(/more than the fare/);
   });
 
   it('round-trips a DTO through the draft unchanged', () => {
@@ -114,7 +144,9 @@ describe('buildOutstationBody', () => {
       max_km: 100,
       one_way_fare_paise: 240000,
       round_trip_fare_paise: null,
-      driver_amount_paise: 170000,
+      one_way_driver_amount_paise: 170000,
+      round_trip_driver_amount_paise: null,
+      variants: [],
       is_active: true,
     };
 
@@ -129,7 +161,9 @@ describe('buildOutstationBody', () => {
       maxKm: 100,
       oneWayFarePaise: 240000,
       roundTripFarePaise: null,
-      driverAmountPaise: 170000,
+      oneWayDriverAmountPaise: 170000,
+      roundTripDriverAmountPaise: null,
+      variants: [],
       isActive: true,
     });
   });
@@ -144,7 +178,9 @@ describe('splitDraftFrom', () => {
     max_km: 150,
     one_way_fare_paise: 180000,
     round_trip_fare_paise: 320000,
-    driver_amount_paise: 120000,
+    one_way_driver_amount_paise: 120000,
+    round_trip_driver_amount_paise: 200000,
+    variants: [],
     is_active: true,
   };
 
@@ -156,6 +192,8 @@ describe('splitDraftFrom', () => {
     // Copied, not divided. Dividing by distance would invent the per-km rate this model deleted.
     expect(draft.oneWayFare).toBe('1800');
     expect(draft.roundTripFare).toBe('3200');
+    expect(draft.oneWayDriverAmount).toBe('1200');
+    expect(draft.roundTripDriverAmount).toBe('2000');
     expect(draft.terrain).toBe('PLAIN');
   });
 
@@ -166,11 +204,17 @@ describe('splitDraftFrom', () => {
   });
 
   it('keeps a band that sells no return trip selling none', () => {
-    const draft = splitDraftFrom({ ...dto, round_trip_fare_paise: null }, 70, 'x');
+    const draft = splitDraftFrom(
+      { ...dto, round_trip_fare_paise: null, round_trip_driver_amount_paise: null },
+      70,
+      'x',
+    );
 
     expect(draft.roundTripFare).toBe('');
+    expect(draft.roundTripDriverAmount).toBe('');
     const result = buildOutstationBody(draft);
     expect(result.ok && result.body.roundTripFarePaise).toBeNull();
+    expect(result.ok && result.body.roundTripDriverAmountPaise).toBeNull();
   });
 });
 

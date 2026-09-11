@@ -1,11 +1,14 @@
 import mongoose from 'mongoose';
 import { allowDevShortcuts, isProduction, loadEnv } from '@/config/env.js';
 import {
+  DEMO_BOOKING,
   DEV_ACCOUNTS,
   DEV_ADMIN,
   DEV_CUSTOMER,
   DEV_CUSTOMER_EMPTY,
   DEV_DRIVER,
+  DEV_DRIVER_TWO,
+  type DevAccount,
 } from '@/config/devAccounts.js';
 import { DEV_ZONES } from '@/config/devZones.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
@@ -19,6 +22,7 @@ import { DriverDocumentModel } from '@/modules/identity/infrastructure/driverDoc
 import { SessionModel } from '@/modules/identity/infrastructure/session.model.js';
 import { ReviewModel } from '@/modules/reviews/infrastructure/review.model.js';
 import { AuditLogModel } from '@/shared/db/auditLog.model.js';
+import { BookingModel } from '@/modules/bookings/infrastructure/booking.model.js';
 
 /**
  * Creates the known development accounts — an admin, an approved driver, two customers — and the
@@ -129,13 +133,20 @@ async function seedAdmin(): Promise<void> {
   ).exec();
 }
 
-async function seedDriver(): Promise<void> {
+/**
+ * One approved, verified driver.
+ *
+ * TAKES THE ACCOUNT rather than closing over `DEV_DRIVER`, because there are two of them now and
+ * a second copy of this function is how the two would drift into having different competencies —
+ * at which point "the seeded drivers" stops being one known shape.
+ */
+async function seedDriver(account: DevAccount, options: { isOnDuty: boolean }): Promise<void> {
   await DriverModel.findOneAndUpdate(
-    { _id: oid(DEV_DRIVER.id) },
+    { _id: oid(account.id) },
     {
       $set: {
-        phone: DEV_DRIVER.phone,
-        fullName: DEV_DRIVER.fullName,
+        phone: account.phone,
+        fullName: account.fullName,
         dob: new Date('1988-07-04'),
         gender: 'MALE',
         experienceYears: 6,
@@ -160,7 +171,7 @@ async function seedDriver(): Promise<void> {
 
         canDriveHill: true,
         canDriveHillVerified: true,
-        isOnDuty: false,
+        isOnDuty: options.isOnDuty,
         isBlocked: false,
       },
     },
@@ -176,10 +187,10 @@ async function seedDriver(): Promise<void> {
     { docType: 'GOVERNMENT_ID', side: 'BACK' },
   ] as const) {
     await DriverDocumentModel.findOneAndUpdate(
-      { driverId: oid(DEV_DRIVER.id), docType, side },
+      { driverId: oid(account.id), docType, side },
       {
         $set: {
-          fileUrl: `drivers/${DEV_DRIVER.id}/${docType.toLowerCase()}-${side.toLowerCase()}/seed`,
+          fileUrl: `drivers/${account.id}/${docType.toLowerCase()}-${side.toLowerCase()}/seed`,
           status: 'VERIFIED',
           rejectionReason: null,
           verifiedBy: oid(DEV_ADMIN.id),
@@ -354,6 +365,140 @@ async function seedReviews(): Promise<void> {
  *
  * Returns what happened per zone, for the summary.
  */
+/**
+ * A booking parked at `ASSIGNED` on `DEV_DRIVER`, so the panel's ops actions have something to
+ * act on the moment the database is seeded.
+ *
+ * WRITTEN STRAIGHT TO THE MODEL, like the identity accounts above and unlike the zones. There is
+ * no door to go through: `bookings.public.ts` exposes `beginSearching` and `claimForDriver` and
+ * deliberately nothing that CREATES a booking, because in the real system one only ever comes
+ * into existence from a paid quote. Reproducing that here would mean seeding a quote, a payment
+ * and a dispatch wave — five moving parts, none of which is what a developer testing a driver
+ * transfer is trying to exercise.
+ *
+ * WHAT THIS IS NOT. It is a fixture, not a real trip: the `quoteId` points at no quote, and the
+ * fare snapshot below was written by hand rather than by `computeFare`. Nothing reads either back
+ * — a transfer touches `driverId` and `status`, and a cancellation touches the payment, which
+ * this booking does not have. Do not grow it into a substitute for the real booking flow; if a
+ * test needs a genuinely priced trip, it needs the app.
+ *
+ * NO EVENT ROW is written for it either. `bookingEvents` is the product's memory of what actually
+ * happened, and inventing a history for a booking that never happened would put fiction in the one
+ * collection whose value is that it contains none. The panel's timeline shows nothing until an
+ * admin does something real to it — which is the point of seeding it.
+ *
+ * Idempotent on the fixed `_id`, like everything else here. Re-running the seed RESTORES it to
+ * `ASSIGNED` on `DEV_DRIVER`, which is what makes it re-testable: transfer it away, run the seed,
+ * transfer it again.
+ */
+async function seedDemoBooking(): Promise<void> {
+  const scheduledAt = new Date();
+
+  await BookingModel.findOneAndUpdate(
+    { _id: oid(DEMO_BOOKING.id) },
+    {
+      $set: {
+        reference: DEMO_BOOKING.reference,
+        customerId: oid(DEV_CUSTOMER.id),
+        driverId: oid(DEV_DRIVER.id),
+        /*
+         * ASSIGNED, which is the first status a transfer is legal from. It is also the one an
+         * admin cancellation is most worth testing at: a driver is committed, so both parties
+         * have to be told, and neither is charged.
+         */
+        status: 'ASSIGNED',
+        serviceType: 'INCITY',
+
+        pickup: { lat: SEVOKE_ROAD.lat, lng: SEVOKE_ROAD.lng },
+        pickupAddress: 'Sevoke Road, Siliguri',
+        drop: { lat: MATIGARA.lat, lng: MATIGARA.lng },
+        dropAddress: 'Matigara, Siliguri',
+        direction: null,
+        distanceKm: 6,
+
+        carCategory: 'SEDAN',
+        vehicleType: 'MANUAL',
+        preferFavouriteDrivers: false,
+
+        walletCreditPaise: 0,
+        walletDebtPaise: 0,
+
+        quoteId: oid(DEMO_BOOKING.quoteId),
+        fareSnapshot: DEMO_FARE_SNAPSHOT,
+
+        /*
+         * CASH, so this booking holds no payment. An admin cancellation therefore refunds nothing
+         * and cannot fail on a gateway call to a payment that was never taken — which keeps the
+         * fixture usable without Razorpay credentials.
+         */
+        paymentMode: 'CASH',
+        paymentId: null,
+
+        isScheduled: false,
+        scheduledAt,
+        dispatchAt: scheduledAt,
+        assignedAt: scheduledAt,
+
+        enRouteAt: null,
+        arrivedAt: null,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        cancellationReason: null,
+        waitingMinutes: null,
+        waitingChargePaise: null,
+        driverLateMinutes: null,
+
+        startOtp: DEMO_BOOKING.startOtp,
+        otpAttempts: 0,
+      },
+    },
+    { upsert: true, new: true },
+  ).exec();
+}
+
+/**
+ * The frozen fare on the demo booking. Hand-written, and the arithmetic still has to hold:
+ * `subtotal = lines`, `driver + company = subtotal`, `subtotal + tax = total`.
+ *
+ * A snapshot that did not reconcile would be a fixture that no real fare could ever be, and the
+ * first thing it would break is the completion path that splits it. `perDay: null` because this
+ * is an incity trip — an hourly package has no day to sell, so the demo booking deliberately
+ * cannot be extended.
+ */
+const DEMO_FARE_SNAPSHOT = {
+  version: 1,
+  serviceType: 'INCITY',
+  computedAt: new Date('2026-09-10T00:00:00.000Z'),
+  source: {
+    packageId: '00000000000000000000000d',
+    packageName: 'Siliguri Hourly',
+    variantId: '00000000000000000000000e',
+    variantLabel: '3 Hours',
+    pickupZoneId: '00000000000000000000000f',
+    pickupZoneName: 'Siliguri Central',
+    cityZoneId: null,
+    cityName: 'Siliguri',
+    terrain: null,
+  },
+  included: { minutes: 180 },
+  fare: {
+    serviceType: 'INCITY',
+    lines: [{ code: 'BASE', label: '3 Hours', amountPaise: 90_000 }],
+    subtotalPaise: 90_000,
+    taxBps: 500,
+    taxPaise: 4_500,
+    totalPaise: 94_500,
+    split: {
+      commissionablePaise: 90_000,
+      driverAmountPaise: 67_500,
+      driverPaise: 67_500,
+      companyPaise: 22_500,
+    },
+    perDay: null,
+  },
+} as const;
+
 async function seedZones(zones: ZonesPublicContract): Promise<Map<string, 'created' | 'present'>> {
   const actor = { adminId: DEV_ADMIN.id };
 
@@ -430,7 +575,8 @@ function printSummary(
 ): void {
   const rows = [
     ['ADMIN', DEV_ADMIN.phone, '/admin/auth', 'active'],
-    ['DRIVER', DEV_DRIVER.phone, '/driver/auth', 'APPROVED, verified, off duty'],
+    ['DRIVER', DEV_DRIVER.phone, '/driver/auth', 'verified, off duty — has the demo trip'],
+    ['DRIVER', DEV_DRIVER_TWO.phone, '/driver/auth', 'verified, off duty — free'],
     ['CUSTOMER', DEV_CUSTOMER.phone, '/customer/auth', '2 addresses, 1 vehicle'],
     ['CUSTOMER', DEV_CUSTOMER_EMPTY.phone, '/customer/auth', 'empty profile'],
   ];
@@ -440,6 +586,15 @@ function printSummary(
   for (const [role, phone, path, state] of rows) {
     console.log(`  ${role?.padEnd(9)} ${phone?.padEnd(15)} ${path?.padEnd(16)} ${state}`);
   }
+  /*
+   * Printed with the accounts rather than left in the log, because the whole reason this
+   * booking exists is that somebody is about to go looking for it in the panel.
+   */
+  console.log('\n  Demo booking\n');
+  console.log(`  ${DEMO_BOOKING.reference}  ASSIGNED to ${DEV_DRIVER.fullName} — cash, Siliguri`);
+  console.log(`  Panel: /bookings/${DEMO_BOOKING.id}`);
+  console.log('  Actions there: Transfer driver, Cancel booking.');
+  console.log(`  Re-run the seed to put it back on ${DEV_DRIVER.fullName} and test again.`);
 
   /**
    * The zones, and — for the ones already there — the fact that this run left them alone.
@@ -540,9 +695,15 @@ async function main(): Promise<void> {
   }
 
   await seedAdmin();
-  await seedDriver();
+  // The second one OFF DUTY on purpose — that is the state the manual-assignment picker has to
+  // warn about rather than hide, so the default seed exercises the interesting case.
+  await seedDriver(DEV_DRIVER, { isOnDuty: false });
+  await seedDriver(DEV_DRIVER_TWO, { isOnDuty: false });
   await seedCustomers();
   await seedReviews();
+
+  // After both drivers and the customer exist — it references all three.
+  await seedDemoBooking();
 
   // After the admin exists — every zone is `createdBy` that account.
   const zoneOutcome = await seedZones(zones);
@@ -550,7 +711,7 @@ async function main(): Promise<void> {
   const foreign = await countForeignAccounts();
 
   logger.info(
-    { accounts: 4, zones: [...zoneOutcome.values()].filter((o) => o === 'created').length, reset },
+    { accounts: DEV_ACCOUNTS.length, zones: [...zoneOutcome.values()].filter((o) => o === 'created').length, reset },
     'seed complete',
   );
   printSummary(env.DEV_FIXED_OTP, foreign, zoneOutcome);

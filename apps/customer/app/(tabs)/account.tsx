@@ -123,6 +123,13 @@ export default function AccountScreen(): ReactElement {
             label="Saved Addresses"
             onPress={() => router.push('/saved-addresses')}
           />
+          {/* Beside the saved places rather than off with the informational rows below: both are
+              lists the customer built themselves and both change what happens when they book. */}
+          <MenuRow
+            icon="heart"
+            label="Favourite Drivers"
+            onPress={() => router.push('/favourite-drivers')}
+          />
           {/* Above the payment method on purpose: the wallet is what a trip is paid from FIRST,
               and the payment mode only settles whatever is left. */}
           <MenuRow icon="gift" label="Wallet" onPress={() => router.push('/wallet')} />

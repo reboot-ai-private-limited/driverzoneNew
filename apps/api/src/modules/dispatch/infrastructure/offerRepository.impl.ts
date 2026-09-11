@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import type { DeliveryChannel } from '@driverzone/contracts';
+import { MANUAL_ASSIGNMENT_WAVE } from '../domain/offer.entity.js';
 import type { DispatchOffer, OfferStatus } from '../domain/offer.entity.js';
 import type { NewOffer, OfferRepositoryPort } from '../domain/ports.js';
 import { DispatchOfferModel, type DispatchOfferDoc } from './dispatchOffer.model.js';
@@ -78,6 +79,24 @@ export class MongoOfferRepository implements OfferRepositoryPort {
   }
 
   /**
+   * Both of these are existence questions, so both use `.exists()` — Mongo stops at the first
+   * match, and the `{ bookingId, wave, status }` index already serves them.
+   *
+   * `hasLiveOffersInWave` does NOT check `expiresAt`. An offer past its TTL that nothing has
+   * lapsed yet is still SENT, and the timeout job is what resolves it — treating it as dead here
+   * would race that job into ringing the next wave twice.
+   */
+  async hasLiveOffersInWave(bookingId: string, wave: number): Promise<boolean> {
+    if (!mongoose.isValidObjectId(bookingId)) return false;
+    return (await DispatchOfferModel.exists({ bookingId, wave, status: 'SENT' })) !== null;
+  }
+
+  async hasOffersAfterWave(bookingId: string, wave: number): Promise<boolean> {
+    if (!mongoose.isValidObjectId(bookingId)) return false;
+    return (await DispatchOfferModel.exists({ bookingId, wave: { $gt: wave } })) !== null;
+  }
+
+  /**
    * `status: 'SENT'` and `expiresAt: { $gt: now }` are in the FILTER.
    *
    * A driver tapping Accept as the timeout job fires must resolve one way or the other, never
@@ -129,6 +148,38 @@ export class MongoOfferRepository implements OfferRepositoryPort {
       { $set: { status: 'LAPSED' } },
     );
     return live.map((doc) => toEntity(doc.toObject() as DispatchOfferDoc));
+  }
+
+  /**
+   * `updateOne` with `upsert`, not `create`. The `{ bookingId, driverId }` unique index means a
+   * second assignment of the same driver would throw on an insert — and "they already have it"
+   * is not an error worth failing a committed transfer over.
+   */
+  async recordManualAssignment(bookingId: string, driverId: string): Promise<void> {
+    if (!mongoose.isValidObjectId(bookingId) || !mongoose.isValidObjectId(driverId)) return;
+
+    const now = new Date();
+
+    await DispatchOfferModel.updateOne(
+      { bookingId, driverId },
+      {
+        $set: {
+          wave: MANUAL_ASSIGNMENT_WAVE,
+          status: 'ACCEPTED',
+          score: 0,
+          distanceMetres: 0,
+          // Nothing rang, so there is no TTL that could mean anything and nothing to expire.
+          expiresAt: now,
+          respondedAt: now,
+          // NOT a delivery failure: nobody tried to reach them, an admin simply gave them the
+          // trip. `deliveredVia` drives the infrastructure-failure metric, and a manual
+          // assignment filed as NONE would read as a push we failed to send.
+          deliveredVia: 'BOTH',
+          deliveredAt: now,
+        },
+      },
+      { upsert: true },
+    );
   }
 
   async recordDelivery(offerId: string, via: DeliveryChannel): Promise<void> {

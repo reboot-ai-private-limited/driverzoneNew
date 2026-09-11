@@ -7,6 +7,34 @@ export interface DriverControllers {
   decline: RequestHandler;
 }
 
+export interface AdminControllers {
+  assignableDrivers: RequestHandler;
+  assign: RequestHandler;
+}
+
+/**
+ * Mounted at `/api/admin/bookings`, AHEAD of the bookings module's own admin router for the same
+ * prefix — `routes.ts` explains why. Hence `/:id/assign` rather than `/bookings/:id/assign`.
+ *
+ * IT IS DISPATCH THAT ANSWERS FOR THESE despite the path saying bookings, because assigning a
+ * driver writes `bookings.driverId` and this is the only module permitted to.
+ *
+ * MUST BE MOUNTED FIRST. The bookings admin router registers `GET /:id`, which reads
+ * `assignable-drivers` as a booking id if it gets there first — this module used to be mounted
+ * second, and that is exactly what happened: every request to this picker answered 404 "no such
+ * booking", silently, because nothing but manual testing through the actual HTTP layer catches a
+ * route-order bug like this one.
+ */
+export function buildAdminRouter(handlers: AdminControllers): Router {
+  const router = Router();
+  router.use(requireAuth('ADMIN'));
+
+  router.get('/assignable-drivers', handlers.assignableDrivers);
+  router.post('/:id/assign', handlers.assign);
+
+  return router;
+}
+
 /** Mounted at `/api/driver/offers`. */
 export function buildDriverRouter(handlers: DriverControllers): Router {
   const router = Router();

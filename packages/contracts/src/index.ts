@@ -17,5 +17,6 @@ export * from './reviews.js';
 export * from './wallet.js';
 export * from './duty.js';
 export * from './bookings.js';
+export * from './favourites.js';
 export * from './dispatch.js';
 export * from './quotes.js';

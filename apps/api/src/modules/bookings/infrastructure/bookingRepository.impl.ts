@@ -1,7 +1,7 @@
 import mongoose, { type FilterQuery } from 'mongoose';
 import type { BookingStatus } from '@driverzone/contracts';
 import { logger } from '../../../shared/logging/logger.js';
-import type { Booking, FareSnapshot } from '../domain/booking.entity.js';
+import type { Actor, Booking, FareSnapshot } from '../domain/booking.entity.js';
 import { TRANSITIONS } from '../domain/booking.entity.js';
 import type {
   AdminBookingFilter,
@@ -33,12 +33,15 @@ function toEntity(doc: BookingDoc): Booking {
     distanceKm: doc.distanceKm ?? null,
     carCategory: (doc.carCategory ?? null) as Booking['carCategory'],
     vehicleType: (doc.vehicleType ?? null) as Booking['vehicleType'],
+    preferFavouriteDrivers: doc.preferFavouriteDrivers ?? false,
     walletCreditPaise: doc.walletCreditPaise ?? 0,
     walletDebtPaise: doc.walletDebtPaise ?? 0,
     quoteId: String(doc.quoteId),
     fareSnapshot: doc.fareSnapshot as FareSnapshot,
-    paymentMode: doc.paymentMode as Booking['paymentMode'],
+    paymentMode: (doc.paymentMode ?? null) as Booking['paymentMode'],
+    paymentStatus: (doc.paymentStatus ?? (doc.paymentMode === 'CASH' ? 'CASH' : doc.paymentMode === 'UPI' ? 'AWAITING_PAYMENT' : 'NOT_SELECTED')) as Booking['paymentStatus'],
     paymentId: doc.paymentId ? String(doc.paymentId) : null,
+    paidExtensionPaise: doc.paidExtensionPaise ?? 0,
     isScheduled: doc.isScheduled,
     scheduledAt: doc.scheduledAt,
     dispatchAt: doc.dispatchAt,
@@ -143,6 +146,21 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     if (!mongoose.isValidObjectId(customerId)) return [];
     const docs = await BookingModel.find({ customerId }).sort({ createdAt: -1 }).limit(limit);
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  /**
+   * `favourites` asking whether these two have really been on a trip together.
+   *
+   * `.exists()` rather than a find: the answer is a boolean, and Mongo can stop at the first
+   * matching document. Both ids are validated first because an ObjectId cast failure inside a
+   * filter throws rather than returning nothing, and a malformed id from a URL must read as
+   * "no, they have not" rather than as a 500.
+   */
+  async hasCompletedTripTogether(customerId: string, driverId: string): Promise<boolean> {
+    if (!mongoose.isValidObjectId(customerId) || !mongoose.isValidObjectId(driverId)) return false;
+
+    const match = await BookingModel.exists({ customerId, driverId, status: 'COMPLETED' });
+    return match !== null;
   }
 
   /** Every trip assigned to this driver, newest first. See the port on why no status filter. */
@@ -265,6 +283,34 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     });
   }
 
+  async setPaymentMode(
+    id: string,
+    mode: Booking['paymentMode'],
+    status?: Booking['paymentStatus'],
+  ): Promise<Booking | null> {
+    const paymentStatus =
+      status ?? (mode === 'CASH' ? 'CASH' : mode === 'UPI' ? 'AWAITING_PAYMENT' : 'NOT_SELECTED');
+    const doc = await BookingModel.findByIdAndUpdate(
+      id,
+      { $set: { paymentMode: mode, paymentStatus } },
+      { new: true },
+    );
+    return doc ? toEntity(doc.toObject() as BookingDoc) : null;
+  }
+
+  async setPaymentStatus(id: string, status: Booking['paymentStatus']): Promise<Booking | null> {
+    const doc = await BookingModel.findByIdAndUpdate(
+      id,
+      { $set: { paymentStatus: status } },
+      { new: true },
+    );
+    return doc ? toEntity(doc.toObject() as BookingDoc) : null;
+  }
+
+  async setPaidExtensionPaise(id: string, amountPaise: number): Promise<void> {
+    await BookingModel.findByIdAndUpdate(id, { $set: { paidExtensionPaise: amountPaise } });
+  }
+
   /**
    * THE transition. Invariant B-3 lives here and nowhere else.
    *
@@ -337,7 +383,11 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     }
   }
 
-  async claimForDriver(bookingId: string, driverId: string): Promise<Booking | null> {
+  async claimForDriver(
+    bookingId: string,
+    driverId: string,
+    actor?: (Actor & { reason?: string }) | undefined,
+  ): Promise<Booking | null> {
     if (!mongoose.isValidObjectId(bookingId) || !mongoose.isValidObjectId(driverId)) return null;
 
     const now = new Date();
@@ -364,10 +414,15 @@ export class MongoBookingRepository implements BookingRepositoryPort {
               bookingId: doc._id,
               fromStatus: 'SEARCHING',
               toStatus: 'ASSIGNED',
-              actorType: 'DRIVER',
-              actorId: new mongoose.Types.ObjectId(driverId),
-              reason: null,
-              metadata: { claimed: true },
+              actorType: actor?.type ?? 'DRIVER',
+              actorId:
+                actor === undefined
+                  ? new mongoose.Types.ObjectId(driverId)
+                  : actor.id !== null && mongoose.isValidObjectId(actor.id)
+                    ? new mongoose.Types.ObjectId(actor.id)
+                    : null,
+              reason: actor?.reason ?? null,
+              metadata: actor === undefined ? { claimed: true } : { claimed: true, manualAssignment: true },
             },
           ],
           { session },

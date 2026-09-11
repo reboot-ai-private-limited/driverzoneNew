@@ -1,5 +1,11 @@
 import type { BadgeTone } from '@driverzone/design-system';
-import { BOOKING_STATUSES, type BookingStatus, type PaymentMode, type ServiceType } from '@driverzone/contracts';
+import {
+  BOOKING_STATUSES,
+  type BookingPaymentStatus,
+  type BookingStatus,
+  type PaymentMode,
+  type ServiceType,
+} from '@driverzone/contracts';
 
 /**
  * The thirteen `BookingStatus`es, grouped into the handful an admin actually filters by.
@@ -133,7 +139,19 @@ export function serviceTypeTone(serviceType: ServiceType): BadgeTone {
  *   - CASH is collected AT THE END, so it reads as due until `COMPLETED`, uncollected if the trip
  *     was cancelled first, and paid once it finished.
  */
-export function paymentStatusLabel(status: BookingStatus, paymentMode: PaymentMode): string {
+export function paymentStatusLabel(
+  status: BookingStatus,
+  paymentMode: PaymentMode | null,
+  paymentStatus?: BookingPaymentStatus,
+): string {
+  if (paymentStatus === 'PAID') return 'Paid';
+  if (paymentMode === null) {
+    if (groupOf(status) === 'CANCELLED' || status === 'NO_DRIVER_FOUND' || status === 'EXPIRED') {
+      return 'Not collected';
+    }
+    return 'Not chosen yet';
+  }
+
   if (status === 'PENDING_PAYMENT') return 'Pending';
 
   // `EXPIRED` is ONLY reachable from `PENDING_PAYMENT` (`booking.entity.ts`'s transition table) —
@@ -148,13 +166,22 @@ export function paymentStatusLabel(status: BookingStatus, paymentMode: PaymentMo
     return 'Due at trip end';
   }
 
+  if (paymentMode === 'UPI') {
+    if (status === 'COMPLETED') return 'Paid';
+    return 'Pending';
+  }
+
   return 'Paid';
 }
 
-export function paymentStatusTone(status: BookingStatus, paymentMode: PaymentMode): BadgeTone {
-  const label = paymentStatusLabel(status, paymentMode);
+export function paymentStatusTone(
+  status: BookingStatus,
+  paymentMode: PaymentMode | null,
+  paymentStatus?: BookingPaymentStatus,
+): BadgeTone {
+  const label = paymentStatusLabel(status, paymentMode, paymentStatus);
   if (label === 'Paid') return 'success';
-  if (label === 'Pending' || label === 'Due at trip end') return 'warning';
+  if (label === 'Pending' || label === 'Due at trip end' || label === 'Not chosen yet') return 'warning';
   return 'neutral';
 }
 

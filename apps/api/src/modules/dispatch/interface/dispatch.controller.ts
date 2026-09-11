@@ -6,10 +6,13 @@ import { AppError } from '../../../shared/errors/AppError.js';
 import { toMoney } from '../../../shared/money/format.js';
 import type { BookingDispatchContract } from '../../bookings/bookings.public.js';
 import type { OfferRepositoryPort } from '../domain/ports.js';
+import type { AssignableDriversContract } from '../../identity/identity.public.js';
 import type {
   AcceptOfferUseCase,
   DeclineOfferUseCase,
 } from '../application/useCases/respondToOffer.usecase.js';
+import type { TransferBookingUseCase } from '../application/useCases/transferBooking.usecase.js';
+import { requirementFromBooking, vehicleMismatchReason } from '../domain/vehicleCompatibility.js';
 
 const offerIdParamSchema = z.object({ id: z.string().min(1) });
 
@@ -117,5 +120,100 @@ export function makeListOffersController(
     ).filter((dto): dto is NonNullable<typeof dto> => dto !== null);
 
     sendSuccess(req, res, { offers: dtos }, dtos.length === 0 ? 'No live offers' : 'Live offers');
+  });
+}
+
+// ─── Admin: manual assignment ────────────────────────────────────────────────────────────────
+
+const assignableQuerySchema = z.object({
+  search: z.string().trim().max(120).optional().default(''),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+  booking_id: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/, 'Not a valid booking id.')
+    .optional(),
+});
+
+const assignSchema = z
+  .object({
+    driver_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Not a valid driver id.'),
+    reason: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+const bookingIdParamSchema = z.object({ id: z.string().min(1) });
+
+function adminOf(req: Request): string {
+  const sub = req.principal?.sub;
+  if (sub === undefined) {
+    throw AppError.internal('INTERNAL', {
+      reason: 'requireAuth ran but left no principal on the request',
+    });
+  }
+  return sub;
+}
+
+/**
+ * `GET /admin/bookings/assignable-drivers?search=&booking_id=`.
+ *
+ * `is_on_duty` rides along so the panel can WARN rather than hide. An admin assigning an off-duty
+ * driver has almost always just phoned them, which is the case manual assignment exists for.
+ *
+ * `vehicle_compatible` is the same kind of warning, not a gate — `null` when no `booking_id` was
+ * given (or it did not resolve), `true`/`false` otherwise. `TransferBookingUseCase` is the actual
+ * gate; this only lets the picker flag a mismatch before the admin wastes a round trip on one.
+ */
+export function makeAssignableDriversController(
+  drivers: AssignableDriversContract,
+  bookings: BookingDispatchContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { search, limit, booking_id } = assignableQuerySchema.parse(req.query);
+
+    const [found, booking] = await Promise.all([
+      drivers.assignableDrivers(search, limit),
+      booking_id === undefined ? Promise.resolve(null) : bookings.findById(booking_id),
+    ]);
+    const requirement = booking === null ? null : requirementFromBooking(booking);
+
+    sendSuccess(
+      req,
+      res,
+      found.map((driver) => ({
+        id: driver.id,
+        name: driver.fullName,
+        phone: driver.phone,
+        is_on_duty: driver.isOnDuty,
+        vehicle_compatible:
+          requirement === null ? null : vehicleMismatchReason(driver, requirement) === null,
+      })),
+    );
+  });
+}
+
+/** `POST /admin/bookings/:id/assign` — release whoever has it, hand it to the chosen driver. */
+export function makeAssignDriverController(useCase: TransferBookingUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = assignSchema.parse(req.body);
+
+    const result = await useCase.execute({
+      bookingId: id,
+      toDriverId: body.driver_id,
+      reason: body.reason,
+      adminId: adminOf(req),
+    });
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking_id: result.booking.id,
+        reference: result.booking.reference,
+        driver_id: result.booking.driverId,
+        released_driver_id: result.releasedDriverId,
+      },
+      'Trip transferred',
+    );
   });
 }

@@ -1,15 +1,27 @@
 import { Feather } from '@expo/vector-icons';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   type ComponentProps,
   type ReactElement,
   type ReactNode,
+  useCallback,
   useEffect,
   useRef,
   useState,
 } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  BackHandler,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import RazorpayCheckout from 'react-native-razorpay';
 import Animated, {
   Easing,
   FadeIn,
@@ -22,6 +34,7 @@ import Animated, {
 import type { BookingDto, BookingStatus, CancelBookingResponse } from '@driverzone/contracts';
 import { CancelRide } from '@/components/CancelRide';
 import { DriverCard } from '@/components/DriverCard';
+import { ExtendDayCard } from '@/components/ExtendDayCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { formatTime } from '@/features/booking/schedule';
 import {
@@ -32,7 +45,7 @@ import {
   showsStartOtp,
   tripStatusCopy,
 } from '@/features/booking/status';
-import { getBooking } from '@/lib/api/endpoints/bookings';
+import { getBooking, selectPaymentMethod, verifyPayment } from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
 
@@ -74,9 +87,112 @@ export default function TripScreen(): ReactElement {
 
   const [cancelling, setCancelling] = useState(false);
   const [lastCancel, setLastCancel] = useState<CancelBookingResponse | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [checkoutInFlight, setCheckoutInFlight] = useState(false);
 
   const data = booking.data;
   const copy = data === undefined ? null : tripStatusCopy(data.status);
+
+  /*
+   * OPENS THE REAL RAZORPAY CHECKOUT — the piece that was missing before: `selectPaymentMethod`
+   * already creates a genuine order server-side, but nothing used to show the customer a way to
+   * pay it. `order_id`/`key` come straight from that response's `client_token`/`public_key`.
+   *
+   * NEITHER `open()` RESOLVING NOR REJECTING IS TRUSTED AS PAYMENT CONFIRMATION. Only the
+   * server-verified webhook is (`razorpay.gateway.ts`'s own doc comment says so) — this screen
+   * already polls for that. A resolved checkout just means the customer did not back out, which
+   * is worth an immediate look rather than waiting out the rest of the 4s poll; a rejected one
+   * means they cancelled or it failed within the checkout itself, which is worth telling them.
+   */
+  const openCheckout = useCallback(
+    async (order: { clientToken: string; publicKey: string; amountPaise: number }) => {
+      setCheckoutInFlight(true);
+      try {
+        const result = await RazorpayCheckout.open({
+          key: order.publicKey,
+          amount: order.amountPaise,
+          currency: 'INR',
+          name: 'DriverZone',
+          description: data === undefined ? 'Trip fare' : `Trip ${data.reference}`,
+          order_id: order.clientToken,
+          theme: { color: '#F2C200' },
+        });
+
+        /*
+         * HANDS THE SIGNED RESULT BACK FOR SERVER-SIDE VERIFICATION, which is what lets the driver
+         * end the trip within a second or two instead of whenever the webhook lands. Swallowed on
+         * failure ON PURPOSE: this is an accelerant, not the confirmation. The webhook is still
+         * coming and the 4s poll below still picks it up, so a failed verify means "wait a bit
+         * longer", never "payment lost" — and telling the customer their payment failed here,
+         * after they have actually paid, would be the worse lie.
+         */
+        try {
+          await verifyPayment(id, result.razorpay_payment_id, result.razorpay_signature);
+        } catch {
+          /* the webhook remains the authority */
+        }
+
+        await queryClient.invalidateQueries({ queryKey: keys.bookings.detail(id) });
+      } catch (error) {
+        const description =
+          typeof error === 'object' && error !== null && 'description' in error
+            ? String((error as { description?: unknown }).description)
+            : 'Payment was not completed.';
+        setPaymentError(`${description} You can try again.`);
+      } finally {
+        setCheckoutInFlight(false);
+      }
+    },
+    [data, id, queryClient],
+  );
+
+  const selectMode = useMutation({
+    mutationFn: (mode: 'CASH' | 'UPI') => selectPaymentMethod(id, mode, Crypto.randomUUID()),
+    onMutate: () => setPaymentError(null),
+    onSuccess: (result) => {
+      queryClient.setQueryData(keys.bookings.detail(id), result.booking);
+      if (result.client_token !== null && result.public_key !== null && result.amount !== null) {
+        void openCheckout({
+          clientToken: result.client_token,
+          publicKey: result.public_key,
+          amountPaise: result.amount.amount_paise,
+        });
+      }
+    },
+    onError: (err) => {
+      setPaymentError(err instanceof Error ? err.message : 'Could not set payment method');
+    },
+  });
+
+  /*
+   * COMING BACK FROM WHEREVER WE WENT — most often GPay or Paytm mid-UPI-payment, since Razorpay's
+   * UPI Intent flow hands off to whichever app the customer picked and this screen is only
+   * backgrounded, never unmounted, while that happens (this effect existing at all is the
+   * confirmation of that: an unmounted screen has no `AppState` listener left to fire). The 4s
+   * poll would eventually notice a captured payment on its own; this removes the wait the moment
+   * the customer's thumb is back on this app, rather than leaving them staring at a stale "pending"
+   * badge for up to 4 seconds after switching back.
+   */
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void queryClient.invalidateQueries({ queryKey: keys.bookings.detail(id) });
+      }
+    });
+    return () => subscription.remove();
+  }, [id, queryClient]);
+
+  /*
+   * BLOCKS THE HARDWARE BACK BUTTON while a checkout is actually open. Android's back gesture is
+   * otherwise free to pop this screen mid-payment, which — however briefly, before Razorpay's own
+   * activity has focus — would unmount the very screen `openCheckout`'s promise is about to
+   * resolve into. `true` here means "handled, do nothing", which is exactly what suppresses it.
+   */
+  useEffect(() => {
+    if (!checkoutInFlight) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => subscription.remove();
+  }, [checkoutInFlight]);
 
   /*
    * THE RATE-YOUR-DRIVER HANDOFF, and ONLY on a transition witnessed in this session. `previous`
@@ -106,7 +222,9 @@ export default function TripScreen(): ReactElement {
       */}
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.replace('/home')}
+          // Disabled mid-checkout for the same reason the hardware back button is blocked above —
+          // this is the app-level equivalent of that same guard.
+          onPress={() => (checkoutInFlight ? undefined : router.replace('/home'))}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Back to home"
@@ -176,12 +294,20 @@ export default function TripScreen(): ReactElement {
               <Stagger index={2}>
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Your driver</Text>
-                  <DriverCard driver={data.driver} />
+                  {/* Only once the trip is over: a favourite needs a completed trip behind it,
+                      which is the same rule the API enforces. */}
+                  <DriverCard driver={data.driver} favouritable={data.status === 'COMPLETED'} />
                 </View>
               </Stagger>
             )}
 
+            {/* Above the booking details, because it is an ACTION on a live trip and those are a
+                read-only record of one. Renders nothing at all when there is nothing to say. */}
             <Stagger index={3}>
+              <ExtendDayCard booking={data} />
+            </Stagger>
+
+            <Stagger index={4}>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Booking details</Text>
                 <DetailRow
@@ -194,14 +320,14 @@ export default function TripScreen(): ReactElement {
               </View>
             </Stagger>
 
-            <Stagger index={4}>
+            <Stagger index={5}>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Trip progress</Text>
                 <ProgressTimeline booking={data} />
               </View>
             </Stagger>
 
-            <Stagger index={5}>
+            <Stagger index={6}>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Fare</Text>
                 {data.fare.lines.map((line) => (
@@ -225,10 +351,135 @@ export default function TripScreen(): ReactElement {
                   <Text style={styles.totalLabel}>Total</Text>
                   <Text style={styles.totalValue}>{data.fare.total.amount_display}</Text>
                 </View>
-                {data.payment_mode === 'CASH' ? (
+                {data.status === 'STARTED' && data.payment_mode === null ? (
+                  <View style={styles.paymentBox}>
+                    <View style={styles.rule} />
+                    <Text style={styles.paymentHeading}>How would you like to pay?</Text>
+                    <Text style={styles.paymentSubtext}>
+                      Select a payment method before you reach your destination.
+                    </Text>
+                    {paymentError !== null ? (
+                      <Text style={styles.paymentError}>{paymentError}</Text>
+                    ) : null}
+                    <View style={styles.payActions}>
+                      <Pressable
+                        onPress={() => selectMode.mutate('CASH')}
+                        disabled={(selectMode.isPending || checkoutInFlight)}
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                          styles.payBtn,
+                          pressed && styles.payBtnPressed,
+                          (selectMode.isPending || checkoutInFlight) && styles.payBtnDisabled,
+                        ]}
+                      >
+                        <Feather name="dollar-sign" size={16} color={colors.fg} />
+                        <Text style={styles.payBtnText}>Pay Cash</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => selectMode.mutate('UPI')}
+                        disabled={(selectMode.isPending || checkoutInFlight)}
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                          styles.payBtnOnline,
+                          pressed && styles.payBtnPressed,
+                          (selectMode.isPending || checkoutInFlight) && styles.payBtnDisabled,
+                        ]}
+                      >
+                        <Feather name="credit-card" size={16} color={colors.fg} />
+                        <Text style={styles.payBtnOnlineText}>Pay Online</Text>
+                      </Pressable>
+                    </View>
+                    {selectMode.isPending || checkoutInFlight ? (
+                      <View style={styles.payPendingRow}>
+                        <ActivityIndicator size="small" color={colors.fg} />
+                        <Text style={styles.payPendingText}>
+                          {checkoutInFlight ? 'Waiting for checkout…' : 'Setting up payment…'}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {data.payment_mode === null && data.status !== 'STARTED' ? (
                   <Text style={styles.cashNote}>
-                    Pay the driver in cash at the end of your trip.
+                    You can choose how to pay once the driver starts the trip.
                   </Text>
+                ) : null}
+
+                {data.payment_mode === 'CASH' ? (
+                  <View style={styles.paymentNoteCash}>
+                    <Feather name="info" size={15} color={colors.muted} />
+                    <View style={styles.flex}>
+                      <Text style={styles.cashNoteText}>
+                        Pay the driver in cash at the end of your trip.
+                      </Text>
+                      {data.status === 'STARTED' ? (
+                        <Pressable
+                          onPress={() => selectMode.mutate('UPI')}
+                          disabled={(selectMode.isPending || checkoutInFlight)}
+                          hitSlop={6}
+                          style={styles.switchLink}
+                        >
+                          <Text style={styles.switchLinkText}>Or pay online via Razorpay</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                ) : null}
+
+                {data.payment_mode === 'UPI' && data.payment_status === 'PAID' ? (
+                  <View style={styles.paymentBadgeSuccess}>
+                    <Feather name="check-circle" size={16} color="#16a34a" />
+                    <View style={styles.flex}>
+                      <Text style={styles.paymentSuccessTitle}>Paid Online</Text>
+                      <Text style={styles.paymentSuccessBody}>
+                        Your payment was received. Driver can complete the trip upon arrival.
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+
+                {data.payment_mode === 'UPI' && data.payment_status !== 'PAID' ? (
+                  <View style={styles.paymentBadgePending}>
+                    <Feather name="clock" size={16} color="#ca8a04" />
+                    <View style={styles.flex}>
+                      <Text style={styles.paymentPendingTitle}>Online payment pending</Text>
+                      <Text style={styles.paymentPendingBody}>
+                        Waiting for payment confirmation. The driver cannot end the trip until this clears.
+                      </Text>
+                      {paymentError !== null ? (
+                        <Text style={styles.paymentError}>{paymentError}</Text>
+                      ) : null}
+                      {data.status === 'STARTED' ? (
+                        <>
+                          {/* Reopens the SAME order — `selectPaymentMethod` is idempotent on an
+                              already-chosen mode and hands back the existing order id, so a
+                              dismissed or interrupted checkout is one tap from resuming. */}
+                          <Pressable
+                            onPress={() => selectMode.mutate('UPI')}
+                            disabled={(selectMode.isPending || checkoutInFlight)}
+                            accessibilityRole="button"
+                            style={({ pressed }) => [
+                              styles.retryPayBtn,
+                              pressed && styles.payBtnPressed,
+                              (selectMode.isPending || checkoutInFlight) && styles.payBtnDisabled,
+                            ]}
+                          >
+                            <Feather name="refresh-cw" size={15} color={colors.fg} />
+                            <Text style={styles.payBtnOnlineText}>Retry payment</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => selectMode.mutate('CASH')}
+                            disabled={(selectMode.isPending || checkoutInFlight)}
+                            hitSlop={6}
+                            style={styles.switchLink}
+                          >
+                            <Text style={styles.switchLinkText}>Or switch to cash payment</Text>
+                          </Pressable>
+                        </>
+                      ) : null}
+                    </View>
+                  </View>
                 ) : null}
               </View>
             </Stagger>
@@ -712,6 +963,111 @@ const styles = StyleSheet.create({
   totalLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
   totalValue: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
   cashNote: { ...text.caption, color: colors.faint, textAlign: 'center', marginTop: space.md },
+
+  paymentBox: { marginTop: space.sm },
+  paymentHeading: {
+    ...text.label,
+    color: colors.fg,
+    fontFamily: fontFamily.bold,
+    marginTop: space.xs,
+  },
+  paymentSubtext: { ...text.caption, color: colors.muted, marginTop: 2, marginBottom: space.sm },
+  paymentError: { ...text.caption, color: colors.danger, marginBottom: space.xs },
+  payActions: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
+  payBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSunken,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  payBtnOnline: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.brand,
+  },
+  // Full width rather than half: unlike the Cash/Online pair it has no sibling to share a row
+  // with, and it is the action this block exists to offer.
+  retryPayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.brand,
+    marginTop: space.sm,
+  },
+  payBtnPressed: { opacity: 0.8 },
+  payBtnDisabled: { opacity: 0.5 },
+  payBtnText: { ...text.label, color: colors.fg, fontFamily: fontFamily.semibold },
+  payBtnOnlineText: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
+  payPendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    marginTop: space.sm,
+  },
+  payPendingText: { ...text.caption, color: colors.muted },
+
+  paymentNoteCash: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.xs,
+    backgroundColor: colors.bgSunken,
+    borderRadius: radius.md,
+    padding: space.sm,
+    marginTop: space.md,
+  },
+  cashNoteText: { ...text.caption, color: colors.fg, flex: 1 },
+  switchLink: { marginTop: 4 },
+  switchLinkText: {
+    ...text.caption,
+    color: colors.fg,
+    textDecorationLine: 'underline',
+    fontFamily: fontFamily.semibold,
+  },
+
+  paymentBadgeSuccess: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.xs,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: radius.md,
+    padding: space.sm,
+    marginTop: space.md,
+  },
+  paymentSuccessTitle: { ...text.label, color: '#166534', fontFamily: fontFamily.bold },
+  paymentSuccessBody: { ...text.caption, color: '#15803D', marginTop: 2 },
+
+  paymentBadgePending: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.xs,
+    backgroundColor: '#FEFCE8',
+    borderWidth: 1,
+    borderColor: '#FEF08A',
+    borderRadius: radius.md,
+    padding: space.sm,
+    marginTop: space.md,
+  },
+  paymentPendingTitle: { ...text.label, color: '#854D0E', fontFamily: fontFamily.bold },
+  paymentPendingBody: { ...text.caption, color: '#A16207', marginTop: 2 },
 
   cancelBar: {
     flexDirection: 'row',

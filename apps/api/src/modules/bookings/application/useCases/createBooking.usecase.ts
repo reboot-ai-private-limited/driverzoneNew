@@ -2,8 +2,6 @@ import { randomInt } from 'node:crypto';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
 import type { CarCategory, PaymentMode, VehicleTypePreference } from '@driverzone/contracts';
-import type { PaymentsContract } from '../../../payments/payments.public.js';
-import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
 import type { DispatchScheduler } from './confirmBookingPayment.usecase.js';
 import type { QuoteConsumptionContract } from '../../../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
@@ -21,53 +19,46 @@ export interface CreateBookingInput {
   quoteId: string;
   pickupAddress: string;
   dropAddress: string;
-  paymentMode: PaymentMode;
+  paymentMode?: PaymentMode | undefined;
   /**
    * The car the driver is being booked for. Not a pricing input — it never reaches the fare — so
    * it arrives here rather than on the quote, and its only consumer is the eligibility query.
    */
   carCategory: CarCategory;
   vehicleType: VehicleTypePreference;
+  /**
+   * Ring this customer's favourites first. Frozen onto the booking, not consulted here — `bookings`
+   * sits below `favourites` and below `dispatch`, and neither the list nor the wave is its
+   * business. All this module does is record what the customer asked for.
+   */
+  preferFavouriteDrivers: boolean;
   /** One tap, one key. Passed to the gateway so a retried request charges once. */
   idempotencyKey: string;
 }
 
 export interface CreatedBooking {
   booking: Booking;
-  /** The gateway order id, for checkout. Null for cash, and null on an already-settled retry. */
+  /** The gateway order id, for checkout. Null at creation; populated when online payment is chosen. */
   clientToken: string | null;
-  /** The publishable key checkout needs beside the order. Null for cash. */
+  /** The publishable key checkout needs beside the order. Null at creation. */
   publicKey: string | null;
-  /** What is being charged: the fare plus any dues carried in. Null for cash. */
+  /** What is being charged. Null at creation. */
   amountPaise: number | null;
 }
 
 /**
- * Turns a quote into a booking and starts collecting for it.
+ * Turns a quote into a confirmed booking and enqueues dispatch immediately.
  *
- * THE ORDER HERE IS THE WHOLE DESIGN, and it is not the obvious one. The booking row is created
- * BEFORE the quote is consumed and before the payment exists, because consumption needs a booking
- * id to record and because a customer must never be charged for a booking that failed to save.
- * That leaves one recoverable failure — a booking at `PENDING_PAYMENT` whose quote was never
- * claimed — which the sweeper expires. The alternative orderings lose money or lose the booking.
- *
- * IDEMPOTENT ON THE QUOTE. A double-tapped Confirm finds the quote already consumed and returns
- * the booking that consumed it, rather than creating a second at the same price.
+ * Payment method selection is deferred until the ride has STARTED. Every booking confirms
+ * immediately, spends credit immediately if any, and dispatches a driver without upfront charge.
  */
 export class CreateBookingUseCase {
   constructor(
     private readonly repo: BookingRepositoryPort,
     private readonly quotes: QuoteConsumptionContract,
-    private readonly payments: PaymentsContract,
     private readonly settings: SettingsReadContract,
-    private readonly charges: ChargeRepositoryPort,
     /** The customer's balance: what it takes off this fare, and what it adds to it. */
     private readonly wallet: WalletPublicContract,
-    /**
-     * Only reached on the CASH path. A prepaid booking is dispatched by the payment webhook, which
-     * for cash never fires — so this use case has to do it, and it is injected for the same reason
-     * the webhook's copy is: `dispatch` is a tier above `bookings` and cannot be imported.
-     */
     private readonly scheduleDispatch: DispatchScheduler,
   ) {}
 
@@ -92,9 +83,14 @@ export class CreateBookingUseCase {
     /*
      * WHAT THE WALLET DOES TO THIS TRIP'S PRICE — credit off, debt on.
      *
-     * PLANNED, NOT SPENT. Nothing is written here: the rows are appended when the booking is
-     * CONFIRMED (`confirmBookingPayment`, and the cash path below), because a customer who
-     * abandons UPI checkout must not have spent their credit on a booking that then expires.
+     * PLANNED, NOT SPENT. Nothing is written here: the booking confirms synchronously a few lines
+     * down, and credit is spent then, in this same call — there is no upfront payment to wait on
+     * any more, so there is no abandoned-checkout case to protect the credit from.
+     *
+     * `walletDebtPaise` is frozen onto the booking either way; it is only ever actually COLLECTED
+     * once the customer picks a payment method after the ride starts — cash cannot carry a debt
+     * (`selectPaymentMethod.usecase.ts` refuses it), online collects it on capture
+     * (`confirmLatePayment.usecase.ts`).
      *
      * KNOWN RACE, and it is bounded. Two bookings created in the same instant both plan against
      * the same balance and both spend it, taking the wallet negative — which lands as a debt on
@@ -102,24 +98,6 @@ export class CreateBookingUseCase {
      * only worth building when a customer can plausibly have two checkouts open at once.
      */
     const plan = await this.wallet.planFor(input.customerId, quote.fare.totalPaise);
-
-    /*
-     * A customer carrying a DEBT must pay by UPI. Credit is fine on either mode.
-     *
-     * Cash has no payment leg to settle a debt on, so allowing it would let a cancellation fee
-     * outlive every future trip — and the cheapest way never to pay one would be to always book
-     * cash. Refused rather than silently upgraded to UPI, because the customer chose a mode and
-     * deserves to be told why they cannot have it.
-     *
-     * Credit is the opposite case and needs no such guard: it makes a cash trip CHEAPER, and the
-     * driver is told the reduced figure to collect (`expectedCashPaise`).
-     */
-    if (plan.debtAddedPaise > 0 && input.paymentMode === 'CASH') {
-      throw AppError.badRequest(
-        'You have an unpaid cancellation fee. Please pay for this trip by UPI to clear it.',
-        { outstanding_dues_paise: plan.debtAddedPaise },
-      );
-    }
 
     const now = new Date();
     const snapshot = await this.settings.snapshot();
@@ -158,10 +136,11 @@ export class CreateBookingUseCase {
       distanceKm: quote.distanceKm,
       carCategory: input.carCategory,
       vehicleType: input.vehicleType,
+      preferFavouriteDrivers: input.preferFavouriteDrivers,
       walletCreditPaise: plan.creditAppliedPaise,
       walletDebtPaise: plan.debtAddedPaise,
       fareSnapshot,
-      paymentMode: input.paymentMode,
+      paymentMode: null,
       isScheduled,
       scheduledAt: quote.scheduledAt,
       dispatchAt,
@@ -190,104 +169,54 @@ export class CreateBookingUseCase {
       });
     }
 
+    const confirmed = await this.repo.transition({
+      bookingId: booking.id,
+      from: 'PENDING_PAYMENT',
+      to: 'CONFIRMED',
+      actor: { type: 'SYSTEM', id: null },
+      metadata: { via: 'booking_creation' },
+    });
+
+    const result = confirmed ?? booking;
+
     /*
-     * ── CASH: no gateway, no payment row, and no webhook is coming ────────────────────────────
-     *
-     * This is the one path to CONFIRMED that is not a signature-verified capture, and it is only
-     * safe because nothing has been promised in exchange: the money is collected at the end of the
-     * trip by the driver, who becomes liable for it (`CASH_COLLECTED` at completion).
-     *
-     * Dispatch is enqueued HERE because the webhook — which does it for a prepaid booking — will
-     * never fire for this one.
+     * Booking confirmed synchronously, so wallet credit is spent here — there is no upfront
+     * payment webhook to do it later.
      */
-    if (input.paymentMode === 'CASH') {
-      const confirmed = await this.repo.transition({
-        bookingId: booking.id,
-        from: 'PENDING_PAYMENT',
-        to: 'CONFIRMED',
-        actor: { type: 'SYSTEM', id: null },
-        metadata: { via: 'cash' },
-      });
-
-      const result = confirmed ?? booking;
-
-      /*
-       * The cash path is the one that confirms synchronously, so it is where cash spends the
-       * credit — there is no webhook coming to do it later.
-       *
-       * A failure here is logged and swallowed, because the booking IS confirmed and a driver is
-       * about to be dispatched: throwing would fail a request whose trip is already happening. The
-       * cost of the log line is a customer who keeps credit they should have spent, which is the
-       * error worth having of the two.
-       */
-      if (plan.creditAppliedPaise > 0) {
-        try {
-          await this.wallet.append([
-            {
-              customerId: input.customerId,
-              bookingId: booking.id,
-              entryType: 'SPENT_ON_RIDE',
-              amountPaise: -plan.creditAppliedPaise,
-              note: `Used on trip ${booking.reference}`,
-            },
-          ]);
-        } catch (error) {
-          logger.error(
-            { err: error, bookingId: booking.id },
-            'could not spend wallet credit on a confirmed cash booking',
-          );
-        }
-      }
-
+    if (plan.creditAppliedPaise > 0) {
       try {
-        await this.scheduleDispatch(result);
+        await this.wallet.append([
+          {
+            customerId: input.customerId,
+            bookingId: booking.id,
+            entryType: 'SPENT_ON_RIDE',
+            amountPaise: -plan.creditAppliedPaise,
+            note: `Used on trip ${booking.reference}`,
+          },
+        ]);
       } catch (error) {
         logger.error(
           { err: error, bookingId: booking.id },
-          'could not enqueue dispatch for a cash booking — the sweeper will pick this up',
+          'could not spend wallet credit on a confirmed booking',
         );
       }
-
-      logger.info(
-        { bookingId: booking.id, reference: booking.reference },
-        'cash booking confirmed without a payment',
-      );
-
-      return settled(result);
     }
 
-    // ── UPI: collect before anyone is dispatched ────────────────────────────────────────────
-    // The fare, less whatever credit covers, plus whatever debt is being collected with it.
-    const amountPaise = plan.payablePaise;
-
-    const { payment, clientToken, publicKey } = await this.payments.charge({
-      bookingId: booking.id,
-      customerId: input.customerId,
-      kind: 'BOOKING',
-      amountPaise,
-      reference: booking.reference,
-      idempotencyKey: input.idempotencyKey,
-    });
-
-    await this.repo.attachPayment(booking.id, payment.id);
+    try {
+      await this.scheduleDispatch(result);
+    } catch (error) {
+      logger.error(
+        { err: error, bookingId: booking.id },
+        'could not enqueue dispatch for a booking — the sweeper will pick this up',
+      );
+    }
 
     logger.info(
-      {
-        bookingId: booking.id,
-        reference: booking.reference,
-        paymentId: payment.id,
-        creditAppliedPaise: plan.creditAppliedPaise,
-        debtAddedPaise: plan.debtAddedPaise,
-      },
-      'booking created, awaiting payment',
+      { bookingId: booking.id, reference: booking.reference },
+      'booking confirmed and dispatch enqueued',
     );
 
-    return {
-      booking: { ...booking, paymentId: payment.id },
-      clientToken,
-      publicKey,
-      amountPaise,
-    };
+    return settled(result);
   }
 }
 

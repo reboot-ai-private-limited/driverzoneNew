@@ -14,8 +14,15 @@ import type {
   DriverCardContract,
 } from '../../identity/identity.public.js';
 import { BookingNotFoundError } from '../domain/booking.errors.js';
+import type { BookingExtension } from '../domain/bookingExtension.entity.js';
+import type { ExtensionRepositoryPort } from '../domain/extensionRepository.port.js';
 import type { CreateBookingUseCase } from '../application/useCases/createBooking.usecase.js';
 import type {
+  RequestBookingExtensionUseCase,
+  RespondToExtensionUseCase,
+} from '../application/useCases/extendBooking.usecase.js';
+import type {
+  CancelBookingByAdminUseCase,
   CancelBookingByCustomerUseCase,
   CancelBookingByDriverUseCase,
 } from '../application/useCases/cancelBooking.usecase.js';
@@ -27,6 +34,9 @@ import type {
   ForceArriveUseCase,
   ReportPickupPinUseCase,
 } from '../application/useCases/driverProgress.usecase.js';
+import type { SelectPaymentMethodUseCase } from '../application/useCases/selectPaymentMethod.usecase.js';
+import type { VerifyPaymentUseCase } from '../application/useCases/verifyPayment.usecase.js';
+import type { DriverSwitchToCashUseCase } from '../application/useCases/driverSwitchToCash.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
 import {
   adminBookingListQuerySchema,
@@ -37,7 +47,9 @@ import {
   driverArrivedSchema,
   forceArriveSchema,
   reportPinSchema,
+  selectPaymentMethodSchema,
   startTripSchema,
+  verifyPaymentSchema,
 } from './bookings.validation.js';
 
 /**
@@ -87,6 +99,36 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       paymentMode: body.paymentMode,
       carCategory: body.carCategory,
       vehicleType: body.vehicleType,
+      preferFavouriteDrivers: body.preferFavouriteDrivers,
+      idempotencyKey: idempotencyKeyOf(req),
+    });
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking: toBookingDto({ booking: result.booking, adjustments: [] }),
+        client_token: result.clientToken,
+        public_key: result.publicKey,
+        amount: result.amountPaise === null ? null : toMoney(result.amountPaise),
+      },
+      'Booking confirmed',
+      201,
+    );
+  });
+}
+
+export function makeSelectPaymentMethodController(
+  useCase: SelectPaymentMethodUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = selectPaymentMethodSchema.parse(req.body);
+
+    const result = await useCase.execute({
+      bookingId: id,
+      customerId: principalOf(req),
+      paymentMode: body.payment_mode,
       idempotencyKey: idempotencyKeyOf(req),
     });
 
@@ -100,9 +142,50 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
         amount: result.amountPaise === null ? null : toMoney(result.amountPaise),
       },
       result.booking.paymentMode === 'CASH'
-        ? 'Booking confirmed — pay the driver at the end of your trip'
-        : 'Booking created — awaiting payment',
-      201,
+        ? 'Cash payment selected — pay the driver at the end of your trip'
+        : 'Online payment selected — proceed to checkout',
+      200,
+    );
+  });
+}
+
+export function makeVerifyPaymentController(useCase: VerifyPaymentUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = verifyPaymentSchema.parse(req.body);
+
+    const booking = await useCase.execute({
+      bookingId: id,
+      customerId: principalOf(req),
+      providerPaymentId: body.razorpay_payment_id,
+      signature: body.razorpay_signature,
+    });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Payment confirmed',
+    );
+  });
+}
+
+export function makeDriverSwitchToCashController(
+  useCase: DriverSwitchToCashUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const booking = await useCase.execute({
+      bookingId: id,
+      driverId: principalOf(req),
+    });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Switched to cash — collect the fare from the customer',
     );
   });
 }
@@ -127,6 +210,7 @@ export function makeGetCustomerBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
   directory: DriverCardContract,
+  extensions: ExtensionRepositoryPort,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -135,14 +219,22 @@ export function makeGetCustomerBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.customerId !== customerId) throw new BookingNotFoundError(id);
 
-    const [adjustments, startOtp, driverCard] = await Promise.all([
+    const [adjustments, startOtp, driverCard, extensionRows] = await Promise.all([
       charges.listAdjustments(booking.id),
       // Shown to the customer so they can read it out — and only ever from here.
       repo.readStartOtp(booking.id),
       cardFor(directory, booking.driverId),
+      // Resolved on the single-booking read, not the list: this is the screen with the Extend
+      // button on it, and a history list would pay a query per row to render nothing.
+      extensions.listForBooking(booking.id),
     ]);
 
-    sendSuccess(req, res, toBookingDto({ booking, adjustments, startOtp, driverCard }), 'Booking');
+    sendSuccess(
+      req,
+      res,
+      toBookingDto({ booking, adjustments, startOtp, driverCard, extensions: extensionRows }),
+      'Booking',
+    );
   });
 }
 
@@ -204,6 +296,7 @@ export function makeGetDriverBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
   directory: AccountDirectoryContract & CustomerContactContract,
+  extensions: ExtensionRepositoryPort,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -212,9 +305,13 @@ export function makeGetDriverBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.driverId !== driverId) throw new BookingNotFoundError(id);
 
-    const [adjustments, contacts] = await Promise.all([
+    const [adjustments, contacts, extensionRows] = await Promise.all([
       charges.listAdjustments(booking.id),
       directory.customerContactsByIds([booking.customerId]),
+      // THE READ THE DRIVER'S TRIP SCREEN ACTUALLY MAKES. `/current` is the recovery path after
+      // the app is killed; this is the one the screen polls, so the confirm card lives or dies
+      // on it being here.
+      extensions.listForBooking(booking.id),
     ]);
 
     sendSuccess(
@@ -224,6 +321,8 @@ export function makeGetDriverBookingController(
         booking,
         adjustments,
         customerCard: contacts.get(booking.customerId) ?? null,
+        extensions: extensionRows,
+        revealDriverEarnings: true,
       }),
       'Booking',
     );
@@ -285,6 +384,7 @@ export function makeGetCurrentCustomerBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
   directory: DriverCardContract,
+  extensions: ExtensionRepositoryPort,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const booking = await repo.findActiveForCustomer(principalOf(req));
@@ -294,16 +394,25 @@ export function makeGetCurrentCustomerBookingController(
       return;
     }
 
-    const [adjustments, startOtp, driverCard] = await Promise.all([
+    const [adjustments, startOtp, driverCard, extensionRows] = await Promise.all([
       charges.listAdjustments(booking.id),
       repo.readStartOtp(booking.id),
       cardFor(directory, booking.driverId),
+      extensions.listForBooking(booking.id),
     ]);
 
     sendSuccess(
       req,
       res,
-      { booking: toBookingDto({ booking, adjustments, startOtp, driverCard }) },
+      {
+        booking: toBookingDto({
+          booking,
+          adjustments,
+          startOtp,
+          driverCard,
+          extensions: extensionRows,
+        }),
+      },
       'Booking in progress',
     );
   });
@@ -327,6 +436,7 @@ export function makeGetCurrentDriverTripController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
   directory: CustomerContactContract,
+  extensions: ExtensionRepositoryPort,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const booking = await repo.findActiveForDriver(principalOf(req));
@@ -336,9 +446,11 @@ export function makeGetCurrentDriverTripController(
       return;
     }
 
-    const [adjustments, contacts] = await Promise.all([
+    const [adjustments, contacts, extensionRows] = await Promise.all([
       charges.listAdjustments(booking.id),
       directory.customerContactsByIds([booking.customerId]),
+      // The driver's half of the same screen: this is where they answer a pending request.
+      extensions.listForBooking(booking.id),
     ]);
 
     sendSuccess(
@@ -349,9 +461,43 @@ export function makeGetCurrentDriverTripController(
           booking,
           adjustments,
           customerCard: contacts.get(booking.customerId) ?? null,
+          extensions: extensionRows,
+          // This is the driver's own trip: they are the one being asked to commit a day.
+          revealDriverEarnings: true,
         }),
       },
       'Trip in progress',
+    );
+  });
+}
+
+/**
+ * `POST /admin/bookings/:id/cancel`.
+ *
+ * The same request shape as the customer's and the driver's — a reason and nothing else — but the
+ * response's `fee` is always zero. It is sent anyway rather than omitted, so the panel renders one
+ * cancellation result shape whoever cancelled.
+ */
+export function makeCancelByAdminController(useCase: CancelBookingByAdminUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = cancelBookingSchema.parse(req.body);
+
+    const result = await useCase.execute({
+      bookingId: id,
+      actorId: principalOf(req),
+      reason: body.reason,
+    });
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking: toBookingDto({ booking: result.booking, adjustments: [] }),
+        fee: toMoney(result.feePaise),
+        refunded: toMoney(result.refundedPaise),
+      },
+      'Booking cancelled — nobody was charged',
     );
   });
 }
@@ -730,6 +876,71 @@ export function makeListEventsController(repo: BookingRepositoryPort): RequestHa
       res,
       { reference: booking.reference, events: events.map(toBookingEventDto) },
       'Booking history',
+    );
+  });
+}
+
+// ─── Day extensions ──────────────────────────────────────────────────────────────────────────
+
+/** One extension, as both apps read it. */
+function toExtensionDto(extension: BookingExtension) {
+  return {
+    id: extension.id,
+    status: extension.status,
+    amount: toMoney(extension.amountPaise),
+    /** What the DRIVER earns from it. Rendered by the driver app; harmless to the customer. */
+    driver_amount: toMoney(extension.driverAmountPaise),
+    expires_at: extension.expiresAt.toISOString(),
+    requested_at: extension.requestedAt.toISOString(),
+  };
+}
+
+/** `POST /customer/bookings/:id/extend` — asks the driver for one more day. */
+export function makeRequestExtensionController(
+  useCase: RequestBookingExtensionUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const extension = await useCase.execute({ bookingId: id, customerId: principalOf(req) });
+
+    sendSuccess(
+      req,
+      res,
+      toExtensionDto(extension),
+      'Asked your driver for an extra day',
+      201,
+    );
+  });
+}
+
+/**
+ * `POST /driver/bookings/:id/extension/accept` and `/decline`.
+ *
+ * ONE FACTORY, BOUND AT THE ROUTE, rather than reading the answer out of the body. A driver's yes
+ * and no are two different URLs, so neither can be produced by a malformed request that meant the
+ * other — and the route table reads as what it does.
+ */
+export function makeRespondToExtensionController(
+  useCase: RespondToExtensionUseCase,
+  accept: boolean,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const extension = await useCase.execute({
+      bookingId: id,
+      driverId: principalOf(req),
+      accept,
+    });
+
+    sendSuccess(
+      req,
+      res,
+      toExtensionDto(extension),
+      accept
+        ? 'Extra day confirmed — it is added to this trip'
+        : 'You have declined the extra day',
     );
   });
 }

@@ -2,7 +2,8 @@ import type { OutstationPackagePatch, PackageRepositoryPort } from '../../domain
 import type { OutstationPackage } from '../../domain/outstationPackage.entity.js';
 import {
   validateOutstationBand,
-  validateOutstationDriverAmount,
+  validateOutstationDriverAmounts,
+  validateOutstationVariantAmounts,
 } from '../../domain/outstationPackage.entity.js';
 import {
   DriverAmountError,
@@ -29,13 +30,23 @@ export class UpdateOutstationPackageUseCase {
     // the stored fares, and one touching only a fare has to stay above the stored amount.
     // `roundTripFarePaise` is nullable, so `'x' in data` is the test for "the patch set it" —
     // `??` would swap a deliberate `null` for the old value.
-    const amountError = validateOutstationDriverAmount({
+    const amountError = validateOutstationDriverAmounts({
       oneWayFarePaise: data.oneWayFarePaise ?? existing.oneWayFarePaise,
       roundTripFarePaise:
         'roundTripFarePaise' in data ? (data.roundTripFarePaise ?? null) : existing.roundTripFarePaise,
-      driverAmountPaise: data.driverAmountPaise ?? existing.driverAmountPaise,
+      oneWayDriverAmountPaise:
+        data.oneWayDriverAmountPaise ?? existing.oneWayDriverAmountPaise,
+      roundTripDriverAmountPaise:
+        'roundTripDriverAmountPaise' in data
+          ? (data.roundTripDriverAmountPaise ?? null)
+          : existing.roundTripDriverAmountPaise,
     });
     if (amountError) throw new DriverAmountError(amountError);
+
+    const variantError = validateOutstationVariantAmounts({
+      variants: data.variants ?? existing.variants,
+    });
+    if (variantError) throw new DriverAmountError(variantError);
 
     // No P-3 check here either — the fare is a required field on the band, so there is no
     // "active but unsellable" state left for an update to create.

@@ -2,9 +2,10 @@ import type {
   IncityPackageDto,
   IncityVariantDto,
   OutstationPackageDto,
+  OutstationVariantDto,
 } from '@driverzone/contracts';
 import type { IncityPackage, IncityVariant } from '../domain/incityPackage.entity.js';
-import type { OutstationPackage } from '../domain/outstationPackage.entity.js';
+import type { OutstationPackage, OutstationVariant } from '../domain/outstationPackage.entity.js';
 
 /**
  * INTERFACE — camelCase domain entity in, snake_case wire DTO out.
@@ -47,6 +48,17 @@ export function toIncityPackageDto(pkg: IncityPackage): IncityPackageDto {
   };
 }
 
+function toOutstationVariantDto(variant: OutstationVariant): OutstationVariantDto {
+  return {
+    id: variant.id,
+    label: variant.label,
+    included_minutes: variant.includedMinutes,
+    base_fare_paise: variant.baseFarePaise,
+    driver_amount_paise: variant.driverAmountPaise,
+    is_active: variant.isActive,
+  };
+}
+
 export function toOutstationPackageDto(pkg: OutstationPackage): OutstationPackageDto {
   return {
     id: pkg.id,
@@ -58,7 +70,9 @@ export function toOutstationPackageDto(pkg: OutstationPackage): OutstationPackag
     // Passed through as `null`, never coerced to 0. The DTO's own comment carries the reason:
     // a band that does not sell a return trip is not a band that sells it for nothing.
     round_trip_fare_paise: pkg.roundTripFarePaise,
-    driver_amount_paise: pkg.driverAmountPaise,
+    one_way_driver_amount_paise: pkg.oneWayDriverAmountPaise,
+    round_trip_driver_amount_paise: pkg.roundTripDriverAmountPaise,
+    variants: (pkg.variants ?? []).map(toOutstationVariantDto),
     is_active: pkg.isActive,
   };
 }

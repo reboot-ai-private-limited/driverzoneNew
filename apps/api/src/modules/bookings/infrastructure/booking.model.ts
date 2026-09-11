@@ -1,6 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import {
   BOOKING_ACTOR_TYPES,
+  BOOKING_PAYMENT_STATUSES,
   BOOKING_STATUSES,
   CAR_CATEGORIES,
   DIRECTIONS,
@@ -28,12 +29,15 @@ export interface BookingDoc {
   distanceKm?: number | null;
   carCategory?: string | null;
   vehicleType?: string | null;
+  preferFavouriteDrivers?: boolean;
   walletCreditPaise?: number;
   walletDebtPaise?: number;
   quoteId: mongoose.Types.ObjectId;
   fareSnapshot: unknown;
-  paymentMode: string;
+  paymentMode?: string | null;
+  paymentStatus?: string | null;
   paymentId?: mongoose.Types.ObjectId | null;
+  paidExtensionPaise?: number;
   isScheduled: boolean;
   scheduledAt: Date;
   dispatchAt: Date;
@@ -85,6 +89,16 @@ const bookingSchema = new Schema<BookingDoc>(
     vehicleType: { type: String, enum: [...VEHICLE_TYPE_PREFERENCES, null], default: null },
 
     /*
+     * Ring this customer's favourites first (dispatch's wave 0).
+     *
+     * DEFAULTS TO FALSE, NOT NULL, unlike the two above. Those are nullable because "never asked"
+     * and "no requirement" are genuinely different answers for a competency filter. This one has
+     * no such ambiguity: a booking that did not ask for favourites and a booking made before the
+     * feature existed want exactly the same behaviour, which is the one dispatch has always had.
+     */
+    preferFavouriteDrivers: { type: Boolean, default: false },
+
+    /*
      * What the wallet did to this trip's price, frozen at creation. Never both non-zero — a
      * balance is either credit or debt. Default 0 covers every booking written before wallets
      * existed, for which the honest answer is 'the wallet did nothing'.
@@ -102,8 +116,15 @@ const bookingSchema = new Schema<BookingDoc>(
      * The real protection is that nothing in the module has a reason to write it twice.
      */
     fareSnapshot: { type: Schema.Types.Mixed, required: true, immutable: true },
-    paymentMode: { type: String, enum: PAYMENT_MODES, required: true },
+    paymentMode: { type: String, enum: [...PAYMENT_MODES, null], default: null },
+    paymentStatus: {
+      type: String,
+      enum: [...BOOKING_PAYMENT_STATUSES, null],
+      default: 'NOT_SELECTED',
+    },
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', default: null },
+    /** How much of an already-accepted day extension rode along in the payment-selection charge. */
+    paidExtensionPaise: { type: Number, default: 0, min: 0 },
 
     isScheduled: { type: Boolean, required: true, default: false },
     scheduledAt: { type: Date, required: true },

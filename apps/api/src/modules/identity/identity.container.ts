@@ -54,7 +54,8 @@ import { buildDriverRouter } from './interface/driver.routes.js';
 import { makeAdminControllers } from './interface/admin.controller.js';
 import { buildAdminRouter } from './interface/admin.routes.js';
 import { registerIdentitySwaggerPaths } from './interface/identity.swagger.js';
-import type { IdentityPublicContract } from './identity.public.js';
+import type { AssignableDriver, IdentityPublicContract } from './identity.public.js';
+import type { DriverProfile } from './domain/driverProfile.repository.port.js';
 import type { DriverDeviceRepositoryPort } from './domain/driverDevice.repository.port.js';
 import type { CustomerDeviceRepositoryPort } from './domain/customerDevice.repository.port.js';
 
@@ -99,6 +100,19 @@ export interface IdentityContainer {
    */
   driverDevices: DriverDeviceRepositoryPort;
   customerDevices: CustomerDeviceRepositoryPort;
+}
+
+/** The `AssignableDriver` shape, from a full `DriverProfile` — shared by both lookups below. */
+function toAssignableDriver(profile: DriverProfile): AssignableDriver {
+  return {
+    id: profile.id,
+    fullName: profile.fullName,
+    phone: profile.mobileNumber,
+    isOnDuty: profile.isOnDuty,
+    vehicleCategoryPreference: profile.vehicleCategoryPreference,
+    vehicleTypePreferences: profile.vehicleTypePreferences,
+    canDriveHillVerified: profile.canDriveHillVerified,
+  };
 }
 
 export function buildIdentityContainer(): IdentityContainer {
@@ -299,6 +313,35 @@ export function buildIdentityContainer(): IdentityContainer {
       // The driver card a customer sees on their trip. `bookings` decides whether the phone
       // number on it is passed on — see `DriverCardContract`.
       driverCardsByIds: (ids) => directory.driverCardsByIds(ids),
+
+      /*
+       * The manual-assignment picker, for `dispatch`. Reuses the admin list's own paginated query
+       * rather than adding a second driver search — one place decides what `search` matches.
+       *
+       * `isVerified: true` is in the filter; blocked is rejected here because `DriverListFilter`
+       * has no field for it. On duty is neither — see `AssignableDriversContract` on why an admin
+       * is allowed to override that one and the server does not.
+       */
+      assignableDrivers: async (search, limit) => {
+        const { drivers: found } = await drivers.findPaginated(
+          { isVerified: true, ...(search === '' ? {} : { search }) },
+          1,
+          limit,
+        );
+
+        return found.filter((profile) => !profile.isBlocked).map(toAssignableDriver);
+      },
+
+      /*
+       * Looked up directly rather than through `assignableDrivers` above — `search` there is a
+       * name/phone regex, and an id is never a substring of either, so this is the ONLY correct
+       * way to ask "is this specific driver assignable". See `AssignableDriversContract`.
+       */
+      assignableDriverById: async (id) => {
+        const profile = await drivers.findById(id);
+        if (profile === undefined || !profile.isVerified || profile.isBlocked) return null;
+        return toAssignableDriver(profile);
+      },
 
       // The mirror: the customer contact the driver sees on their trip. Same rule — `bookings`
       // gates the phone number on the trip being live.

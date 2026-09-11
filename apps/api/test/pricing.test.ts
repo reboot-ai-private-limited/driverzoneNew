@@ -309,6 +309,55 @@ describe('computeOutstationFare', () => {
       computeOutstationFare({ ...input, scheduledAt: ist(4, 30) }, config).lines.map((l) => l.code),
     ).toContain('EARLY_MORNING');
   });
+
+  it('does not add a return allowance when extraDays is 0 or omitted on one-way trips', () => {
+    const fare = computeOutstationFare({ ...input, days: 1, extraDays: 0 }, config);
+    expect(fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE')).toBeUndefined();
+    expect(fare.lines[0]?.amountPaise).toBe(450_000);
+    expect(fare.split.driverPaise).toBe(300_000);
+  });
+
+  it('adds RETURN_DRIVER_ALLOWANCE for extraDays on a single-day one-way trip and pays 100% to the driver', () => {
+    // 1-day trip exceeding 8 hours gets 1 extra return day
+    const fare = computeOutstationFare({ ...input, days: 1, extraDays: 1 }, config);
+    const returnLine = fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE');
+    expect(returnLine).toEqual({
+      code: 'RETURN_DRIVER_ALLOWANCE',
+      label: 'Return trip allowance for your driver × 1 day',
+      amountPaise: 300_000,
+    });
+    // Base line remains unchanged at 1 day
+    expect(fare.lines[0]?.amountPaise).toBe(450_000);
+    // Driver gets 1 day base (300k) + 1 day return (300k) = 600k
+    expect(fare.split.driverAmountPaise).toBe(600_000);
+    expect(fare.split.driverPaise).toBe(600_000);
+    // Company margin is unchanged: (450k - 300k) + insurance (3k) = 153k
+    expect(fare.split.companyPaise).toBe(153_000);
+  });
+
+  it('handles multi-day one-way trip (e.g. 16 hours -> days: 2, extraDays: 2) leaving company margin untouched', () => {
+    const fare = computeOutstationFare({ ...input, days: 2, extraDays: 2 }, config);
+    const returnLine = fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE');
+    expect(returnLine).toEqual({
+      code: 'RETURN_DRIVER_ALLOWANCE',
+      label: 'Return trip allowance for your driver × 2 days',
+      amountPaise: 600_000,
+    });
+    expect(fare.lines[0]?.amountPaise).toBe(900_000);
+    // Driver receives 2 days forward (600k) + 2 days return (600k) = 1,200k
+    expect(fare.split.driverPaise).toBe(1_200_000);
+    // Company margin equals exactly 2 forward days: (450k * 2 - 300k * 2) + insurance (3k) = 303k
+    expect(fare.split.companyPaise).toBe(303_000);
+    expect(fare.split.driverPaise + fare.split.companyPaise).toBe(fare.split.commissionablePaise);
+  });
+
+  it('never adds RETURN_DRIVER_ALLOWANCE to a ROUND_TRIP', () => {
+    const fare = computeOutstationFare(
+      { ...input, direction: 'ROUND_TRIP', days: 3, extraDays: 0 },
+      config,
+    );
+    expect(fare.lines.find((l) => l.code === 'RETURN_DRIVER_ALLOWANCE')).toBeUndefined();
+  });
 });
 
 describe('splitFare', () => {

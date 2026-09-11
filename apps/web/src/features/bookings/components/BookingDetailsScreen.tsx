@@ -37,6 +37,7 @@ import { formatTime } from '@/lib/format';
 import { useCustomer } from '@/features/customers/hooks/useCustomer';
 import { useDriverDetails } from '@/features/drivers/hooks/useDriverDetails';
 import { useBooking, useBookingEvents } from '../hooks/useBookings';
+import { BookingActions } from './BookingActions';
 import { formatBookingDate, formatBookingMobile } from '../lib/format';
 import {
   paymentStatusLabel,
@@ -89,6 +90,7 @@ export function BookingDetailsScreen() {
               cannot exist yet is worse than one that was never drawn (the same rule the bookings
               table already applies to Edit).
             */}
+            {booking !== undefined && <BookingActions booking={booking} />}
           </div>
         }
       />
@@ -212,8 +214,8 @@ function BookingSummary({ booking }: { booking: BookingDto }) {
         </SummaryStat>
 
         <SummaryStat icon={<CreditCard aria-hidden className="size-4" />} label="Payment Status">
-          <Badge tone={paymentStatusTone(booking.status, booking.payment_mode)}>
-            {paymentStatusLabel(booking.status, booking.payment_mode)}
+          <Badge tone={paymentStatusTone(booking.status, booking.payment_mode, booking.payment_status)}>
+            {paymentStatusLabel(booking.status, booking.payment_mode, booking.payment_status)}
           </Badge>
         </SummaryStat>
 
@@ -651,17 +653,17 @@ function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
    * that already exist for a different reason.
    */
   const paidAt =
-    booking.payment_mode === 'UPI'
-      ? (events.data?.events.find((e) => e.to_status === 'CONFIRMED')?.at ?? null)
+    booking.payment_mode === 'UPI' && booking.payment_status === 'PAID'
+      ? (events.data?.events.find((e) => e.to_status === 'CONFIRMED' || e.metadata?.paymentStatus === 'PAID')?.at ?? null)
       : booking.timestamps.completed_at;
 
   return (
     <Panel title="Payment Details" icon={<CreditCard aria-hidden className="size-4" />} className={CARD}>
       <DefinitionList>
-        <FieldRow label="Payment Method">{booking.payment_mode}</FieldRow>
+        <FieldRow label="Payment Method">{booking.payment_mode ?? 'Not selected'}</FieldRow>
         <FieldRow label="Payment Status">
-          <Badge tone={paymentStatusTone(booking.status, booking.payment_mode)}>
-            {paymentStatusLabel(booking.status, booking.payment_mode)}
+          <Badge tone={paymentStatusTone(booking.status, booking.payment_mode, booking.payment_status)}>
+            {paymentStatusLabel(booking.status, booking.payment_mode, booking.payment_status)}
           </Badge>
         </FieldRow>
         {paidAt !== null && (

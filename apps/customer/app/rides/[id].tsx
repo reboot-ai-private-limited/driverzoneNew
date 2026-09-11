@@ -25,6 +25,8 @@ import {
   type RideStatus,
 } from '@/features/rides/rideHistory';
 import { DriverCard } from '@/components/DriverCard';
+import { PrimaryButton } from '@/components/PrimaryButton';
+import { rebookParamsFor } from '@/features/booking/rebook';
 import { getBooking } from '@/lib/api/endpoints/bookings';
 import { formatPaise } from '@/lib/money';
 import { keys } from '@/lib/query/keys';
@@ -132,7 +134,10 @@ export default function RideDetailScreen(): ReactElement {
               which screen it is on. A history that could still ring the driver would be a
               permanent line to their personal phone, months after the trip.
             */}
-            <DriverCard driver={ride.driver} />
+            {/* The heart is offered only on a trip that actually finished — the API refuses a
+                driver the customer has not completed a trip with, and the ride list carries
+                cancelled and no-driver rows too. */}
+            <DriverCard driver={ride.driver} favouritable={ride.status === 'COMPLETED'} />
           </SectionCard>
         )}
 
@@ -243,6 +248,27 @@ export default function RideDetailScreen(): ReactElement {
           <SectionCard title="Why it was cancelled">
             <Text style={styles.paymentValue}>{ride.cancellation_reason}</Text>
           </SectionCard>
+        )}
+
+        {/*
+          BOOK AGAIN — the same two places, on the home map, ready to price.
+
+          OFFERED ON A CANCELLED TRIP TOO, and that is the point rather than an oversight: a trip
+          that never found a driver is the one a customer is most likely to want to place again.
+          It is hidden only while a trip is RUNNING, where "book again" would be an invitation to
+          double-book the ride they are currently on.
+        */}
+        {status === 'RUNNING' ? null : (
+          <View style={styles.rebook}>
+            <PrimaryButton
+              label="Book again"
+              onPress={() => router.push({ pathname: '/home', params: rebookParamsFor(ride) })}
+            />
+            <Text style={styles.rebookHint}>
+              We will fill in the same pickup and destination. Choose a new time before you
+              continue.
+            </Text>
+          </View>
         )}
       </ScrollView>
     </View>
@@ -525,6 +551,9 @@ const styles = StyleSheet.create({
   invoiceValue: { ...text.caption, color: colors.fg },
   invoiceValueGood: { color: colors.success },
   rule: { height: 1, backgroundColor: colors.border, marginVertical: space.sm },
+
+  rebook: { marginTop: space.lg, gap: space.sm },
+  rebookHint: { ...text.caption, color: colors.muted, textAlign: 'center' },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
   totalLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 13 },
   totalValue: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 13 },

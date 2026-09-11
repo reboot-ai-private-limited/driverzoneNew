@@ -4,7 +4,7 @@ import type { GeoPoint } from './booking.entity.js';
 export interface FareAdjustment {
   id: string;
   bookingId: string;
-  type: 'WAITING_CHARGE';
+  type: 'WAITING_CHARGE' | 'DAY_EXTENSION';
   amountPaise: number;
   label: string;
   settledByPaymentId: string | null;

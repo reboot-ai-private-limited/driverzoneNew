@@ -12,6 +12,8 @@ import type { WalletPublicContract } from '../../../wallet/wallet.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
+import { canTransition } from '../../domain/booking.entity.js';
+import { BookingNotFoundError, InvalidTransitionError } from '../../domain/booking.errors.js';
 import {
   explainLostTransition,
   loadForCustomer,
@@ -172,34 +174,51 @@ export class CancelBookingByCustomerUseCase {
 
   /** Everything paid, less the fee. Nothing at all if the fee swallows the fare — or if cash. */
   private async refund(booking: Booking, feePaise: number): Promise<number> {
-    // Nothing was collected, so there is nothing to send back. The fee becomes a due instead.
-    if (booking.paymentMode === 'CASH' || booking.paymentId === null) return 0;
+    return refundLessFee(this.payments, booking, feePaise);
+  }
+}
 
-    const payment = await this.payments.findById(booking.paymentId);
-    if (payment === null || payment.status !== 'CAPTURED') return 0;
+/**
+ * Everything paid, less whatever fee was kept back.
+ *
+ * MODULE-LEVEL RATHER THAN A METHOD, because the admin cancellation below needs exactly this with
+ * a fee of zero. Copying it there would be two refund paths that have to stay in step on the
+ * idempotency key, the CAPTURED check and what a gateway failure means — and they would not.
+ *
+ * A FAILURE HERE IS LOGGED, NEVER THROWN. By the time this runs the booking is already cancelled
+ * and the driver already released; an unpaid refund is a receivable for ops to chase, not a
+ * reason to leave a dead trip live.
+ */
+async function refundLessFee(
+  payments: PaymentsContract,
+  booking: Booking,
+  feePaise: number,
+): Promise<number> {
+  // Nothing was collected, so there is nothing to send back. The fee becomes a due instead.
+  if (booking.paymentMode === 'CASH' || booking.paymentId === null) return 0;
 
-    const refundable = payment.amountPaise - feePaise;
-    if (refundable <= 0) return 0;
+  const payment = await payments.findById(booking.paymentId);
+  if (payment === null || payment.status !== 'CAPTURED') return 0;
 
-    try {
-      await this.payments.refund({
-        paymentId: payment.id,
-        amountPaise: refundable,
-        // HYPHEN, not a colon: Razorpay's `X-Refund-Idempotency` accepts `[A-Za-z0-9_-]` only,
-        // and rejects the request outright otherwise. The adapter sanitises too; this is the
-        // call site being correct rather than relying on it.
-        idempotencyKey: `refund-${booking.id}`,
-      });
-      return refundable;
-    } catch (error) {
-      // The booking IS cancelled — that has already committed, and the driver has been released.
-      // An unpaid refund is a receivable for ops, not a reason to leave the trip live.
-      logger.error(
-        { err: error, bookingId: booking.id, refundable },
-        'cancellation refund failed — booking is cancelled, refund is owed',
-      );
-      return 0;
-    }
+  const refundable = payment.amountPaise - feePaise;
+  if (refundable <= 0) return 0;
+
+  try {
+    await payments.refund({
+      paymentId: payment.id,
+      amountPaise: refundable,
+      // HYPHEN, not a colon: Razorpay's `X-Refund-Idempotency` accepts `[A-Za-z0-9_-]` only,
+      // and rejects the request outright otherwise. The adapter sanitises too; this is the
+      // call site being correct rather than relying on it.
+      idempotencyKey: `refund-${booking.id}`,
+    });
+    return refundable;
+  } catch (error) {
+    logger.error(
+      { err: error, bookingId: booking.id, refundable },
+      'cancellation refund failed — booking is cancelled, refund is owed',
+    );
+    return 0;
   }
 }
 
@@ -283,5 +302,103 @@ export class CancelBookingByDriverUseCase {
     );
 
     return { booking: cancelled, feePaise: penaltyPaise, refundedPaise: 0 };
+  }
+}
+
+/**
+ * An ADMIN cancels a booking.
+ *
+ * NOBODY IS CHARGED. Not the customer, not the driver — and that is the whole reason this is its
+ * own class rather than a flag on the two above. An admin cancellation is the company deciding a
+ * trip is not going to happen: there is no misbehaviour to deter on either side, so there is no
+ * fee ladder to read, no charge row to write, no wallet debt to leave behind, and no ledger
+ * penalty. Every one of those is a line this class does not have.
+ *
+ * THE CUSTOMER IS REFUNDED IN FULL, through the same helper the customer cancellation uses with a
+ * fee of zero. Cash bookings refund nothing because nothing was ever collected.
+ *
+ * THE REASON IS MANDATORY and it is passed on to both parties verbatim. A trip that vanishes with
+ * no explanation is a support call from the customer and a second one from the driver, which is
+ * exactly the work ops was trying to save by cancelling it here.
+ *
+ * NO ACTOR CHECK BEYOND THE ROUTE. Unlike the customer and driver cases there is no
+ * `loadForCustomer`/`loadForDriver` — an admin is not a party to the booking, and
+ * `requireAuth('ADMIN')` on the router is the whole authorisation. `actorId` is recorded on the
+ * event so the history names which admin did it.
+ */
+export class CancelBookingByAdminUseCase {
+  constructor(
+    private readonly repo: BookingRepositoryPort,
+    private readonly payments: PaymentsContract,
+    private readonly notifications: NotificationsContract,
+  ) {}
+
+  async execute(input: CancelInput): Promise<CancelResult> {
+    const booking = await this.repo.findById(input.bookingId);
+    if (booking === null) throw new BookingNotFoundError(input.bookingId);
+
+    const reason = requireReason(input.reason);
+    const now = new Date();
+
+    /*
+     * THE TABLE IS CHECKED HERE, EXPLICITLY, and it has to be.
+     *
+     * Every other cancellation passes a LITERAL `from` — `'STARTED'`, `'ARRIVED'` — so the
+     * compare-and-swap itself refuses anything else and the table is enforced by the caller
+     * naming the one legal source status. This one is different: an admin may cancel from six
+     * different statuses, so `from` is whatever the booking is in, and the swap would then match
+     * ANY of them — including `COMPLETED`, which the table forbids and which would un-finish a
+     * trip that has already been paid for and settled into the driver's ledger.
+     */
+    if (!canTransition(booking.status, 'CANCELLED_BY_ADMIN')) {
+      throw new InvalidTransitionError(booking.reference, booking.status, 'CANCELLED_BY_ADMIN');
+    }
+
+    const cancelled = await this.repo.transition({
+      bookingId: booking.id,
+      from: booking.status,
+      to: 'CANCELLED_BY_ADMIN',
+      actor: { type: 'ADMIN', id: input.actorId },
+      reason,
+      /*
+       * `feePaise: 0` is recorded EXPLICITLY rather than omitted. The event log is what answers
+       * "was I charged for this" eight weeks later, and an absent field reads as "nobody wrote it
+       * down" — which is the same shape as a bug that forgot to.
+       */
+      metadata: { feePaise: 0, atStatus: booking.status },
+      patch: { cancelledAt: now, cancellationReason: reason },
+    });
+
+    if (cancelled === null) {
+      return explainLostTransition(this.repo, booking, 'CANCELLED_BY_ADMIN');
+    }
+
+    const refundedPaise = await refundLessFee(this.payments, booking, 0);
+
+    await this.notifications.sendBookingUpdate(
+      { role: 'CUSTOMER', id: booking.customerId },
+      {
+        bookingId: booking.id,
+        reference: booking.reference,
+        status: 'CANCELLED_BY_ADMIN',
+        message: `We have had to cancel this trip: ${reason}. You have not been charged.`,
+      },
+    );
+
+    if (booking.driverId !== null) {
+      await this.notifications.sendBookingUpdate(
+        { role: 'DRIVER', id: booking.driverId },
+        {
+          bookingId: booking.id,
+          reference: booking.reference,
+          status: 'CANCELLED_BY_ADMIN',
+          // Says the cancellation is not theirs, because the driver's own cancellation DOES carry
+          // a penalty and they have no way to tell the two apart from a status alone.
+          message: `This trip was cancelled by the office: ${reason}. It does not count against you.`,
+        },
+      );
+    }
+
+    return { booking: cancelled, feePaise: 0, refundedPaise };
   }
 }

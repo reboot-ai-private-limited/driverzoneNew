@@ -1,13 +1,16 @@
+import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
 import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
 import { computeWaitingCharge } from '../../../pricing/pricing.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../../../ledger/ledger.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
-import type { PaymentsContract } from '../../../payments/payments.public.js';
+import { isCaptured, type PaymentsContract } from '../../../payments/payments.public.js';
 import type { DriverStatsContract } from '../../../identity/identity.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
+import type { ExtensionRepositoryPort } from '../../domain/extensionRepository.port.js';
+import { extensionLabel, totalExtension } from '../../domain/bookingExtension.entity.js';
 import { explainLostTransition, loadForDriver } from '../bookingAccess.js';
 
 export interface CompleteTripInput {
@@ -46,11 +49,29 @@ export class CompleteTripUseCase {
     private readonly ledger: LedgerWriteContract,
     private readonly payments: PaymentsContract,
     private readonly notifications: NotificationsContract,
+    /** Extra days the customer bought mid-trip and the driver agreed to. Settled here, not then. */
+    private readonly extensions: ExtensionRepositoryPort,
     private readonly driverStats?: DriverStatsContract,
   ) {}
 
   async execute(input: CompleteTripInput): Promise<CompletedTrip> {
     const booking = await loadForDriver(this.repo, input.bookingId, input.driverId);
+
+    if (booking.paymentMode === null) {
+      throw AppError.conflict(
+        'The customer has not chosen how to pay yet. Ask them to select a payment method in their app before you can end the trip.',
+      );
+    }
+    if (booking.paymentMode === 'UPI') {
+      const payments = await this.payments.listForBooking(booking.id);
+      const bookingPayment = payments.find((p) => p.kind === 'BOOKING');
+      if (bookingPayment === undefined || !isCaptured(bookingPayment.status)) {
+        throw AppError.conflict(
+          "Waiting for the customer's online payment to go through. You can end the trip once it clears.",
+        );
+      }
+    }
+
     const now = new Date();
     const snapshot = await this.settings.snapshot();
 
@@ -88,6 +109,15 @@ export class CompleteTripUseCase {
 
     if (completed === null) return explainLostTransition(this.repo, booking, 'COMPLETED');
 
+    /*
+     * Every extra day the driver actually agreed to. DECLINED and EXPIRED requests are excluded by
+     * `totalExtension`, so a customer who asked three times and was told yes once pays for one.
+     *
+     * Read AFTER the transition, like the waiting charge: by this point the trip is over and no
+     * further extension can be accepted, so the sum cannot move underneath the settlement.
+     */
+    const extras = totalExtension(await this.extensions.listForBooking(booking.id));
+
     // ── Settle the extras ───────────────────────────────────────────────────────────────────
     let settledPaise = 0;
 
@@ -105,34 +135,70 @@ export class CompleteTripUseCase {
         amountPaise: waiting.amountPaise,
         label: `Waiting — ${waiting.chargeableMinutes} min beyond the free ${snapshot['waiting.free_minutes']}`,
       });
+    }
 
+    /*
+     * ONE ROW HOLDING THE TOTAL, which the `{ bookingId, type }` unique index requires and the
+     * receipt wants anyway — "Extended — 2 extra days" reads better than two identical lines. The
+     * individual days, each with the driver's answer against it, are in `bookingExtensions`.
+     */
+    if (extras.amountPaise > 0) {
+      await this.charges.recordAdjustment({
+        bookingId: booking.id,
+        type: 'DAY_EXTENSION',
+        amountPaise: extras.amountPaise,
+        label: extensionLabel(extras.days),
+      });
+    }
+
+    /*
+     * ONE SETTLEMENT FOR BOTH, and it has to be one. `settle-${booking.id}` is derived from the
+     * booking precisely so a retried completion cannot charge twice — which means two separate
+     * charges under that key would silently collect only the first. Waiting and extensions are
+     * summed and taken together.
+     *
+     * `paidExtensionPaise` is whatever `SelectPaymentMethodUseCase` already folded into the
+     * booking-confirmation order for an extension accepted before the customer paid — billing it
+     * again here would double-charge exactly that portion. The adjustment row above still records
+     * the FULL extension amount; only the amount actually collected now is reduced.
+     *
+     * ONLY WHILE THE BOOKING IS STILL `UPI`. That order is the only thing that collected it, and
+     * a booking that has since switched to cash — the customer's own choice, or
+     * `DriverSwitchToCashUseCase` — never paid it. The payment gate at the top of this method has
+     * already established that a `UPI` booking's charge captured, so this needs no second check.
+     */
+    const prepaidExtrasPaise = booking.paymentMode === 'UPI' ? booking.paidExtensionPaise : 0;
+    const uncollectedExtrasPaise = Math.max(0, extras.amountPaise - prepaidExtrasPaise);
+    const owedPaise = waiting.amountPaise + uncollectedExtrasPaise;
+
+    if (owedPaise > 0) {
       if (settleThroughGateway) {
         try {
           const { payment } = await this.payments.charge({
             bookingId: booking.id,
             customerId: booking.customerId,
             kind: 'SETTLEMENT',
-            amountPaise: waiting.amountPaise,
+            amountPaise: owedPaise,
             reference: booking.reference,
             // Derived from the booking, not from the request: a retry with a fresh client key must
-            // not become a second charge for the same waiting time. Hyphen, not a colon — the
-            // gateway's idempotency charset excludes it.
+            // not become a second charge for the same extras. Hyphen, not a colon — the gateway's
+            // idempotency charset excludes it.
             idempotencyKey: `settle-${booking.id}`,
           });
 
           await this.charges.markAdjustmentsSettled(booking.id, payment.id);
-          settledPaise = waiting.amountPaise;
+          settledPaise = owedPaise;
         } catch (error) {
           // The trip is over and the driver is owed regardless. An uncollected settlement is a
           // receivable to chase, not a reason to fail the completion.
           logger.error(
-            { err: error, bookingId: booking.id, amountPaise: waiting.amountPaise },
-            'could not collect the waiting charge — recorded as owed',
+            { err: error, bookingId: booking.id, amountPaise: owedPaise },
+            'could not collect the trip extras — recorded as owed',
           );
         }
       } else {
         // Cash: the driver took it at the door along with the fare, so it is already collected.
-        settledPaise = waiting.amountPaise;
+        settledPaise = owedPaise;
       }
     }
 
@@ -151,6 +217,21 @@ export class CompleteTripUseCase {
         note: `Trip ${booking.reference}`,
       },
     ];
+
+    /*
+     * COMMISSIONED, unlike the waiting earning below it. An extra day is a day of the package, so
+     * the driver gets the same per-day share they were promised when the booking was priced —
+     * frozen onto the extension row at request time, never re-read from the package here.
+     */
+    if (extras.driverAmountPaise > 0) {
+      entries.push({
+        driverId: input.driverId,
+        bookingId: booking.id,
+        entryType: 'EXTENSION_EARNING',
+        amountPaise: extras.driverAmountPaise,
+        note: `${String(extras.days)} extra ${extras.days === 1 ? 'day' : 'days'} on ${booking.reference}`,
+      });
+    }
 
     if (waiting.amountPaise > 0) {
       entries.push({
@@ -179,7 +260,9 @@ export class CompleteTripUseCase {
      * the gap, rather than quietly booking a number nobody handed over.
      */
     if (booking.paymentMode === 'CASH') {
-      const collected = input.cashCollectedPaise ?? expectedCashPaise(booking, waiting.amountPaise);
+      const collected =
+        input.cashCollectedPaise ??
+        expectedCashPaise(booking, waiting.amountPaise + extras.amountPaise);
 
       entries.push({
         driverId: input.driverId,
@@ -217,14 +300,25 @@ export class CompleteTripUseCase {
     return {
       booking: completed,
       waitingChargePaise: waiting.amountPaise,
-      totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise,
+      /*
+       * What the customer has ACTUALLY paid — `settledPaise` stays 0 when the settlement charge
+       * failed and the extras became a receivable, and that must keep showing through here.
+       * `paidExtensionPaise` is added because that money moved earlier, at payment selection, so
+       * it is neither in the frozen fare nor in this settlement.
+       */
+      totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise + prepaidExtrasPaise,
     };
   }
 }
 
 /**
- * What a cash trip should have collected: the frozen fare, plus whatever waiting accrued, LESS
- * whatever the customer's wallet credit already covered.
+ * What a cash trip should have collected: the frozen fare, plus whatever accrued during the trip
+ * — waiting time and any extra days the driver agreed to — LESS the customer's wallet credit.
+ *
+ * THE EXTRAS ARE ONE ARGUMENT, not two, because this function has no reason to tell them apart:
+ * both are money the driver takes at the door on top of the fare, and summing them at the call
+ * site keeps the one place that decides what a cash driver collects from growing a parameter per
+ * kind of charge.
  *
  * THE CREDIT COMES OFF THE DOOR, and that is the whole reason a cash trip can use a wallet at
  * all. The driver is told the reduced figure and hands over the reduced figure, so this is what
@@ -238,9 +332,9 @@ export class CompleteTripUseCase {
  * amount, not an observed one — which is why the reported number wins when there is one, and why
  * a mismatch is worth surfacing to ops rather than smoothing over here.
  */
-function expectedCashPaise(booking: Booking, waitingPaise: number): number {
+function expectedCashPaise(booking: Booking, extrasPaise: number): number {
   return Math.max(
     0,
-    booking.fareSnapshot.fare.totalPaise + waitingPaise - booking.walletCreditPaise,
+    booking.fareSnapshot.fare.totalPaise + extrasPaise - booking.walletCreditPaise,
   );
 }

@@ -1,5 +1,6 @@
 import type {
   BookingActorType,
+  BookingPaymentStatus,
   BookingStatus,
   CarCategory,
   Direction,
@@ -24,9 +25,14 @@ import type { FareBreakdown } from '../../pricing/pricing.public.js';
  * and `PENDING_PAYMENT` is the entry point.
  *
  * Those two described a customer who had not bought anything, and that state lives on the
- * `quotes` collection — a booking row now comes into existence only when there is money to
- * collect. Payment precedes confirmation, so a booking waits at `PENDING_PAYMENT` until the
- * gateway captures, and no driver is looked for before then.
+ * `quotes` collection — a booking row now comes into existence only when the quote is consumed.
+ *
+ * `PENDING_PAYMENT → CONFIRMED` no longer waits on anything: `createBooking.usecase.ts` makes
+ * that transition synchronously, in the same request, for every booking regardless of how it will
+ * eventually be paid for — payment method is chosen later, once the ride has STARTED
+ * (`selectPaymentMethod.usecase.ts`), and a driver is dispatched immediately rather than waiting
+ * on it. The status is kept rather than collapsed away so the audit trail (`bookingEvents`) still
+ * records the same first transition every booking has always had.
  */
 export const TRANSITIONS: Record<BookingStatus, readonly BookingStatus[]> = {
   PENDING_PAYMENT: ['CONFIRMED', 'EXPIRED', 'CANCELLED_BY_CUSTOMER'],
@@ -93,6 +99,22 @@ export const COMMITTED_STATUSES: readonly BookingStatus[] = [
   'STARTED',
 ];
 
+/**
+ * The statuses an admin may move a booking OFF its driver from.
+ *
+ * `COMMITTED_STATUSES` MINUS `STARTED`, and the missing one is the whole point. A trip already
+ * under way cannot be handed to somebody else: the fare was quoted for one journey, the ledger
+ * pays one driver for it, and the customer's receipt names one. Ops moving a started trip is a
+ * cancellation and a new booking, and docs/LLD/dispatch-and-assignment.md says so explicitly —
+ * blurring the two breaks all three of those at once.
+ *
+ * Derived from the list above rather than typed out again, so a status added to one is a
+ * deliberate decision about the other rather than a copy somebody forgot.
+ */
+export const REASSIGNABLE_STATUSES: readonly BookingStatus[] = COMMITTED_STATUSES.filter(
+  (status) => status !== 'STARTED',
+);
+
 export interface Actor {
   type: BookingActorType;
   /** Null for SYSTEM — a sweeper and a wave timeout have no person behind them. */
@@ -155,6 +177,23 @@ export interface Booking {
   vehicleType: VehicleTypePreference | null;
 
   /**
+   * The customer asked for their favourite drivers to be rung before anybody else.
+   *
+   * A PREFERENCE, NOT A RESTRICTION, and the distinction is the whole design: dispatch rings the
+   * favourites as wave 0 and then falls through to the ordinary radius ladder the moment they
+   * decline, ignore, or turn out to be ineligible. No booking is ever left without a driver
+   * because a favourite was busy.
+   *
+   * STORED ON THE BOOKING rather than read off the customer at dispatch time, because it is a
+   * decision the customer made about THIS trip. The list of favourites it resolves against is
+   * read live — that one is a preference about people, and the newest answer is the right one.
+   *
+   * False on every booking made before favourites existed, which is the correct reading: nobody
+   * asked for it.
+   */
+  preferFavouriteDrivers: boolean;
+
+  /**
    * What the customer's wallet did to this trip's price, frozen at creation.
    *
    * STORED, NOT RECOMPUTED. The balance moves — a later fine, a later grant — so asking the wallet
@@ -171,11 +210,19 @@ export interface Booking {
   quoteId: string;
   fareSnapshot: FareSnapshot;
   /**
-   * How this trip is paid for. `CASH` means there is no payment row at all until completion, and
-   * the driver collects — which is the only way a booking reaches `CONFIRMED` without a webhook.
+   * How this trip is paid for. Null from booking creation until the customer selects a payment
+   * method after the trip has STARTED.
    */
-  paymentMode: PaymentMode;
+  paymentMode: PaymentMode | null;
+  paymentStatus: BookingPaymentStatus;
   paymentId: string | null;
+  /**
+   * How much of an already-accepted day extension was folded into the UPI order at payment
+   * selection time — zero for a cash booking, or a UPI one selected before any extension was
+   * accepted. `CompleteTripUseCase` reads this to avoid billing the same extension twice: once
+   * here, in the booking-confirmation charge, and again in the completion settlement.
+   */
+  paidExtensionPaise: number;
 
   /** True when the pickup is far enough out that dispatch waits rather than searching now. */
   isScheduled: boolean;

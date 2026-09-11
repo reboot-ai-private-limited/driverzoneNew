@@ -40,6 +40,41 @@ function markerColour(driver: AdminLiveDriverDto, now: number): string {
   return stale ? '#9ca3af' : '#16a34a';
 }
 
+/** Diameter of the coloured badge each car glyph sits inside, in px. */
+const MARKER_SIZE = 30;
+
+/**
+ * A car, not a dot — same glyph `CarFront` from `lucide-react` draws elsewhere on this screen, so
+ * a driver reads as a driver here too rather than as an abstract ping. `AdminLiveDriverDto` carries
+ * no heading, so the car faces forward/up rather than toward its direction of travel — there is
+ * nothing to point it by.
+ *
+ * A DATA URI IMAGE, not a `SymbolPath`: Google's marker-symbol paths are drawn in the marker's own
+ * coordinate space with no easy way to compose a multi-stroke glyph inside a filled badge, where an
+ * inline SVG string is exactly the format `Marker.icon.url` already accepts.
+ */
+function driverMarkerIcon(color: string): google.maps.Icon {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${MARKER_SIZE}" height="${MARKER_SIZE}" viewBox="0 0 30 30">
+      <circle cx="15" cy="15" r="13" fill="${color}" stroke="#ffffff" stroke-width="2" />
+      <g transform="translate(6.5 7.5) scale(0.7)" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m21 8-2 2-1.5-3.7A2 2 0 0 0 15.646 5H8.4a2 2 0 0 0-1.903 1.257L5 10 3 8" />
+        <path d="M7 14h.01" />
+        <path d="M17 14h.01" />
+        <rect width="18" height="8" x="3" y="10" rx="2" />
+        <path d="M5 18v2" />
+        <path d="M19 18v2" />
+      </g>
+    </svg>
+  `.trim();
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(MARKER_SIZE, MARKER_SIZE),
+    anchor: new google.maps.Point(MARKER_SIZE / 2, MARKER_SIZE / 2),
+  };
+}
+
 export function LiveDriverMap({ drivers }: LiveDriverMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
@@ -105,14 +140,7 @@ export function LiveDriverMap({ drivers }: LiveDriverMapProps) {
             position,
             map: instance,
             title: `${driver.full_name ?? 'Driver'} · ${driver.mobile_number}`,
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 7,
-              fillColor: markerColour(driver, now),
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 2,
-            },
+            icon: driverMarkerIcon(markerColour(driver, now)),
           })
         );
         continue;
@@ -121,14 +149,7 @@ export function LiveDriverMap({ drivers }: LiveDriverMapProps) {
       // Moved, not recreated — a new marker at a new position flickers, and drops any info window
       // the admin has open on it.
       existing.setPosition(position);
-      existing.setIcon({
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 7,
-        fillColor: markerColour(driver, now),
-        fillOpacity: 1,
-        strokeColor: '#ffffff',
-        strokeWeight: 2,
-      });
+      existing.setIcon(driverMarkerIcon(markerColour(driver, now)));
     }
 
     // Gone from the response — off duty, or aged out entirely.

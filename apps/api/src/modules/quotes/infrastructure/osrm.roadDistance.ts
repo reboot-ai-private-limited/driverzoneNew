@@ -45,6 +45,23 @@ export class OsrmRoadDistance implements RoadDistancePort {
     return Math.ceil(parsed / 1000);
   }
 
+  async travelDurationMinutes(from: LatLng, to: LatLng): Promise<number | null> {
+    const path = `${from.lng},${from.lat};${to.lng},${to.lat}`;
+    const url = `${this.baseUrl}/route/v1/driving/${path}?overview=false&alternatives=false`;
+
+    const response = await this.fetchWithTimeout(url);
+    const body: unknown = await response.json();
+
+    const parsed = readOsrmDuration(body);
+
+    if (parsed === 'NO_ROUTE') return null;
+    if (parsed === null) {
+      throw AppError.internal('INTERNAL', { reason: 'OSRM returned a response we cannot read', url });
+    }
+
+    return Math.ceil(parsed / 60);
+  }
+
   private async fetchWithTimeout(url: string): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -79,4 +96,17 @@ function readOsrmRoute(body: unknown): number | 'NO_ROUTE' | null {
 
   const distance = (raw.routes[0] as { distance?: unknown }).distance;
   return typeof distance === 'number' && Number.isFinite(distance) ? distance : null;
+}
+
+/** Seconds, the string `'NO_ROUTE'`, or `null` when the body is not something we recognise. */
+function readOsrmDuration(body: unknown): number | 'NO_ROUTE' | null {
+  if (typeof body !== 'object' || body === null) return null;
+
+  const raw = body as { code?: unknown; routes?: unknown };
+  if (raw.code === 'NoRoute') return 'NO_ROUTE';
+  if (raw.code !== 'Ok') return null;
+  if (!Array.isArray(raw.routes) || raw.routes.length === 0) return 'NO_ROUTE';
+
+  const duration = (raw.routes[0] as { duration?: unknown }).duration;
+  return typeof duration === 'number' && Number.isFinite(duration) ? duration : null;
 }

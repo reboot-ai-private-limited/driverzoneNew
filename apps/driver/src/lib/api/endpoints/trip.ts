@@ -1,11 +1,13 @@
 import type {
   BookingDto,
+  BookingExtensionDto,
   CancelBookingResponse,
   CompleteTripResponse,
   CurrentDriverTripResponse,
   ListDriverTripsResponse,
   RateTripRequest,
   RateTripResponse,
+  SwitchToCashResponse,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { getAccessToken } from '../../auth/session';
@@ -118,6 +120,21 @@ export function completeTrip(bookingId: string): Promise<CompleteTripResponse> {
 }
 
 /**
+ * "They paid me cash instead." The way out of the online-payment gate when the customer's own app
+ * cannot get there — a dead phone, no signal, a card that keeps failing — and they hand over cash.
+ *
+ * Refused by the server while the customer carries wallet debt, which cash cannot clear. A payment
+ * that captures anyway after this is refunded server-side rather than collected twice.
+ */
+export function switchToCash(bookingId: string): Promise<SwitchToCashResponse> {
+  return request<SwitchToCashResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/switch-to-cash`, {
+    method: 'POST',
+    body: {},
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
  * "I am here and the pin is not."
  *
  * The documented way out of the arrival gate, and deliberately NOT a self-serve override: it
@@ -144,6 +161,27 @@ export function reportPickupPin(
  * back only ever lived in navigation state, which dies with the process. Asked on every launch;
  * `null` most of the time, and that is a normal answer rather than an error.
  */
+/**
+ * `POST /driver/bookings/:id/extension/{accept,decline}` — the driver's answer to a customer
+ * asking them to stay one more day.
+ *
+ * TWO URLS RATHER THAN A BODY FLAG, so a yes and a no cannot be produced by the same malformed
+ * request. Accepting is what makes the day billable: the customer pays for it at completion and
+ * this driver is credited the per-day amount the booking was priced at.
+ *
+ * Declining costs nobody anything, and neither does letting it lapse — the request has a window,
+ * after which it expires on its own.
+ */
+export function respondToExtension(
+  bookingId: string,
+  accept: boolean,
+): Promise<BookingExtensionDto> {
+  return request<BookingExtensionDto>(
+    `${ROLE_PREFIX}/bookings/${bookingId}/extension/${accept ? 'accept' : 'decline'}`,
+    { method: 'POST', token: getAccessToken() ?? undefined },
+  );
+}
+
 export function getCurrentTrip(signal?: AbortSignal): Promise<CurrentDriverTripResponse> {
   return request<CurrentDriverTripResponse>(`${ROLE_PREFIX}/bookings/current`, {
     token: getAccessToken() ?? undefined,

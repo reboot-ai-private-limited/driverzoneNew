@@ -128,8 +128,15 @@ have to build copy from a code — new reasons then render correctly on old app 
 { "quote_id": "…", "customer_car_plate": "WB74AB1234",
   "scheduled_at": "2026-08-21T09:30:00+05:30", "payment_mode": "CASH",
   "save_pickup_address": { "label": "HOME", "is_preferred_pickup": true },
-  "save_vehicle": true }
+  "save_vehicle": true,
+  "prefer_favourite_drivers": true }
 ```
+
+`prefer_favourite_drivers` is optional and defaults to `false`, so a client that predates the
+feature books exactly as it always did. When true, dispatch rings this customer's favourites as
+wave 0 before the ordinary radius search — a preference, never a restriction: the search opens to
+everyone the moment those drivers decline, ignore, or turn out not to be eligible. See
+[Favourite drivers](./dispatch-and-assignment.md) and §Favourite drivers below.
 
 `save_pickup_address` and `save_vehicle` are optional and opt-in — when present, this endpoint
 calls into `identity`'s `CustomerBookingProfileContract` to upsert them onto the customer's
@@ -158,6 +165,43 @@ capture point rather than a separate profile-setup step. See
 Idempotent on `quote_id`: replaying the same quote returns the same booking with `200`
 rather than creating a second one.
 
+### Favourite drivers
+
+The drivers this customer wants rung before anybody else. Marking one changes nothing on its own —
+it is `prefer_favourite_drivers` on a booking that asks dispatch to use the list
+([dispatch-and-assignment.md](./dispatch-and-assignment.md) §Favourite drivers).
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/customer/favourite-drivers` | The list, newest first, plus the cap |
+| `POST` | `/customer/favourite-drivers` | `{ driver_id }` — 404 unless they have completed a trip together; 409 at the cap |
+| `DELETE` | `/customer/favourite-drivers/:driverId` | Idempotent |
+
+**All three answer with the whole list**, including the two that change it:
+
+```jsonc
+{
+  "favourites": [
+    { "id": "…", "name": "Ramesh Chettri", "photo_url": "https://…",
+      "rating": 4.7, "rating_count": 31, "added_at": "2026-09-08T14:02:00+05:30" }
+  ],
+  "max": 20
+}
+```
+
+The heart appears on four screens in the customer app and each decides its filled state from this
+one list, so replying with the list is what lets a single tap update all four without a follow-up
+read. `max` rides along so no client hardcodes a limit only the server enforces.
+
+**No phone number.** `DriverCardContract` returns one unconditionally and leaves the decision to
+the caller — a favourites list is not a live trip, there is nobody at a kerb to reach, and that
+number is the one the driver's own login OTP is sent to.
+
+**Adding requires a completed trip together**, and the check runs *before* the driver is looked
+up, so a caller probing ids cannot tell "no such driver" from "you have never ridden with them".
+Both answer `404`. Without that rule this endpoint is a directory of every driver on the platform
+for anyone holding a customer token.
+
 ### Other customer endpoints
 
 | Method | Path | Notes |
@@ -168,6 +212,7 @@ rather than creating a second one.
 | `GET` | `/bookings/:id/track` | Driver position + ETA; poll 5 s or use the socket |
 | `GET` | `/bookings/:id/receipt` | Final itemised fare, post-completion |
 | `POST` | `/bookings/:id/rate` | `{ rating, comment }` |
+| `POST` | `/bookings/:id/extend` | Asks the driver for one more day. Outstation, STARTED only |
 | `GET` | `/car-categories` | For the picker |
 | `GET` | `/coverage/check?lat=&lng=` | Pre-flight, before the customer types a destination |
 | `POST` | `/coverage/waitlist` | Notify me when my area is covered |
@@ -185,6 +230,50 @@ paid-zone pickup fee up front rather than at the fare card.
 A miss is `available: false` at `200`, never a `404` — see `zone-resolution.md` §Error codes.
 Both routes are served by the `zones` module (`zones.md`); they are the only customer-facing
 routes it has.
+
+### Day extensions
+
+Buying one more day on an outstation trip already under way
+([booking-lifecycle.md](./booking-lifecycle.md) §Day extensions).
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `POST` | `/customer/bookings/:id/extend` | Opens a request. 409 unless STARTED, outstation, has a driver, has a frozen day rate, and nothing already pending |
+| `POST` | `/driver/bookings/:id/extension/accept` | Makes the day billable |
+| `POST` | `/driver/bookings/:id/extension/decline` | Charges nobody |
+
+```jsonc
+{ "id": "…", "status": "PENDING",
+  "amount": { "amount_paise": 300000, "amount_display": "₹3,000" },
+  "driver_amount": { "amount_paise": 225000, "amount_display": "₹2,250" },
+  "expires_at": "2026-09-10T18:30:00+05:30", "requested_at": "2026-09-10T18:00:00+05:30" }
+```
+
+**It asks; it does not buy.** Nothing is charged and nothing is promised until the driver accepts —
+an extra day commits their next 24 hours. An accepted day settles at COMPLETION alongside any
+waiting charge, as one `DAY_EXTENSION` adjustment and one settlement charge.
+
+**Two URLs for the driver's answer**, rather than a body flag, so a yes and a no cannot be produced
+by the same malformed request.
+
+`BookingDto.extension` carries the whole state for both apps, and `can_extend` is the SERVER's
+answer to the five guard conditions — neither app re-derives them, because two copies is how a
+button comes to appear on a trip the server refuses. `extension.pending.driver_amount` is present
+only on a driver's read of their own trip and `null` on the customer's: it is the commission split,
+gated the same way the two phone numbers are.
+
+### Admin booking actions
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `POST` | `/admin/bookings/:id/cancel` | `{ reason }`. Charges NOBODY; refunds a prepaid trip in full |
+| `GET` | `/admin/bookings/assignable-drivers?search=` | Verified, unblocked drivers, with `is_on_duty` as a warning |
+| `POST` | `/admin/bookings/:id/assign` | `{ driver_id, reason }`. Release-then-claim; 409 on a STARTED trip |
+
+Both assignment routes are served by `dispatch` despite the path saying bookings — writing
+`bookings.driverId` is its exclusive right. See
+[dispatch-and-assignment.md](./dispatch-and-assignment.md) §Reassignment and manual assignment.
+
 
 ---
 

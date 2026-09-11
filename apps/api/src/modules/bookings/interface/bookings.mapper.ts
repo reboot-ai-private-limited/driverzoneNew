@@ -1,13 +1,34 @@
-import type { BookingDto, BookingEventDto, BookingStatus } from '@driverzone/contracts';
+import type {
+  BookingDto,
+  BookingEventDto,
+  BookingPaymentStatus,
+  BookingStatus,
+} from '@driverzone/contracts';
 import type { CustomerContact, DriverCard } from '../../identity/identity.public.js';
 import { toMoney } from '../../../shared/money/format.js';
 import type { Booking } from '../domain/booking.entity.js';
 import type { BookingEvent } from '../domain/bookingRepository.port.js';
 import type { FareAdjustment } from '../domain/chargeRepository.port.js';
+import type { BookingExtension } from '../domain/bookingExtension.entity.js';
+import { totalExtension } from '../domain/bookingExtension.entity.js';
+import {
+  extensionRefusal,
+  extensionRefusalMessage,
+} from '../application/useCases/extendBooking.usecase.js';
 
 export interface BookingView {
   booking: Booking;
   adjustments: readonly FareAdjustment[];
+  /**
+   * Every day-extension request on this booking, whatever its status.
+   *
+   * OPTIONAL, and absent means "not looked up" rather than "there are none" — the same convention
+   * `driverCard` and `customerName` follow. A read that does not pass it renders `extension: null`,
+   * which the apps treat as nothing to show. The customer's and driver's live-trip reads pass it;
+   * a history list does not, because a finished trip cannot be extended and the list would pay a
+   * query per row to say so.
+   */
+  extensions?: readonly BookingExtension[] | undefined;
   /**
    * The trip code, supplied ONLY when the customer is reading their own booking.
    *
@@ -63,6 +84,17 @@ export interface BookingView {
    * someone reviewing that endpoint can see the decision being made.
    */
   revealPhones?: boolean | undefined;
+  /**
+   * Puts the driver's own cut of a pending day extension on the response. DRIVER READS ONLY.
+   *
+   * The same rule as `revealPhones` above, aimed at the other party: a driver deciding whether to
+   * commit their next 24 hours is owed the number, and a customer looking at the same booking has
+   * no business being shown what their driver's share of a package is. An explicit flag rather
+   * than the mapper inferring it from the caller, because that is the rule this whole interface
+   * follows.
+   */
+  revealDriverEarnings?: boolean | undefined;
+  paymentStatus?: BookingPaymentStatus | undefined;
 }
 
 /**
@@ -105,6 +137,14 @@ export function toBookingDto(view: BookingView): BookingDto {
     status: booking.status,
     service_type: booking.serviceType,
     payment_mode: booking.paymentMode,
+    payment_status:
+      view.paymentStatus ??
+      booking.paymentStatus ??
+      (booking.paymentMode === null
+        ? 'NOT_SELECTED'
+        : booking.paymentMode === 'CASH'
+          ? 'CASH'
+          : 'AWAITING_PAYMENT'),
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },
     drop: { ...booking.drop, address: booking.dropAddress },
@@ -116,6 +156,7 @@ export function toBookingDto(view: BookingView): BookingDto {
 
     car_category: booking.carCategory,
     vehicle_type: booking.vehicleType,
+    prefer_favourite_drivers: booking.preferFavouriteDrivers,
 
     wallet_credit: toMoney(booking.walletCreditPaise),
     wallet_debt: toMoney(booking.walletDebtPaise),
@@ -149,6 +190,8 @@ export function toBookingDto(view: BookingView): BookingDto {
       label: adjustment.label,
       amount: toMoney(adjustment.amountPaise),
     })),
+
+    extension: toExtensionBlock(view),
 
     timestamps: {
       assigned_at: booking.assignedAt?.toISOString() ?? null,
@@ -234,6 +277,45 @@ function toCustomerDto(view: BookingView): BookingDto['customer'] {
  * Support staff should never have to ask an engineer what happened to a booking — this is the
  * list that makes that true, so nothing is summarised or filtered on the way out.
  */
+/**
+ * The day-extension block, or `null` when this read was not asked to resolve one.
+ *
+ * `can_extend` IS DECIDED HERE, ONCE, by the same `extensionRefusal` the request endpoint itself
+ * runs. That shared function is the point: two copies of five conditions is how an app comes to
+ * show an Extend button on a trip the server refuses, and the customer learns the difference by
+ * tapping it.
+ */
+function toExtensionBlock(view: BookingView): BookingDto['extension'] {
+  if (view.extensions === undefined) return null;
+
+  const { booking } = view;
+  const pending = view.extensions.find((extension) => extension.status === 'PENDING') ?? null;
+  const agreed = totalExtension(view.extensions);
+
+  const refusal = extensionRefusal(booking, pending !== null);
+  const perDay = booking.fareSnapshot.fare.perDay ?? null;
+
+  return {
+    can_extend: refusal === null,
+    reason: refusal === null ? null : extensionRefusalMessage(refusal),
+    price: perDay === null ? null : toMoney(perDay.farePaise),
+    pending:
+      pending === null
+        ? null
+        : {
+            id: pending.id,
+            amount: toMoney(pending.amountPaise),
+            expires_at: pending.expiresAt.toISOString(),
+            driver_amount:
+              view.revealDriverEarnings === true
+                ? toMoney(pending.driverAmountPaise)
+                : null,
+          },
+    extra_days: agreed.days,
+    extra_amount: toMoney(agreed.amountPaise),
+  };
+}
+
 export function toBookingEventDto(event: BookingEvent): BookingEventDto {
   return {
     from_status: event.fromStatus,

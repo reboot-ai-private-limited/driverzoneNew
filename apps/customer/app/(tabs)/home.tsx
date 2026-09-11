@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { DateTimeChooser } from '@/components/DateTimeChooser';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -42,6 +42,7 @@ import {
 import { FareSheet } from '@/components/FareSheet';
 import { TripOptions } from '@/components/TripOptions';
 import { unavailableTitle } from '@/features/booking/quote';
+import { REBOOK_PARAM_KEYS, parseRebookParams } from '@/features/booking/rebook';
 import {
   defaultScheduleAnchor,
   returnProblem,
@@ -213,6 +214,59 @@ export default function HomeScreen(): ReactElement {
       map.current?.moveTo(location.point.lat, location.point.lng, 'street');
     }
   }, [location.isReal, location.point]);
+
+  /**
+   * BOOK AGAIN — this screen was opened from a past trip, carrying its two ends.
+   *
+   * APPLIED ONCE PER REQUEST, then the params are cleared. Home is a TAB: it stays mounted, and
+   * without both halves of that a customer who rebooks, moves the pin, then switches to Rides and
+   * back would find their edit silently reverted to the old trip. `appliedRebook` guards the
+   * re-renders, `setParams` guards the tab switches.
+   *
+   * IT ALSO SETTLES THE RACE WITH THE GPS. `pickupIsAutomatic` is what tells the effect above
+   * that a later, better fix may overwrite the pickup — a rebooked pickup is a choice, so this
+   * closes that door before the fix arrives rather than after.
+   *
+   * NO TIME IS RESTORED. The old trip's pickup instant is in the past; the customer picks a new
+   * one, and Continue stays blocked until they do. See `rebook.ts` on what else is left behind.
+   */
+  const rebookParams = useLocalSearchParams<Record<string, string>>();
+  const appliedRebook = useRef<string | null>(null);
+
+  useEffect(() => {
+    const rebook = parseRebookParams(rebookParams);
+
+    /*
+     * No params — either an ordinary visit, or the clear below has landed. Releasing the guard
+     * here is what lets the SAME past trip be rebooked twice: tap it, edit the destination, come
+     * back, tap it again. Holding the token forever would make that second tap do nothing, which
+     * reads as the button being broken.
+     */
+    if (rebook === null) {
+      appliedRebook.current = null;
+      return;
+    }
+
+    if (appliedRebook.current === rebook.token) return;
+
+    appliedRebook.current = rebook.token;
+
+    pickupIsAutomatic.current = false;
+    setPickup(rebook.pickup);
+    setDrop(rebook.drop);
+
+    // The map goes to the PICKUP rather than trying to frame both: `MapCanvas` recentres, it does
+    // not fit a bounding box, and the pickup is the end the customer is standing at.
+    hasCentred.current = true;
+    map.current?.moveTo(rebook.pickup.lat, rebook.pickup.lng, 'street');
+
+    // Anything mid-pick is abandoned — the trip just changed underneath it.
+    setMode('idle');
+    setDraft(null);
+    setDraftAddress(null);
+
+    router.setParams(Object.fromEntries(REBOOK_PARAM_KEYS.map((key) => [key, ''])));
+  }, [rebookParams]);
 
   const profile = useQuery({
     queryKey: keys.profile.me(),

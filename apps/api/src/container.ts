@@ -2,6 +2,7 @@ import { enqueueDispatch, enqueueWaveTimeout } from '@/shared/queue/dispatchJobs
 import { buildAdminContainer } from '@/modules/admin/admin.container.js';
 import { buildBookingsContainer } from '@/modules/bookings/bookings.container.js';
 import { buildDispatchContainer } from '@/modules/dispatch/dispatch.container.js';
+import { buildFavouritesContainer } from '@/modules/favourites/favourites.container.js';
 import { buildHealthContainer } from '@/modules/health/health.container.js';
 import { buildIdentityContainer } from '@/modules/identity/identity.container.js';
 import { buildLedgerContainer } from '@/modules/ledger/ledger.container.js';
@@ -42,6 +43,7 @@ export interface AppContainers {
   packages: ReturnType<typeof buildPackagesContainer>;
   quotes: ReturnType<typeof buildQuotesContainer>;
   bookings: ReturnType<typeof buildBookingsContainer>;
+  favourites: ReturnType<typeof buildFavouritesContainer>;
   dispatch: ReturnType<typeof buildDispatchContainer>;
   reviews: ReturnType<typeof buildReviewsContainer>;
   admin: ReturnType<typeof buildAdminContainer>;
@@ -113,16 +115,32 @@ export function buildContainers(): AppContainers {
     scheduleDispatch: (booking) => enqueueDispatch(booking.id, booking.dispatchAt),
   });
 
-  // tier 7 — the only module permitted to set bookings.driverId
+  /*
+   * tier 7 — between `bookings` and `dispatch`, and it has to be both.
+   *
+   * It reads `bookings` because a customer may only favourite a driver they have really ridden
+   * with, and `dispatch` reads IT because the favourite wave is the first thing that rings. That
+   * pair of facts is the whole reason favourites is a module rather than an array on the customer
+   * document: `identity` sits at tier 1 and cannot see a booking from there.
+   */
+  const favourites = buildFavouritesContainer({
+    bookings: bookings.favouritesContract,
+    identity: identity.contract,
+  });
+
+  // tier 8 — the only module permitted to set bookings.driverId
   const dispatch = buildDispatchContainer({
     bookings: bookings.contract,
     settings: settings.contract,
     notifications: notifications.contract,
+    favourites: favourites.contract,
+    // Tier 1, for the manual-assignment picker. Search only — see `AssignableDriversContract`.
+    identity: identity.contract,
     scheduleWaveTimeout: enqueueWaveTimeout,
   });
 
   /*
-   * Also tier 7, beside `dispatch` rather than above it: the two never speak. A review is written
+   * Also tier 8, beside `dispatch` rather than above it: the two never speak. A review is written
    * after the trip is over, so it needs to READ a finished booking and nothing more — which is
    * why it is handed `BookingReviewContract` and not the dispatch contract `bookings` exposes.
    */
@@ -157,6 +175,7 @@ export function buildContainers(): AppContainers {
     packages,
     quotes,
     bookings,
+    favourites,
     dispatch,
     reviews,
     admin,

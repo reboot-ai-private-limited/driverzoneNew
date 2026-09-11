@@ -167,8 +167,9 @@ export class RazorpayGateway implements PaymentGatewayPort {
    * one read from OUR database, never the `razorpay_order_id` the client returned: a client that
    * can choose both halves of the message can sign it too.
    *
-   * Nothing calls this yet — there is no app posting a checkout result. Webhooks remain the
-   * authority regardless; a verified callback only lets the app stop waiting sooner.
+   * Called from `VerifyCheckoutUseCase` right after the app's own checkout resolves, so a
+   * confirmed booking does not have to wait out the webhook. Webhooks remain the authority
+   * regardless — this only lets the app stop waiting sooner.
    */
   verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean {
     const expected = createHmac('sha256', this.config.keySecret)

@@ -4,6 +4,7 @@ import type {
   IncityPackageDto,
   IncityVariantInput,
   OutstationPackageDto,
+  OutstationVariantInput,
   Terrain,
 } from '@driverzone/contracts';
 import { validateBand } from './band';
@@ -24,6 +25,43 @@ import { paiseToRupees, rupeesToPaise } from './money';
 export type FieldErrors = Record<string, string>;
 export type BuildResult<T> = { ok: true; body: T } | { ok: false; errors: FieldErrors };
 
+// ─── Variants (shared between InCity and Outstation) ──────────────────────────────────────────
+
+export interface VariantDraft {
+  /** Stable across re-renders and reorders. Not the server's subdocument id — see below. */
+  key: string;
+  label: string;
+  includedMinutes: string;
+  baseFare: string;
+  /** What the driver is paid for this variant, in rupees as typed. */
+  driverAmount: string;
+  isActive: boolean;
+}
+
+let variantKeySeq = 0;
+/**
+ * A local key, deliberately not the server's `id`.
+ *
+ * `PUT` replaces the whole `variants` array, so every save mints fresh subdocument ids — a React
+ * key taken from the server's id would change under a row the admin is still typing in. A local
+ * counter is stable for the life of the form, which is exactly the lifetime a key needs.
+ */
+export function newVariantKey(): string {
+  variantKeySeq += 1;
+  return `variant-${variantKeySeq}`;
+}
+
+export function emptyVariantDraft(): VariantDraft {
+  return {
+    key: newVariantKey(),
+    label: '',
+    includedMinutes: '',
+    baseFare: '',
+    driverAmount: '',
+    isActive: true,
+  };
+}
+
 // ─── Outstation ──────────────────────────────────────────────────────────────────────────────
 
 export interface OutstationDraft {
@@ -40,8 +78,12 @@ export interface OutstationDraft {
    * return trip, `''` is no return trip on offer.
    */
   roundTripFare: string;
-  /** What the driver is paid, in rupees as typed — per day on outstation. */
-  driverAmount: string;
+  /** What the driver is paid for one-way, in rupees as typed — per day on outstation. */
+  oneWayDriverAmount: string;
+  /** What the driver is paid for round-trip, in rupees as typed — per day on outstation. */
+  roundTripDriverAmount: string;
+  /** Hourly variants offered on this band. */
+  variants: VariantDraft[];
   isActive: boolean;
 }
 
@@ -66,7 +108,9 @@ export function emptyOutstationDraft(prefill: OutstationPrefill = {}): Outstatio
     maxKm: prefill.maxKm ?? '',
     oneWayFare: '',
     roundTripFare: '',
-    driverAmount: '',
+    oneWayDriverAmount: '',
+    roundTripDriverAmount: '',
+    variants: [],
     isActive: true,
   };
 }
@@ -80,7 +124,19 @@ export function toOutstationDraft(dto: OutstationPackageDto): OutstationDraft {
     oneWayFare: paiseToRupees(dto.one_way_fare_paise),
     roundTripFare:
       dto.round_trip_fare_paise === null ? '' : paiseToRupees(dto.round_trip_fare_paise),
-    driverAmount: paiseToRupees(dto.driver_amount_paise),
+    oneWayDriverAmount: paiseToRupees(dto.one_way_driver_amount_paise),
+    roundTripDriverAmount:
+      dto.round_trip_driver_amount_paise === null
+        ? ''
+        : paiseToRupees(dto.round_trip_driver_amount_paise),
+    variants: (dto.variants ?? []).map((v) => ({
+      key: newVariantKey(),
+      label: v.label,
+      includedMinutes: String(v.included_minutes),
+      baseFare: paiseToRupees(v.base_fare_paise),
+      driverAmount: paiseToRupees(v.driver_amount_paise),
+      isActive: v.is_active,
+    })),
     isActive: dto.is_active,
   };
 }
@@ -132,17 +188,50 @@ export function buildOutstationBody(
     errors['roundTripFare'] = 'Enter an amount in rupees, or leave it blank for no return trip.';
   }
 
-  const driverAmountPaise = rupeesToPaise(draft.driverAmount);
-  if (driverAmountPaise === null) {
-    errors['driverAmount'] = 'Enter what the driver is paid, in rupees.';
-  } else if (
-    // Mirrors the server: the amount cannot exceed the fare it is paid out of, checked against
-    // whichever direction the band sells more cheaply. Saves a round trip to a guaranteed 400.
-    (oneWayFarePaise !== null && driverAmountPaise > oneWayFarePaise) ||
-    (roundTripFarePaise !== null && driverAmountPaise > roundTripFarePaise)
-  ) {
-    errors['driverAmount'] = 'The driver amount cannot be more than the fare.';
+  const oneWayDriverAmountPaise = rupeesToPaise(draft.oneWayDriverAmount);
+  if (oneWayDriverAmountPaise === null) {
+    errors['oneWayDriverAmount'] = 'Enter what the driver is paid for one-way, in rupees.';
+  } else if (oneWayFarePaise !== null && oneWayDriverAmountPaise > oneWayFarePaise) {
+    errors['oneWayDriverAmount'] = 'The one-way driver amount cannot exceed the one-way fare.';
   }
+
+  let roundTripDriverAmountPaise: number | null = null;
+  if (!roundTripBlank) {
+    roundTripDriverAmountPaise = rupeesToPaise(draft.roundTripDriverAmount);
+    if (roundTripDriverAmountPaise === null) {
+      errors['roundTripDriverAmount'] = 'Enter what the driver is paid for return trip, in rupees.';
+    } else if (roundTripFarePaise !== null && roundTripDriverAmountPaise > roundTripFarePaise) {
+      errors['roundTripDriverAmount'] = 'The return driver amount cannot exceed the return fare.';
+    }
+  }
+
+  const variants: OutstationVariantInput[] = draft.variants.map((variant) => {
+    const scope = `variants.${variant.key}`;
+    if (variant.label.trim() === '') errors[`${scope}.label`] = 'Name the variant.';
+
+    const includedMinutes = wholeNumber(variant.includedMinutes);
+    if (includedMinutes === null || includedMinutes < 1) {
+      errors[`${scope}.includedMinutes`] = 'Enter the included minutes.';
+    }
+
+    const baseFarePaise = rupeesToPaise(variant.baseFare);
+    if (baseFarePaise === null) errors[`${scope}.baseFare`] = 'Enter the base fare in rupees.';
+
+    const driverAmountPaise = rupeesToPaise(variant.driverAmount);
+    if (driverAmountPaise === null) {
+      errors[`${scope}.driverAmount`] = 'Enter what the driver is paid, in rupees.';
+    } else if (baseFarePaise !== null && driverAmountPaise > baseFarePaise) {
+      errors[`${scope}.driverAmount`] = 'The driver amount cannot be more than the fare.';
+    }
+
+    return {
+      label: variant.label.trim(),
+      includedMinutes: includedMinutes ?? 0,
+      baseFarePaise: baseFarePaise ?? 0,
+      driverAmountPaise: driverAmountPaise ?? 0,
+      isActive: variant.isActive,
+    };
+  });
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
@@ -155,7 +244,9 @@ export function buildOutstationBody(
       maxKm: maxKm as number,
       oneWayFarePaise: oneWayFarePaise as number,
       roundTripFarePaise,
-      driverAmountPaise: driverAmountPaise as number,
+      oneWayDriverAmountPaise: oneWayDriverAmountPaise as number,
+      roundTripDriverAmountPaise,
+      variants,
       isActive: draft.isActive,
     },
   };
@@ -163,52 +254,12 @@ export function buildOutstationBody(
 
 // ─── InCity ──────────────────────────────────────────────────────────────────────────────────
 
-/**
- * A duration and a price. The included-km cap, both overage rates, the destination-enforcement
- * flag and the sort order were removed 2026-08-28 (docs/decision-log.md) — there is no overage
- * to bill, and variants display in the order the editor lists them.
- */
-export interface VariantDraft {
-  /** Stable across re-renders and reorders. Not the server's subdocument id — see below. */
-  key: string;
-  label: string;
-  includedMinutes: string;
-  baseFare: string;
-  /** What the driver is paid for this variant, in rupees as typed. */
-  driverAmount: string;
-  isActive: boolean;
-}
-
 export interface IncityDraft {
   name: string;
   description: string;
   cityZoneId: string;
   isActive: boolean;
   variants: VariantDraft[];
-}
-
-let variantKeySeq = 0;
-/**
- * A local key, deliberately not the server's `id`.
- *
- * `PUT` replaces the whole `variants` array, so every save mints fresh subdocument ids — a React
- * key taken from the server's id would change under a row the admin is still typing in. A local
- * counter is stable for the life of the form, which is exactly the lifetime a key needs.
- */
-export function newVariantKey(): string {
-  variantKeySeq += 1;
-  return `variant-${variantKeySeq}`;
-}
-
-export function emptyVariantDraft(): VariantDraft {
-  return {
-    key: newVariantKey(),
-    label: '',
-    includedMinutes: '',
-    baseFare: '',
-    driverAmount: '',
-    isActive: true,
-  };
 }
 
 export function emptyIncityDraft(cityZoneId = ''): IncityDraft {

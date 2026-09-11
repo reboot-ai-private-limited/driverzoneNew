@@ -44,6 +44,16 @@ export interface DispatchOffer {
 }
 
 /**
+ * The `wave` an admin's manual assignment is recorded under.
+ *
+ * NEGATIVE, so it can never collide with a real one: 0 is the favourite wave and 1 upwards are the
+ * radius ladder. It says "no wave chose this driver, a person did" — which matters because the
+ * dispatch metrics read `wave` to judge the ranker, and a hand-picked assignment filed as wave 1
+ * would look like the ranker's work.
+ */
+export const MANUAL_ASSIGNMENT_WAVE = -1;
+
+/**
  * How far wave `n` looks. Doubles each time, from the configured base.
  *
  * Widening fast is deliberate: a wave that finds nobody has cost the booking its whole TTL, so

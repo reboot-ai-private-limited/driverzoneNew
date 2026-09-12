@@ -235,19 +235,46 @@ Redis flush that a scheduled job would not. The window is
 time, because this reaches a driver who is driving, eating or asleep in another town rather than
 one waiting for work.
 
-**It settles at completion**, alongside the waiting charge:
+**The customer pays for it before the trip can end.** An extension accepted BEFORE the customer
+chose how to pay rides along in the booking order (`SelectPaymentMethodUseCase`, recorded in
+`paidExtensionPaise`). One accepted afterwards cannot: that order was raised, usually captured, and
+closed before the day existed, and a gateway order cannot be repriced once its id is in a
+customer's hands. So it gets **its own checkout** — `POST /customer/bookings/:id/extras/pay`, an
+`EXTENSION` payment, confirmed by `extras/verify` or the webhook, either of which increments
+`paidExtensionPaise` (never both: the credit hangs off the capture transition, not off "is it
+captured").
+
+`CompleteTripUseCase` **refuses to end a UPI trip while any of the extension is still owed**, the
+same gate the fare has. Before that gate, the money went to a `SETTLEMENT` order the server raised
+at completion and showed to nobody — no route, no screen, no checkout — so it was billed on the
+receipt and never collected.
+
+The way out when the customer's phone is dead is `POST /driver/bookings/:id/extras/cash`
+(`CollectExtrasInCashUseCase`). `switch-to-cash` cannot help here: it refuses a booking whose fare
+has already been paid online, which is exactly this trip. Only the extension moves, into
+`cashExtensionPaise`, so the ledger can book the driver as holding the company's share of it.
+
+**What completion still settles**, alongside the waiting charge:
 
 - one `DAY_EXTENSION` adjustment row holding the TOTAL of the accepted days, labelled
   `Extended — 2 extra days`. Forced by the `{ bookingId, type }` unique index, and better anyway:
   one receipt line beats two identical ones.
-- ONE settlement charge covering waiting **and** extensions together. `settle-${bookingId}` is
-  derived from the booking so a retried completion cannot charge twice — which means two separate
-  charges under that key would silently collect only the first.
+- ONE settlement charge under `settle-${bookingId}`, derived from the booking so a retried
+  completion cannot charge twice. On a UPI trip the gate above means this is now the waiting
+  charge alone; the extension subtraction stays because it is what makes that true.
 - an `EXTENSION_EARNING` ledger row for the driver, at the per-day amount frozen on the request.
   Unlike `WAITING_EARNING` it IS commissioned: an extra day is a day of the package, not
   compensation for time the company did nothing to earn.
 - a cash driver's `CASH_COLLECTED` figure includes it, or they are recorded as holding less than
-  they actually took.
+  they actually took. On a UPI trip where only the extension was taken in cash, a `CASH_COLLECTED`
+  row covers exactly that portion.
+
+**Both apps show one price, and it is the server's.** `BookingDto.payable.total` is
+`fare + extensions + waiting − wallet credit + wallet debt`. `fare` is frozen at booking time
+(B-1) and cannot move, so every screen that rendered it as "the total" was showing a customer with
+an extra day the old number, and telling a cash driver to collect less than `expectedCashPaise`
+books them as holding. `payable.outstanding` is what the customer still owes online, and the cue
+for the Pay button.
 
 **What it does not do:** move the booking's return date. `Booking` has no `returnAt` — the return
 instant is a quote input only — so an extension adds days and money, not a new date.

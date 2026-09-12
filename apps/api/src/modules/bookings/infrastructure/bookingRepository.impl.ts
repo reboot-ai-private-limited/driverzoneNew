@@ -42,6 +42,7 @@ function toEntity(doc: BookingDoc): Booking {
     paymentStatus: (doc.paymentStatus ?? (doc.paymentMode === 'CASH' ? 'CASH' : doc.paymentMode === 'UPI' ? 'AWAITING_PAYMENT' : 'NOT_SELECTED')) as Booking['paymentStatus'],
     paymentId: doc.paymentId ? String(doc.paymentId) : null,
     paidExtensionPaise: doc.paidExtensionPaise ?? 0,
+    cashExtensionPaise: doc.cashExtensionPaise ?? 0,
     isScheduled: doc.isScheduled,
     scheduledAt: doc.scheduledAt,
     dispatchAt: doc.dispatchAt,
@@ -309,6 +310,25 @@ export class MongoBookingRepository implements BookingRepositoryPort {
 
   async setPaidExtensionPaise(id: string, amountPaise: number): Promise<void> {
     await BookingModel.findByIdAndUpdate(id, { $set: { paidExtensionPaise: amountPaise } });
+  }
+
+  async addPaidExtensionPaise(id: string, amountPaise: number): Promise<void> {
+    await BookingModel.findByIdAndUpdate(id, { $inc: { paidExtensionPaise: amountPaise } });
+  }
+
+  async addCashExtensionPaise(id: string, amountPaise: number): Promise<Booking | null> {
+    /*
+     * BOTH COUNTERS IN ONE `$inc`. `paidExtensionPaise` is what clears the completion gate and
+     * `cashExtensionPaise` is what the ledger settles against; a driver who collected the day in
+     * cash has satisfied both, and updating them in two calls would leave a window where the gate
+     * is open on money the ledger has not been told about.
+     */
+    const doc = await BookingModel.findByIdAndUpdate(
+      id,
+      { $inc: { paidExtensionPaise: amountPaise, cashExtensionPaise: amountPaise } },
+      { new: true },
+    );
+    return doc ? toEntity(doc) : null;
   }
 
   /**

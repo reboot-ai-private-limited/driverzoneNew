@@ -8,6 +8,7 @@ import type {
   CurrentCustomerBookingResponse,
   ListBookingsResponse,
   PaymentMode,
+  PayTripExtrasResponse,
   RateTripRequest,
   RateTripResponse,
   SelectPaymentMethodResponse,
@@ -176,6 +177,50 @@ export function verifyPayment(
   return request<VerifyPaymentResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/payment/verify`, {
     method: 'POST',
     body: { razorpay_payment_id: razorpayPaymentId, razorpay_signature: razorpaySignature },
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `POST /customer/bookings/:id/extras/pay` — a checkout for the extra day the driver agreed to.
+ *
+ * A SECOND ORDER, DELIBERATELY. The trip's own order was raised — and usually already paid —
+ * before the extra day existed, and a gateway order cannot be repriced once its id is in the
+ * customer's hands. `payable.outstanding` on the booking is what says this is needed and for how
+ * much; this opens the order to cover it.
+ *
+ * NO IDEMPOTENCY KEY FROM HERE. The server keys it on the number of days already agreed, which is
+ * the only thing that genuinely changes the amount — a per-tap key would open a second order for
+ * the same day, and a per-booking one would hand back the first day's order after a second
+ * extension.
+ */
+export function payTripExtras(bookingId: string): Promise<PayTripExtrasResponse> {
+  return request<PayTripExtrasResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/extras/pay`, {
+    method: 'POST',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * The same accelerant `verifyPayment` is, for that order.
+ *
+ * IT NAMES THE PAYMENT, which the fare's verify does not have to: the booking carries exactly one
+ * fare payment and the server can find it, whereas a trip extended twice has more than one extras
+ * order. The ORDER id is still never sent — the server reads that from the row.
+ */
+export function verifyExtrasPayment(
+  bookingId: string,
+  paymentId: string,
+  razorpayPaymentId: string,
+  razorpaySignature: string,
+): Promise<VerifyPaymentResponse> {
+  return request<VerifyPaymentResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/extras/verify`, {
+    method: 'POST',
+    body: {
+      payment_id: paymentId,
+      razorpay_payment_id: razorpayPaymentId,
+      razorpay_signature: razorpaySignature,
+    },
     token: getAccessToken() ?? undefined,
   });
 }

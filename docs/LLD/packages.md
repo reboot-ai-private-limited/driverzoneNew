@@ -180,6 +180,27 @@ The cost is not hypothetical: a long cross-city trip now sells as an hourly rent
 overage gone there is nothing to collect the difference. It was chosen deliberately, and the
 `incity.max_distance_multiple` settings key it would have needed is no longer coming.
 
+### "An in-city tour was charged as outstation"
+
+A recurring report, and it is **never this ladder**. In-city wins at any distance, in either
+direction, hill drop or not, and `CreateQuoteUseCase` tries it FIRST — before it even measures the
+road, because road distance is a paid call an in-city trip does not need. So the complaint is
+always one of three facts about the DATA, and from the outside all three look identical:
+
+| What is actually wrong | `trace.incityRejected` |
+|---|---|
+| The drop (or the pickup) is outside the CITY polygon — in-city needs **both** points in **one** city zone | `NOT_SAME_CITY` |
+| That city zone has no in-city package at all | `NO_PACKAGE_FOR_CITY` |
+| It has one, and every variant on it is inactive | `NO_ACTIVE_VARIANT` |
+
+Two things make that visible. `resolveForTrip.explain()` returns a `ResolutionTrace` alongside the
+verdict — the same ladder, not a description of it — which backs the admin panel's
+`GET /admin/quotes/explain` diagnostic on the packages screen. And `CreateQuoteUseCase` logs a
+`warn` naming the city zone and the reason whenever a **same-city** trip resolves to outstation,
+which is always a configuration fault and used to be completely silent. The quote still goes out:
+a band fare is a real price, and refusing the trip is worse for the customer than selling them the
+wrong product.
+
 ### On rung (b) — defensive only
 
 Under destination-point classification, `to` is either inside a hill zone or it is not. HILL and

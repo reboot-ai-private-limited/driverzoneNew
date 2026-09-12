@@ -17,6 +17,16 @@ export const PAYMENT_KINDS = [
   'BOOKING',
   /** Extras accrued during the trip — waiting time — collected at completion. */
   'SETTLEMENT',
+  /**
+   * A day extension the customer bought mid-trip, collected mid-trip.
+   *
+   * ITS OWN KIND RATHER THAN A SECOND `SETTLEMENT`, because the two are settled by different
+   * mechanisms and a capture has to be told apart from the outside: this one is opened by the
+   * customer and credits `booking.paidExtensionPaise`, while a `SETTLEMENT` is opened by the
+   * server at completion and credits nothing. Sharing a kind meant the webhook had to guess from
+   * the booking's status which of the two had just landed.
+   */
+  'EXTENSION',
   /** Money going back: a cancellation refund, or a booking no driver was found for. */
   'REFUND',
 ] as const;

@@ -15,6 +15,10 @@ export interface CustomerControllers {
   selectPaymentMethod: RequestHandler;
   /** `POST /customer/bookings/:id/payment/verify` — confirms a checkout instantly, ahead of the webhook. */
   verifyPayment: RequestHandler;
+  /** `POST /customer/bookings/:id/extras/pay` — a checkout for an accepted extra day. */
+  payExtras: RequestHandler;
+  /** `POST /customer/bookings/:id/extras/verify` — the same accelerant, for that order. */
+  verifyExtrasPayment: RequestHandler;
 }
 
 export interface DriverControllers {
@@ -33,6 +37,8 @@ export interface DriverControllers {
   declineExtension: RequestHandler;
   /** `POST /driver/bookings/:id/switch-to-cash` — the fallback when the customer cannot pay online. */
   switchToCash: RequestHandler;
+  /** `POST /driver/bookings/:id/extras/cash` — the extra day was handed over in cash. */
+  collectExtrasInCash: RequestHandler;
 }
 
 export interface AdminControllers {
@@ -63,6 +69,11 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
      verifies that signature server-side rather than taking the client's word — see
      `VerifyCheckoutUseCase`. */
   router.post('/:id/payment/verify', handlers.verifyPayment);
+  /* The extra day, collected on its own order. Separate from `/payment-method` because the
+     booking's order was raised — usually paid — before the extra day existed, and a gateway order
+     cannot be repriced once its id is in a customer's hands. See `payExtras.usecase.ts`. */
+  router.post('/:id/extras/pay', handlers.payExtras);
+  router.post('/:id/extras/verify', handlers.verifyExtrasPayment);
 
   return router;
 }
@@ -97,6 +108,9 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
   /* The way out of the payment gate when the customer's own app cannot get there — a dead phone,
      no signal — and they pay the driver in cash instead. */
   router.post('/:id/switch-to-cash', handlers.switchToCash);
+  /* The narrow version of the line above, for a trip whose FARE was already paid online and so
+     cannot be switched wholesale — only the extra day moves. See `CollectExtrasInCashUseCase`. */
+  router.post('/:id/extras/cash', handlers.collectExtrasInCash);
 
   return router;
 }

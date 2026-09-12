@@ -23,8 +23,15 @@ import {
 import { CreateBookingUseCase } from './application/useCases/createBooking.usecase.js';
 import { SelectPaymentMethodUseCase } from './application/useCases/selectPaymentMethod.usecase.js';
 import { ConfirmLatePaymentUseCase } from './application/useCases/confirmLatePayment.usecase.js';
-import { VerifyPaymentUseCase } from './application/useCases/verifyPayment.usecase.js';
-import { DriverSwitchToCashUseCase } from './application/useCases/driverSwitchToCash.usecase.js';
+import {
+  VerifyExtrasPaymentUseCase,
+  VerifyPaymentUseCase,
+} from './application/useCases/verifyPayment.usecase.js';
+import { PayTripExtrasUseCase } from './application/useCases/payExtras.usecase.js';
+import {
+  CollectExtrasInCashUseCase,
+  DriverSwitchToCashUseCase,
+} from './application/useCases/driverSwitchToCash.usecase.js';
 import {
   ConfirmBookingPaymentUseCase,
   FailBookingPaymentUseCase,
@@ -81,8 +88,14 @@ export interface BookingsContainer {
    * needs "have these two ridden together" the dispatch contract would hand it `claimForDriver`.
    */
   favouritesContract: BookingFavouritesContract;
-  /** Called by the payment webhook once a charge settles. Wired at the composition root. */
-  onPaymentCaptured: (bookingId: string) => Promise<void>;
+  /**
+   * Called by the payment webhook once a charge settles. Wired at the composition root.
+   *
+   * TAKES THE PAYMENT ID, not just the booking, because a booking has more than one charge on it
+   * and they mean different things: the fare's capture confirms the trip, while an `EXTENSION`
+   * capture is a day extension being paid for and must not touch the booking's payment status.
+   */
+  onPaymentCaptured: (bookingId: string, paymentId: string) => Promise<void>;
   onPaymentFailed: (bookingId: string, reason: string) => Promise<void>;
   /** The sweeper's housekeeping: bookings whose payment never arrived. Returns how many expired. */
   sweepAbandonedPayments: (before: Date, limit: number) => Promise<number>;
@@ -114,7 +127,10 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
   const selectPaymentMethod = new SelectPaymentMethodUseCase(repo, deps.payments, extensions);
   const confirmLate = new ConfirmLatePaymentUseCase(repo, deps.notifications, deps.wallet, deps.payments);
   const verifyPayment = new VerifyPaymentUseCase(repo, deps.payments, confirmLate);
+  const payExtras = new PayTripExtrasUseCase(repo, deps.payments, extensions);
+  const verifyExtrasPayment = new VerifyExtrasPaymentUseCase(repo, deps.payments);
   const switchToCash = new DriverSwitchToCashUseCase(repo, deps.notifications);
+  const collectExtrasInCash = new CollectExtrasInCashUseCase(repo, extensions);
   const confirm = new ConfirmBookingPaymentUseCase(
     repo,
     deps.notifications,
@@ -241,7 +257,23 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         repo.hasCompletedTripTogether(customerId, driverId),
     },
 
-    onPaymentCaptured: async (bookingId) => {
+    onPaymentCaptured: async (bookingId, paymentId) => {
+      /*
+       * A DAY EXTENSION BEING PAID FOR, not the trip. It has its own order (see
+       * `payExtras.usecase.ts`) because the booking's own was raised, and usually captured, before
+       * the extra day existed. Nothing about the booking's payment status changes — the fare was
+       * already settled — so this credits the extension and stops.
+       *
+       * The increment happens HERE and in `VerifyExtrasPaymentUseCase`, and exactly one of them
+       * runs for any given capture: both hang off the same compare-and-swap, and this callback is
+       * only reached when the webhook itself performed the transition.
+       */
+      const payment = await deps.payments.findById(paymentId);
+      if (payment?.kind === 'EXTENSION') {
+        await repo.addPaidExtensionPaise(bookingId, payment.amountPaise);
+        return;
+      }
+
       const booking = await repo.findById(bookingId);
       if (booking?.status === 'PENDING_PAYMENT') {
         await confirm.execute(bookingId);
@@ -304,6 +336,8 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         extend: controllers.makeRequestExtensionController(requestExtension),
         selectPaymentMethod: controllers.makeSelectPaymentMethodController(selectPaymentMethod),
         verifyPayment: controllers.makeVerifyPaymentController(verifyPayment),
+        payExtras: controllers.makePayTripExtrasController(payExtras),
+        verifyExtrasPayment: controllers.makeVerifyExtrasPaymentController(verifyExtrasPayment),
       }),
 
     buildDriverRouter: () =>
@@ -325,12 +359,13 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         acceptExtension: controllers.makeRespondToExtensionController(respondToExtension, true),
         declineExtension: controllers.makeRespondToExtensionController(respondToExtension, false),
         switchToCash: controllers.makeDriverSwitchToCashController(switchToCash),
+        collectExtrasInCash: controllers.makeCollectExtrasInCashController(collectExtrasInCash),
       }),
 
     buildAdminRouter: () =>
       buildAdminRouter({
         list: controllers.makeListAdminBookingsController(repo, charges, deps.identity),
-        get: controllers.makeGetAdminBookingController(repo, charges, deps.identity),
+        get: controllers.makeGetAdminBookingController(repo, charges, deps.identity, extensions),
         events: controllers.makeListEventsController(repo),
         forceArrive: controllers.makeForceArriveController(forceArrive),
         cancel: controllers.makeCancelByAdminController(cancelByAdmin),

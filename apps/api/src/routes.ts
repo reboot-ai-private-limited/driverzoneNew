@@ -55,6 +55,14 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/admin/faq', c.faq.buildAdminRouter());
   router.use('/admin/packages', c.packages.buildAdminRouter());
   /*
+   * `GET /admin/quotes/explain` — which product a pair of coordinates resolves to, and why.
+   *
+   * In `quotes` rather than `packages` because answering it is the same composition quoting
+   * performs (zones, then the road, then the package ladder), and `packages` sits below `zones`
+   * and never sees a coordinate.
+   */
+  router.use('/admin/quotes', c.quotes.buildAdminRouter());
+  /*
    * `/admin/drivers/:id/wallet`. Identity's ADMIN router owns `/admin/drivers` and
    * `/admin/drivers/:id`, neither of which matches three segments, so the request falls through to
    * here — the module that owns the ledger rows answers for them.
@@ -143,7 +151,9 @@ export function buildApiRouter(c: AppContainers): Router {
     '/payments',
     c.payments.buildWebhookRouter(async (outcome) => {
       if (outcome.kind === 'CAPTURED') {
-        await c.bookings.onPaymentCaptured(outcome.bookingId);
+        // The payment id too: what a capture means to the booking depends on WHICH charge it
+        // was — the fare, or the separate order collecting a day extension.
+        await c.bookings.onPaymentCaptured(outcome.bookingId, outcome.paymentId);
         return;
       }
       if (outcome.kind === 'FAILED') {

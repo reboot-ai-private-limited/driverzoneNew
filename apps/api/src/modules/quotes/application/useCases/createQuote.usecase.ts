@@ -1,5 +1,6 @@
 import type { Direction, UnavailableResult } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
+import { logger } from '@/shared/logging/logger.js';
 import type { LatLng } from '@driverzone/geo';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
 import { rupeesToPaise } from '../../../settings/settings.public.js';
@@ -115,7 +116,40 @@ export class CreateQuoteUseCase {
           message: 'We could not find a driving route between these two points.',
         };
       }
+
       match = await this.packages.resolveForTrip({ ...tripBase, distanceKm });
+
+      /*
+       * A TRIP BETWEEN TWO POINTS IN ONE CITY THAT DID NOT PRICE AS IN-CITY.
+       *
+       * In-city outranks outstation unconditionally, so reaching here with `toSameCityZone` true
+       * is never the ladder disagreeing — it is that the city has no in-city package with an
+       * active variant, and a customer is being quoted a long-distance band for a trip across
+       * town. That is a configuration fault, and it was completely silent.
+       *
+       * THE SECOND LOOKUP IS ONLY ON THE FAULT. The hot path keeps the plain `resolveForTrip`
+       * above; `explainForTrip` re-runs the identical ladder purely to find out WHICH of the two
+       * in-city failures happened, which is the one thing the log has to say to be actionable.
+       * That costs a query on a path that should never be taken and nothing at all on the one
+       * every quote uses.
+       *
+       * WARN, not an error, and the quote still goes out: a band fare is a real price, and
+       * refusing to sell the trip would be worse for the customer than selling them the wrong
+       * product. Somebody has to notice, which is what this is for.
+       */
+      if (toSameCityZone && match.available && match.match.type === 'OUTSTATION') {
+        const { trace } = await this.packages.explainForTrip({ ...tripBase, distanceKm });
+        logger.warn(
+          {
+            cityZoneId: trace.cityZoneId,
+            cityName: from.city?.name ?? null,
+            reason: trace.incityRejected,
+            incityCandidates: trace.incityCandidates,
+            distanceKm,
+          },
+          'a trip within one city priced as outstation — no sellable incity package for that city',
+        );
+      }
     }
 
     if (!match.available) {

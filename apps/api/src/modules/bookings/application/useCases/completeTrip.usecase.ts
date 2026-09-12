@@ -72,6 +72,26 @@ export class CompleteTripUseCase {
       }
     }
 
+    /*
+     * THE SAME GATE THE FARE HAS, for the extra days.
+     *
+     * Read BEFORE the transition, unlike the sum used for settlement below — this has to refuse
+     * the completion, and a check that runs after the status has already moved to COMPLETED can
+     * only complain about it. Safe to read twice: a trip cannot gain an extension between here and
+     * the transition a few lines down, because `RequestBookingExtensionUseCase` requires STARTED.
+     *
+     * Without it, a customer who paid for the trip and then bought a day simply never paid for the
+     * day: the driver ended the trip, and the extra became a receivable nobody chased.
+     */
+    if (booking.paymentMode === 'UPI') {
+      const agreed = totalExtension(await this.extensions.listForBooking(booking.id));
+      if (agreed.amountPaise - booking.paidExtensionPaise > 0) {
+        throw AppError.conflict(
+          'Your customer still has to pay for the extra day. You can end the trip once that clears.',
+        );
+      }
+    }
+
     const now = new Date();
     const snapshot = await this.settings.snapshot();
 
@@ -166,6 +186,13 @@ export class CompleteTripUseCase {
      * a booking that has since switched to cash — the customer's own choice, or
      * `DriverSwitchToCashUseCase` — never paid it. The payment gate at the top of this method has
      * already established that a `UPI` booking's charge captured, so this needs no second check.
+     */
+    /*
+     * ON A UPI TRIP THIS NOW ALWAYS CLEARS THE EXTRAS, because the gate at the top of this method
+     * refuses the completion until it does — so in practice `owedPaise` here is the waiting charge
+     * alone. The subtraction stays rather than being replaced by a zero: it is what MAKES that
+     * true, and a cash trip switched to UPI mid-way, or a future path that collects extras some
+     * other way, must still not be billed twice.
      */
     const prepaidExtrasPaise = booking.paymentMode === 'UPI' ? booking.paidExtensionPaise : 0;
     const uncollectedExtrasPaise = Math.max(0, extras.amountPaise - prepaidExtrasPaise);
@@ -270,6 +297,23 @@ export class CompleteTripUseCase {
         entryType: 'CASH_COLLECTED',
         amountPaise: -Math.abs(collected),
         note: `Cash collected for ${booking.reference}`,
+      });
+    } else if (booking.cashExtensionPaise > 0) {
+      /*
+       * A UPI TRIP WHERE ONLY THE EXTRA DAY CHANGED HANDS IN CASH — `CollectExtrasInCashUseCase`,
+       * the way out of the extension gate when the customer's phone is dead. The fare reached the
+       * company through the gateway; this did not, so the driver is holding the company's share of
+       * it and the same negative row a cash fare gets applies to exactly this portion.
+       *
+       * An `else if`: on an all-cash trip the row above already covers the extension, and adding
+       * this one would book the same money twice.
+       */
+      entries.push({
+        driverId: input.driverId,
+        bookingId: booking.id,
+        entryType: 'CASH_COLLECTED',
+        amountPaise: -Math.abs(booking.cashExtensionPaise),
+        note: `Extra day collected in cash for ${booking.reference}`,
       });
     }
 

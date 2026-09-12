@@ -149,6 +149,26 @@ export interface BookingRepositoryPort {
   setPaidExtensionPaise(id: string, amountPaise: number): Promise<void>;
 
   /**
+   * Adds to that figure when a separate extras order captures — the extension the customer bought
+   * AFTER they had already paid for the trip, which the booking order could not have covered.
+   *
+   * AN INCREMENT, NOT A SET, unlike the one above. That one runs once, at payment selection, and
+   * knows the whole accepted total. This one runs per captured order, possibly more than once on a
+   * trip extended twice, and each capture only knows its own amount — writing the absolute figure
+   * from a webhook that arrives out of order would erase the other one.
+   */
+  addPaidExtensionPaise(id: string, amountPaise: number): Promise<void>;
+
+  /**
+   * The driver took the extra day in cash on an otherwise-UPI trip — see `Booking.cashExtensionPaise`.
+   *
+   * Adds to BOTH counters, which is why it is its own method rather than a second call to the one
+   * above: the money has been collected (so the completion gate opens) AND the driver is holding
+   * it (so the ledger owes the company its share back).
+   */
+  addCashExtensionPaise(id: string, amountPaise: number): Promise<Booking | null>;
+
+  /**
    * THE ONE WAY A STATUS CHANGES (invariant B-3).
    *
    * Compare-and-swap on `from`, plus the `bookingEvents` insert, in one multi-document

@@ -220,7 +220,7 @@ function BookingSummary({ booking }: { booking: BookingDto }) {
         </SummaryStat>
 
         <SummaryStat icon={<IndianRupee aria-hidden className="size-4" />} label="Total Amount">
-          <span className="text-base font-semibold">{booking.fare.total.amount_display}</span>
+          <span className="text-base font-semibold">{booking.payable.total.amount_display}</span>
         </SummaryStat>
       </div>
     </Panel>
@@ -617,9 +617,16 @@ function FareBreakdownCard({ booking }: { booking: BookingDto }) {
           )}
         </DefinitionList>
 
+        {/*
+          `payable.total`, NOT `fare.total`. The fare is frozen at booking time (invariant B-1) and
+          says nothing about an extra day the driver agreed to, the waiting charge or the wallet —
+          all three of which are listed as rows immediately above this line. Printing the frozen
+          figure under them made a column that visibly did not add up, and it is the number support
+          reads out when a customer disputes what they were charged.
+        */}
         <div className="flex items-center justify-between border-t border-border pt-3">
           <span className="text-sm font-semibold">Total Amount</span>
-          <span className="text-base font-semibold">{fare.total.amount_display}</span>
+          <span className="text-base font-semibold">{booking.payable.total.amount_display}</span>
         </div>
 
         {saved && (
@@ -671,7 +678,7 @@ function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
             {formatBookingDate(paidAt)}, {formatTime(paidAt)}
           </FieldRow>
         )}
-        <FieldRow label="Amount">{booking.fare.total.amount_display}</FieldRow>
+        <FieldRow label="Amount">{booking.payable.total.amount_display}</FieldRow>
       </DefinitionList>
     </Panel>
   );

@@ -95,15 +95,22 @@ export function rideHappenedAt(booking: BookingDto): string {
 /**
  * What the trip cost: the quoted fare plus anything decided afterwards.
  *
- * `adjustments` (waiting time, a late fine) never edit `fare` — that is invariant B-1 — so a row
- * showing `fare.total` alone would under-report every trip that ran long, and disagree with the
- * detail screen's own invoice, which lists both.
+ * `adjustments` never edit `fare` — that is invariant B-1 — so a row showing `fare.total` alone
+ * would under-report every trip that ran long, and disagree with the detail screen's own invoice,
+ * which lists both.
+ *
+ * READ OFF `payable` RATHER THAN SUMMED FROM `adjustments`, which is what this did. The server now
+ * does that arithmetic once, for every client, and two copies of it is how a receipt and a history
+ * row come to disagree about one trip. It also picks up an extra day the driver has agreed to on a
+ * trip that is still running: the `DAY_EXTENSION` adjustment row carrying it is not written until
+ * completion, so summing adjustments saw nothing until the trip was over.
+ *
+ * PRE-WALLET, deliberately — `payable.total` is the net. The two are different questions and
+ * `toRideHistoryRow` below reports both.
  */
 export function rideTotalPaise(booking: BookingDto): number {
-  return booking.adjustments.reduce(
-    (sum, adjustment) => sum + adjustment.amount.amount_paise,
-    booking.fare.total.amount_paise,
-  );
+  const { fare_total, extension_total, waiting_total } = booking.payable;
+  return fare_total.amount_paise + extension_total.amount_paise + waiting_total.amount_paise;
 }
 
 export function toRideHistoryRow(booking: BookingDto): RideHistoryRow {
@@ -124,18 +131,18 @@ export function toRideHistoryRow(booking: BookingDto): RideHistoryRow {
     },
     dropPoint: { lat: booking.drop.lat, lng: booking.drop.lng, address: booking.drop.address },
     totalPaise,
-    paidPaise: Math.max(
-      0,
-      totalPaise - booking.wallet_credit.amount_paise + booking.wallet_debt.amount_paise,
-    ),
+    // The server's own figure, not the same subtraction done again here. `payable.total` IS
+    // "fare plus extras, less credit, plus carried debt, floored at zero".
+    paidPaise: booking.payable.total.amount_paise,
     /*
-     * The server's string is only correct while nothing has been added to the fare. With an
-     * adjustment there is no preformatted total for fare+adjustments, so this formats it — which
-     * is why `formatPaise` exists here at all rather than every total coming down the wire.
+     * The server's string whenever one describes this figure — which is whenever nothing has been
+     * added to the fare. Only a trip that grew needs formatting here, and it is worth avoiding:
+     * Hermes ships a reduced ICU on Android, so `₹1,00,000` renders as `₹100,000` on some phones
+     * and correctly on others. That is exactly why `toMoney` preformats on the server.
      */
     totalDisplay:
-      totalPaise === booking.fare.total.amount_paise
-        ? booking.fare.total.amount_display
+      totalPaise === booking.payable.fare_total.amount_paise
+        ? booking.payable.fare_total.amount_display
         : formatPaise(totalPaise),
   };
 }

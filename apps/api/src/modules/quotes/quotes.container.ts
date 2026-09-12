@@ -12,12 +12,17 @@ import { GoogleRoadDistance } from './infrastructure/google.roadDistance.js';
 import { OsrmRoadDistance } from './infrastructure/osrm.roadDistance.js';
 import { HaversineRoadDistance } from './infrastructure/haversine.roadDistance.js';
 import { CreateQuoteUseCase } from './application/useCases/createQuote.usecase.js';
-import { makeCreateQuoteController } from './interface/quotes.controller.js';
-import { buildCustomerRouter } from './interface/quotes.routes.js';
+import { ExplainTripUseCase } from './application/useCases/explainTrip.usecase.js';
+import {
+  makeCreateQuoteController,
+  makeExplainTripController,
+} from './interface/quotes.controller.js';
+import { buildAdminRouter, buildCustomerRouter } from './interface/quotes.routes.js';
 
 export interface QuotesContainer {
   contract: QuotesPublicContract;
   buildCustomerRouter: () => Router;
+  buildAdminRouter: () => Router;
 }
 
 export interface QuotesDependencies {
@@ -50,13 +55,20 @@ function selectRoadDistance(): RoadDistancePort {
 
 export function buildQuotesContainer(deps: QuotesDependencies): QuotesContainer {
   const repo = new MongoQuoteRepository();
+  /*
+   * ONE ADAPTER SHARED BY BOTH, deliberately: it is the caching one, so the admin diagnostic
+   * looking at a trip a customer just quoted answers from that same cached measurement rather
+   * than paying the provider for a second copy of it.
+   */
+  const roadDistance = selectRoadDistance();
   const create = new CreateQuoteUseCase(
     deps.zones,
     deps.packages,
     deps.settings,
-    selectRoadDistance(),
+    roadDistance,
     repo,
   );
+  const explain = new ExplainTripUseCase(deps.zones, deps.packages, roadDistance);
 
   return {
     contract: {
@@ -88,5 +100,6 @@ export function buildQuotesContainer(deps: QuotesDependencies): QuotesContainer 
       },
     },
     buildCustomerRouter: () => buildCustomerRouter({ createQuote: makeCreateQuoteController(create) }),
+    buildAdminRouter: () => buildAdminRouter({ explainTrip: makeExplainTripController(explain) }),
   };
 }

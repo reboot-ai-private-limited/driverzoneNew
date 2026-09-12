@@ -37,3 +37,24 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
 
   return router;
 }
+
+export interface AdminControllers {
+  /** `GET /admin/quotes/explain` — which product a trip resolves to, and why. */
+  explainTrip: RequestHandler;
+}
+
+/**
+ * Mounted at `/api/admin/quotes`.
+ *
+ * NO RATE LIMIT, unlike the customer router above. That one exists because quoting is expensive
+ * and a whole apartment block sits behind one NAT; this is a handful of admins looking at one
+ * trip at a time, and throttling a support tool mid-investigation is the wrong trade.
+ */
+export function buildAdminRouter(handlers: AdminControllers): Router {
+  const router = Router();
+
+  router.use(requireAuth('ADMIN'));
+  router.get('/explain', handlers.explainTrip);
+
+  return router;
+}

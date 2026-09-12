@@ -88,6 +88,44 @@ const ROUTE_ARC = 0.14;
  */
 const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 } as const;
 
+/**
+ * The most of the map that framing a route is allowed to pad away, per axis.
+ *
+ * WHY A CAP IS NEEDED AT ALL. `fitToCoordinates`' bottom padding is the sheet's height plus a
+ * margin, and the sheet can be most of the screen — a trip summary with options and a button
+ * easily runs past half of it. Once `top + bottom` approaches the map's own height there is no
+ * rectangle left to fit two points into, and Google's camera solver does not degrade gracefully:
+ * it returns a frame with the pins outside it, or declines to move at all. Either way the customer
+ * picks a pickup and a destination and the route simply never appears.
+ *
+ * Capping at 70% leaves a usable strip whatever the sheet is doing. It only ever bites when the
+ * padding was already impossible, so a normal-sized sheet frames exactly as before.
+ */
+const MAX_FIT_PADDING_RATIO = 0.7;
+
+/**
+ * How long after a new pickup/drop pair appears a sheet resize may still correct the framing.
+ * Module scope, so the effect that reads it needs no dependency on it.
+ */
+const FRAME_SETTLE_MS = 1200;
+
+/**
+ * Shrinks a pair of opposite paddings proportionally until they fit inside `extent`.
+ *
+ * PROPORTIONALLY, rather than clamping each to half the budget: the two sides mean different
+ * things here — the bottom is a sheet covering the map, the top is a bar floating over it — and
+ * clamping them independently would hand a 40pt top margin the same allowance as a 500pt sheet
+ * and push the route up behind the sheet anyway.
+ */
+function fitWithin(near: number, far: number, extent: number): { near: number; far: number } {
+  const budget = extent * MAX_FIT_PADDING_RATIO;
+  const total = near + far;
+  if (extent <= 0 || total <= budget) return { near, far };
+
+  const scale = budget / total;
+  return { near: Math.floor(near * scale), far: Math.floor(far * scale) };
+}
+
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
   {
     initialCentre,
@@ -112,6 +150,15 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
 
   /** The pickup/drop pair the map was last framed to, so it re-fits once per NEW pair only. */
   const framedTo = useRef<string | null>(null);
+
+  /**
+   * This view's own size, so framing can be clamped against it — see `MAX_FIT_PADDING_RATIO`.
+   *
+   * A ref, not state: nothing renders differently for it, and the map is full-bleed, so a state
+   * update here would re-render the whole canvas on every rotation for a value only one callback
+   * reads. Zero until the first layout, which `fitWithin` treats as "no clamp".
+   */
+  const size = useRef({ width: 0, height: 0 });
 
   const initialRegion = useMemo<Region>(
     () => ({
@@ -199,10 +246,22 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     return () => clearTimeout(t);
   }, [markerSignature]);
 
+  /** When the current pair was first framed — see the settle window in the effect below. */
+  const framedAt = useRef(0);
+
   /**
-   * Frame both points the first time a given pickup/drop pair appears. A later `bottomInset`
-   * change (a row added to the sheet) must NOT re-frame and fight a customer who has since panned,
-   * so the effect keys on the coordinate pair only and `bottomInset` is read fresh inside it.
+   * Frame both points the first time a given pickup/drop pair appears — and again if the sheet
+   * resizes in the moment right after, while the frame is still settling.
+   *
+   * THE SETTLE WINDOW IS A FIX, not a refinement. Confirming a destination does two things at
+   * once: the drop marker appears, and the sheet below swaps a short "where to?" panel for a full
+   * trip summary. The sheet's new height arrives a frame or two AFTER the marker, so the fit ran
+   * against the old, much smaller inset and framed the route low — squarely behind the sheet that
+   * was about to grow over it. Which looks exactly like the map never framing the ride at all.
+   *
+   * A LATER inset change must still not re-frame: a customer who has since dragged the sheet to
+   * look around would have the map yanked back under them. So the window is short, and only a
+   * genuinely new pair reopens it.
    */
   const routeKey =
     pickup !== undefined && drop !== undefined
@@ -210,10 +269,13 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       : null;
 
   /**
-   * The latest pair and inset, mirrored into a ref so the effect below can read them without
-   * listing them as dependencies — `pickup`/`drop` are fresh objects from `.find()` on every
-   * render, and `bottomInset` changes whenever the sheet resizes. Only `routeKey` should trigger
-   * a re-frame.
+   * The latest pair and inset, mirrored into a ref so the effect below can read them at the
+   * moment it fires rather than as they were when it was scheduled.
+   *
+   * `pickup`/`drop` are fresh objects from `.find()` on every render, so depending on them would
+   * re-run the effect constantly. `bottomInset` IS a dependency — a sheet that grows right after
+   * a route appears has to be allowed to correct the frame — but it is still read from here, so
+   * the 80ms debounce uses the height as it stands when the fit actually runs.
    */
   const latest = useRef({ pickup, drop, bottomInset });
   latest.current = { pickup, drop, bottomInset };
@@ -229,28 +291,58 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     // arrives, and `framedTo` is only claimed when the work is genuinely scheduled — bailing after
     // setting it would mark the pair as framed and silently never frame it.
     if (!mapReady) return;
-    if (routeKey === framedTo.current) return;
+
+    const isNewPair = routeKey !== framedTo.current;
+    const settling = Date.now() - framedAt.current < FRAME_SETTLE_MS;
+    if (!isNewPair && !settling) return;
+
     framedTo.current = routeKey;
+    if (isNewPair) framedAt.current = Date.now();
 
     const t = setTimeout(() => {
       const { pickup: p, drop: d, bottomInset: inset } = latest.current;
       if (p === undefined || d === undefined) return;
+
+      /*
+       * CLAMPED AGAINST THE MAP'S OWN SIZE. `inset + 90` is whatever the sheet happens to be, and
+       * on a trip-summary sheet that is most of the screen — see `MAX_FIT_PADDING_RATIO`. The
+       * size comes from this view's own `onLayout`; before that has landed there is nothing to
+       * clamp against and the raw values go through, which is correct, since a map that has not
+       * been laid out has no visible strip to protect.
+       */
+      const { width, height: viewHeight } = size.current;
+      const vertical = fitWithin(90, inset + 90, viewHeight);
+      const horizontal = fitWithin(60, 60, width);
+
       map.current?.fitToCoordinates(
         [
           { latitude: p.lat, longitude: p.lng },
           { latitude: d.lat, longitude: d.lng },
         ],
         {
-          edgePadding: { top: 90, right: 60, bottom: inset + 90, left: 60 },
+          edgePadding: {
+            top: vertical.near,
+            bottom: vertical.far,
+            left: horizontal.near,
+            right: horizontal.far,
+          },
           animated: true,
         },
       );
     }, 80);
     return () => clearTimeout(t);
-  }, [routeKey, mapReady]);
+    // `bottomInset` IS a dependency now — that is what lets the sheet's arriving height correct a
+    // frame drawn a moment before it. The guard above is what stops it re-framing forever after.
+  }, [routeKey, mapReady, bottomInset]);
 
   return (
-    <View style={styles.root}>
+    <View
+      style={styles.root}
+      onLayout={(event) => {
+        const { width, height: measured } = event.nativeEvent.layout;
+        size.current = { width, height: measured };
+      }}
+    >
       <MapView
         ref={map}
         style={styles.map}

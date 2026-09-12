@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   FadeIn,
@@ -110,6 +111,16 @@ const PICK_PEEK = 230;
  */
 const HOME_PEEK = 264;
 
+/**
+ * How much uncovered map there has to be before the recentre button is worth showing.
+ *
+ * Sized from what it has to clear, not picked for feel: the header row is `top: space.md` plus a
+ * 44pt glass button, the recentre circle is another 44 plus its own `space.md` gap, and a strip of
+ * map between the two is what stops them reading as one stack. Below this the button would be
+ * sitting on the account button — and there would be almost no map left to recentre anyway.
+ */
+const RECENTRE_MIN_MAP = 190;
+
 const SAVE_LABELS: ReadonlyArray<{ value: AddressLabel; title: string }> = [
   { value: 'HOME', title: 'Home' },
   { value: 'OFFICE', title: 'Office' },
@@ -167,6 +178,12 @@ export default function HomeScreen(): ReactElement {
    * and a collapsed sheet covers only its peek.
    */
   const [sheetHeight, setSheetHeight] = useState(0);
+  /**
+   * The strip of map left above whatever sheet is showing — what decides whether the recentre
+   * button has anywhere to sit. See `RECENTRE_MIN_MAP`.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const mapRoomAbove = windowHeight - sheetHeight;
   /**
    * Within a picking mode: is the customer placing the pin themselves?
    *
@@ -998,16 +1015,31 @@ export default function HomeScreen(): ReactElement {
         pointerEvents="box-none"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <GlassPanel rounded="pill" style={styles.recentre}>
-          <Pressable
-            onPress={recentre}
-            accessibilityRole="button"
-            accessibilityLabel="Centre on my location"
-            style={({ pressed }) => [styles.glassButton, pressed && styles.pressedDim]}
-          >
-            <Feather name="navigation" size={18} color={colors.fg} />
-          </Pressable>
-        </GlassPanel>
+        {/*
+          THE RECENTRE BUTTON RIDES THE SHEET, so it has to know when to get off.
+
+          It is the first child of `sheetLayer`, which means it sits directly on top of whatever
+          sheet is showing — and once both trip points are chosen that sheet carries a summary, the
+          trip options and a Continue button. On a normal phone that pushed this circle all the way
+          up into the header row, where it landed on top of the account button: two round glass
+          controls overlapping, neither fully tappable.
+
+          Hidden rather than repositioned. With a sheet that tall there is barely a strip of map
+          left to recentre, so the control has nothing to do; when the customer drags the sheet
+          down to see the map — the moment they would actually want it — it comes straight back.
+        */}
+        {mapRoomAbove >= RECENTRE_MIN_MAP ? (
+          <GlassPanel rounded="pill" style={styles.recentre}>
+            <Pressable
+              onPress={recentre}
+              accessibilityRole="button"
+              accessibilityLabel="Centre on my location"
+              style={({ pressed }) => [styles.glassButton, pressed && styles.pressedDim]}
+            >
+              <Feather name="navigation" size={18} color={colors.fg} />
+            </Pressable>
+          </GlassPanel>
+        ) : null}
 
         {picking ? (
           /*

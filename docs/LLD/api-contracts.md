@@ -241,6 +241,9 @@ Buying one more day on an outstation trip already under way
 | `POST` | `/customer/bookings/:id/extend` | Opens a request. 409 unless STARTED, outstation, has a driver, has a frozen day rate, and nothing already pending |
 | `POST` | `/driver/bookings/:id/extension/accept` | Makes the day billable |
 | `POST` | `/driver/bookings/:id/extension/decline` | Charges nobody |
+| `POST` | `/customer/bookings/:id/extras/pay` | Opens an `EXTENSION` order for what the accepted days still owe. 400 on a cash trip, or when nothing is outstanding |
+| `POST` | `/customer/bookings/:id/extras/verify` | The checkout callback for that order. Takes `payment_id` as well, since a twice-extended trip has more than one |
+| `POST` | `/driver/bookings/:id/extras/cash` | "They paid me the extra day in hand." The only way out of the completion gate on a trip whose fare already went through online |
 
 ```jsonc
 { "id": "…", "status": "PENDING",
@@ -250,8 +253,17 @@ Buying one more day on an outstation trip already under way
 ```
 
 **It asks; it does not buy.** Nothing is charged and nothing is promised until the driver accepts —
-an extra day commits their next 24 hours. An accepted day settles at COMPLETION alongside any
-waiting charge, as one `DAY_EXTENSION` adjustment and one settlement charge.
+an extra day commits their next 24 hours.
+
+**An accepted day is PAID BEFORE THE TRIP CAN END.** One accepted before the customer picked a
+payment method rides along in the booking order; one accepted afterwards gets its own checkout
+(`extras/pay`), because that order was already raised and captured and a gateway order cannot be
+repriced. `CompleteTripUseCase` refuses to end a UPI trip with any of it still owed. The receipt
+line — one `DAY_EXTENSION` adjustment — is still written at completion either way.
+
+`BookingDto.payable` is the one price both apps render: `fare + extensions + waiting − wallet
+credit + wallet debt`, with `outstanding` saying what is still to be paid online. `fare` is frozen
+at booking time and deliberately never moves, which is why it is not the number on screen.
 
 **Two URLs for the driver's answer**, rather than a body flag, so a yes and a no cannot be produced
 by the same malformed request.
@@ -344,6 +356,7 @@ count against the driver's acceptance rate.
 | `GET` | `/admin/zones/:id/dependents` | What breaks if this is deactivated |
 | CRUD | `/admin/packages/incity` | + nested variants and prices |
 | CRUD | `/admin/packages/outstation` | + nested prices |
+| `GET` | `/admin/quotes/explain` | **Why did this trip price that way?** Four coordinates in, the zones, the road distance, the package ladder's trace and the verdict out. Writes nothing |
 | `POST` | `/admin/pricing/preview` | The FR-P6 what-would-the-customer-see tool |
 | `GET` | `/admin/bookings` | Rich filters: status, zone, date, driver |
 | `POST` | `/admin/bookings/:id/reassign` | `{ driver_id?, reason }` — reason required |

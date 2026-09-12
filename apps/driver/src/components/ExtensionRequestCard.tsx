@@ -112,6 +112,12 @@ const styles = StyleSheet.create({
     borderColor: colors.dutyOn,
     padding: space.lg,
     gap: space.sm,
+    /*
+     * The trip screen stacks its blocks with each one carrying its own TOP gap (`metaRow`,
+     * `cashNote`, and the rest). This card had none, so it sat flush against the pickup/drop card
+     * directly above it — the one place on that screen where two bordered surfaces touch.
+     */
+    marginTop: space.md,
   },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   title: { ...text.label, color: colors.fg, fontFamily: fontFamily.semibold, flex: 1 },

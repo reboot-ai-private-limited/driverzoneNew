@@ -49,8 +49,15 @@ import {
 } from '../src/modules/bookings/application/useCases/confirmBookingPayment.usecase.js';
 import { SelectPaymentMethodUseCase } from '../src/modules/bookings/application/useCases/selectPaymentMethod.usecase.js';
 import { ConfirmLatePaymentUseCase } from '../src/modules/bookings/application/useCases/confirmLatePayment.usecase.js';
-import { VerifyPaymentUseCase } from '../src/modules/bookings/application/useCases/verifyPayment.usecase.js';
-import { DriverSwitchToCashUseCase } from '../src/modules/bookings/application/useCases/driverSwitchToCash.usecase.js';
+import {
+  VerifyExtrasPaymentUseCase,
+  VerifyPaymentUseCase,
+} from '../src/modules/bookings/application/useCases/verifyPayment.usecase.js';
+import {
+  CollectExtrasInCashUseCase,
+  DriverSwitchToCashUseCase,
+} from '../src/modules/bookings/application/useCases/driverSwitchToCash.usecase.js';
+import { PayTripExtrasUseCase } from '../src/modules/bookings/application/useCases/payExtras.usecase.js';
 import { buildSnapshot } from '../src/modules/settings/domain/setting.entity.js';
 import { adminBookingListQuerySchema } from '../src/modules/bookings/interface/bookings.validation.js';
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
@@ -129,6 +136,7 @@ function booking(over: Partial<Booking> = {}): Booking {
     paymentStatus: 'PAID',
     paymentId: 'pay_1',
     paidExtensionPaise: 0,
+    cashExtensionPaise: 0,
     isScheduled: false,
     scheduledAt: new Date('2026-08-31T09:00:00Z'),
     dispatchAt: new Date('2026-08-31T09:00:00Z'),
@@ -186,6 +194,20 @@ function fakeRepo(seed: Booking, otp = '4821') {
       if (id === current.id) {
         current = { ...current, paidExtensionPaise: amountPaise };
       }
+    }),
+    addPaidExtensionPaise: vi.fn(async (id: string, amountPaise: number) => {
+      if (id === current.id) {
+        current = { ...current, paidExtensionPaise: current.paidExtensionPaise + amountPaise };
+      }
+    }),
+    addCashExtensionPaise: vi.fn(async (id: string, amountPaise: number) => {
+      if (id !== current.id) return null;
+      current = {
+        ...current,
+        paidExtensionPaise: current.paidExtensionPaise + amountPaise,
+        cashExtensionPaise: current.cashExtensionPaise + amountPaise,
+      };
+      return current;
     }),
 
     transition: vi.fn(
@@ -418,7 +440,7 @@ function fakePayments(payment: Partial<Payment> = {}) {
     }),
     findById: vi.fn(async () => stored),
     listForBooking: vi.fn(async () => [stored]),
-    verifyAndCapture: vi.fn(async () => ({ captured: true })),
+    verifyAndCapture: vi.fn(async () => ({ captured: true, justCaptured: true })),
     publicKey: 'rzp_test_mock',
   };
 
@@ -1160,6 +1182,136 @@ const CARD: DriverCard = {
   ratingCount: 26,
 };
 
+/**
+ * `toBookingDto`'s `payable` block — the one figure both apps render as the price.
+ *
+ * WHY IT EXISTS. `fare` is frozen at booking time (invariant B-1) and every screen was showing it
+ * as "the total", so a customer who bought an extra day saw the old number, and the driver's
+ * "collect this much in cash" line under-told them by the extension, the waiting charge AND the
+ * wallet credit while the server booked `expectedCashPaise`. Three renderings of one number, none
+ * of which agreed.
+ */
+describe('toBookingDto — payable', () => {
+  const extensionRow = (over: Partial<BookingExtension> = {}): BookingExtension =>
+    acceptedExtension({ bookingId: 'bkg_1', ...over });
+
+  it('adds an accepted extension to the total while the trip is still running', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', serviceType: 'OUTSTATION' }),
+      adjustments: [],
+      extensions: [extensionRow()],
+    });
+
+    expect(dto.fare.total.amount_paise).toBe(105_000);
+    expect(dto.payable.extension_total.amount_paise).toBe(300_000);
+    expect(dto.payable.total.amount_paise).toBe(405_000);
+  });
+
+  /*
+   * The same money from the other source. A finished trip's extension lives on a `DAY_EXTENSION`
+   * adjustment row, and a history LIST does not pay for the extensions query — so the block has
+   * to add up from whichever of the two this read was given.
+   */
+  it('reads a finished trip’s extension off the adjustment row instead', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'COMPLETED', waitingChargePaise: 5_000 }),
+      adjustments: [
+        {
+          id: 'adj_1',
+          bookingId: 'bkg_1',
+          type: 'DAY_EXTENSION',
+          amountPaise: 300_000,
+          label: 'Extended — 1 extra day',
+          settledByPaymentId: null,
+        },
+      ],
+    });
+
+    expect(dto.payable.extension_total.amount_paise).toBe(300_000);
+    expect(dto.payable.waiting_total.amount_paise).toBe(5_000);
+    expect(dto.payable.total.amount_paise).toBe(410_000);
+  });
+
+  it('never counts the same extension twice when both sources are present', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'COMPLETED' }),
+      adjustments: [
+        {
+          id: 'adj_1',
+          bookingId: 'bkg_1',
+          type: 'DAY_EXTENSION',
+          amountPaise: 300_000,
+          label: 'Extended — 1 extra day',
+          settledByPaymentId: null,
+        },
+      ],
+      extensions: [extensionRow()],
+    });
+
+    expect(dto.payable.extension_total.amount_paise).toBe(300_000);
+  });
+
+  it('takes wallet credit off the total, the way the driver’s cash line has to', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', paymentMode: 'CASH', walletCreditPaise: 20_000 }),
+      adjustments: [],
+      extensions: [],
+    });
+
+    expect(dto.payable.total.amount_paise).toBe(85_000);
+  });
+
+  it('reports an unpaid extension as outstanding on a UPI trip', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', paymentMode: 'UPI', paidExtensionPaise: 0 }),
+      adjustments: [],
+      extensions: [extensionRow()],
+    });
+
+    expect(dto.payable.outstanding.amount_paise).toBe(300_000);
+  });
+
+  it('reports nothing outstanding once that extension has been collected', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', paymentMode: 'UPI', paidExtensionPaise: 300_000 }),
+      adjustments: [],
+      extensions: [extensionRow()],
+    });
+
+    expect(dto.payable.outstanding.amount_paise).toBe(0);
+  });
+
+  /*
+   * A FINISHED TRIP ASKS FOR NOTHING, even carrying an extension nobody collected — one completed
+   * before the gate existed, say. `PayTripExtrasUseCase` refuses anything but STARTED, so a
+   * non-zero figure here would put a Pay button on the customer's screen that 400s on every press.
+   */
+  it('reports nothing outstanding once the trip is over', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'COMPLETED', paymentMode: 'UPI', paidExtensionPaise: 0 }),
+      adjustments: [],
+      extensions: [extensionRow()],
+    });
+
+    expect(dto.payable.outstanding.amount_paise).toBe(0);
+    // Still counted in what the trip cost — it is a receivable, not a discount.
+    expect(dto.payable.total.amount_paise).toBe(405_000);
+  });
+
+  /* Cash collects everything at the door, so there is never an online payment to prompt for. */
+  it('reports nothing outstanding on a cash trip', () => {
+    const dto = toBookingDto({
+      booking: booking({ status: 'STARTED', paymentMode: 'CASH' }),
+      adjustments: [],
+      extensions: [extensionRow()],
+    });
+
+    expect(dto.payable.outstanding.amount_paise).toBe(0);
+    // Still in the total: the driver collects it, it is just not a checkout.
+    expect(dto.payable.total.amount_paise).toBe(405_000);
+  });
+});
+
 describe('toBookingDto — the driver card', () => {
   const withStatus = (status: BookingStatus): ReturnType<typeof toBookingDto> =>
     toBookingDto({
@@ -1660,7 +1812,11 @@ describe('CompleteTripUseCase — extensions', () => {
   it('bills two accepted days as ONE receipt line', async () => {
     // Forced by the `{ bookingId, type }` unique index, and better anyway: a customer reads one
     // line rather than adding up two identical ones.
-    const { useCase, charges } = build(finished(), [
+    //
+    // `paidExtensionPaise` covers both days because on a UPI trip it has to: completion refuses
+    // outright while any of an extension is still owed. The receipt line is what is under test,
+    // and it is written whatever paid for it.
+    const { useCase, charges } = build(finished({ paidExtensionPaise: 600_000 }), [
       acceptedExtension({ id: 'ext_1' }),
       acceptedExtension({ id: 'ext_2' }),
     ]);
@@ -1674,7 +1830,9 @@ describe('CompleteTripUseCase — extensions', () => {
   });
 
   it('pays the driver their frozen per-day share, commissioned', async () => {
-    const { useCase, ledger } = build(finished(), [acceptedExtension()]);
+    const { useCase, ledger } = build(finished({ paidExtensionPaise: 300_000 }), [
+      acceptedExtension(),
+    ]);
 
     await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
 
@@ -1684,20 +1842,42 @@ describe('CompleteTripUseCase — extensions', () => {
     expect(earning?.amountPaise).toBe(225_000);
   });
 
-  it('takes waiting and the extension in ONE settlement charge', async () => {
+  /*
+   * THE GATE. Before it, an extension accepted after the customer had already paid was billed to
+   * a receipt line and then collected by a `SETTLEMENT` order the server raised at completion and
+   * showed to nobody — no route, no screen, no checkout. The driver ended the trip and the money
+   * became a receivable nobody chased. The customer has a Pay button for it now
+   * (`PayTripExtrasUseCase`) and this is what makes them use it.
+   */
+  it('refuses to end a UPI trip with an extra day still unpaid', async () => {
+    const { useCase, payments } = build(finished(), [acceptedExtension()]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' }),
+    ).rejects.toThrow('still has to pay for the extra day');
+
+    // Nothing was charged and nothing was settled — the trip is still running.
+    expect(payments.charge).not.toHaveBeenCalled();
+  });
+
+  it('settles the waiting charge alone once the extension has been paid for', async () => {
     // `settle-${bookingId}` is derived from the booking so a retried completion cannot charge
     // twice — which means two separate charges under that key would silently collect only one.
     const { useCase, payments } = build(
-      finished({ arrivedAt: new Date('2026-08-31T09:00:00Z'), startedAt: new Date('2026-08-31T09:40:00Z') }),
+      finished({
+        paidExtensionPaise: 300_000,
+        arrivedAt: new Date('2026-08-31T09:00:00Z'),
+        startedAt: new Date('2026-08-31T09:40:00Z'),
+      }),
       [acceptedExtension()],
     );
 
     await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
 
     expect(payments.charge).toHaveBeenCalledTimes(1);
-    // 25 chargeable minutes at ₹2 = ₹50, plus one ₹3,000 day.
+    // 25 chargeable minutes at ₹2 = ₹50. The ₹3,000 day is already collected.
     expect(payments.charge).toHaveBeenCalledWith(
-      expect.objectContaining({ amountPaise: 305_000, idempotencyKey: 'settle-bkg_1' }),
+      expect.objectContaining({ amountPaise: 5_000, idempotencyKey: 'settle-bkg_1' }),
     );
   });
 
@@ -1761,18 +1941,37 @@ describe('CompleteTripUseCase — extensions', () => {
     expect(result.totalPaise).toBe(finished().fareSnapshot.fare.totalPaise + 300_000);
   });
 
-  it('bills only the part of an extension not already paid for', async () => {
-    const { useCase, payments } = build(
-      finished({ paidExtensionPaise: 300_000 }),
-      [acceptedExtension({ id: 'ext_1' }), acceptedExtension({ id: 'ext_2' })],
+  /*
+   * A SECOND DAY BOUGHT AFTER THE FIRST WAS PAID FOR. The gate counts what is OUTSTANDING, not
+   * whether anything has been paid at all — a customer who settled day one and not day two is
+   * still a customer with an unpaid day, and a `>= 1` test would let it through.
+   */
+  it('refuses when only part of the extension has been paid for', async () => {
+    const { useCase } = build(finished({ paidExtensionPaise: 300_000 }), [
+      acceptedExtension({ id: 'ext_1' }),
+      acceptedExtension({ id: 'ext_2' }),
+    ]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' }),
+    ).rejects.toThrow('still has to pay for the extra day');
+  });
+
+  /*
+   * THE WAY THROUGH THE GATE when the customer's phone is dead — `CollectExtrasInCashUseCase`
+   * has recorded the driver taking the day in hand. The company's share of it is in the driver's
+   * pocket, so the same negative row a cash FARE gets applies to exactly that portion.
+   */
+  it('books cash-collected extras against the driver on an otherwise-UPI trip', async () => {
+    const { useCase, ledger } = build(
+      finished({ paidExtensionPaise: 300_000, cashExtensionPaise: 300_000 }),
+      [acceptedExtension()],
     );
 
     await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'idem_1' });
 
-    // Two accepted days at ₹3,000, one of which rode along in the earlier order.
-    expect(payments.charge).toHaveBeenCalledWith(
-      expect.objectContaining({ amountPaise: 300_000 }),
-    );
+    const cash = ledger.entries().find((entry) => entry.entryType === 'CASH_COLLECTED');
+    expect(cash?.amountPaise).toBe(-300_000);
   });
 
   it('charges nothing for days the driver never agreed to', async () => {
@@ -2369,5 +2568,177 @@ describe('ConfirmLatePaymentUseCase — a capture that arrives after the switch 
     await useCase.execute('bkg_1');
 
     expect(payments.refund).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * COLLECTING A DAY EXTENSION THE BOOKING'S OWN ORDER COULD NOT HAVE COVERED.
+ *
+ * The gap: a customer pays when the trip starts and buys an extra day that evening. The order
+ * carrying the fare was raised, captured and closed hours earlier, and a gateway order cannot be
+ * repriced once its id is in a customer's hands — so the extra had nowhere to go. It went to a
+ * `SETTLEMENT` order `CompleteTripUseCase` raised at completion and showed to nobody: no route,
+ * no screen, no checkout. Billed on the receipt, never collected.
+ */
+describe('PayTripExtrasUseCase', () => {
+  function build(seed: Booking, extensions: BookingExtension[] = []) {
+    const repo = fakeRepo(seed);
+    const payments = fakePayments({ kind: 'EXTENSION', amountPaise: 300_000 });
+    return {
+      repo,
+      payments,
+      useCase: new PayTripExtrasUseCase(repo, payments, fakeExtensions(extensions)),
+    };
+  }
+
+  it('opens an order for exactly what is still owed on the extension', async () => {
+    const { useCase, payments } = build(runningOutstation(), [acceptedExtension()]);
+
+    const order = await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' });
+
+    expect(order.amountPaise).toBe(300_000);
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'EXTENSION', amountPaise: 300_000 }),
+    );
+  });
+
+  /* Two days agreed, one already in the payment-selection order. Charging the full 2 × ₹3,000
+     would take a day the customer has paid for twice. */
+  it('deducts what the booking order already carried', async () => {
+    const { useCase } = build(runningOutstation({ paidExtensionPaise: 300_000 }), [
+      acceptedExtension({ id: 'ext_1' }),
+      acceptedExtension({ id: 'ext_2' }),
+    ]);
+
+    const order = await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' });
+
+    expect(order.amountPaise).toBe(300_000);
+  });
+
+  /*
+   * KEYED ON THE DAY COUNT. A per-tap key would open a second order for the same day; a key on
+   * the booking alone would hand a customer who extended twice the first day's order and collect
+   * half of what they owe.
+   */
+  it('keys the order on how many days have been agreed', async () => {
+    const { useCase, payments } = build(runningOutstation(), [
+      acceptedExtension({ id: 'ext_1' }),
+      acceptedExtension({ id: 'ext_2' }),
+    ]);
+
+    await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' });
+
+    expect(payments.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: 'extras-bkg_1-2' }),
+    );
+  });
+
+  it('refuses when there is nothing outstanding', async () => {
+    const { useCase } = build(runningOutstation({ paidExtensionPaise: 300_000 }), [
+      acceptedExtension(),
+    ]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' }),
+    ).rejects.toThrow('nothing extra to pay');
+  });
+
+  /* Cash settles at the door, and a gateway order here would collect the day a second time. */
+  it('refuses on a cash trip rather than opening a second collection', async () => {
+    const { useCase, payments } = build(
+      runningOutstation({ paymentMode: 'CASH', paymentStatus: 'CASH' }),
+      [acceptedExtension()],
+    );
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1' }),
+    ).rejects.toThrow('paid in cash');
+    expect(payments.charge).not.toHaveBeenCalled();
+  });
+});
+
+describe('VerifyExtrasPaymentUseCase', () => {
+  function build(seed: Booking, payment: Partial<Payment> = {}) {
+    const repo = fakeRepo(seed);
+    const payments = fakePayments({ kind: 'EXTENSION', amountPaise: 300_000, ...payment });
+    return { repo, payments, useCase: new VerifyExtrasPaymentUseCase(repo, payments) };
+  }
+
+  const verify = { providerPaymentId: 'rzp_1', signature: 'sig', paymentId: 'pay_1' };
+
+  it('credits the extension once the capture goes through', async () => {
+    const { useCase, repo } = build(runningOutstation());
+
+    await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1', ...verify });
+
+    expect(repo.current().paidExtensionPaise).toBe(300_000);
+  });
+
+  /*
+   * THE WEBHOOK IS COMING FOR THE SAME CAPTURE and credits it there. `captured` is true for a row
+   * that was ALREADY settled, so crediting on that would count every extension twice — once here
+   * and once when the webhook lands. Only `justCaptured` says this call did the work.
+   */
+  it('credits nothing when the row was already captured', async () => {
+    const { useCase, repo, payments } = build(runningOutstation());
+    payments.verifyAndCapture = vi.fn(async () => ({ captured: true, justCaptured: false }));
+
+    await useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1', ...verify });
+
+    expect(repo.current().paidExtensionPaise).toBe(0);
+  });
+
+  it('refuses a payment that is not an extras order on this booking', async () => {
+    const { useCase } = build(runningOutstation(), { kind: 'BOOKING' });
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', customerId: 'cus_1', ...verify }),
+    ).rejects.toThrow('does not belong to this trip');
+  });
+});
+
+/**
+ * THE DOOR IN THE EXTENSION GATE.
+ *
+ * `DriverSwitchToCashUseCase` — the usual way out of a payment gate — refuses a booking whose
+ * fare has already been paid online, and that is exactly the trip an unpaid extension happens on:
+ * they paid this morning, bought a day tonight, and their phone is dead. Without this the driver
+ * is stuck on a gate with no door.
+ */
+describe('CollectExtrasInCashUseCase', () => {
+  function build(seed: Booking, extensions: BookingExtension[] = []) {
+    const repo = fakeRepo(seed);
+    return { repo, useCase: new CollectExtrasInCashUseCase(repo, fakeExtensions(extensions)) };
+  }
+
+  it('records the outstanding day as collected, opening the gate', async () => {
+    const { useCase, repo } = build(runningOutstation(), [acceptedExtension()]);
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' });
+
+    expect(repo.current().paidExtensionPaise).toBe(300_000);
+    // Tracked separately so the ledger can book the driver as holding the company's share.
+    expect(repo.current().cashExtensionPaise).toBe(300_000);
+  });
+
+  /* The fare really did go through the gateway. Switching the booking to cash would make
+     `ConfirmLatePaymentUseCase` refund it. */
+  it('leaves the payment mode alone', async () => {
+    const { useCase, repo } = build(runningOutstation(), [acceptedExtension()]);
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' });
+
+    expect(repo.current().paymentMode).toBe('UPI');
+    expect(repo.current().paymentStatus).toBe('PAID');
+  });
+
+  it('refuses when nothing is outstanding', async () => {
+    const { useCase } = build(runningOutstation({ paidExtensionPaise: 300_000 }), [
+      acceptedExtension(),
+    ]);
+
+    await expect(
+      useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' }),
+    ).rejects.toThrow('nothing outstanding');
   });
 });

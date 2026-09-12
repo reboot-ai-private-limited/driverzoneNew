@@ -1,12 +1,18 @@
 import type {
   CreateQuoteResponse,
+  ExplainTripResponse,
   FareBreakdownDto,
   QuoteOptionDto,
+  TripResolutionPointDto,
 } from '@driverzone/contracts';
 import { toMoney } from '../../../shared/money/format.js';
 import type { FareBreakdown } from '../../pricing/pricing.public.js';
 import type { Quote } from '../domain/quote.entity.js';
 import type { QuotedTrip } from '../application/useCases/createQuote.usecase.js';
+import type {
+  ExplainedPoint,
+  ExplainedTrip,
+} from '../application/useCases/explainTrip.usecase.js';
 
 /**
  * INTERFACE — domain entities to the snake_case DTOs the contracts promise.
@@ -56,5 +62,47 @@ export function toCreateQuoteResponse(result: QuotedTrip): CreateQuoteResponse {
     terrain: first?.source.terrain ?? null,
     outstation_hours_per_day: result.outstationHoursPerDay,
     options: result.quotes.map(toOptionDto),
+  };
+}
+
+/**
+ * The admin trip-resolution diagnostic, domain → wire.
+ *
+ * A MAPPER RATHER THAN RETURNING THE DOMAIN SHAPE, even though only one admin screen reads it:
+ * every other response in this codebase is snake_case, and one endpoint that is not is the kind
+ * of exception a client eventually gets wrong at three in the morning.
+ */
+export function toExplainTripResponse(result: ExplainedTrip): ExplainTripResponse {
+  return {
+    from: toResolutionPoint(result.from),
+    to: toResolutionPoint(result.to),
+    distance_km: result.distanceKm,
+    trace:
+      result.trace === null
+        ? null
+        : {
+            city_zone_id: result.trace.cityZoneId,
+            to_same_city_zone: result.trace.toSameCityZone,
+            terrain: result.trace.terrain,
+            distance_km: result.trace.distanceKm,
+            incity_candidates: result.trace.incityCandidates,
+            incity_rejected: result.trace.incityRejected,
+            outstation_candidates: result.trace.outstationCandidates,
+            outstation_band_id: result.trace.outstationBandId,
+          },
+    verdict: {
+      service_type: result.verdict.serviceType,
+      package_id: result.verdict.packageId,
+      package_name: result.verdict.packageName,
+      unavailable: result.verdict.unavailable,
+    },
+  };
+}
+
+function toResolutionPoint(point: ExplainedPoint): TripResolutionPointDto {
+  return {
+    pickup_zone: point.pickupZone,
+    city_zone: point.cityZone,
+    hill_zone: point.hillZone,
   };
 }

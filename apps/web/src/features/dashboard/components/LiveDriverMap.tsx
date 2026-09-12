@@ -29,19 +29,38 @@ const STALE_AFTER_MS = 2 * 60_000;
 const DEFAULT_ZOOM = 12;
 
 /**
- * Green: reachable by dispatch right now. Grey: on duty, but the last fix has aged out.
+ * Brand yellow: reachable by dispatch right now. Grey: on duty, but the last fix has aged out.
  *
  * The caller asks for on-duty drivers only, so `is_on_duty` is not the axis here — freshness is.
  * A grey marker is a driver sitting on duty whom no wave can route to, which is precisely the
  * thing an ops screen exists to surface and which no other screen shows.
+ *
+ * YELLOW RATHER THAN THE GREEN THIS USED TO BE, so an available driver reads as DriverZone on a
+ * screen full of Google's own map colours. `#F2F200` is the mobile apps' `colors.brand` — NOT
+ * `--color-accent`, the panel's near-white lime, which disappears against pale map tiles. Copied
+ * rather than imported because the two palettes deliberately live apart (see the customer theme's
+ * own header), and this is the one place the panel borrows the product's brand hue.
+ *
+ * INK TRAVELS WITH THE FILL. Yellow is a SURFACE — roughly 1.1:1 against white — so the white car
+ * glyph the green badge wore is invisible on it, and so is a white ring. Each state therefore
+ * names its own ink, used for both the glyph and the outline.
  */
-function markerColour(driver: AdminLiveDriverDto, now: number): string {
+const AVAILABLE = { fill: '#F2F200', ink: '#1a1a1a' } as const;
+const AGED_OUT = { fill: '#9ca3af', ink: '#ffffff' } as const;
+
+function markerPalette(driver: AdminLiveDriverDto, now: number): { fill: string; ink: string } {
   const stale = now - new Date(driver.last_location_at).getTime() > STALE_AFTER_MS;
-  return stale ? '#9ca3af' : '#16a34a';
+  return stale ? AGED_OUT : AVAILABLE;
 }
 
-/** Diameter of the coloured badge each car glyph sits inside, in px. */
-const MARKER_SIZE = 30;
+/**
+ * Diameter of the coloured badge each car glyph sits inside, in px.
+ *
+ * Bigger than the 30 it started at: at that size the car inside the badge was a smudge at city
+ * zoom, and picking a driver out of a cluster meant zooming in to identify shapes that should be
+ * readable at a glance.
+ */
+const MARKER_SIZE = 38;
 
 /**
  * A car, not a dot — same glyph `CarFront` from `lucide-react` draws elsewhere on this screen, so
@@ -53,11 +72,20 @@ const MARKER_SIZE = 30;
  * coordinate space with no easy way to compose a multi-stroke glyph inside a filled badge, where an
  * inline SVG string is exactly the format `Marker.icon.url` already accepts.
  */
-function driverMarkerIcon(color: string): google.maps.Icon {
+function driverMarkerIcon({ fill, ink }: { fill: string; ink: string }): google.maps.Icon {
+  /*
+   * The viewBox stays 30 wide while `MARKER_SIZE` grew, so the whole badge scales as one — the
+   * glyph keeps its proportions instead of rattling around inside a bigger circle.
+   *
+   * TWO RINGS. The inner one in `ink` is what separates the badge from the tiles beneath it; the
+   * outer white one is what separates it from a dark road or a satellite view. A single ring
+   * worked while the fill was a mid-green, and does not on a colour this light.
+   */
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${MARKER_SIZE}" height="${MARKER_SIZE}" viewBox="0 0 30 30">
-      <circle cx="15" cy="15" r="13" fill="${color}" stroke="#ffffff" stroke-width="2" />
-      <g transform="translate(6.5 7.5) scale(0.7)" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="15" cy="15" r="13.5" fill="#ffffff" opacity="0.9" />
+      <circle cx="15" cy="15" r="12.5" fill="${fill}" stroke="${ink}" stroke-width="1.5" />
+      <g transform="translate(6.5 7.5) scale(0.7)" fill="none" stroke="${ink}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <path d="m21 8-2 2-1.5-3.7A2 2 0 0 0 15.646 5H8.4a2 2 0 0 0-1.903 1.257L5 10 3 8" />
         <path d="M7 14h.01" />
         <path d="M17 14h.01" />
@@ -140,7 +168,7 @@ export function LiveDriverMap({ drivers }: LiveDriverMapProps) {
             position,
             map: instance,
             title: `${driver.full_name ?? 'Driver'} · ${driver.mobile_number}`,
-            icon: driverMarkerIcon(markerColour(driver, now)),
+            icon: driverMarkerIcon(markerPalette(driver, now)),
           })
         );
         continue;
@@ -149,7 +177,7 @@ export function LiveDriverMap({ drivers }: LiveDriverMapProps) {
       // Moved, not recreated — a new marker at a new position flickers, and drops any info window
       // the admin has open on it.
       existing.setPosition(position);
-      existing.setIcon(driverMarkerIcon(markerColour(driver, now)));
+      existing.setIcon(driverMarkerIcon(markerPalette(driver, now)));
     }
 
     // Gone from the response — off duty, or aged out entirely.

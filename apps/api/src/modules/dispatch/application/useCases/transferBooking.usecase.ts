@@ -79,9 +79,37 @@ export class TransferBookingUseCase {
             : `A booking at ${booking.status} cannot be transferred.`,
         );
       }
+    } else if (booking.status === 'CONFIRMED') {
+      /*
+       * PRE-ASSIGNMENT — the booking is scheduled for later and nothing has started looking yet.
+       *
+       * Automatic dispatch does not ring for this trip until T−`dispatch.scheduled_lead_minutes`,
+       * which is the right default: it rings drivers who are actually on duty near the pickup at
+       * the time it matters. But ops routinely knows days ahead who should take an early-morning
+       * outstation run, and before this there was no way to say so — the booking simply refused.
+       *
+       * THROUGH `beginSearching`, not around it. `claimForDriver`'s compare-and-swap demands
+       * `SEARCHING`, and CONFIRMED → SEARCHING → ASSIGNED is exactly the path every automatically
+       * dispatched booking takes, so the transition table, the event log and invariant B-2 keep
+       * having one implementation each. The event pair also reads correctly months later: ops
+       * started the search early and immediately claimed it for their pick.
+       *
+       * THE PENDING DISPATCH JOB NEEDS NO CLEANUP. It still fires at T−lead, re-reads the booking,
+       * finds it `ASSIGNED` rather than `SEARCHING` and returns `NOT_SEARCHING` without ringing
+       * anybody (`runWave.usecase.ts`). Cancelling it would be a second thing to keep correct for
+       * no behaviour gained.
+       */
+      const searching = await this.bookings.beginSearching(input.bookingId);
+
+      if (searching === null) {
+        // Cancelled, or dispatched into SEARCHING on its own, between the read and here.
+        throw AppError.conflict(
+          'This booking moved on while you were assigning it — reload and try again.',
+        );
+      }
     } else if (booking.status !== 'SEARCHING') {
-      // No driver AND not searching: confirmed and not yet dispatched, cancelled, or finished.
-      // None of those is a booking to hand somebody.
+      // No driver, not searching, and not waiting to be: cancelled, expired or finished. None of
+      // those is a booking to hand somebody.
       throw AppError.conflict(`A booking at ${booking.status} cannot be assigned a driver.`);
     }
 

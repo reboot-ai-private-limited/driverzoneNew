@@ -7,7 +7,7 @@ import type { PaymentsContract } from '../payments/payments.public.js';
 import type { QuoteConsumptionContract } from '../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../settings/settings.public.js';
 import type { IdentityPublicContract } from '../identity/identity.public.js';
-import { REASSIGNABLE_STATUSES } from './domain/booking.entity.js';
+import { liveAssignmentCutoff, REASSIGNABLE_STATUSES } from './domain/booking.entity.js';
 import type {
   BookingFavouritesContract,
   BookingsPublicContract,
@@ -238,7 +238,21 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         });
       },
 
-      hasActiveBooking: async (driverId) => (await repo.findActiveForDriver(driverId)) !== null,
+      /*
+       * FENCED THE SAME WAY THE DRIVER'S OWN `/current` IS, and for a reason that bites harder
+       * here: this is what manual assignment checks before handing somebody a trip. Counting a
+       * booking they were pre-assigned for next Saturday as "already on a trip" would refuse them
+       * every job between now and then — including today's — and refuse a second advance booking
+       * on top of the first. A trip that has not come round yet is not one they are driving.
+       */
+      hasActiveBooking: async (driverId) => {
+        const snapshot = await deps.settings.snapshot();
+        const active = await repo.findActiveForDriver(
+          driverId,
+          liveAssignmentCutoff(new Date(), snapshot['dispatch.scheduled_lead_minutes']),
+        );
+        return active !== null;
+      },
 
       markNoDriverFound: (bookingId, reason) =>
         repo.transition({
@@ -331,6 +345,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
           charges,
           deps.identity,
           extensions,
+          deps.settings,
         ),
         cancel: controllers.makeCancelByCustomerController(cancelByCustomer),
         extend: controllers.makeRequestExtensionController(requestExtension),
@@ -348,6 +363,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
           charges,
           deps.identity,
           extensions,
+          deps.settings,
         ),
         get: controllers.makeGetDriverBookingController(repo, charges, deps.identity, extensions),
         enRoute: controllers.makeEnRouteController(enRoute),

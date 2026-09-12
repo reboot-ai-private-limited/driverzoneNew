@@ -23,7 +23,14 @@ export type ClaimResult =
 export interface BookingDispatchContract {
   findById(bookingId: string): Promise<Booking | null>;
 
-  /** Moves CONFIRMED → SEARCHING when the dispatch job fires. */
+  /**
+   * Moves CONFIRMED → SEARCHING when the dispatch job fires.
+   *
+   * ALSO THE DOOR MANUAL PRE-ASSIGNMENT COMES THROUGH. An admin handing a driver a booking that
+   * has not dispatched yet needs it in `SEARCHING` before `claimForDriver`'s compare-and-swap will
+   * look at it, and this is that move — rather than a second way to write `ASSIGNED` onto a
+   * `CONFIRMED` booking, which would put a hole in the transition table and in invariant B-2.
+   */
   beginSearching(bookingId: string): Promise<Booking | null>;
 
   /**

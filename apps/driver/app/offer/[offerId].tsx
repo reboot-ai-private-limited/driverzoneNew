@@ -10,6 +10,7 @@ import {
   offerHref,
 } from '@/features/offer/openOffer';
 import { useOfferRing } from '@/features/offer/useOfferRing';
+import { formatWhen } from '@/features/trips/scheduledWhen';
 import { acceptOffer, declineOffer, listOffers } from '@/lib/api/endpoints/offers';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, space, text } from '@/theme/theme';
@@ -432,34 +433,6 @@ function Countdown({
       </View>
     </View>
   );
-}
-
-/**
- * `scheduled_at` in the words a driver needs: is this now, or is it later?
- *
- * NOT SHOWN AT ALL BEFORE THIS, and it mattered most exactly where it mattered most — an
- * outstation booking for tomorrow morning rendered identically to a trip starting this minute,
- * and which of the two it is decides whether the driver can take it.
- *
- * The one-minute floor on "Now" is deliberate: dispatch rings for immediate trips within seconds
- * of the booking, so a little clock skew either way must still read as "Now" rather than flipping
- * to a wall-clock time that implies waiting.
- */
-function formatWhen(iso: string): string {
-  const when = new Date(iso);
-  const minutesAway = (when.getTime() - Date.now()) / 60000;
-
-  if (minutesAway <= 1) return 'Now';
-  if (minutesAway < 60) return `In ${Math.round(minutesAway)} min`;
-
-  const time = when.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
-  if (when.toDateString() === new Date().toDateString()) return `Today, ${time}`;
-
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (when.toDateString() === tomorrow.toDateString()) return `Tomorrow, ${time}`;
-
-  return `${when.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${time}`;
 }
 
 const styles = StyleSheet.create({

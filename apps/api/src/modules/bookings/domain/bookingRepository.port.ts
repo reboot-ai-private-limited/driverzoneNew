@@ -223,8 +223,23 @@ export interface BookingRepositoryPort {
    * drivers, "the one they are on" is ambiguous, and the newest is the only answer that matches
    * what the driver just did. Returning an arbitrary one would send them back to a trip they
    * finished with.
+   *
+   * `assignedPickupBefore` FENCES OFF A TRIP THAT HAS NOT COME ROUND YET. An admin can hand a
+   * driver a booking days in advance (`TransferBookingUseCase`), and without this that booking is
+   * "the trip they are on" from the moment it is assigned — `gate.tsx` would re-route them onto it
+   * on every app launch until the pickup day, and `hasActiveBooking` would refuse them all other
+   * work in the meantime. So an `ASSIGNED` booking only counts once its pickup is within the
+   * caller's window: the same instant automatic dispatch would have begun ringing for it.
+   *
+   * ONLY `ASSIGNED` IS FENCED. A driver who has set off, arrived, or started is on the trip
+   * whatever the clock says — a wrong `scheduledAt` must never strand a ride that is happening.
+   * Omitting the window restores the old behaviour, which is what a caller that is asking "does
+   * this driver hold anything at all" wants.
    */
-  findActiveForDriver(driverId: string): Promise<Booking | null>;
+  findActiveForDriver(
+    driverId: string,
+    assignedPickupBefore?: Date | undefined,
+  ): Promise<Booking | null>;
 
   /**
    * The booking this customer is living through right now, or null.
@@ -239,8 +254,19 @@ export interface BookingRepositoryPort {
    * trip booked for tomorrow every time they opened the app. `PENDING_PAYMENT` is out for the
    * same kind of reason: an abandoned checkout is not something to reopen unasked. What is left
    * is the set where something is actually happening to them now.
+   *
+   * `assignedPickupBefore` CLOSES THE HOLE THAT EXCLUDING `CONFIRMED` LEFT. Excluding it was
+   * enough while a scheduled booking could only reach `ASSIGNED` at T−90, because by then the trip
+   * genuinely was about to happen. Ops can now pre-assign one days ahead, which walks it straight
+   * past that guard and back into "Trip in progress" on the customer's home screen for three days
+   * — the same complaint, one status further along. Same window as the driver's side, and only
+   * `ASSIGNED` is fenced: `SEARCHING` means we are ringing phones right now, and the three moving
+   * statuses speak for themselves.
    */
-  findActiveForCustomer(customerId: string): Promise<Booking | null>;
+  findActiveForCustomer(
+    customerId: string,
+    assignedPickupBefore?: Date | undefined,
+  ): Promise<Booking | null>;
 
   listEvents(bookingId: string): Promise<BookingEvent[]>;
 

@@ -7,6 +7,7 @@ import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
 import { needsBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
+import { formatWhen } from '@/features/trips/scheduledWhen';
 import {
   ensureDutyMachinery,
   rememberDutyState,
@@ -15,7 +16,7 @@ import {
 import { registerForPush, stopPushRegistration } from '@/notifications/registerDevice';
 import { getProfile, setDuty } from '@/lib/api/endpoints/driver';
 import { listOffers } from '@/lib/api/endpoints/offers';
-import { getCurrentTrip } from '@/lib/api/endpoints/trip';
+import { getCurrentTrip, listTrips } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
@@ -202,6 +203,35 @@ export default function HomeScreen(): ReactElement {
   });
 
   /**
+   * TRIPS THIS DRIVER HOLDS FOR LATER — an admin can hand out a booking days before its pickup.
+   *
+   * Those deliberately do NOT come back from `/driver/bookings/current`: a booking assigned for
+   * next Saturday would otherwise be "the trip you are on" from the moment it is assigned, and
+   * `gate.tsx` would re-route the driver onto it on every launch between now and then. The fence
+   * is right, but it leaves an accepted job invisible — so it surfaces here instead, and becomes
+   * the live trip on its own at T−lead.
+   *
+   * Read off the history list rather than a new endpoint: `GET /driver/bookings` already returns
+   * everything this driver holds, `ASSIGNED` rows included.
+   */
+  const upcoming = useQuery({
+    queryKey: keys.trip.list(),
+    queryFn: ({ signal }) => listTrips(signal),
+    select: (response) =>
+      response.bookings
+        .filter(
+          (booking) =>
+            booking.status === 'ASSIGNED' && Date.parse(booking.scheduled_at) > Date.now(),
+        )
+        .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)),
+  });
+
+  // The trip the driver is actively on is never also "upcoming" — it has left the fence behind.
+  const upcomingTrips = (upcoming.data ?? []).filter(
+    (booking) => booking.id !== activeTrip.data?.booking?.id,
+  );
+
+  /**
    * `undefined` while the first read is in flight, so the banner does not flash in and out on a
    * cold start. `true` means Android is still battery-optimising this app.
    *
@@ -270,6 +300,39 @@ export default function HomeScreen(): ReactElement {
             <Feather name="chevron-right" size={20} color={colors.dutyOn} />
           </Pressable>
         ) : null}
+
+        {/*
+          BOOKED FOR LATER. Below the live-trip banner and above the battery nudge: a job the
+          driver already holds outranks a setup reminder, and a job happening right now outranks
+          both. Absent entirely when there are none, which is most of the time.
+        */}
+        {upcomingTrips.length === 0 ? null : (
+          <View style={styles.upcoming}>
+            <Text style={styles.upcomingHeading}>Booked for later</Text>
+            {upcomingTrips.map((booking) => (
+              <Pressable
+                key={booking.id}
+                onPress={() => router.push(`/trip/${booking.id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Trip ${booking.reference}, ${formatWhen(booking.scheduled_at)}`}
+                style={({ pressed }) => [styles.upcomingRow, pressed && styles.upcomingRowPressed]}
+              >
+                <View style={styles.upcomingIcon}>
+                  <Feather name="calendar" size={15} color={colors.warning} />
+                </View>
+                <View style={styles.batteryText}>
+                  <Text style={styles.upcomingTitle}>
+                    {formatWhen(booking.scheduled_at)}
+                  </Text>
+                  <Text style={styles.batteryBody} numberOfLines={1}>
+                    {booking.pickup.address} → {booking.drop.address}
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={colors.faint} />
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         {needsBattery === true ? (
           <Pressable
@@ -411,6 +474,38 @@ const styles = StyleSheet.create({
   batteryText: { flex: 1 },
   batteryTitle: { ...text.label, color: colors.fg },
   batteryBody: { ...text.caption, color: colors.muted, marginTop: 2 },
+
+  /* Quieter than the live-trip banner above it on purpose: these are jobs to know about, not jobs
+     to act on. A second green card would compete with the one trip that is actually happening. */
+  upcoming: { marginBottom: space.md },
+  upcomingHeading: {
+    ...text.caption,
+    color: colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: space.xs,
+  },
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: space.md,
+    marginBottom: space.xs,
+  },
+  upcomingRowPressed: { opacity: 0.9 },
+  upcomingIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    backgroundColor: '#FFF6E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upcomingTitle: { ...text.label, color: colors.fg },
 
   dutyCard: {
     borderRadius: radius.lg,

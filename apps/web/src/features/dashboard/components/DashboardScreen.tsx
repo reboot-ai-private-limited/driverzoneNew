@@ -185,7 +185,7 @@ export function DashboardScreen() {
                 'Drivers appear here while their app is running. An empty map outside working hours is normal.',
             }}
           >
-            {/* Everyone here is on duty — the query asks for nobody else. Green means their last
+            {/* Everyone here is on duty — the query asks for nobody else. Yellow means their last
                 fix is inside dispatch's two-minute window, so a wave can reach them; grey means it
                 is not, which is a driver sitting on duty whom no trip can currently be routed to. */}
             <LiveDriverMap drivers={live.data?.drivers ?? []} />

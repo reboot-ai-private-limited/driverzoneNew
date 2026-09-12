@@ -36,7 +36,7 @@ import { CancelRide } from '@/components/CancelRide';
 import { DriverCard } from '@/components/DriverCard';
 import { ExtendDayCard } from '@/components/ExtendDayCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { formatTime } from '@/features/booking/schedule';
+import { formatTime, formatWhen } from '@/features/booking/schedule';
 import {
   hasDriverAssigned,
   isCustomerCancellable,
@@ -650,7 +650,26 @@ function OtpDigits({ code }: { code: string }): ReactElement {
 }
 
 function StatusCard({ booking }: { booking: BookingDto }): ReactElement {
-  const copy = tripStatusCopy(booking.status);
+  /*
+   * A SCHEDULED BOOKING WAITING ITS TURN GETS ITS OWN WORDS, because `tripStatusCopy`'s CONFIRMED
+   * line — "We're about to start looking for a driver" — is true for a trip leaving in ten minutes
+   * and false for days on one booked for next Tuesday. A customer reading "about to" and then
+   * watching nothing happen for three days has every reason to think the app is broken, which is
+   * exactly the report this came from.
+   *
+   * NAMES BOTH INSTANTS. The pickup answers "did it save the time I chose", and `dispatch_at` —
+   * derived server-side from the lead-time setting, so this screen never hardcodes 90 minutes —
+   * answers the question that was unanswerable before: when does anything start happening.
+   */
+  const waitingForDispatch = booking.is_scheduled && booking.status === 'CONFIRMED';
+
+  const copy = waitingForDispatch
+    ? {
+        ...tripStatusCopy(booking.status),
+        title: `Booked for ${formatWhen(new Date(booking.scheduled_at))}`,
+        body: `We start looking for your driver at ${formatWhen(new Date(booking.dispatch_at))}. You can cancel free until then.`,
+      }
+    : tripStatusCopy(booking.status);
 
   /*
    * "INCLUDED UNTIL", NOT "ESTIMATED COMPLETION" — there is no overage in this product any more
@@ -672,7 +691,9 @@ function StatusCard({ booking }: { booking: BookingDto }): ReactElement {
   return (
     <View style={styles.statusCard}>
       <View style={styles.statusRow}>
-        <StatusIcon icon={copy.icon} live={isLiveStatus(booking.status)} />
+        {/* Still, not pulsing, while a scheduled booking waits: the pulse means "something is
+            happening right now", and for the next three days nothing is. */}
+        <StatusIcon icon={copy.icon} live={isLiveStatus(booking.status) && !waitingForDispatch} />
         <View style={styles.flex}>
           <Text style={styles.statusLabel}>Current status</Text>
           <Text style={styles.statusTitle}>{copy.title}</Text>

@@ -252,11 +252,23 @@ export function FareSheet({
       // and the wallet screen is two taps away.
       void queryClient.invalidateQueries({ queryKey: keys.wallet.me() });
       onClose();
-      // The SEARCHING screen, not the trip screen directly — dispatch has not run yet at this
-      // instant (CASH confirms synchronously; the wave that finds a driver is a separate queued
-      // job), so landing straight on the trip screen would show a customer a receipt with a
-      // "Finding your driver" line buried in it instead of the full-screen moment that deserves.
-      router.push(`/searching/${result.booking.id}`);
+      /*
+       * The SEARCHING screen, not the trip screen directly — dispatch has not run yet at this
+       * instant (CASH confirms synchronously; the wave that finds a driver is a separate queued
+       * job), so landing straight on the trip screen would show a customer a receipt with a
+       * "Finding your driver" line buried in it instead of the full-screen moment that deserves.
+       *
+       * EXCEPT WHEN THE TRIP IS FOR LATER, where that screen is a lie told for days. A scheduled
+       * booking is not dispatched until 90 minutes before its pickup, so the radar would spin and
+       * the "Searching for 41:12" chip would count up on a search that has not started and will
+       * not for three days. The trip screen already says "Booking confirmed" for this exact state,
+       * and it already carries the cancel bar.
+       */
+      router.push(
+        result.booking.is_scheduled
+          ? `/trip/${result.booking.id}`
+          : `/searching/${result.booking.id}`,
+      );
     },
   });
 

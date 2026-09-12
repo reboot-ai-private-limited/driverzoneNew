@@ -26,14 +26,20 @@ const ALL_STATUSES: BookingDto['status'][] = [
 describe('canTransfer', () => {
   it('allows exactly the statuses a driver can still be moved or added on', () => {
     const allowed = ALL_STATUSES.filter(canTransfer);
-    expect(allowed.sort()).toEqual(['ARRIVED', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'SEARCHING'].sort());
+    expect(allowed.sort()).toEqual(
+      ['ARRIVED', 'ASSIGNED', 'CONFIRMED', 'DRIVER_EN_ROUTE', 'SEARCHING'].sort(),
+    );
   });
 
   it('refuses a started trip — that is a cancellation plus a new booking, not a transfer', () => {
     expect(canTransfer('STARTED')).toBe(false);
   });
 
-  it('refuses every finished or never-dispatched status', () => {
+  it('allows a confirmed booking, which is pre-assignment before dispatch ever rings', () => {
+    expect(canTransfer('CONFIRMED')).toBe(true);
+  });
+
+  it('refuses every finished status', () => {
     for (const status of ['COMPLETED', 'CANCELLED_BY_CUSTOMER', 'NO_DRIVER_FOUND', 'EXPIRED'] as const) {
       expect(canTransfer(status)).toBe(false);
     }
@@ -69,9 +75,15 @@ describe('buildAssignPayload', () => {
 
 describe('transferDialogCopy', () => {
   it('offers a straight assignment when nobody has the booking yet', () => {
-    const copy = transferDialogCopy(null);
+    const copy = transferDialogCopy(null, 'SEARCHING');
     expect(copy.title).toBe('Assign a driver');
     expect(copy.description).toMatch(/bypassing the search/i);
+  });
+
+  it('never claims to bypass a search on a booking nothing is searching for', () => {
+    const copy = transferDialogCopy(null, 'CONFIRMED');
+    expect(copy.description).not.toMatch(/bypassing/i);
+    expect(copy.description).toMatch(/closer to the pickup time/i);
   });
 
   it('names the outgoing driver when handing off an existing assignment', () => {

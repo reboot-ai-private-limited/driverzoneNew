@@ -283,6 +283,23 @@ export function isScheduledBooking(scheduledAt: Date, now: Date): boolean {
 }
 
 /**
+ * How near a pickup has to be before an ASSIGNED booking counts as the trip a driver is ON.
+ *
+ * A driver can hold a booking days ahead of time — an admin assigns one directly from the panel
+ * rather than waiting for the automatic search. Treating that as their current trip would re-route
+ * them onto it on every app launch until the pickup day and block them from all other work, so
+ * `findActiveForDriver` fences it off with this instant.
+ *
+ * THE SAME DIAL AS AUTOMATIC DISPATCH (`dispatch.scheduled_lead_minutes`), deliberately: a
+ * pre-assigned trip becomes live at exactly the moment dispatch would otherwise have started
+ * ringing for it. One number to turn, and the two paths cannot drift into disagreeing about when
+ * a scheduled booking stops being "later" and starts being "now".
+ */
+export function liveAssignmentCutoff(now: Date, leadMinutes: number): Date {
+  return new Date(now.getTime() + leadMinutes * 60_000);
+}
+
+/**
  * `DZ-` plus six characters from an alphabet with no `0`/`O` and no `1`/`I`.
  *
  * These are read aloud down a phone line to support, which is the whole reason for the exclusions

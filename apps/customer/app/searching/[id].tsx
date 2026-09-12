@@ -1,8 +1,9 @@
 import { Feather } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import { type ReactElement, useEffect, useState } from 'react';
+import { type ReactElement, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
   FadeIn,
@@ -14,6 +15,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { CancelRide } from '@/components/CancelRide';
+import { GlassPanel } from '@/components/GlassPanel';
+import { MapCanvas, type MapMarker } from '@/components/MapCanvas';
 import { tripStatusCopy } from '@/features/booking/status';
 import { getBooking } from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
@@ -29,6 +32,13 @@ import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
  * where the only thing worth showing is "we are looking, hold on" — full-screen, animated, and
  * with nothing else competing for attention.
  *
+ * ON THE MAP, NOT ON A BLANK PAGE. This was a radar animation centred on white: a good waiting
+ * graphic about nothing in particular. The customer has just chosen two points on a map and the
+ * question in their head is spatial — where am I, where is this going, is anyone near me. So the
+ * map they booked on stays on screen and the search happens ON it: the pulse now emanates from
+ * their actual pickup pin, over their actual streets, with the route to their destination drawn
+ * underneath. The animation is the same idea; it is just anchored to something real now.
+ *
  * OWNS NOTHING. It polls the same `GET /customer/bookings/:id` the trip screen does and hands off
  * the instant the answer stops being "still looking": found a driver → the trip screen, gave up
  * → the trip screen. Both outcomes land on the SAME page because `tripStatusCopy` and
@@ -40,28 +50,54 @@ const SEARCHING_STATUSES = new Set(['PENDING_PAYMENT', 'CONFIRMED', 'SEARCHING']
 export default function SearchingScreen(): ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
   const [cancelling, setCancelling] = useState(false);
+
+  /**
+   * How much of the map the bottom card covers.
+   *
+   * Handed to `MapCanvas` as `bottomInset` so the map's own centre is the middle of the VISIBLE
+   * strip rather than the middle of the screen — otherwise centring on the pickup would park the
+   * pin behind the card, which is the one thing this screen is about.
+   */
+  const [cardHeight, setCardHeight] = useState(0);
 
   const booking = useQuery({
     queryKey: keys.bookings.detail(id),
     queryFn: () => getBooking(id),
     refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === undefined || SEARCHING_STATUSES.has(status) ? 3000 : false;
+      const data = query.state.data;
+      // A scheduled booking is leaving for the trip screen anyway; polling it every three seconds
+      // on the way out is a request per tick for a status that cannot change for days.
+      if (data?.is_scheduled === true && data.status === 'CONFIRMED') return false;
+      return data === undefined || SEARCHING_STATUSES.has(data.status) ? 3000 : false;
     },
   });
 
   const status = booking.data?.status;
+
+  /*
+   * A BOOKING FOR NEXT WEEK IS NOT A SEARCH, and `CONFIRMED` alone cannot tell the two apart.
+   *
+   * `CONFIRMED` belongs in `SEARCHING_STATUSES` for an immediate booking: dispatch is a queued job
+   * and the few seconds before the first wave rings are genuinely part of the wait. On a SCHEDULED
+   * booking the same status means nothing will happen for up to three days, and this screen would
+   * spend them animating a search that has not started.
+   *
+   * CHECKED HERE RATHER THAN ONLY AT THE PUSH in `FareSheet`, because a deep link, a back
+   * navigation or a resumed app can land on this route without going through Confirm.
+   */
+  const scheduledAndWaiting = booking.data?.is_scheduled === true && status === 'CONFIRMED';
 
   // THE HANDOFF. The moment the status is no longer one of the "still looking" ones — driver
   // found, gave up, or the customer's own cancel just now — this page is done and the trip
   // screen takes over. `replace`, not `push`: this screen must not be a back-button destination
   // once the answer exists, or leaving the trip screen would land back on a search that is over.
   useEffect(() => {
-    if (status !== undefined && !SEARCHING_STATUSES.has(status)) {
+    if (scheduledAndWaiting || (status !== undefined && !SEARCHING_STATUSES.has(status))) {
       router.replace(`/trip/${id}`);
     }
-  }, [status, id]);
+  }, [scheduledAndWaiting, status, id]);
 
   const copy = status === undefined ? null : tripStatusCopy(status);
 
@@ -75,82 +111,146 @@ export default function SearchingScreen(): ReactElement {
    */
   const ringingFavourites = status === 'SEARCHING' && booking.data?.prefer_favourite_drivers === true;
 
+  /**
+   * Both ends of the trip, so the map draws its route bow between them rather than a lone pin.
+   *
+   * Rebuilt only when a coordinate actually moves — which on this screen is never, since the
+   * booking's points are frozen. Memoised anyway because a fresh array identity every poll would
+   * re-run `MapCanvas`'s marker-snapshot pass every three seconds.
+   */
+  const markers = useMemo<MapMarker[]>(() => {
+    const data = booking.data;
+    if (data === undefined) return [];
+    return [
+      {
+        id: 'pickup',
+        lat: data.pickup.lat,
+        lng: data.pickup.lng,
+        kind: 'pickup',
+        title: data.pickup.address,
+      },
+      { id: 'drop', lat: data.drop.lat, lng: data.drop.lng, kind: 'drop', title: data.drop.address },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    booking.data?.pickup.lat,
+    booking.data?.pickup.lng,
+    booking.data?.drop.lat,
+    booking.data?.drop.lng,
+  ]);
+
+  if (booking.isPending) {
+    return (
+      <View style={styles.plain}>
+        <ActivityIndicator size="large" color={colors.muted} />
+      </View>
+    );
+  }
+
+  if (booking.isError || booking.data === undefined) {
+    return (
+      <View style={styles.plain}>
+        <Text style={styles.loadError}>We could not check on this booking.</Text>
+        <Pressable
+          onPress={() => void booking.refetch()}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
+        >
+          <Feather name="refresh-cw" size={15} color={colors.fg} />
+          <Text style={styles.retryLabel}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const data = booking.data;
+
   return (
     <View style={styles.root}>
-      {booking.isPending ? (
-        <View style={styles.centre}>
-          <ActivityIndicator size="large" color={colors.muted} />
-        </View>
-      ) : booking.isError ? (
-        <View style={styles.centre}>
-          <Text style={styles.loadError}>We could not check on this booking.</Text>
-          <Pressable
-            onPress={() => void booking.refetch()}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
-          >
-            <Feather name="refresh-cw" size={15} color={colors.fg} />
-            <Text style={styles.retryLabel}>Try again</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <>
-          <View style={styles.centre}>
-            <Radar />
+      {/*
+        CENTRED ON THE PICKUP, not framed to the whole route. The customer is standing at one of
+        these two points and waiting for somebody to come to it — a camera pulled back far enough
+        to include a drop 40 km away would put their own street under a pixel. `MapCanvas` still
+        draws the route bow off the edge of the screen, which is the right amount of "and then
+        we go over there" for a screen about the pickup.
+      */}
+      <MapCanvas
+        initialCentre={{ lat: data.pickup.lat, lng: data.pickup.lng }}
+        markers={markers}
+        bottomInset={cardHeight}
+      />
 
-            <Animated.View entering={FadeInDown.duration(260).delay(100)} style={styles.textBlock}>
-              <Text style={styles.title}>
-                {ringingFavourites ? 'Ringing your favourite drivers' : (copy?.title ?? 'Confirming your booking')}
-              </Text>
-              <Text style={styles.body}>
-                {ringingFavourites
-                  ? 'If none of them takes it, we will look for everyone else straight away.'
-                  : (copy?.body ?? 'This only takes a moment.')}
-              </Text>
-              <ElapsedChip />
-            </Animated.View>
+      {/*
+        THE SWEEP, over the map rather than in it.
 
-            {booking.data === undefined ? null : (
-              <Animated.View
-                entering={FadeInDown.duration(260).delay(200)}
-                style={styles.routeCard}
-              >
-                <Text style={styles.routeCardTitle}>Your trip</Text>
-                <View style={styles.routeRow}>
-                  <View style={styles.routeIconBubble}>
-                    <View style={styles.dotPickup} />
-                  </View>
-                  <Text style={styles.routeText} numberOfLines={1}>
-                    {booking.data.pickup.address}
-                  </Text>
-                </View>
-                <View style={styles.routeConnector}>
-                  <View style={styles.routeLine} />
-                </View>
-                <View style={styles.routeRow}>
-                  <View style={styles.routeIconBubble}>
-                    <View style={styles.dotDrop} />
-                  </View>
-                  <Text style={styles.routeText} numberOfLines={1}>
-                    {booking.data.drop.address}
-                  </Text>
-                </View>
-              </Animated.View>
-            )}
+        A `<Marker>` with an animating child forces `tracksViewChanges` on, which re-rasterises the
+        marker into a native bitmap every frame — a known Android jank source, and the exact reason
+        `MapCanvas`'s own pickup glyph is a static halo instead of a pulse. Drawn here as a plain
+        screen-space overlay it costs nothing, and it lands on the pickup anyway because the map is
+        centred there and `bottomInset` makes "centre" mean the middle of the visible strip.
+      */}
+      <View style={[styles.sweepLayer, { bottom: cardHeight }]} pointerEvents="none">
+        <Sweep />
+      </View>
+
+      <View style={[styles.topBar, { paddingTop: insets.top + space.sm }]} pointerEvents="box-none">
+        <GlassPanel rounded="pill" style={styles.elapsedGlass}>
+          <View style={styles.elapsedRow}>
+            <LiveDot />
+            <ElapsedChipLabel />
           </View>
+        </GlassPanel>
+      </View>
 
-          <Animated.View entering={FadeIn.duration(240).delay(320)}>
-            <Pressable
-              onPress={() => setCancelling(true)}
-              accessibilityRole="button"
-              style={({ pressed }) => [styles.cancelLink, pressed && styles.cancelLinkPressed]}
-            >
-              <Feather name="x" size={14} color={colors.danger} />
-              <Text style={styles.cancelLinkLabel}>Cancel this search</Text>
-            </Pressable>
-          </Animated.View>
-        </>
-      )}
+      <Animated.View
+        entering={FadeInDown.duration(260)}
+        style={[styles.card, { paddingBottom: insets.bottom + space.lg }]}
+        onLayout={(event) => setCardHeight(event.nativeEvent.layout.height)}
+      >
+        <View style={styles.grabber} />
+
+        <Text style={styles.title}>
+          {ringingFavourites ? 'Ringing your favourite drivers' : (copy?.title ?? 'Confirming your booking')}
+        </Text>
+        <Text style={styles.body}>
+          {ringingFavourites
+            ? 'If none of them takes it, we will look for everyone else straight away.'
+            : (copy?.body ?? 'This only takes a moment.')}
+        </Text>
+
+        <View style={styles.route}>
+          <View style={styles.routeRow}>
+            <View style={styles.routeIconBubble}>
+              <View style={styles.dotPickup} />
+            </View>
+            <Text style={styles.routeText} numberOfLines={1}>
+              {data.pickup.address}
+            </Text>
+          </View>
+          <View style={styles.routeConnector}>
+            <View style={styles.routeLine} />
+          </View>
+          <View style={styles.routeRow}>
+            <View style={styles.routeIconBubble}>
+              <View style={styles.dotDrop} />
+            </View>
+            <Text style={styles.routeText} numberOfLines={1}>
+              {data.drop.address}
+            </Text>
+          </View>
+        </View>
+
+        <Animated.View entering={FadeIn.duration(240).delay(200)}>
+          <Pressable
+            onPress={() => setCancelling(true)}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.cancelLink, pressed && styles.cancelLinkPressed]}
+          >
+            <Feather name="x" size={14} color={colors.danger} />
+            <Text style={styles.cancelLinkLabel}>Cancel this search</Text>
+          </Pressable>
+        </Animated.View>
+      </Animated.View>
 
       <CancelRide
         visible={cancelling}
@@ -166,13 +266,12 @@ export default function SearchingScreen(): ReactElement {
 }
 
 /**
- * A ticking "Searching for 0:12" chip, with its own small pulsing dot — the one piece of proof on
- * this whole screen that time is actually passing and nothing has frozen. Counts from when THIS
- * component mounted, not from the booking's own timestamps: it is answering "how long have I been
- * looking at this screen", not "how long has the booking existed" — those can differ by however
- * long the previous screen (Confirm, or a re-open) took.
+ * A ticking "Searching for 0:12", the one piece of proof that time is passing and nothing has
+ * frozen. Counts from when THIS component mounted, not from the booking's own timestamps: it is
+ * answering "how long have I been looking at this screen", not "how long has the booking
+ * existed" — those can differ by however long the previous screen (Confirm, or a re-open) took.
  */
-function ElapsedChip(): ReactElement {
+function ElapsedChipLabel(): ReactElement {
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
@@ -183,12 +282,7 @@ function ElapsedChip(): ReactElement {
   const minutes = Math.floor(seconds / 60);
   const display = `${String(minutes)}:${String(seconds % 60).padStart(2, '0')}`;
 
-  return (
-    <View style={styles.elapsedChip}>
-      <LiveDot />
-      <Text style={styles.elapsedText}>Searching for {display}</Text>
-    </View>
-  );
+  return <Text style={styles.elapsedText}>Searching for {display}</Text>;
 }
 
 function LiveDot(): ReactElement {
@@ -210,56 +304,36 @@ function LiveDot(): ReactElement {
 }
 
 const RING_COUNT = 3;
-const RING_DELAY_MS = 550;
-const RING_DURATION_MS = 1800;
+const RING_DELAY_MS = 700;
+const RING_DURATION_MS = 2600;
 
-const ORBIT_DOT_COUNT = 2;
-const ORBIT_DURATION_MS = 3400;
+/** The widest a ring gets, in points — roughly "a few streets" at the map's street zoom. */
+const SWEEP_MAX = 260;
+/** Where a ring starts: just outside `MapCanvas`'s own pickup halo, so it grows out of the pin. */
+const SWEEP_MIN = 44;
 
 /**
- * Three rings, staggered rather than started together — a single pulsing ring reads as a
- * heartbeat monitor; three overlapping ones, each a beat behind the last, read as something
- * actively searching outward. Two small dots orbit the whole ring stack in the opposite sense of
- * the outward pulse, so the eye has a second, independent motion to track — the pulse alone reads
- * as a beacon; the orbit on top of it reads as a live radar sweep. The core glyph breathes (a
- * slow, small scale-up/down) and turns continuously, like a compass needle settling on a signal
- * rather than a static icon dropped in the middle.
+ * Rings growing outward from the pickup pin, three of them, each a beat behind the last.
+ *
+ * TRANSLUCENT AND OUTLINED, unlike the solid discs this was on white. Over a map a filled shape
+ * hides the streets it is supposed to be sweeping, which reads as a loading overlay rather than a
+ * search — the thing being animated has to stay visible through it. So each ring is a soft yellow
+ * wash with a brighter rim, and it fades out entirely before it reaches its full size.
+ *
+ * NO CORE GLYPH any more. The map already draws a pickup marker at this exact point; a second
+ * icon on top of it was two pins for one place.
  */
-function Radar(): ReactElement {
-  const breathe = useSharedValue(0);
-  const spin = useSharedValue(0);
-
-  useEffect(() => {
-    breathe.value = withRepeat(withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }), -1, true);
-    spin.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.linear }), -1, false);
-  }, [breathe, spin]);
-
-  const coreStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + breathe.value * 0.06 }],
-  }));
-  const iconStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${spin.value * 360}deg` }],
-  }));
-
+function Sweep(): ReactElement {
   return (
-    <View style={styles.radarWrap}>
-      <View style={styles.radarBackdrop} />
+    <View style={styles.sweepBox}>
       {Array.from({ length: RING_COUNT }, (_, index) => (
-        <RadarRing key={index} delayMs={index * RING_DELAY_MS} />
+        <SweepRing key={index} delayMs={index * RING_DELAY_MS} />
       ))}
-      {Array.from({ length: ORBIT_DOT_COUNT }, (_, index) => (
-        <OrbitDot key={index} delayMs={(index * ORBIT_DURATION_MS) / ORBIT_DOT_COUNT} />
-      ))}
-      <Animated.View style={[styles.radarCore, coreStyle]}>
-        <Animated.View style={iconStyle}>
-          <Feather name="navigation" size={30} color={colors.fg} />
-        </Animated.View>
-      </Animated.View>
     </View>
   );
 }
 
-function RadarRing({ delayMs }: { delayMs: number }): ReactElement {
+function SweepRing({ delayMs }: { delayMs: number }): ReactElement {
   const progress = useSharedValue(0);
 
   useEffect(() => {
@@ -273,40 +347,30 @@ function RadarRing({ delayMs }: { delayMs: number }): ReactElement {
     );
   }, [delayMs, progress]);
 
+  /*
+   * Scale, not width/height: an animated layout property re-measures the view every frame on the
+   * JS thread, while a transform runs on the UI thread and survives a busy render — and this
+   * screen re-renders on every poll.
+   */
   const ringStyle = useAnimatedStyle(() => ({
-    opacity: 0.5 * (1 - progress.value),
-    transform: [{ scale: 1 + progress.value * 1.8 }],
+    opacity: 0.45 * (1 - progress.value),
+    transform: [{ scale: (SWEEP_MIN + (SWEEP_MAX - SWEEP_MIN) * progress.value) / SWEEP_MIN }],
   }));
 
-  return <Animated.View style={[styles.radarRing, ringStyle]} />;
-}
-
-/** A small dot sweeping around the outside of the ring stack — orbit radius sits just past them. */
-function OrbitDot({ delayMs }: { delayMs: number }): ReactElement {
-  const angle = useSharedValue(0);
-
-  useEffect(() => {
-    angle.value = withDelay(
-      delayMs,
-      withRepeat(withTiming(360, { duration: ORBIT_DURATION_MS, easing: Easing.linear }), -1, false),
-    );
-  }, [delayMs, angle]);
-
-  const orbitStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${angle.value}deg` }],
-  }));
-
-  return (
-    <Animated.View style={[styles.orbitPivot, orbitStyle]}>
-      <View style={styles.orbitDot} />
-    </Animated.View>
-  );
+  return <Animated.View style={[styles.sweepRing, ringStyle]} />;
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
 
+  /** The loading and error states, which have no map to sit on — there is no centre to draw yet. */
+  plain: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: space.lg,
+  },
   loadError: { ...text.body, color: colors.muted, marginBottom: space.md },
   retry: {
     flexDirection: 'row',
@@ -321,94 +385,73 @@ const styles = StyleSheet.create({
   retryPressed: { backgroundColor: colors.bgSunken },
   retryLabel: { ...text.label, color: colors.fg },
 
-  radarWrap: {
-    width: 180,
-    height: 180,
+  // Spans the map down to the top of the card, so its centre is the map's centre — which is the
+  // pickup. `bottom` is set inline from the measured card height.
+  sweepLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: space.xl,
   },
-  // A still disc behind the pulsing rings — without it the rings have nothing to read as
-  // "growing FROM", and the animation looks like three separate shapes rather than one radar.
-  radarBackdrop: {
+  sweepBox: { width: SWEEP_MAX, height: SWEEP_MAX, alignItems: 'center', justifyContent: 'center' },
+  sweepRing: {
     position: 'absolute',
-    width: 180,
-    height: 180,
+    width: SWEEP_MIN,
+    height: SWEEP_MIN,
     borderRadius: radius.pill,
-    backgroundColor: colors.bgSunken,
+    backgroundColor: 'rgba(242, 242, 0, 0.35)',
+    borderWidth: 2,
+    borderColor: colors.brand,
   },
-  radarRing: {
+
+  topBar: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center' },
+  elapsedGlass: { paddingHorizontal: space.md, paddingVertical: space.xs },
+  elapsedRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.success },
+  elapsedText: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
+
+  /*
+   * OPAQUE, not glass. `GlassPanel`'s own header is explicit that frosting is for the small
+   * controls floating over the map — everything in a bottom sheet stays solid, because the copy
+   * inside it has to be readable over whatever tile happens to be underneath.
+   */
+  card: {
     position: 'absolute',
-    width: 88,
-    height: 88,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand,
-  },
-  radarCore: {
-    width: 88,
-    height: 88,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: colors.bg,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
     ...shadow.card,
   },
-  // Fills the same 180x180 box as radarWrap so rotating it turns around the exact same centre
-  // point as the rings and core — the dot itself just sits near the top edge of that box.
-  orbitPivot: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    alignItems: 'center',
+  grabber: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: space.md,
   },
-  orbitDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 2,
-    backgroundColor: colors.brand,
-    ...shadow.soft,
-  },
+  title: { ...text.heading, color: colors.fg },
+  body: { ...text.body, color: colors.muted, marginTop: space.xs },
 
-  textBlock: { alignItems: 'center', marginBottom: space.xl },
-  title: { ...text.title, color: colors.fg, textAlign: 'center' },
-  body: { ...text.body, color: colors.muted, textAlign: 'center', marginTop: space.xs },
-
-  elapsedChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
-    backgroundColor: colors.bgSunken,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.sm,
-    paddingVertical: 5,
+  route: {
     marginTop: space.md,
-  },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.success },
-  elapsedText: { ...text.caption, color: colors.muted, fontFamily: fontFamily.semibold },
-
-  routeCard: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.bgSunken,
     borderRadius: radius.md,
     padding: space.md,
-  },
-  routeCardTitle: {
-    ...text.caption,
-    color: colors.muted,
-    fontFamily: fontFamily.semibold,
-    marginBottom: space.sm,
   },
   routeRow: { flexDirection: 'row', alignItems: 'center' },
   routeIconBubble: {
     width: 22,
     height: 22,
     borderRadius: radius.pill,
-    backgroundColor: colors.bgSunken,
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: space.sm,
@@ -422,21 +465,20 @@ const styles = StyleSheet.create({
   /*
    * OUTLINED IN RED, not filled. This is the only affordance on a screen that is otherwise pure
    * waiting, so it has to be findable at a glance — but it is also the destructive one, and a
-   * solid red bar under a radar animation reads as the search having failed rather than as
-   * something the customer may optionally do.
+   * solid red bar under a live search reads as the search having failed rather than as something
+   * the customer may optionally do.
    */
   cancelLink: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    marginHorizontal: space.lg,
-    marginBottom: space.lg,
+    gap: space.xs,
+    marginTop: space.md,
     paddingVertical: space.sm,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.danger,
   },
   cancelLinkPressed: { backgroundColor: colors.dangerSoft },
-  cancelLinkLabel: { ...text.label, color: colors.danger, fontFamily: fontFamily.semibold },
+  cancelLinkLabel: { ...text.label, color: colors.danger },
 });

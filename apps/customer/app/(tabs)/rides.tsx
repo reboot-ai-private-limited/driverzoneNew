@@ -56,6 +56,7 @@ const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
   { value: 'RUNNING', label: 'Running' },
+  { value: 'SCHEDULED', label: 'Scheduled' },
 ];
 
 type SortOrder = 'NEWEST' | 'AMOUNT_DESC';
@@ -92,7 +93,12 @@ export default function RidesScreen(): ReactElement {
   const rides = useMemo(() => {
     let list = [...all];
 
-    if (filter === 'COMPLETED' || filter === 'CANCELLED' || filter === 'RUNNING') {
+    if (
+      filter === 'COMPLETED' ||
+      filter === 'CANCELLED' ||
+      filter === 'RUNNING' ||
+      filter === 'SCHEDULED'
+    ) {
       list = list.filter((ride) => ride.status === filter);
     }
     // Both read `at` — when the trip actually happened, not when it was booked. See
@@ -370,10 +376,16 @@ function StatTile({
   );
 }
 
+/**
+ * `SCHEDULED` is amber rather than the blue `RUNNING` wears, because the two used to be the same
+ * pill: a trip booked for next Tuesday read as a driver on the way. Blue is "happening"; this is
+ * "booked, nothing happening yet".
+ */
 const STATUS_COPY: Record<RideStatus, { label: string; color: string; tint: string }> = {
   COMPLETED: { label: 'Completed', color: colors.success, tint: '#E7F5EC' },
   CANCELLED: { label: 'Cancelled', color: colors.danger, tint: '#FDECEC' },
   RUNNING: { label: 'Running', color: colors.link, tint: '#E9F0FC' },
+  SCHEDULED: { label: 'Scheduled', color: '#7A5E00', tint: '#FAF3D2' },
 };
 
 function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
@@ -385,7 +397,16 @@ function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
 
   return (
     <Pressable
-      onPress={() => router.push(`/rides/${ride.id}`)}
+      /*
+       * WHERE A ROW LEADS DEPENDS ON WHETHER THE TRIP IS OVER.
+       *
+       * `/rides/[id]` is a receipt and says so in its own header: no polling, no actions. That is
+       * right for a finished trip and a dead end for one that has not happened — a customer who
+       * wanted to cancel a booking made for next week landed there and found nothing to press,
+       * because every cancel affordance lives on the trip screen. So a live or upcoming booking
+       * goes there instead, where the status is current and Cancel exists.
+       */
+      onPress={() => router.push(ride.finished ? `/rides/${ride.id}` : `/trip/${ride.id}`)}
       accessibilityRole="button"
       style={({ pressed }) => [styles.rideCard, pressed && styles.rideCardPressed]}
     >
@@ -444,10 +465,11 @@ function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
 
         {/*
           BOOK AGAIN, INSIDE THE ROW'S OWN PRESSABLE. `Pressable` nests, and the inner one wins —
-          so this takes the tap without also opening the detail screen behind it. Hidden while a
-          trip is RUNNING: rebooking the ride you are sitting in is not a thing to offer.
+          so this takes the tap without also opening the detail screen behind it. Hidden on any
+          trip still ahead of the customer: rebooking the ride you are sitting in is not a thing to
+          offer, and neither is booking a second copy of one you have already booked for Tuesday.
         */}
-        {ride.status === 'RUNNING' ? null : (
+        {ride.finished ? (
           <Pressable
             onPress={() =>
               router.push({
@@ -463,7 +485,7 @@ function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
             <Feather name="repeat" size={12} color={colors.fg} />
             <Text style={styles.rebookChipLabel}>Book again</Text>
           </Pressable>
-        )}
+        ) : null}
       </View>
     </Pressable>
   );

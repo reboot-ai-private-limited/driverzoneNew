@@ -153,6 +153,7 @@ export function toBookingDto(view: BookingView): BookingDto {
 
     scheduled_at: booking.scheduledAt.toISOString(),
     is_scheduled: booking.isScheduled,
+    dispatch_at: booking.dispatchAt.toISOString(),
 
     car_category: booking.carCategory,
     vehicle_type: booking.vehicleType,

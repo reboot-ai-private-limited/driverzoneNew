@@ -236,13 +236,28 @@ export class MongoBookingRepository implements BookingRepositoryPort {
    * The four statuses are listed rather than expressed as "not terminal": a status added to the
    * machine later must be an explicit decision about whether a driver is still working it, not
    * something a negation silently absorbs.
+   *
+   * THE `$or` IS THE PRE-ASSIGNMENT FENCE the port describes: `ASSIGNED` carries a pickup-time
+   * condition, the three moving statuses carry none. Written as one query rather than two reads
+   * so "newest first" still ranks across both halves — a driver holding next week's booking AND
+   * today's must get today's, and two sorted reads would need the caller to compare them again.
    */
-  async findActiveForDriver(driverId: string): Promise<Booking | null> {
+  async findActiveForDriver(
+    driverId: string,
+    assignedPickupBefore?: Date | undefined,
+  ): Promise<Booking | null> {
     if (!mongoose.isValidObjectId(driverId)) return null;
 
     const doc = await BookingModel.findOne({
       driverId,
-      status: { $in: ['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] },
+      ...(assignedPickupBefore === undefined
+        ? { status: { $in: ['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] } }
+        : {
+            $or: [
+              { status: 'ASSIGNED', scheduledAt: { $lte: assignedPickupBefore } },
+              { status: { $in: ['DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] } },
+            ],
+          }),
     }).sort({ createdAt: -1 });
 
     return doc === null ? null : toEntity(doc.toObject() as BookingDoc);
@@ -255,12 +270,24 @@ export class MongoBookingRepository implements BookingRepositoryPort {
    * found is mid-experience and has a screen of their own for it, whereas no driver holds a
    * booking in that state.
    */
-  async findActiveForCustomer(customerId: string): Promise<Booking | null> {
+  async findActiveForCustomer(
+    customerId: string,
+    assignedPickupBefore?: Date | undefined,
+  ): Promise<Booking | null> {
     if (!mongoose.isValidObjectId(customerId)) return null;
 
     const doc = await BookingModel.findOne({
       customerId,
-      status: { $in: ['SEARCHING', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] },
+      ...(assignedPickupBefore === undefined
+        ? { status: { $in: ['SEARCHING', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] } }
+        : {
+            // The pre-assignment fence — see the port. Shaped like the driver's, minus SEARCHING,
+            // which is never a trip booked for later: it means a wave is ringing right now.
+            $or: [
+              { status: 'ASSIGNED', scheduledAt: { $lte: assignedPickupBefore } },
+              { status: { $in: ['SEARCHING', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] } },
+            ],
+          }),
     }).sort({ createdAt: -1 });
 
     return doc === null ? null : toEntity(doc.toObject() as BookingDoc);

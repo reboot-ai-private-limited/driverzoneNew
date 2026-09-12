@@ -13,6 +13,8 @@ import type {
   DriverCard,
   DriverCardContract,
 } from '../../identity/identity.public.js';
+import type { SettingsReadContract } from '../../settings/settings.public.js';
+import { liveAssignmentCutoff } from '../domain/booking.entity.js';
 import { BookingNotFoundError } from '../domain/booking.errors.js';
 import type { BookingExtension } from '../domain/bookingExtension.entity.js';
 import type { ExtensionRepositoryPort } from '../domain/extensionRepository.port.js';
@@ -469,9 +471,14 @@ export function makeGetCurrentCustomerBookingController(
   charges: ChargeRepositoryPort,
   directory: DriverCardContract,
   extensions: ExtensionRepositoryPort,
+  settings: SettingsReadContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const booking = await repo.findActiveForCustomer(principalOf(req));
+    const snapshot = await settings.snapshot();
+    const booking = await repo.findActiveForCustomer(
+      principalOf(req),
+      liveAssignmentCutoff(new Date(), snapshot['dispatch.scheduled_lead_minutes']),
+    );
 
     if (booking === null) {
       sendSuccess(req, res, { booking: null }, 'No booking in progress');
@@ -515,15 +522,25 @@ export function makeGetCurrentCustomerBookingController(
  *
  * `null` rather than a 404 when nothing is live — "you are not on a trip" is a normal answer to
  * this question, and the app asks it on every launch.
+ *
+ * A TRIP BOOKED FOR NEXT WEEK IS NOT "CURRENT", the same rule the customer's `/current` follows
+ * for its own scheduled bookings. `gate.tsx` re-routes the driver onto whatever this returns on
+ * every launch, so a booking an admin pre-assigned would hold their app hostage until its pickup
+ * day. It surfaces in the driver's Upcoming list instead, and becomes this answer at T−lead.
  */
 export function makeGetCurrentDriverTripController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
   directory: CustomerContactContract,
   extensions: ExtensionRepositoryPort,
+  settings: SettingsReadContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const booking = await repo.findActiveForDriver(principalOf(req));
+    const snapshot = await settings.snapshot();
+    const booking = await repo.findActiveForDriver(
+      principalOf(req),
+      liveAssignmentCutoff(new Date(), snapshot['dispatch.scheduled_lead_minutes']),
+    );
 
     if (booking === null) {
       sendSuccess(req, res, { booking: null }, 'No trip in progress');

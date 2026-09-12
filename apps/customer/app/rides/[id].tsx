@@ -89,7 +89,7 @@ export default function RideDetailScreen(): ReactElement {
     );
   }
 
-  const status = toRideStatus(ride.status);
+  const status = toRideStatus(ride);
   const when = new Date(rideHappenedAt(ride));
   const totalPaise = rideTotalPaise(ride);
   const steps = timelineOf(ride);
@@ -258,10 +258,11 @@ export default function RideDetailScreen(): ReactElement {
 
           OFFERED ON A CANCELLED TRIP TOO, and that is the point rather than an oversight: a trip
           that never found a driver is the one a customer is most likely to want to place again.
-          It is hidden only while a trip is RUNNING, where "book again" would be an invitation to
-          double-book the ride they are currently on.
+          It is hidden on a trip still ahead of them — RUNNING, where "book again" would be an
+          invitation to double-book the ride they are currently on, and SCHEDULED, where it would
+          be an invitation to book Tuesday's trip a second time.
         */}
-        {status === 'RUNNING' ? null : (
+        {status === 'RUNNING' || status === 'SCHEDULED' ? null : (
           <View style={styles.rebook}>
             <PrimaryButton
               label="Book again"
@@ -411,11 +412,15 @@ const STATUS_LABEL: Record<RideStatus, string> = {
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
   RUNNING: 'Running',
+  SCHEDULED: 'Scheduled',
 };
 const STATUS_COLOR: Record<RideStatus, string> = {
   COMPLETED: colors.success,
   CANCELLED: colors.danger,
   RUNNING: colors.link,
+  // Matches the list's pill. See `STATUS_COPY` in `(tabs)/rides.tsx` on why this is not the
+  // running blue.
+  SCHEDULED: '#7A5E00',
 };
 
 /** `ServiceType` reads as an enum on the wire; this is what a customer calls it. */

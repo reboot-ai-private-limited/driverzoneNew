@@ -10,6 +10,7 @@ import {
   generateReference,
   isScheduledBooking,
   isTerminal,
+  liveAssignmentCutoff,
   MAX_OTP_ATTEMPTS,
   TRANSITIONS,
   type Booking,
@@ -508,6 +509,20 @@ describe('isScheduledBooking', () => {
   });
 });
 
+describe('liveAssignmentCutoff — when a driver is actually on a trip they hold', () => {
+  const now = new Date('2026-08-31T09:00:00Z');
+
+  it('is the lead time ahead of now, so a pickup inside the window counts', () => {
+    const cutoff = liveAssignmentCutoff(now, 90);
+    expect(cutoff.toISOString()).toBe('2026-08-31T10:30:00.000Z');
+
+    // A booking an admin pre-assigned for Wednesday is not the trip they are on this morning.
+    expect(new Date('2026-09-03T06:00:00Z').getTime()).toBeGreaterThan(cutoff.getTime());
+    // One picking up in an hour is.
+    expect(new Date('2026-08-31T10:00:00Z').getTime()).toBeLessThan(cutoff.getTime());
+  });
+});
+
 describe('distance and fix freshness', () => {
   it('measures a short hop in metres', () => {
     // ~1.1 km north of the pickup.
@@ -882,6 +897,36 @@ describe('CancelBookingByCustomerUseCase — the ladder', () => {
 
     expect(result.feePaise).toBe(10_000);
     expect(result.refundedPaise).toBe(95_000);
+  });
+
+  /*
+   * The trip booked for next week, which a customer could not cancel at all until the app grew a
+   * route to the button. The API always allowed it; these pin that down so a future guard on
+   * "CONFIRMED is not a real booking yet" cannot quietly take it away again.
+   */
+  it('cancels a scheduled booking that has not dispatched, free', async () => {
+    const threeDaysOut = new Date(Date.now() + 3 * 24 * 60 * 60_000);
+    const { repo, payments, useCase } = build(
+      booking({
+        status: 'CONFIRMED',
+        driverId: null,
+        assignedAt: null,
+        isScheduled: true,
+        scheduledAt: threeDaysOut,
+        dispatchAt: new Date(threeDaysOut.getTime() - 90 * 60_000),
+      }),
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      actorId: 'cus_1',
+      reason: 'Plans changed',
+    });
+
+    expect(result.feePaise).toBe(0);
+    expect(result.refundedPaise).toBe(105_000);
+    expect(repo.current().status).toBe('CANCELLED_BY_CUSTOMER');
+    expect(payments.refunds()).toEqual([{ amountPaise: 105_000 }]);
   });
 
   it('never edits the fare snapshot when charging a fee', async () => {

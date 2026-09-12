@@ -207,6 +207,21 @@ export interface BookingDto {
   is_scheduled: boolean;
 
   /**
+   * When the server starts looking for a driver — `scheduled_at` minus the dispatch lead time on a
+   * scheduled booking, and booking time on an immediate one.
+   *
+   * EXPOSED SO THE APPS CAN STOP GUESSING. A scheduled booking sits at `CONFIRMED` for days while
+   * nothing whatsoever is happening, which is indistinguishable — from `status` alone — from the
+   * few seconds an immediate booking spends there before its first wave rings. Both apps need to
+   * say WHEN the search begins, and the setting that decides it (`dispatch.scheduled_lead_minutes`)
+   * is admin-audience only, so the alternative was hardcoding 90 in two clients and letting them
+   * drift from the dial the moment anybody turned it.
+   *
+   * READ-ONLY, and not a promise about when a driver is found — only about when we start asking.
+   */
+  dispatch_at: string;
+
+  /**
    * What the customer said they would be putting the driver in, and what dispatch matched on.
    *
    * NULL ON BOOKINGS MADE BEFORE 2026-09-02, when the choice did not exist. A null is not "any" —
@@ -535,7 +550,10 @@ export interface CurrentDriverTripResponse {
  * history screen is a receipt and holds neither the code nor the cancel action.
  *
  * A scheduled booking sitting at `CONFIRMED` is NOT "current": it would otherwise pull a customer
- * into a trip booked for next week every time they opened the app.
+ * into a trip booked for next week every time they opened the app. Nor is one an admin has
+ * PRE-ASSIGNED — a driver can be put on a booking days before its pickup, and that walks it to
+ * `ASSIGNED` without the trip being any nearer. Both become current at T−lead. The Rides list is
+ * where a customer finds either in the meantime, labelled "Scheduled".
  */
 export interface CurrentCustomerBookingResponse {
   booking: BookingDto | null;

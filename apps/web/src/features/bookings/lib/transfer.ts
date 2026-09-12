@@ -14,12 +14,17 @@ import type { BookingDto } from '@driverzone/contracts';
  * `STARTED` is absent and that is the rule, not an oversight — see `REASSIGNABLE_STATUSES` in the
  * API: moving a running trip is a cancellation plus a new booking. `SEARCHING` is present for the
  * other half of manual assignment — dispatch is still looking and ops has found somebody by phone.
+ *
+ * `CONFIRMED` IS PRE-ASSIGNMENT: a booking scheduled for later that dispatch will not ring for
+ * until T−90. Ops usually knows days ahead who should take an early-morning outstation run, and
+ * naming them now is better than hoping the automatic search finds somebody at 4:30am.
  */
 export const TRANSFERABLE_STATUSES = new Set<BookingDto['status']>([
   'ASSIGNED',
   'DRIVER_EN_ROUTE',
   'ARRIVED',
   'SEARCHING',
+  'CONFIRMED',
 ]);
 
 export function canTransfer(status: BookingDto['status']): boolean {
@@ -44,11 +49,29 @@ export function buildAssignPayload(input: {
   return { id: input.bookingId, driverId: input.driverId, reason: input.reason.trim() };
 }
 
-/** The dialog's title and description, which read differently depending on whether anybody has the trip yet. */
-export function transferDialogCopy(driver: BookingDto['driver']): {
+/**
+ * The dialog's title and description, which read differently depending on whether anybody has the
+ * trip yet — and, when nobody does, on whether there is a search to bypass at all.
+ *
+ * THE THIRD CASE IS NOT A WORDING PREFERENCE. "Bypassing the search" is a lie on a `CONFIRMED`
+ * booking: no search is running, none will until T−90, and an admin told they are overriding a
+ * live hunt for a driver will hesitate over exactly the routine action this exists to make easy.
+ */
+export function transferDialogCopy(
+  driver: BookingDto['driver'],
+  status?: BookingDto['status'],
+): {
   title: string;
   description: string;
 } {
+  if (driver === null && status === 'CONFIRMED') {
+    return {
+      title: 'Assign a driver now',
+      description:
+        'Nobody is being rung for this trip yet — dispatch starts closer to the pickup time. Assigning now books this driver for it.',
+    };
+  }
+
   if (driver === null) {
     return {
       title: 'Assign a driver',

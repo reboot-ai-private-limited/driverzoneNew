@@ -955,6 +955,61 @@ describe('TransferBookingUseCase — manual assignment', () => {
     expect(offers.recordManualAssignment).toHaveBeenCalledWith('bkg_1', 'drv_new');
   });
 
+  /*
+   * PRE-ASSIGNMENT. Ops knows on Tuesday who should take Saturday's 6am outstation run, and
+   * automatic dispatch will not ring anybody for it until 4:30 on Saturday morning. This used to
+   * be refused outright with "A booking at CONFIRMED cannot be assigned a driver."
+   */
+  it('pre-assigns a scheduled booking that has not dispatched yet', async () => {
+    const { useCase, bookings } = build(
+      booking({ status: 'CONFIRMED', driverId: null, isScheduled: true }),
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Regular customer, asked for Ramesh',
+      adminId: 'adm_1',
+    });
+
+    expect(result.releasedDriverId).toBeNull();
+    expect(bookings.current().driverId).toBe('drv_new');
+    expect(bookings.current().status).toBe('ASSIGNED');
+  });
+
+  it('pre-assigns THROUGH beginSearching, never straight from CONFIRMED to ASSIGNED', async () => {
+    // The transition table has no CONFIRMED → ASSIGNED edge, and the claim's compare-and-swap
+    // demands SEARCHING. Going around either would put a second way to write a driver onto a
+    // booking, which is what invariant B-2 exists to prevent.
+    const { useCase, bookings } = build(booking({ status: 'CONFIRMED', driverId: null }));
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Booked ahead by phone',
+      adminId: 'adm_1',
+    });
+
+    expect(bookings.beginSearching).toHaveBeenCalledWith('bkg_1');
+    expect(bookings.releaseDriver).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a booking that is finished rather than merely waiting', async () => {
+    const { useCase, bookings } = build(booking({ status: 'COMPLETED', driverId: null }));
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        toDriverId: 'drv_new',
+        reason: 'Customer asked',
+        adminId: 'adm_1',
+      }),
+    ).rejects.toThrow(/cannot be assigned a driver/i);
+
+    expect(bookings.beginSearching).not.toHaveBeenCalled();
+    expect(bookings.current().driverId).toBeNull();
+  });
+
   it('refuses to transfer a trip that has already started', async () => {
     // Not a reassignment at all — it is a cancellation plus a new booking, and blurring the two
     // breaks the fare, the ledger and the receipt. docs/LLD/dispatch-and-assignment.md is explicit.

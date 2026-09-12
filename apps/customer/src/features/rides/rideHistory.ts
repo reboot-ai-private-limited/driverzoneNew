@@ -22,7 +22,7 @@ import { formatPaise } from '@/lib/money';
  * a plausible-looking constant would be the demo data again, without the badge that admitted it.
  */
 
-export type RideStatus = 'COMPLETED' | 'CANCELLED' | 'RUNNING';
+export type RideStatus = 'COMPLETED' | 'CANCELLED' | 'RUNNING' | 'SCHEDULED';
 
 export interface RideHistoryRow {
   /** The booking's id — what `/rides/[id]` routes on. Never shown. */
@@ -30,6 +30,12 @@ export interface RideHistoryRow {
   /** `DZ-8F3K2M`. What the customer reads, and what a search matches against. */
   reference: string;
   status: RideStatus;
+  /**
+   * Whether the trip is over, which is a different question from `status === 'COMPLETED'` — a
+   * cancelled trip is finished too. The list routes on it: a finished ride opens its receipt, an
+   * unfinished one opens the trip screen, where Cancel lives.
+   */
+  finished: boolean;
   /** ISO 8601. When the ride HAPPENED — see `rideHappenedAt`. */
   at: string;
   driverName: string | null;
@@ -75,9 +81,40 @@ const CANCELLED_STATUSES = new Set<BookingStatus>([
   'EXPIRED',
 ]);
 
-export function toRideStatus(status: BookingStatus): RideStatus {
-  if (status === 'COMPLETED') return 'COMPLETED';
-  return CANCELLED_STATUSES.has(status) ? 'CANCELLED' : 'RUNNING';
+/**
+ * TAKES THE BOOKING, NOT THE STATUS, because the status alone cannot answer this.
+ *
+ * `CONFIRMED` is a trip starting in ninety seconds and a trip starting next Tuesday, and calling
+ * the second one "Running" is the bug this fixes: a customer saw a ride three days away sitting in
+ * their list as though a driver were on the way. `is_scheduled` plus `scheduled_at` are what tell
+ * them apart, and both have been on `BookingDto` all along.
+ *
+ * THE PICKUP TIME DECIDES, NOT THE FLAG. A scheduled booking whose hour has arrived is genuinely
+ * running, so `is_scheduled` on its own would leave it labelled "Scheduled" while the driver was
+ * already at the door. And a driver assigned days early (ops can pre-assign now) is still a trip
+ * for later, which is why `ASSIGNED` counts here too.
+ */
+export function toRideStatus(booking: Pick<BookingDto, 'status' | 'is_scheduled' | 'scheduled_at'>): RideStatus {
+  if (booking.status === 'COMPLETED') return 'COMPLETED';
+  if (CANCELLED_STATUSES.has(booking.status)) return 'CANCELLED';
+
+  const notYetDispatched =
+    booking.status === 'CONFIRMED' || booking.status === 'SEARCHING' || booking.status === 'ASSIGNED';
+
+  if (booking.is_scheduled && notYetDispatched && Date.parse(booking.scheduled_at) > Date.now()) {
+    return 'SCHEDULED';
+  }
+
+  return 'RUNNING';
+}
+
+/**
+ * Whether this booking is over. The list uses it to decide where a row leads: a finished trip to
+ * its receipt, a live or upcoming one to the trip screen, which is the only place the customer can
+ * cancel from.
+ */
+export function isRideFinished(status: BookingStatus): boolean {
+  return status === 'COMPLETED' || CANCELLED_STATUSES.has(status);
 }
 
 /**
@@ -119,7 +156,8 @@ export function toRideHistoryRow(booking: BookingDto): RideHistoryRow {
   return {
     id: booking.id,
     reference: booking.reference,
-    status: toRideStatus(booking.status),
+    status: toRideStatus(booking),
+    finished: isRideFinished(booking.status),
     at: rideHappenedAt(booking),
     driverName: booking.driver?.name ?? null,
     pickup: booking.pickup.address,

@@ -157,7 +157,7 @@ function TransferDialog({
     });
   };
 
-  const copy = transferDialogCopy(booking.driver);
+  const copy = transferDialogCopy(booking.driver, booking.status);
 
   return (
     <Dialog

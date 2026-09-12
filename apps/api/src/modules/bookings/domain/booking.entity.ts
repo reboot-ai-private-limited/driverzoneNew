@@ -223,6 +223,24 @@ export interface Booking {
    * here, in the booking-confirmation charge, and again in the completion settlement.
    */
   paidExtensionPaise: number;
+  /**
+   * How much of `paidExtensionPaise` the DRIVER took in cash on a trip that is otherwise UPI.
+   *
+   * THE WAY OUT OF THE EXTENSION GATE. `CompleteTripUseCase` refuses to end a UPI trip whose
+   * extra day has not been paid for, and `DriverSwitchToCashUseCase` — the usual escape from a
+   * payment gate — cannot help here, because it refuses a booking whose fare has already been
+   * paid online, which is exactly the trip this happens on. A customer whose phone has died owes
+   * the driver a day and has no way to send it; this is the driver saying they took it in hand.
+   *
+   * RECORDED SEPARATELY FROM `paidExtensionPaise` rather than inferred from it, because the
+   * ledger needs to tell the two apart: money that reached the company through the gateway leaves
+   * the driver owing nothing, while money in the driver's pocket is the company's and comes back
+   * as a negative `CASH_COLLECTED` row, the same way a cash fare does.
+   *
+   * Zero on every ordinary trip, including an all-cash one — there the whole fare is already
+   * booked as cash collected, and counting the extension again would double it.
+   */
+  cashExtensionPaise: number;
 
   /** True when the pickup is far enough out that dispatch waits rather than searching now. */
   isScheduled: boolean;

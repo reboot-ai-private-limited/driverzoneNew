@@ -27,11 +27,23 @@ export class VerifyCheckoutUseCase {
     private readonly gateway: PaymentGatewayPort,
   ) {}
 
-  async execute(input: VerifyCheckoutInput): Promise<{ captured: boolean }> {
+  /**
+   * `captured` answers the caller's question — is this payment settled? — and is true for a row
+   * that was already settled before this call, because that is still a yes.
+   *
+   * `justCaptured` answers a narrower one: did THIS call perform the transition? Only that may
+   * drive a side effect which must happen exactly once. Both this endpoint and the webhook arrive
+   * for every capture, and `captured` is true on both of them.
+   */
+  async execute(
+    input: VerifyCheckoutInput,
+  ): Promise<{ captured: boolean; justCaptured: boolean }> {
     const payment = await this.repo.findById(input.paymentId);
-    if (payment === null || payment.gatewayRef === null) return { captured: false };
+    if (payment === null || payment.gatewayRef === null) {
+      return { captured: false, justCaptured: false };
+    }
 
-    if (isCaptured(payment.status)) return { captured: true };
+    if (isCaptured(payment.status)) return { captured: true, justCaptured: false };
 
     const verified = this.gateway.verifyCheckoutSignature(
       payment.gatewayRef,
@@ -40,10 +52,10 @@ export class VerifyCheckoutUseCase {
     );
     if (!verified) {
       logger.warn({ paymentId: input.paymentId }, 'checkout signature did not verify');
-      return { captured: false };
+      return { captured: false, justCaptured: false };
     }
 
     const captured = await captureIfPending(this.repo, input.paymentId, input.providerPaymentId);
-    return { captured: captured !== null };
+    return { captured: captured !== null, justCaptured: captured !== null };
   }
 }

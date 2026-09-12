@@ -54,6 +54,19 @@ export const verifyPaymentSchema = z
   .strict();
 
 /**
+ * The same, for the separate order that collects a day extension.
+ *
+ * `payment_id` IS OURS, not the gateway's — the row `extras/pay` returned. It is needed because,
+ * unlike the fare, an extras order is not the one hanging off `booking.payment_id`, and a trip
+ * extended twice has more than one. The use case still checks it belongs to this booking, so
+ * accepting it here grants nothing: the ORDER id is what must never come from the caller, and
+ * still does not.
+ */
+export const verifyExtrasPaymentSchema = verifyPaymentSchema.extend({
+  payment_id: z.string().min(1).max(200),
+});
+
+/**
  * A reason is mandatory on every cancellation, on both sides.
  *
  * An unexplained cancellation is one nobody can act on later, and these are precisely the events

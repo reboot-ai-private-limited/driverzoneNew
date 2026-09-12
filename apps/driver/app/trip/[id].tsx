@@ -36,6 +36,7 @@ import { isDriverCancellable } from '@/features/trip/cancellation';
 import { ApiError } from '@/lib/api/ApiError';
 import { getDriverSettings } from '@/lib/api/endpoints/driver';
 import {
+  collectExtrasInCash,
   completeTrip,
   getTrip,
   goEnRoute,
@@ -241,6 +242,13 @@ export default function TripScreen(): ReactElement {
     onError: (cause) => fail(cause, 'Could not switch this trip to cash.'),
   });
 
+  const takeExtrasCash = useMutation({
+    mutationFn: () => collectExtrasInCash(id),
+    onMutate: () => setError(null),
+    onSuccess: (result) => adopt(result.booking),
+    onError: (cause) => fail(cause, 'Could not record the cash for the extra day.'),
+  });
+
   const reportPin = useMutation({
     mutationFn: async () => {
       const fix = await currentFix();
@@ -345,7 +353,7 @@ export default function TripScreen(): ReactElement {
         <ExtensionRequestCard booking={booking} />
 
         <View style={styles.metaRow}>
-          <Meta icon="tag" label="Fare" value={booking.fare.total.amount_display} />
+          <Meta icon="tag" label="Fare" value={booking.payable.total.amount_display} />
           <Meta
             icon={cash ? 'dollar-sign' : 'credit-card'}
             label="Payment"
@@ -407,7 +415,7 @@ export default function TripScreen(): ReactElement {
             <View style={styles.paymentWarningRow}>
               <Feather name="clock" size={16} color="#B45309" />
               <Text style={styles.paymentWarningText}>
-                Waiting for customer online payment ({booking.fare.total.amount_display}). The ride cannot be ended until payment is received.
+                Waiting for customer online payment ({booking.payable.total.amount_display}). The ride cannot be ended until payment is received.
               </Text>
             </View>
             {/* The way through when their phone is dead, out of signal, or their card keeps
@@ -435,8 +443,46 @@ export default function TripScreen(): ReactElement {
           <Animated.View entering={FadeIn} style={styles.paymentSuccess}>
             <Feather name="check-circle" size={16} color="#166534" />
             <Text style={styles.paymentSuccessText}>
-              Payment received online ({booking.fare.total.amount_display}). Your share will be added to your wallet upon ending the trip.
+              Payment received online ({booking.payable.total.amount_display}). Your share will be added to your wallet upon ending the trip.
             </Text>
+          </Animated.View>
+        ) : null}
+
+        {/*
+          THE EXTRA DAY, STILL UNPAID. The driver agreed to it, the customer has a Pay button for
+          it in their own app, and the server refuses to end the trip until it clears — so say that
+          here rather than letting the driver find out by sliding to complete and being told no.
+
+          Separate from the "waiting for online payment" notice above it: that one is the FARE, and
+          on a trip in this state the fare has usually been paid for hours.
+        */}
+        {booking.status === 'STARTED' && booking.payable.outstanding.amount_paise > 0 ? (
+          <Animated.View entering={FadeIn} style={styles.paymentWarningColumn}>
+            <View style={styles.paymentWarningRow}>
+              <Feather name="clock" size={16} color="#B45309" />
+              <Text style={styles.paymentWarningText}>
+                Your customer still has to pay {booking.payable.outstanding.amount_display} for the
+                extra day. The trip cannot be ended until it comes through.
+              </Text>
+            </View>
+            {/*
+              The door in the gate. "Customer paid me cash instead" above only works while the
+              FARE is unpaid, and on this trip it usually is not — they paid this morning and
+              their phone died tonight. This moves the extra day alone.
+            */}
+            <Pressable
+              onPress={() => takeExtrasCash.mutate()}
+              disabled={takeExtrasCash.isPending}
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.takeCashBtn,
+                pressed && styles.takeCashBtnPressed,
+                takeExtrasCash.isPending && styles.takeCashBtnDisabled,
+              ]}
+            >
+              <Feather name="dollar-sign" size={15} color="#92400E" />
+              <Text style={styles.takeCashBtnText}>They paid me the extra day in cash</Text>
+            </Pressable>
           </Animated.View>
         ) : null}
 
@@ -444,7 +490,7 @@ export default function TripScreen(): ReactElement {
           <Animated.View entering={FadeIn} style={styles.cashNote}>
             <Feather name="dollar-sign" size={16} color={colors.warning} />
             <Text style={styles.cashNoteText}>
-              Collect {booking.fare.total.amount_display} in cash before you end the trip.
+              Collect {booking.payable.total.amount_display} in cash before you end the trip.
             </Text>
           </Animated.View>
         ) : null}
@@ -571,7 +617,7 @@ export default function TripScreen(): ReactElement {
             <Text style={styles.doneTitle}>Trip complete</Text>
             <Text style={styles.doneBody}>
               {cash
-                ? `You collected ${booking.fare.total.amount_display}. Your share is in your earnings.`
+                ? `You collected ${booking.payable.total.amount_display}. Your share is in your earnings.`
                 : 'Your share has been added to your earnings.'}
             </Text>
 

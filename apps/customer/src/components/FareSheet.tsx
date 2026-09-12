@@ -4,7 +4,15 @@ import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import type {
   CarCategory,
@@ -44,6 +52,15 @@ interface FareSheetProps {
 }
 
 /**
+ * The two questions this sheet asks, in the order it asks them.
+ *
+ * `fare` — WHICH PRODUCT, when there is more than one. `details` — everything that is true
+ * whichever one they picked: the car in the driveway, who to ring first, what the price does not
+ * cover.
+ */
+type Stage = 'fare' | 'details';
+
+/**
  * The fare card, as a sheet over the map rather than a screen of its own.
  *
  * **Why not a route.** Choosing a fare is not a departure from the booking screen, it is the last
@@ -57,6 +74,18 @@ interface FareSheetProps {
  * **It renders the quote it is given, and never fetches.** Home already holds the answer — it
  * needs it to decide whether Continue can be pressed at all — so this receives the same
  * `TripQuote` rather than asking a second time.
+ *
+ * **TWO STAGES, because everything used to be on one.** The fare list, the wallet strip, two rows
+ * of car chips, the favourites switch, the driver-expenses notice with its checkbox and its FAQ
+ * link, and the confirm button all shared one sheet. The sheet is capped at the screen, so the
+ * fares were squeezed into a 240pt scroll region with its indicator hidden — a list of prices the
+ * customer could not see the bottom of, sitting above a form. Splitting it gives the prices the
+ * whole sheet while they are being compared, and the rest of the questions the whole sheet once
+ * that is decided.
+ *
+ * **The split only appears when there is something to split.** An outstation trip with one fare
+ * has no choice to make, so it opens straight on `details` and the Back control never shows —
+ * a first step containing a single non-choice is a tap charged for nothing.
  */
 export function FareSheet({
   visible,
@@ -81,6 +110,29 @@ export function FareSheet({
   const selected = options.find((option) => option.quote_id === selectedId) ?? options[0] ?? null;
   const many = options.length > 1;
   const facts = card === null ? null : tripFacts(card);
+
+  /**
+   * Which stage the sheet is on — and it is REQUESTED, not absolute: with a single option there
+   * is no fare stage to be on, so `stage` below resolves it against what is actually on offer.
+   * Deriving it that way rather than forcing the state means a re-quote that collapses three
+   * options into one cannot strand the customer on a picker with one row in it.
+   */
+  const [requestedStage, setRequestedStage] = useState<Stage>('fare');
+  const stage: Stage = many ? requestedStage : 'details';
+
+  /** The chosen fare's own breakdown, on the second stage. Closed by default: it is a reference. */
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+
+  /*
+   * A FRESH SHEET EVERY TIME IT OPENS. Without this, dismissing from the second stage and
+   * reopening — a customer who changed a pin and came back — lands them on the car questions for
+   * a trip whose prices they have not seen.
+   */
+  useEffect(() => {
+    if (!visible) return;
+    setRequestedStage('fare');
+    setBreakdownOpen(false);
+  }, [visible]);
 
   /**
    * Whether THIS selected option carries the driver-expenses warning — every option except the
@@ -146,8 +198,28 @@ export function FareSheet({
    */
   useEffect(() => {
     setAgreed(false);
+    // The open breakdown belonged to the previous fare. Left open it would animate its rows into
+    // a different set of numbers under a heading the customer did not ask to change.
+    setBreakdownOpen(false);
     idempotencyKey.current = Crypto.randomUUID();
   }, [selected?.quote_id]);
+
+  /**
+   * A RE-QUOTE THAT REPLACED THE OPTION THE CUSTOMER HAD CHOSEN sends them back to the prices.
+   *
+   * `selected` falls back to the first option whenever the stored id matches nothing — which is
+   * right, and was invisible while everything lived on one sheet. On a second stage it is not: the
+   * customer picked the 6-hour package, a re-quote landed, and they would be looking at car chips
+   * above a button carrying the 3-hour price with nothing on screen saying so. Detected by the
+   * fallback having fired, which is exactly the condition, rather than by watching the fare change
+   * — a tap changes that too.
+   */
+  const selectionLost =
+    selectedId !== null && !options.some((option) => option.quote_id === selectedId);
+
+  useEffect(() => {
+    if (selectionLost && many) setRequestedStage('fare');
+  }, [selectionLost, many]);
 
   /**
    * The booking confirms and dispatches immediately without upfront payment.
@@ -196,12 +268,53 @@ export function FareSheet({
   const quoteExpired =
     confirmBooking.error instanceof ApiError && confirmBooking.error.code === 'QUOTE_EXPIRED';
 
+  /** A new price is a new decision — it comes back with the prices, not on the car questions. */
+  function requote(): void {
+    setRequestedStage('fare');
+    onRequote();
+  }
+
+  /**
+   * How tall the fare list may grow before it scrolls.
+   *
+   * Measured against the window rather than fixed at 240 as it was: that number was chosen when
+   * the car chips and the terms block shared this sheet, and with them moved to the second stage
+   * the prices can have the room. Still capped, because `BottomSheet` caps the sheet at the screen
+   * and an uncapped list would push the Continue button off the bottom of it.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const listMaxHeight = Math.max(240, Math.min(440, windowHeight * 0.46));
+  const detailMaxHeight = Math.max(260, Math.min(520, windowHeight * 0.54));
+
   return (
     <BottomSheet visible={visible} onClose={onClose}>
       <View style={styles.head}>
+        {/*
+          THE WAY BACK TO THE PRICES, and only when there were several to choose from. On a
+          one-fare trip there is nothing behind this stage, and a Back control that dismisses the
+          sheet instead of stepping back is the kind of small lie that costs a booking.
+        */}
+        {stage === 'details' && many ? (
+          <Pressable
+            onPress={() => setRequestedStage('fare')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Back to the fares"
+            style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+          >
+            <Feather name="chevron-left" size={20} color={colors.fg} />
+          </Pressable>
+        ) : null}
+
         <View style={styles.headText}>
           <Text style={styles.title}>
-            {card === null ? 'Your fare' : many ? 'Choose how long you need' : 'Your fare'}
+            {card === null
+              ? 'Your fare'
+              : stage === 'details'
+                ? 'Confirm your ride'
+                : many
+                  ? 'Choose how long you need'
+                  : 'Your fare'}
           </Text>
           {facts === null ? null : <Text style={styles.facts}>{facts}</Text>}
         </View>
@@ -253,11 +366,9 @@ export function FareSheet({
             <Text style={styles.noticeBody}>{unavailable.message}</Text>
           </View>
         </Animated.View>
-      ) : (
+      ) : stage === 'fare' ? (
         <ScrollView
-          // Capped rather than free-growing: an incity package with five durations must not push
-          // the confirm button off the bottom of the screen.
-          style={styles.list}
+          style={[styles.list, { maxHeight: listMaxHeight }]}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           // Dimmed AND inert while a re-quote is in flight — a stale price presented at full
@@ -284,149 +395,177 @@ export function FareSheet({
             ))}
           </View>
         </ScrollView>
-      )}
+      ) : (
+        /*
+          STAGE TWO — everything that is true whichever fare they picked.
+          In the order the customer meets it: what they are paying, what the wallet does to it,
+          what the driver will be driving, who to ring first, and what the price does not cover.
 
-      {/*
-        OUTSIDE the fare list's scroll view, and pinned above the button.
-
-        It went in there first, under the prices, on the theory that it is part of the same "what
-        am I booking" decision. In practice the list is capped at a few hundred points with its
-        indicator hidden, so on any trip with more than one fare option these chips were below the
-        fold of a region that does not look scrollable — an invisible required input holding the
-        Confirm button down. The fares gave up the height instead.
-
-        Hidden while there is nothing to confirm: an error, an unavailable trip or an expired
-        quote all replace the button with a different action, and asking about the car under a
-        "we could not get a price" notice is asking about a booking that cannot happen.
-      */}
-      {/*
-        WHAT THE WALLET DOES TO THIS TRIP, shown before the button rather than discovered on the
-        receipt. A customer with credit should see the number that made the total smaller, and one
-        carrying a fee should learn about it here rather than by having Confirm refuse them.
-      */}
-      {card !== null && unavailable === null && (creditAppliedPaise > 0 || owedPaise > 0) ? (
-        <Animated.View entering={FadeIn.duration(180)} style={styles.wallet}>
-          {creditAppliedPaise > 0 ? (
-            <View style={styles.walletRow}>
-              <Feather name="gift" size={14} color={colors.success} />
-              {/*
-                THE APPLIED FIGURE, not the balance. Credit is capped at the fare, so a customer
-                holding ₹500 against a ₹300 trip spends ₹300 — showing "−₹500" beside a Confirm
-                button reading ₹0 would be two numbers on one screen that do not add up.
-              */}
-              <Text style={styles.walletLabel}>
-                {creditPaise > farePaise
-                  ? `Wallet credit (${formatPaise(creditPaise - creditAppliedPaise)} left over)`
-                  : 'Wallet credit'}
-              </Text>
-              <Text style={styles.walletGood}>−{formatPaise(creditAppliedPaise)}</Text>
-            </View>
-          ) : null}
-          {owedPaise > 0 ? (
-            <View style={styles.walletRow}>
-              <Feather name="alert-circle" size={14} color={colors.danger} />
-              <Text style={styles.walletLabel}>Unpaid cancellation fee</Text>
-              <Text style={styles.walletBad}>
-                +{wallet.data?.amount_owed.amount_display ?? ''}
-              </Text>
-            </View>
-          ) : null}
-        </Animated.View>
-      ) : null}
-
-      {card !== null && unavailable === null && !query.isError && !countdown.expired ? (
-        <CarChoice
-          category={carCategory}
-          vehicleType={vehicleType}
-          onCategory={setCarCategory}
-          onVehicleType={setVehicleType}
-        />
-      ) : null}
-
-      {/*
-        OFFERED ONLY TO A CUSTOMER WHO HAS FAVOURITES. A switch that can do nothing is worse than
-        no switch: it promises a feature and then behaves identically either way. Someone who has
-        never added one finds this row after their first trip, next to the driver they just rode
-        with, which is where the heart is.
-      */}
-      {favourites.favourites.length > 0 &&
-      card !== null &&
-      unavailable === null &&
-      !query.isError &&
-      !countdown.expired ? (
-        <Pressable
-          onPress={() => setPreferFavouriteDrivers((on) => !on)}
-          style={styles.favouriteRow}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: preferFavouriteDrivers }}
+          SCROLLED, because on a small phone two rows of chips, a switch and a consent block do not
+          fit under a fare box — and the one control that must never be scrolled away, the button,
+          is outside this view.
+        */
+        <ScrollView
+          style={[styles.detail, { maxHeight: detailMaxHeight }]}
+          contentContainerStyle={styles.detailContent}
+          showsVerticalScrollIndicator={false}
+          pointerEvents={stale ? 'none' : 'auto'}
         >
-          <Feather name="heart" size={15} color={colors.fg} style={styles.noticeIcon} />
-          <View style={styles.flex}>
-            <Text style={styles.favouriteLabel}>Ring my favourite drivers first</Text>
-            {/* Says what happens when they do NOT take it, because that is the question a
-                customer actually has about a switch like this. */}
-            <Text style={styles.favouriteHint}>
-              If none of them takes it, we look for everyone else straight away.
-            </Text>
-          </View>
-          <ToggleSwitch
-            value={preferFavouriteDrivers}
-            onChange={setPreferFavouriteDrivers}
-            accessibilityLabel="Ring my favourite drivers first"
-          />
-        </Pressable>
-      ) : null}
+          <View style={stale ? styles.stale : undefined}>
+            {selected === null ? null : (
+              <>
+                <FareOptionCard
+                  option={selected}
+                  selected
+                  summary
+                  onPress={() => setBreakdownOpen((open) => !open)}
+                  showBreakdown={breakdownOpen}
+                />
+                {many ? (
+                  <Pressable
+                    onPress={() => setRequestedStage('fare')}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.changeLink, pressed && styles.pressedDim]}
+                  >
+                    <Feather name="repeat" size={13} color={colors.fg} />
+                    <Text style={styles.changeLinkText}>Choose a different fare</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            )}
 
-      {/*
-        THE ONE WARNING EVERY TRIP CARRIES EXCEPT THE INCITY 3-HOUR PACKAGE — this app's price
-        never includes what the driver eats, or where they stay if the trip runs that long. Placed
-        between the list and the button rather than folded into the breakdown: it is not a fare
-        line, it is money that changes hands outside this app entirely, and burying it among rows
-        that ARE in the total would read as if it were one of them.
-      */}
-      {needsAgreement && !stale ? (
-        <Animated.View entering={FadeIn.duration(180)} style={styles.terms}>
-          <View style={styles.termsHead}>
-            <Feather name="info" size={14} color={colors.muted} style={styles.noticeIcon} />
-            <View style={styles.flex}>
-              <Text style={styles.termsBody}>
-                This trip does not cover the driver&apos;s food, or a place to stay if it runs that
-                long. You will settle that directly with the driver, not through the app.
-              </Text>
-              {/*
-                THE AMOUNTS LIVE IN THE FAQs, because they are not a fare line and nothing here
-                can quote them — an admin writes them down and both apps read the same answer.
-                Below the notice and above the checkbox on purpose: the agreement is a gate, and
-                a customer must not have to tap a link to find out what they are agreeing to.
-              */}
+            {/*
+              WHAT THE WALLET DOES TO THIS TRIP, shown before the button rather than discovered on
+              the receipt. A customer with credit should see the number that made the total
+              smaller, and one carrying a fee should learn about it here rather than by having
+              Confirm refuse them.
+            */}
+            {creditAppliedPaise > 0 || owedPaise > 0 ? (
+              <Animated.View entering={FadeIn.duration(180)} style={styles.wallet}>
+                {creditAppliedPaise > 0 ? (
+                  <View style={styles.walletRow}>
+                    <Feather name="gift" size={14} color={colors.success} />
+                    {/*
+                      THE APPLIED FIGURE, not the balance. Credit is capped at the fare, so a
+                      customer holding ₹500 against a ₹300 trip spends ₹300 — showing "−₹500"
+                      beside a button reading ₹0 would be two numbers that do not add up.
+                    */}
+                    <Text style={styles.walletLabel}>
+                      {creditPaise > farePaise
+                        ? `Wallet credit (${formatPaise(creditPaise - creditAppliedPaise)} left over)`
+                        : 'Wallet credit'}
+                    </Text>
+                    <Text style={styles.walletGood}>−{formatPaise(creditAppliedPaise)}</Text>
+                  </View>
+                ) : null}
+                {owedPaise > 0 ? (
+                  <View style={styles.walletRow}>
+                    <Feather name="alert-circle" size={14} color={colors.danger} />
+                    <Text style={styles.walletLabel}>Unpaid cancellation fee</Text>
+                    <Text style={styles.walletBad}>
+                      +{wallet.data?.amount_owed.amount_display ?? ''}
+                    </Text>
+                  </View>
+                ) : null}
+              </Animated.View>
+            ) : null}
+
+            <CarChoice
+              category={carCategory}
+              vehicleType={vehicleType}
+              onCategory={setCarCategory}
+              onVehicleType={setVehicleType}
+            />
+
+            {/*
+              OFFERED ONLY TO A CUSTOMER WHO HAS FAVOURITES. A switch that can do nothing is worse
+              than no switch: it promises a feature and then behaves identically either way.
+              Someone who has never added one finds this row after their first trip, next to the
+              driver they just rode with, which is where the heart is.
+            */}
+            {favourites.favourites.length > 0 ? (
               <Pressable
-                onPress={() => router.push('/info/faqs')}
-                hitSlop={8}
-                accessibilityRole="link"
-                accessibilityLabel="See the FAQs for what these costs usually come to"
-                style={({ pressed }) => [styles.termsLinkRow, pressed && styles.termsLinkPressed]}
+                onPress={() => setPreferFavouriteDrivers((on) => !on)}
+                style={styles.favouriteRow}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: preferFavouriteDrivers }}
               >
-                <Text style={styles.termsLink}>See FAQs for what these usually cost</Text>
-                <Feather name="chevron-right" size={13} color={colors.fg} />
+                <Feather name="heart" size={15} color={colors.fg} style={styles.noticeIcon} />
+                <View style={styles.flex}>
+                  <Text style={styles.favouriteLabel}>Ring my favourite drivers first</Text>
+                  {/* Says what happens when they do NOT take it, because that is the question a
+                      customer actually has about a switch like this. */}
+                  <Text style={styles.favouriteHint}>
+                    If none of them takes it, we look for everyone else straight away.
+                  </Text>
+                </View>
+                <ToggleSwitch
+                  value={preferFavouriteDrivers}
+                  onChange={setPreferFavouriteDrivers}
+                  accessibilityLabel="Ring my favourite drivers first"
+                />
               </Pressable>
-            </View>
+            ) : null}
+
+            {/*
+              THE ONE WARNING EVERY TRIP CARRIES EXCEPT THE INCITY 3-HOUR PACKAGE — this app's
+              price never includes what the driver eats, or where they stay if the trip runs that
+              long. Last before the button rather than folded into the breakdown: it is not a fare
+              line, it is money that changes hands outside this app entirely, and burying it among
+              rows that ARE in the total would read as if it were one of them.
+            */}
+            {needsAgreement ? (
+              <Animated.View entering={FadeIn.duration(180)} style={styles.terms}>
+                <View style={styles.termsHead}>
+                  <Feather name="info" size={14} color={colors.muted} style={styles.noticeIcon} />
+                  <View style={styles.flex}>
+                    <Text style={styles.termsBody}>
+                      This trip does not cover the driver&apos;s food, or a place to stay if it
+                      runs that long. You will settle that directly with the driver, not through
+                      the app.
+                    </Text>
+                    {/*
+                      THE AMOUNTS LIVE IN THE FAQs, because they are not a fare line and nothing
+                      here can quote them — an admin writes them down and both apps read the same
+                      answer. Below the notice and above the checkbox on purpose: the agreement is
+                      a gate, and a customer must not have to tap a link to find out what they are
+                      agreeing to.
+                    */}
+                    <Pressable
+                      onPress={() => router.push('/info/faqs')}
+                      hitSlop={8}
+                      accessibilityRole="link"
+                      accessibilityLabel="See the FAQs for what these costs usually come to"
+                      style={({ pressed }) => [
+                        styles.termsLinkRow,
+                        pressed && styles.termsLinkPressed,
+                      ]}
+                    >
+                      <Text style={styles.termsLink}>See FAQs for what these usually cost</Text>
+                      <Feather name="chevron-right" size={13} color={colors.fg} />
+                    </Pressable>
+                  </View>
+                </View>
+                <Checkbox
+                  checked={agreed}
+                  onChange={setAgreed}
+                  accessibilityLabel="I agree to cover the driver's food and stay directly"
+                >
+                  <Text style={styles.termsAgree}>
+                    I understand and will cover these costs directly with the driver.
+                  </Text>
+                </Checkbox>
+              </Animated.View>
+            ) : null}
           </View>
-          <Checkbox
-            checked={agreed}
-            onChange={setAgreed}
-            accessibilityLabel="I agree to cover the driver's food and stay directly"
-          >
-            <Text style={styles.termsAgree}>
-              I understand and will cover these costs directly with the driver.
-            </Text>
-          </Checkbox>
-        </Animated.View>
-      ) : null}
+        </ScrollView>
+      )}
 
       {countdown.expired && card !== null ? (
         <PrimaryButton
           label="Get a new price"
-          onPress={onRequote}
+          onPress={requote}
           loading={query.isFetching}
           showArrow={false}
         />
@@ -438,12 +577,37 @@ export function FareSheet({
         */
         <PrimaryButton
           label="Try again"
-          onPress={onRequote}
+          onPress={requote}
           loading={query.isFetching}
           showArrow={false}
         />
       ) : unavailable !== null ? (
         <PrimaryButton label="Change the trip" onPress={onClose} showArrow={false} />
+      ) : stage === 'fare' ? (
+        <>
+          {/*
+            AN EXPLICIT CONTINUE, not "tapping a fare takes you on". Tapping a card is how the
+            customer opens its breakdown to compare it against the one above — make that the same
+            gesture that leaves the screen and comparing two fares becomes impossible.
+
+            It carries the PAYABLE figure for the same reason the confirm button does: the number
+            on a button has to be the number the customer is agreeing to.
+          */}
+          <PrimaryButton
+            label={
+              selected === null ? 'Continue' : `Continue · ${formatPaise(payablePaise)}`
+            }
+            onPress={() => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setRequestedStage('details');
+            }}
+            disabled={selected === null || stale}
+            showArrow
+          />
+          <Text style={styles.pending} numberOfLines={2}>
+            {stale ? 'Getting you a fresh price…' : 'Next: your car, and who we ring first.'}
+          </Text>
+        </>
       ) : (
         <>
           <PrimaryButton
@@ -451,10 +615,10 @@ export function FareSheet({
               quoteExpired
                 ? 'Get a new price'
                 : selected === null
-                  ? 'Confirm booking'
+                  ? 'Book ride'
                   : // The PAYABLE figure, not the fare — the button must not promise a price the
                     // wallet is about to change.
-                    `Confirm booking · ${formatPaise(payablePaise)}`
+                    `Book ride · ${formatPaise(payablePaise)}`
             }
             onPress={() => {
               if (quoteExpired) {
@@ -462,7 +626,7 @@ export function FareSheet({
                 // must not follow it — otherwise the fresh price would render behind an error
                 // banner for a booking attempt that has already been abandoned.
                 confirmBooking.reset();
-                onRequote();
+                requote();
                 return;
               }
               void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -499,11 +663,22 @@ export function FareSheet({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  pressedDim: { opacity: 0.6 },
 
   head: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: space.md },
   headText: { flex: 1, paddingRight: space.sm },
   title: { ...text.heading, color: colors.fg },
   facts: { ...text.caption, color: colors.muted, marginTop: 2 },
+  /** Sized like the timer chip opposite it, so the title stays optically centred between them. */
+  back: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: space.xs,
+    marginTop: -2,
+  },
+  backPressed: { opacity: 0.5 },
 
   timer: {
     flexDirection: 'row',
@@ -521,11 +696,9 @@ const styles = StyleSheet.create({
   centre: { paddingVertical: space.xl, alignItems: 'center' },
   centreText: { ...text.body, color: colors.muted, marginTop: space.sm },
 
-  // Lowered from 340 when the car chips moved out of this scroll view and became a fixed block
-  // below it — at the old cap a multi-option incity quote pushed the confirm button off-screen.
   /*
-   * The wallet's effect on this trip, between the fares and the car chips. A bordered strip
-   * rather than another card: it is an amendment to the price above it, not a new subject.
+   * The wallet's effect on this trip, under the fare box. A bordered strip rather than another
+   * card: it is an amendment to the price above it, not a new subject.
    */
   wallet: {
     gap: space.xs,
@@ -540,9 +713,24 @@ const styles = StyleSheet.create({
   walletGood: { ...text.label, color: colors.success, fontFamily: fontFamily.semibold },
   walletBad: { ...text.label, color: colors.danger, fontFamily: fontFamily.semibold },
 
-  list: { maxHeight: 240, marginBottom: space.sm },
+  // `maxHeight` is applied inline, from the window — see `listMaxHeight`.
+  list: { marginBottom: space.sm },
   listContent: { paddingBottom: 2 },
+
+  detail: { marginBottom: space.sm },
+  detailContent: { paddingBottom: 2 },
   stale: { opacity: 0.45 },
+
+  /** The way back to the prices, under the box it would replace. A link, not a second button. */
+  changeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingVertical: space.xs,
+    marginBottom: space.sm,
+  },
+  changeLinkText: { ...text.caption, color: colors.fg, textDecorationLine: 'underline' },
 
   notice: {
     flexDirection: 'row',
@@ -563,7 +751,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgSunken,
     borderRadius: radius.md,
     padding: space.md,
+    // Matching gaps on both sides. Without the bottom one this sat flush against whatever
+    // followed — the terms block on most trips, and the button itself on the one fare with no
+    // warning to show.
     marginTop: space.md,
+    marginBottom: space.md,
     gap: space.sm,
   },
   favouriteLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.semibold },
@@ -581,7 +773,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.bgSunken,
     padding: space.sm,
-    marginBottom: space.md,
   },
   termsHead: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: space.sm },
   /** No `flex` of its own any more — the shared `flex` style sits on the wrapper the notice text

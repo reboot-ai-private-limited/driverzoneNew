@@ -16,6 +16,7 @@ import { toErrorState } from '@/lib/api/toErrorState';
 import { useIncityPackages, useOutstationPackages } from '../hooks/usePackages';
 import { IncityTable, INCITY_COLUMN_WIDTHS } from './IncityTable';
 import { OutstationView } from './OutstationView';
+import { TripResolutionPanel } from './TripResolutionPanel';
 
 /**
  * The packages screen — what we actually sell, and what it costs.
@@ -116,6 +117,13 @@ export function PackagesScreen() {
           )}
         </DataState>
       </section>
+
+      {/*
+        BELOW BOTH TABS, not inside either. The question it answers — which product a trip
+        resolves to — spans the two, and it is the screen somebody reaches for when a package is
+        configured and a trip still prices wrong.
+      */}
+      <TripResolutionPanel />
     </div>
   );
 }

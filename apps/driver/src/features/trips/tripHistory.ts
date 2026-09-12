@@ -75,10 +75,15 @@ export function tripHappenedAt(booking: BookingDto): string {
  * screen's own breakdown, which lists both.
  */
 export function tripTotalPaise(booking: BookingDto): number {
-  return booking.adjustments.reduce(
-    (sum, adjustment) => sum + adjustment.amount.amount_paise,
-    booking.fare.total.amount_paise,
-  );
+  /*
+   * READ OFF `payable` RATHER THAN SUMMED FROM `adjustments`, which is what this did. The server
+   * does that arithmetic once for every client, and two copies is how a trip row and the trip
+   * screen come to disagree. It also picks up an extra day the driver has already agreed to on a
+   * trip still under way — the `DAY_EXTENSION` adjustment carrying it is not written until
+   * completion, so summing adjustments saw nothing until the trip was over.
+   */
+  const { fare_total, extension_total, waiting_total } = booking.payable;
+  return fare_total.amount_paise + extension_total.amount_paise + waiting_total.amount_paise;
 }
 
 /**
@@ -107,13 +112,14 @@ export function toTripHistoryRow(booking: BookingDto): TripHistoryRow {
     isCash: booking.payment_mode === 'CASH',
     totalPaise,
     /*
-     * The server's string is only correct while nothing has been added to the fare. With an
-     * adjustment there is no preformatted total for fare+adjustments, so this formats it — which
-     * is why `formatPaise` is needed here at all rather than every total coming down the wire.
+     * The server's string whenever one describes this figure — which is whenever nothing has been
+     * added to the fare. Only a trip that grew needs formatting here, and it is worth avoiding:
+     * Hermes ships a reduced ICU on Android, so `₹1,00,000` renders as `₹100,000` on some phones
+     * and correctly on others. That is exactly why `toMoney` preformats on the server.
      */
     totalDisplay:
-      totalPaise === booking.fare.total.amount_paise
-        ? booking.fare.total.amount_display
+      totalPaise === booking.payable.fare_total.amount_paise
+        ? booking.payable.fare_total.amount_display
         : formatPaise(totalPaise),
   };
 }

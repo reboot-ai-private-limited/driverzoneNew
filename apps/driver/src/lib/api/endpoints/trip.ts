@@ -135,6 +135,21 @@ export function switchToCash(bookingId: string): Promise<SwitchToCashResponse> {
 }
 
 /**
+ * "They paid me the extra day in cash." The narrow version of the above, and the only way out of
+ * the extension gate on a trip whose FARE already went through online.
+ *
+ * `switchToCash` cannot help there: it refuses a booking that has already been paid for online,
+ * which is precisely the trip this happens on. Only the extra day moves; the fare stays put.
+ */
+export function collectExtrasInCash(bookingId: string): Promise<SwitchToCashResponse> {
+  return request<SwitchToCashResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/extras/cash`, {
+    method: 'POST',
+    body: {},
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
  * "I am here and the pin is not."
  *
  * The documented way out of the arrival gate, and deliberately NOT a self-serve override: it

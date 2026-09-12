@@ -1,5 +1,11 @@
 import type { Direction } from '@driverzone/contracts';
-import type { TripContext, PackageMatch, Unavailable } from '../../packages.public.js';
+import type {
+  TripContext,
+  PackageMatch,
+  ResolutionResult,
+  ResolutionTrace,
+  Unavailable,
+} from '../../packages.public.js';
 import type { PackageRepositoryPort } from '../../domain/packageRepository.port.js';
 import type { IncityPackage } from '../../domain/incityPackage.entity.js';
 import { fareFor, type OutstationPackage } from '../../domain/outstationPackage.entity.js';
@@ -16,7 +22,17 @@ import { fareFor, type OutstationPackage } from '../../domain/outstationPackage.
 export class ResolveForTripUseCase {
   constructor(private readonly repo: PackageRepositoryPort) {}
 
+  /**
+   * The answer alone — what every quote asks for.
+   *
+   * Delegates to `explain` rather than the other way round, so there is exactly one copy of the
+   * ladder and the diagnostic cannot describe a decision this never takes.
+   */
   async execute(input: TripContext): Promise<{ available: true; match: PackageMatch } | Unavailable> {
+    return (await this.explain(input)).result;
+  }
+
+  async explain(input: TripContext): Promise<ResolutionResult> {
     // 3. build the candidate set
     let incityCandidates: IncityPackage[] = [];
     if (input.fromCityZoneId && input.toSameCityZone) {
@@ -40,21 +56,52 @@ export class ResolveForTripUseCase {
      */
     const validOutstation = outstationCandidates.filter((pkg) => fareFor(pkg, direction) !== null);
 
+    /*
+     * WHY IN-CITY IS NOT IN THE RUNNING, in the three ways it can fail to be. Built here, beside
+     * the filters it describes, rather than re-derived later from the result — a trace inferred
+     * from the answer is a trace that can disagree with the reason.
+     */
+    const incityRejected: ResolutionTrace['incityRejected'] =
+      validIncity.length > 0
+        ? null
+        : !input.toSameCityZone || input.fromCityZoneId === undefined
+          ? 'NOT_SAME_CITY'
+          : incityCandidates.length === 0
+            ? 'NO_PACKAGE_FOR_CITY'
+            : 'NO_ACTIVE_VARIANT';
+
+    const trace: ResolutionTrace = {
+      cityZoneId: input.fromCityZoneId ?? null,
+      toSameCityZone: input.toSameCityZone,
+      terrain,
+      distanceKm: input.distanceKm,
+      incityCandidates: incityCandidates.length,
+      incityRejected,
+      outstationCandidates: outstationCandidates.length,
+      outstationBandId: null,
+    };
+
     if (validIncity.length === 0 && validOutstation.length === 0) {
       if (
         outstationCandidates.length === 0 &&
         (!input.toSameCityZone || incityCandidates.length === 0)
       ) {
         return {
-          available: false,
-          code: 'NO_PACKAGE_FOR_DISTANCE',
-          message: 'No band covers this distance for this terrain',
+          trace,
+          result: {
+            available: false,
+            code: 'NO_PACKAGE_FOR_DISTANCE',
+            message: 'No band covers this distance for this terrain',
+          },
         };
       }
       return {
-        available: false,
-        code: 'NO_PACKAGE_AVAILABLE',
-        message: 'No package configured',
+        trace,
+        result: {
+          available: false,
+          code: 'NO_PACKAGE_AVAILABLE',
+          message: 'No package configured',
+        },
       };
     }
 
@@ -73,7 +120,7 @@ export class ResolveForTripUseCase {
      */
     const selectedIncity = this.getBestIncity(validIncity);
     if (selectedIncity) {
-      return { available: true, match: this.incityMatch(selectedIncity) };
+      return { trace, result: { available: true, match: this.incityMatch(selectedIncity) } };
     }
 
     // b. HILL beats PLAIN (handled by terrain logic)
@@ -86,22 +133,28 @@ export class ResolveForTripUseCase {
       const farePaise = fareFor(selectedOutstation, direction);
       if (farePaise !== null) {
         return {
-          available: true,
-          match: {
-            type: 'OUTSTATION',
-            package: selectedOutstation,
-            farePaise,
-            direction,
-            variants: (selectedOutstation.variants ?? []).filter((v) => v.isActive),
+          trace: { ...trace, outstationBandId: selectedOutstation.id },
+          result: {
+            available: true,
+            match: {
+              type: 'OUTSTATION',
+              package: selectedOutstation,
+              farePaise,
+              direction,
+              variants: (selectedOutstation.variants ?? []).filter((v) => v.isActive),
+            },
           },
         };
       }
     }
 
     return {
-      available: false,
-      code: 'NO_PACKAGE_AVAILABLE',
-      message: 'No package configured',
+      trace,
+      result: {
+        available: false,
+        code: 'NO_PACKAGE_AVAILABLE',
+        message: 'No package configured',
+      },
     };
   }
 

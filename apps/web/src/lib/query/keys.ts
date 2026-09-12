@@ -32,6 +32,14 @@ export const keys = {
      */
     validate: (fingerprint: string) => ['zones', 'validate', fingerprint] as const,
   },
+  /**
+   * The trip-resolution diagnostic. Keyed on the four coordinates and the direction, because
+   * that IS the question — two different pairs of points are two different answers, and a
+   * narrower key would show the verdict for the previous trip.
+   */
+  tripResolution: {
+    explain: (fingerprint: string) => ['quotes', 'explain', fingerprint] as const,
+  },
   packages: {
     /**
      * One root for both products, so a save on either invalidates the whole screen. They are

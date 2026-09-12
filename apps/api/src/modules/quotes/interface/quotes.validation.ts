@@ -53,3 +53,20 @@ export const createQuoteSchema = z
 
 export type CreateQuoteBody = z.input<typeof createQuoteSchema>;
 export type CreateQuoteInputParsed = z.infer<typeof createQuoteSchema>;
+
+/**
+ * `GET /admin/quotes/explain` — two points, as query parameters.
+ *
+ * A GET WITH A QUERY STRING rather than a POST with a body, because it reads and writes nothing:
+ * an admin can paste the URL into a ticket, and the answer is the same every time it is opened.
+ * `z.coerce.number()` because a query string has no numbers in it.
+ */
+export const explainTripQuerySchema = z
+  .object({
+    pickup_lat: z.coerce.number().min(-90).max(90),
+    pickup_lng: z.coerce.number().min(-180).max(180),
+    drop_lat: z.coerce.number().min(-90).max(90),
+    drop_lng: z.coerce.number().min(-180).max(180),
+    direction: z.enum(DIRECTIONS).optional(),
+  })
+  .strict();

@@ -38,6 +38,7 @@ export interface BookingDoc {
   paymentStatus?: string | null;
   paymentId?: mongoose.Types.ObjectId | null;
   paidExtensionPaise?: number;
+  cashExtensionPaise?: number;
   isScheduled: boolean;
   scheduledAt: Date;
   dispatchAt: Date;
@@ -125,6 +126,8 @@ const bookingSchema = new Schema<BookingDoc>(
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', default: null },
     /** How much of an already-accepted day extension rode along in the payment-selection charge. */
     paidExtensionPaise: { type: Number, default: 0, min: 0 },
+    /** Of that, what the DRIVER took in cash on an otherwise-UPI trip. See the entity field. */
+    cashExtensionPaise: { type: Number, default: 0, min: 0 },
 
     isScheduled: { type: Boolean, required: true, default: false },
     scheduledAt: { type: Date, required: true },

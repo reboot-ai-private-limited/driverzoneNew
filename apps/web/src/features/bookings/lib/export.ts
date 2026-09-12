@@ -23,7 +23,7 @@ const HEADERS = [
   'Destination',
   'Trip type',
   'Status',
-  'Fare',
+  'Total',
 ] as const;
 
 function row(booking: BookingDto): string[] {
@@ -45,7 +45,7 @@ function row(booking: BookingDto): string[] {
     statusLabel(booking.status),
     // `amount_display`, not a local format: contracts preformats it "so all four clients render
     // identically", and an export that disagreed with the screen would be the one people trust.
-    booking.fare.total.amount_display,
+    booking.payable.total.amount_display,
   ];
 }
 

@@ -35,8 +35,18 @@ interface DraggableSheetProps {
    */
   detent?: SheetDetent;
   onDetentChange?: (detent: SheetDetent) => void;
-  /** The measured full height, so a caller can tell the map how much of it is covered. */
-  onHeightChange?: (height: number) => void;
+  /**
+   * How much of the screen the sheet is COVERING right now — the measured height minus however
+   * far it has been dragged down, not the measured height on its own.
+   *
+   * THAT DISTINCTION IS THE WHOLE POINT, and reporting the raw measurement was a real bug. The
+   * caller feeds this straight to the map as `bottomInset`, which becomes the map's own padding
+   * AND the bottom edge-padding `fitToCoordinates` frames a route inside. A sheet dragged down to
+   * its peek still reported its full height, so the map believed several hundred points more were
+   * hidden than actually were: the crosshair drifted off the point it was reporting, and framing a
+   * pickup/drop pair had almost no room left to put them in.
+   */
+  onHeightChange?: (visibleHeight: number) => void;
 }
 
 /**
@@ -77,9 +87,28 @@ export function DraggableSheet({
     return which === 'small' ? maxOffset.value : 0;
   }
 
+  /**
+   * Tells the caller how much of the screen is covered, from an offset.
+   *
+   * ONE FUNCTION, CALLED FROM ALL THREE PLACES THE SHEET CAN MOVE — first layout, a relayout, and
+   * the end of a drag. The map's framing depends on this being current, and three separate
+   * subtractions is how one of them ends up reporting the full height again.
+   */
+  function reportVisible(measured: number, atOffset: number): void {
+    onHeightChange?.(Math.max(0, measured - atOffset));
+  }
+
+  /** The JS-thread half of a finished drag: tell the caller where it landed, and how tall it is. */
+  function settleTo(which: SheetDetent, measured: number, atOffset: number): void {
+    onDetentChange?.(which);
+    reportVisible(measured, atOffset);
+  }
+
   useEffect(() => {
     if (detent === undefined) return;
-    offset.value = withSpring(offsetFor(detent), SPRING);
+    const next = offsetFor(detent);
+    offset.value = withSpring(next, SPRING);
+    reportVisible(height, next);
   }, [detent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pan = Gesture.Pan()
@@ -105,9 +134,15 @@ export function DraggableSheet({
             : offset.value > maxOffset.value / 2;
 
       // No overshoot in SPRING: a sheet that bounces past its own edge shows the screen behind it.
-      offset.value = withSpring(toSmall ? maxOffset.value : 0, SPRING);
+      const landing = toSmall ? maxOffset.value : 0;
+      offset.value = withSpring(landing, SPRING);
 
-      if (onDetentChange !== undefined) runOnJS(onDetentChange)(toSmall ? 'small' : 'large');
+      /*
+       * Reported from the LANDING offset, not from where the finger let go. The map re-pads
+       * itself from this, and padding it to a position the sheet is still springing away from
+       * would leave the inset wrong for good — nothing reports again once the spring settles.
+       */
+      runOnJS(settleTo)(toSmall ? 'small' : 'large', height, landing);
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -140,7 +175,6 @@ export function DraggableSheet({
           const measured = event.nativeEvent.layout.height;
           if (measured <= 0) return;
           setHeight(measured);
-          onHeightChange?.(measured);
 
           const max = Math.max(0, measured - peekHeight);
           maxOffset.value = max;
@@ -154,6 +188,10 @@ export function DraggableSheet({
             // A later relayout shrank the sheet below where it was dragged; close the gap.
             offset.value = max;
           }
+
+          // AFTER the offset is decided, never before: a report taken above would describe the
+          // previous position, and on the very first layout there is no previous position at all.
+          reportVisible(measured, offset.value);
         }}
       >
         {/*

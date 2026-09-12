@@ -191,6 +191,8 @@ export function toBookingDto(view: BookingView): BookingDto {
       amount: toMoney(adjustment.amountPaise),
     })),
 
+    payable: toPayableBlock(view),
+
     extension: toExtensionBlock(view),
 
     timestamps: {
@@ -277,6 +279,84 @@ function toCustomerDto(view: BookingView): BookingDto['customer'] {
  * Support staff should never have to ask an engineer what happened to a booking — this is the
  * list that makes that true, so nothing is summarised or filtered on the way out.
  */
+/**
+ * What accepted day extensions add to this booking, from whichever source this read has.
+ *
+ * TWO SOURCES, NEVER SUMMED. A live-trip read passes `extensions` and the answer is the sum of the
+ * accepted rows. A read that did not — every history list — still has the truth for a FINISHED
+ * trip, because `completeTrip` writes the same total onto one `DAY_EXTENSION` adjustment row.
+ * Adding both together would double every extension on the one read that carries both.
+ *
+ * The rows win when present: they are current mid-trip, whereas the adjustment row does not exist
+ * until completion.
+ */
+function extensionPaise(view: BookingView): number {
+  if (view.extensions !== undefined) return totalExtension(view.extensions).amountPaise;
+
+  const row = view.adjustments.find((adjustment) => adjustment.type === 'DAY_EXTENSION');
+  return row?.amountPaise ?? 0;
+}
+
+/**
+ * The one figure both apps show as the price. See `BookingDto.payable` for why it exists at all.
+ *
+ * COMPUTED HERE RATHER THAN IN EACH APP, which is the entire point: the customer's total, the
+ * driver's "collect this much in cash" line and `expectedCashPaise` in `completeTrip.usecase.ts`
+ * are three renderings of one number, and they were three different numbers because each screen
+ * did its own arithmetic on `fare.total`.
+ *
+ * THE WALLET IS PART OF IT. Credit came off what the customer owes and a carried-over cancellation
+ * fee was added to it, so a driver told to collect the gross fare on a cash trip collects money the
+ * customer already spent — which is exactly the mismatch `expectedCashPaise` documents.
+ */
+function toPayableBlock(view: BookingView): BookingDto['payable'] {
+  const { booking } = view;
+  const farePaise = booking.fareSnapshot.fare.totalPaise;
+  const extrasPaise = extensionPaise(view);
+  const waitingPaise = booking.waitingChargePaise ?? 0;
+
+  const totalPaise = Math.max(
+    0,
+    farePaise + extrasPaise + waitingPaise - booking.walletCreditPaise + booking.walletDebtPaise,
+  );
+
+  /*
+   * ONLY THE EXTENSION CAN BE OUTSTANDING — on a UPI trip, and only WHILE IT IS STILL RUNNING.
+   *
+   * The fare itself has its own gate — `completeTrip` refuses to end a UPI trip whose booking
+   * charge has not captured — and the waiting charge is not known until the trip is already over,
+   * so neither is something the customer can be asked to pay at this moment. An extension is: the
+   * driver has agreed to it, it has a price, and the trip is still under way.
+   *
+   * THE `STARTED` CLAUSE IS NOT DECORATION. This field is what puts a "Pay for your extra day"
+   * button on the customer's trip screen, and `PayTripExtrasUseCase` refuses anything that is not
+   * STARTED — so without it a finished trip carrying an uncollected extension (one completed
+   * before that gate existed, or whose fare was switched to cash afterwards) would show a button
+   * that returns a 400 every single time it is pressed. Such an extension is a receivable for ops
+   * to chase, exactly like an uncollected waiting charge, not something to ask the customer for on
+   * a trip that is over.
+   *
+   * `paidExtensionPaise` is whatever has already been collected for it — folded into the booking
+   * order by `SelectPaymentMethodUseCase` when the extension predated payment, or captured by the
+   * extras order afterwards. On a cash trip it is nothing, because the driver takes the lot at the
+   * door.
+   */
+  const outstandingPaise =
+    booking.paymentMode === 'UPI' && booking.status === 'STARTED'
+      ? Math.max(0, extrasPaise - booking.paidExtensionPaise)
+      : 0;
+
+  return {
+    fare_total: toMoney(farePaise),
+    extension_total: toMoney(extrasPaise),
+    waiting_total: toMoney(waitingPaise),
+    wallet_credit: toMoney(booking.walletCreditPaise),
+    wallet_debt: toMoney(booking.walletDebtPaise),
+    total: toMoney(totalPaise),
+    outstanding: toMoney(outstandingPaise),
+  };
+}
+
 /**
  * The day-extension block, or `null` when this read was not asked to resolve one.
  *

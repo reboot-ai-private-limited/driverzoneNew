@@ -203,13 +203,16 @@ export default function RideDetailScreen(): ReactElement {
               <Text style={styles.totalLabel}>Total Amount</Text>
               <Text style={styles.totalValue}>{formatPaise(totalPaise)}</Text>
             </View>
+            {/*
+              THE SERVER'S OWN FIGURE AND ITS OWN STRING. `payable.total` is precisely "the fare
+              plus what was added, less the credit, plus the carried debt" — doing that subtraction
+              here again was a second copy that could drift from the receipt above it, and the
+              client-side format is the one `toMoney` exists to avoid (Hermes ships a reduced ICU on
+              Android and drops the lakh grouping).
+            */}
             {ride.wallet_credit.amount_paise > 0 || ride.wallet_debt.amount_paise > 0 ? (
               <Text style={styles.paidNote}>
-                You paid{' '}
-                {formatPaise(
-                  totalPaise - ride.wallet_credit.amount_paise + ride.wallet_debt.amount_paise,
-                )}{' '}
-                for this trip.
+                You paid {ride.payable.total.amount_display} for this trip.
               </Text>
             ) : null}
           </SectionCard>

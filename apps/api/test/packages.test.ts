@@ -486,6 +486,108 @@ describe('Packages Module', () => {
       }
     });
 
+    /*
+     * REPORTED AS A BUG: "an in-city tour that also falls inside an outstation band's range is
+     * charged as outstation". It is not — in-city wins at every distance, in both directions, and
+     * whether or not the drop is in a hill zone — so this pins all four so the next report is
+     * read as what it actually is: no sellable in-city package for that city, or a drop outside
+     * the polygon. `explain`'s trace is what tells the two apart.
+     */
+    it('keeps a same-city trip on INCITY whatever the band, direction or terrain', async () => {
+      const useCase = new ResolveForTripUseCase(
+        fakeRepo({
+          incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
+          outstation: [
+            outstation({
+              id: 'plain',
+              terrain: 'PLAIN',
+              roundTripFarePaise: 800000,
+              roundTripDriverAmountPaise: 600000,
+              variants: [variant(480, 400000)],
+            }),
+            outstation({
+              id: 'hill',
+              terrain: 'HILL',
+              roundTripFarePaise: 800000,
+              roundTripDriverAmountPaise: 600000,
+            }),
+          ],
+        }),
+      );
+
+      for (const toHillZone of [false, true]) {
+        for (const direction of ['ONE_WAY', 'ROUND_TRIP'] as const) {
+          const result = await useCase.execute({
+            ...inCityTrip,
+            toHillZone,
+            direction,
+            distanceKm: 95,
+          });
+          expect(result.available === true && result.match.type).toBe('INCITY');
+        }
+      }
+    });
+
+    describe('explain — why the ladder landed where it did', () => {
+      it('names the missing in-city package when a same-city trip falls to outstation', async () => {
+        const useCase = new ResolveForTripUseCase(
+          fakeRepo({ outstation: [outstation({ id: 'o1' })] }),
+        );
+
+        const { result, trace } = await useCase.explain({ ...inCityTrip, distanceKm: 20 });
+
+        expect(result.available === true && result.match.type).toBe('OUTSTATION');
+        expect(trace.incityRejected).toBe('NO_PACKAGE_FOR_CITY');
+        expect(trace.toSameCityZone).toBe(true);
+        expect(trace.outstationBandId).toBe('o1');
+      });
+
+      /* The other in-city failure, and the one an admin fixes differently: the package is there,
+         somebody deactivated every variant on it. */
+      it('distinguishes a package with no active variant from no package at all', async () => {
+        const useCase = new ResolveForTripUseCase(
+          fakeRepo({
+            incity: [incity({ id: 'i1', variants: [variant(180, 90000, false)] })],
+            outstation: [outstation({ id: 'o1' })],
+          }),
+        );
+
+        const { trace } = await useCase.explain({ ...inCityTrip, distanceKm: 20 });
+
+        expect(trace.incityRejected).toBe('NO_ACTIVE_VARIANT');
+        expect(trace.incityCandidates).toBe(1);
+      });
+
+      it('reports the drop being outside the city as its own reason', async () => {
+        const useCase = new ResolveForTripUseCase(
+          fakeRepo({
+            incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })],
+            outstation: [outstation({ id: 'o1' })],
+          }),
+        );
+
+        const { trace } = await useCase.explain({
+          fromCityZoneId: CITY,
+          toSameCityZone: false,
+          toHillZone: false,
+          distanceKm: 20,
+        });
+
+        expect(trace.incityRejected).toBe('NOT_SAME_CITY');
+        expect(trace.incityCandidates).toBe(0);
+      });
+
+      it('leaves the reason null when in-city did win', async () => {
+        const useCase = new ResolveForTripUseCase(
+          fakeRepo({ incity: [incity({ id: 'i1', variants: [variant(180, 90000)] })] }),
+        );
+
+        const { trace } = await useCase.explain({ ...inCityTrip, distanceKm: 20 });
+
+        expect(trace.incityRejected).toBeNull();
+      });
+    });
+
     it('selects the HILL band when the drop point is in a hill zone, never the PLAIN one', async () => {
       const useCase = new ResolveForTripUseCase(
         fakeRepo({

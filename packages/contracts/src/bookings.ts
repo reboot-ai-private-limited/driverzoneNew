@@ -127,6 +127,31 @@ export interface VerifyPaymentResponse {
   booking: BookingDto;
 }
 
+/**
+ * `POST /customer/bookings/:id/extras/pay` — an order for what an accepted day extension added.
+ *
+ * A SECOND ORDER, not an edit to the first. The booking's own order was created (and very often
+ * already paid) before the extension existed, and a gateway order's amount cannot be changed after
+ * the customer has been handed its id. So the extra gets its own checkout, and
+ * `booking.paidExtensionPaise` is what reconciles the two.
+ *
+ * Shaped like `CreateBookingResponse` minus the booking, plus the payment id — `extras/verify`
+ * needs to name WHICH payment it is confirming, since unlike the booking charge this one is not
+ * the one hanging off `booking.payment_id`.
+ */
+export interface PayTripExtrasResponse {
+  payment_id: string;
+  /** The Razorpay ORDER id, to hand to checkout. */
+  client_token: string | null;
+  public_key: string | null;
+  amount: Money;
+}
+
+/** The checkout callback for an extras order. `payment_id` is the one `extras/pay` returned. */
+export interface VerifyExtrasPaymentRequest extends VerifyPaymentRequest {
+  payment_id: string;
+}
+
 /** The driver's fallback when the customer cannot pay online and hands over cash instead. */
 export interface SwitchToCashResponse {
   booking: BookingDto;
@@ -274,6 +299,41 @@ export interface BookingDto {
 
   /** Charges decided after the quote — waiting time, extra days. Never edits `fare`. */
   adjustments: Array<{ type: string; label: string; amount: Money }>;
+
+  /**
+   * WHAT THE TRIP COSTS NOW — everything agreed so far, in one figure.
+   *
+   * `fare` is frozen at booking time (invariant B-1) and deliberately never moves, which is
+   * correct for a receipt and wrong for a price. A day extension the driver agreed to, a waiting
+   * charge, the customer's own wallet credit: all of them change what is actually owed and none
+   * of them can touch `fare`. So the server does that arithmetic once, here, and both apps render
+   * `total` rather than each re-deriving it — which is how the customer's screen and the driver's
+   * "collect this much in cash" line came to disagree with each other and with the ledger.
+   *
+   * The components are all present so a screen can show a breakdown without a second endpoint,
+   * and so the block visibly adds up: `total = fare_total + extension_total + waiting_total
+   * − wallet_credit + wallet_debt`, floored at zero.
+   */
+  payable: {
+    /** The frozen fare, repeated so this block stands on its own. Always equals `fare.total`. */
+    fare_total: Money;
+    /** Extra days the driver has ACCEPTED. Zero while a request is merely pending. */
+    extension_total: Money;
+    /** Waiting time beyond the free window. Zero until the trip has ended and it is known. */
+    waiting_total: Money;
+    wallet_credit: Money;
+    wallet_debt: Money;
+    total: Money;
+    /**
+     * Of `total`, what the customer still has to pay ONLINE right now — today only an accepted
+     * extension that the booking order did not already cover.
+     *
+     * Zero on a cash trip, where everything is collected at the door, and zero when there is
+     * nothing outstanding. Non-zero is the customer app's cue to show a pay button, and the
+     * reason the driver cannot end the trip yet.
+     */
+    outstanding: Money;
+  };
 
   /**
    * Buying another day on an outstation trip already under way.

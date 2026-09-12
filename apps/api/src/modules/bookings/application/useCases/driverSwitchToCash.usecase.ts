@@ -3,6 +3,8 @@ import { logger } from '../../../../shared/logging/logger.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
+import type { ExtensionRepositoryPort } from '../../domain/extensionRepository.port.js';
+import { totalExtension } from '../../domain/bookingExtension.entity.js';
 import { loadForDriver } from '../bookingAccess.js';
 
 export interface DriverSwitchToCashInput {
@@ -71,5 +73,59 @@ export class DriverSwitchToCashUseCase {
     }
 
     return updated ?? { ...booking, paymentMode: 'CASH', paymentStatus: 'CASH' };
+  }
+}
+
+export interface CollectExtrasInCashInput {
+  bookingId: string;
+  driverId: string;
+}
+
+/**
+ * The same fallback, for the one thing `DriverSwitchToCashUseCase` above cannot rescue.
+ *
+ * WHY IT EXISTS. `CompleteTripUseCase` refuses to end a UPI trip whose extra day has not been paid
+ * for — without that refusal the extra silently becomes a receivable nobody chases, which is the
+ * bug this whole path was built to close. But the usual way through a payment gate refuses a
+ * booking whose fare has ALREADY been paid online, and that is precisely the trip this happens
+ * on: the customer paid at nine in the morning, bought a day at nine at night, and their phone is
+ * now dead. Without this the driver is stuck on a gate with no door.
+ *
+ * IT DOES NOT TOUCH `paymentMode`. The fare really was paid online and switching the booking to
+ * cash would make `ConfirmLatePaymentUseCase` refund it. Only the extension moves, and only into
+ * `cashExtensionPaise`, so the ledger can book the driver as holding the company's money.
+ *
+ * THE DRIVER'S WORD, like `cashCollectedPaise` on completion. There is no way to verify cash
+ * changing hands at a kerb, and a system that pretends otherwise just makes the driver lie in a
+ * different field. Recording the real movement and letting reconciliation find a gap is the same
+ * choice `CompleteTripUseCase` documents.
+ */
+export class CollectExtrasInCashUseCase {
+  constructor(
+    private readonly repo: BookingRepositoryPort,
+    private readonly extensions: ExtensionRepositoryPort,
+  ) {}
+
+  async execute(input: CollectExtrasInCashInput): Promise<Booking> {
+    const booking = await loadForDriver(this.repo, input.bookingId, input.driverId);
+
+    if (booking.status !== 'STARTED') {
+      throw AppError.conflict('You can only do this while the trip is under way.');
+    }
+
+    const extras = totalExtension(await this.extensions.listForBooking(booking.id));
+    const owedPaise = extras.amountPaise - booking.paidExtensionPaise;
+    if (owedPaise <= 0) {
+      throw AppError.conflict('There is nothing outstanding on the extra day.');
+    }
+
+    const updated = await this.repo.addCashExtensionPaise(booking.id, owedPaise);
+
+    logger.info(
+      { bookingId: booking.id, reference: booking.reference, driverId: input.driverId, owedPaise },
+      'driver collected the day extension in cash',
+    );
+
+    return updated ?? booking;
   }
 }

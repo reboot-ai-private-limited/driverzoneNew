@@ -60,7 +60,8 @@ export function ExtendDayCard({ booking }: { booking: BookingDto }): ReactElemen
       {extraDays > 0 ? (
         <Text style={styles.agreed}>
           {extraDays} extra {extraDays === 1 ? 'day' : 'days'} added ·{' '}
-          {extension.extra_amount.amount_display}, charged at the end of your trip
+          {extension.extra_amount.amount_display}
+          {settlement(booking)}
         </Text>
       ) : null}
 
@@ -76,8 +77,11 @@ export function ExtendDayCard({ booking }: { booking: BookingDto }): ReactElemen
         <>
           <Text style={styles.body}>
             We will ask your driver to stay one more day. If they agree,{' '}
-            {extension.price?.amount_display ?? 'one more day'} is added to your bill at the end of
-            the trip — nothing is charged now.
+            {extension.price?.amount_display ?? 'one more day'} is added to your total
+            {booking.payment_mode === 'CASH'
+              ? ' and paid to your driver at the end of the trip'
+              : ' for you to pay here'}{' '}
+            — nothing is charged unless they say yes.
           </Text>
 
           <Pressable
@@ -113,6 +117,27 @@ export function ExtendDayCard({ booking }: { booking: BookingDto }): ReactElemen
   );
 }
 
+/**
+ * Where the money for the agreed days actually is, as a clause to hang off the amount.
+ *
+ * IT SAYS NOTHING RATHER THAN GUESSING, and that is the whole reason this is a function. The
+ * obvious version — "outstanding means pay below, otherwise it is paid" — tells two lies. A
+ * customer who has not chosen a payment method yet has an accepted day and a zero outstanding,
+ * because there is no order to owe anything on; that is not "paid". And `outstanding` is
+ * deliberately zero once the trip is over (see `payable.outstanding` on the server), so a finished
+ * trip carrying an extension nobody collected would claim it had been.
+ *
+ * "Paid" is therefore only ever said where it is guaranteed: a UPI trip still running, where
+ * nothing is outstanding — which `CompleteTripUseCase`'s own gate is built on. Everywhere else the
+ * amount stands on its own, which is true in every case.
+ */
+function settlement(booking: BookingDto): string {
+  if (booking.payable.outstanding.amount_paise > 0) return ', to pay below';
+  if (booking.payment_mode === 'CASH') return ', pay your driver at the end';
+  if (booking.payment_mode === 'UPI' && booking.status === 'STARTED') return ', paid';
+  return '';
+}
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.card,
@@ -121,6 +146,12 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: space.lg,
     gap: space.sm,
+    /*
+     * The trip screen's own cards each carry their own bottom gap — its `content` container has
+     * padding but no `gap`, so a card without this sits flush against the next one. This card was
+     * the only one missing it, which is why it read as overlapping the Booking details below it.
+     */
+    marginBottom: space.md,
   },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   title: { ...text.label, color: colors.fg, fontFamily: fontFamily.semibold },

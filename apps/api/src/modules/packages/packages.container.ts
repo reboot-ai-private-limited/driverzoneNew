@@ -44,6 +44,7 @@ export function buildPackagesContainer(): PackagesContainer {
   return {
     contract: {
       resolveForTrip: (input) => resolveForTrip.execute(input),
+      explainForTrip: (input) => resolveForTrip.explain(input),
     },
     buildAdminRouter: () =>
       buildAdminRouter({

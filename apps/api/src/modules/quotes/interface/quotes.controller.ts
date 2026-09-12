@@ -3,8 +3,9 @@ import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import { AppError } from '../../../shared/errors/AppError.js';
 import type { CreateQuoteUseCase } from '../application/useCases/createQuote.usecase.js';
-import { createQuoteSchema } from './quotes.validation.js';
-import { toCreateQuoteResponse } from './quotes.mapper.js';
+import type { ExplainTripUseCase } from '../application/useCases/explainTrip.usecase.js';
+import { createQuoteSchema, explainTripQuerySchema } from './quotes.validation.js';
+import { toCreateQuoteResponse, toExplainTripResponse } from './quotes.mapper.js';
 
 export function makeCreateQuoteController(useCase: CreateQuoteUseCase): RequestHandler {
   return asyncHandler(async (req, res) => {
@@ -38,5 +39,26 @@ export function makeCreateQuoteController(useCase: CreateQuoteUseCase): RequestH
     }
 
     sendSuccess(req, res, toCreateQuoteResponse(result), 'Quote created');
+  });
+}
+
+/**
+ * `GET /admin/quotes/explain` — which product a trip resolves to, and why.
+ *
+ * THE DIAGNOSTIC FOR "this in-city trip was charged as outstation". Returns the domain shape
+ * almost verbatim: there is no app rendering this to keep a wire contract stable for, and an
+ * admin reading a zone id needs the zone id, not a prettier name for it.
+ */
+export function makeExplainTripController(useCase: ExplainTripUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const q = explainTripQuerySchema.parse(req.query);
+
+    const result = await useCase.execute({
+      pickup: { lat: q.pickup_lat, lng: q.pickup_lng },
+      drop: { lat: q.drop_lat, lng: q.drop_lng },
+      ...(q.direction === undefined ? {} : { direction: q.direction }),
+    });
+
+    sendSuccess(req, res, toExplainTripResponse(result), 'Trip resolution');
   });
 }

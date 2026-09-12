@@ -45,7 +45,13 @@ import {
   showsStartOtp,
   tripStatusCopy,
 } from '@/features/booking/status';
-import { getBooking, selectPaymentMethod, verifyPayment } from '@/lib/api/endpoints/bookings';
+import {
+  getBooking,
+  payTripExtras,
+  selectPaymentMethod,
+  verifyExtrasPayment,
+  verifyPayment,
+} from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
 
@@ -105,7 +111,21 @@ export default function TripScreen(): ReactElement {
    * means they cancelled or it failed within the checkout itself, which is worth telling them.
    */
   const openCheckout = useCallback(
-    async (order: { clientToken: string; publicKey: string; amountPaise: number }) => {
+    async (order: {
+      clientToken: string;
+      publicKey: string;
+      amountPaise: number;
+      /**
+       * Which endpoint confirms THIS order, and the only thing that differs between the fare's
+       * checkout and the extra day's.
+       *
+       * A parameter rather than a second copy of this function: everything else here — the
+       * Razorpay options, the deliberate refusal to treat a resolved `open()` as payment, the
+       * error wording, the invalidation — is identical, and a duplicate would be one place for a
+       * checkout bug to get fixed and another for it not to.
+       */
+      verify: (razorpayPaymentId: string, signature: string) => Promise<unknown>;
+    }) => {
       setCheckoutInFlight(true);
       try {
         const result = await RazorpayCheckout.open({
@@ -127,7 +147,7 @@ export default function TripScreen(): ReactElement {
          * after they have actually paid, would be the worse lie.
          */
         try {
-          await verifyPayment(id, result.razorpay_payment_id, result.razorpay_signature);
+          await order.verify(result.razorpay_payment_id, result.razorpay_signature);
         } catch {
           /* the webhook remains the authority */
         }
@@ -156,11 +176,37 @@ export default function TripScreen(): ReactElement {
           clientToken: result.client_token,
           publicKey: result.public_key,
           amountPaise: result.amount.amount_paise,
+          verify: (paymentId, signature) => verifyPayment(id, paymentId, signature),
         });
       }
     },
     onError: (err) => {
       setPaymentError(err instanceof Error ? err.message : 'Could not set payment method');
+    },
+  });
+
+  /**
+   * Paying for an extra day the driver agreed to, after the trip itself was already paid for.
+   *
+   * ITS OWN ORDER AND ITS OWN CHECKOUT — see `payTripExtras`. The trip cannot end until this
+   * clears, which is why it is a button on this screen rather than something tidied away into the
+   * final receipt: the driver is standing there waiting for it.
+   */
+  const payExtras = useMutation({
+    mutationFn: () => payTripExtras(id),
+    onMutate: () => setPaymentError(null),
+    onSuccess: (order) => {
+      if (order.client_token === null || order.public_key === null) return;
+      void openCheckout({
+        clientToken: order.client_token,
+        publicKey: order.public_key,
+        amountPaise: order.amount.amount_paise,
+        verify: (paymentId, signature) =>
+          verifyExtrasPayment(id, order.payment_id, paymentId, signature),
+      });
+    },
+    onError: (err) => {
+      setPaymentError(err instanceof Error ? err.message : 'Could not start the payment');
     },
   });
 
@@ -346,11 +392,65 @@ export default function TripScreen(): ReactElement {
                     plain
                   />
                 ))}
+                {/*
+                  THE EXTRA DAYS, WHILE THE TRIP IS STILL RUNNING. Once it ends the same money
+                  arrives as a `DAY_EXTENSION` adjustment above and this goes quiet — rendering
+                  both would show the customer one extension twice. `payable.extension_total` is
+                  the server's figure either way; this row only decides whether it has a line of
+                  its own yet.
+                */}
+                {data.payable.extension_total.amount_paise > 0 &&
+                !data.adjustments.some((a) => a.type === 'DAY_EXTENSION') ? (
+                  <DetailRow
+                    label={`Extra ${data.extension?.extra_days === 1 ? 'day' : 'days'}`}
+                    value={data.payable.extension_total.amount_display}
+                    plain
+                  />
+                ) : null}
+                {data.payable.wallet_credit.amount_paise > 0 ? (
+                  <DetailRow
+                    label="Wallet credit"
+                    value={`−${data.payable.wallet_credit.amount_display}`}
+                    plain
+                  />
+                ) : null}
                 <View style={styles.rule} />
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Total</Text>
-                  <Text style={styles.totalValue}>{data.fare.total.amount_display}</Text>
+                  {/*
+                    `payable.total`, NOT `fare.total`. The fare is frozen at booking time and says
+                    nothing about the extra day the driver agreed to, the waiting charge or the
+                    wallet — so it was showing a customer with an extension a total smaller than
+                    the lines printed directly above it.
+                  */}
+                  <Text style={styles.totalValue}>{data.payable.total.amount_display}</Text>
                 </View>
+
+                {/*
+                  THE EXTRA DAY'S OWN CHECKOUT. `outstanding` is non-zero only when the driver has
+                  accepted a day that the trip's own order did not cover — and the server will not
+                  let the driver end the trip until this clears, so it belongs here as an action
+                  rather than on the receipt afterwards.
+                */}
+                {data.payable.outstanding.amount_paise > 0 ? (
+                  <View style={styles.paymentBox}>
+                    <View style={styles.rule} />
+                    <Text style={styles.paymentHeading}>Pay for your extra day</Text>
+                    <Text style={styles.paymentSubtext}>
+                      Your driver agreed to stay on. Your trip cannot be completed until this is
+                      paid.
+                    </Text>
+                    {paymentError !== null ? (
+                      <Text style={styles.paymentError}>{paymentError}</Text>
+                    ) : null}
+                    <PrimaryButton
+                      label={`Pay ${data.payable.outstanding.amount_display}`}
+                      onPress={() => payExtras.mutate()}
+                      loading={payExtras.isPending || checkoutInFlight}
+                      showArrow={false}
+                    />
+                  </View>
+                ) : null}
                 {data.status === 'STARTED' && data.payment_mode === null ? (
                   <View style={styles.paymentBox}>
                     <View style={styles.rule} />

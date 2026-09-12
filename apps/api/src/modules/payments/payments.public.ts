@@ -44,12 +44,16 @@ export interface PaymentsContract {
    * up — the accelerant to the webhook, never a replacement for it. `false` covers an unverified
    * signature and an unknown payment alike; the caller's answer to both is "keep waiting for the
    * webhook", not an error.
+   *
+   * `justCaptured` is true only when THIS call made the transition, and is the flag to hang a
+   * once-only side effect off. `captured` is true for an already-settled row too, so a caller that
+   * credits money on `captured` credits it twice — once here and once when the webhook lands.
    */
   verifyAndCapture(input: {
     paymentId: string;
     providerPaymentId: string;
     signature: string;
-  }): Promise<{ captured: boolean }>;
+  }): Promise<{ captured: boolean; justCaptured: boolean }>;
 
   /**
    * The checkout publishable key, static for the whole app — not per-charge. Exposed so a caller

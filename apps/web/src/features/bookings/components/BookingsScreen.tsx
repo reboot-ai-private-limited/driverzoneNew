@@ -269,11 +269,14 @@ export function BookingsScreen() {
     {
       key: 'fare',
       optional: 'fare',
-      header: 'Fare',
+      // 'Total', not 'Fare': the figure includes an extra day and a waiting charge when there
+      // was one. The column KEY stays 'fare' — it is the saved show/hide preference, and renaming
+      // it would silently re-show a column an admin had hidden.
+      header: 'Total',
       width: COLUMN_WIDTHS[11] ?? '',
       align: 'right',
       numeric: true,
-      render: (booking) => booking.fare.total.amount_display,
+      render: (booking) => booking.payable.total.amount_display,
     },
     {
       key: 'actions',

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LatLng } from '@driverzone/geo';
 import { CreateQuoteUseCase } from '../src/modules/quotes/application/useCases/createQuote.usecase.js';
 import type { Quote } from '../src/modules/quotes/domain/quote.entity.js';
@@ -166,8 +166,33 @@ function outstationPackages(): PackageLookupContract {
 
 let repo: ReturnType<typeof fakeRepo>;
 
+/**
+ * A FIXED INSTANT, because this suite asserts fare totals and a fare depends on the clock.
+ *
+ * `CreateQuoteUseCase` prices against `input.scheduledAt ?? now`, and no test here passes one — so
+ * every subtotal below was being computed against the wall clock of whoever ran it.
+ * `surchargeFor` adds ₹150 inside `pricing.late_night_window` (22:00–04:00 IST) and ₹100 inside
+ * `pricing.early_morning_window` (04:00–06:00), which made "generates options for active
+ * outstation variants" fail with `318000` where it expects `303000` — but only when run between
+ * 10pm and 6am. Green all day, red in the evening, with nothing in the diff to explain it.
+ *
+ * 2026-08-31T06:00:00Z is 11:30 IST: outside both windows, which is what every expected figure in
+ * this file already assumes. Pinning it changes no assertion, it just stops the answer depending
+ * on when the suite happens to run.
+ *
+ * `shouldAdvanceTime` keeps the event loop moving — without it a faked clock stalls the timers
+ * that `await` itself depends on, and the suite hangs rather than fails.
+ */
+const NOON_IST = new Date('2026-08-31T06:00:00Z');
+
 beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(NOON_IST);
   repo = fakeRepo();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('CreateQuoteUseCase — unavailable answers', () => {

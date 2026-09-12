@@ -21,6 +21,16 @@ interface FareOptionCardProps {
   onPress: () => void;
   /** Fare lines are shown for the selected option only — see the note on the breakdown below. */
   showBreakdown: boolean;
+  /**
+   * This is the CHOSEN fare being reviewed, not one of several being chosen between.
+   *
+   * The second step of the fare sheet renders exactly one of these, above the car questions, and
+   * two things about a picker are wrong there. The radio dot implies a choice that is not on the
+   * screen any more — the way back is the explicit "Change" link — and `role="radio"` tells a
+   * screen reader it is one of a group with no group to be one of. The tap still works; it opens
+   * and closes the breakdown, which is what `button` means.
+   */
+  summary?: boolean;
 }
 
 /**
@@ -50,6 +60,7 @@ export function FareOptionCard({
   selected,
   onPress,
   showBreakdown,
+  summary = false,
 }: FareOptionCardProps): ReactElement {
   const included = includedCopy(option);
   const icon = packageIcon(option);
@@ -70,8 +81,9 @@ export function FareOptionCard({
           onPressOut={() => {
             pressed.value = 0;
           }}
-          accessibilityRole="radio"
-          accessibilityState={{ selected }}
+          accessibilityRole={summary ? 'button' : 'radio'}
+          accessibilityState={summary ? { expanded: showBreakdown } : { selected }}
+          accessibilityHint={summary ? 'Shows what makes up this fare' : undefined}
           accessibilityLabel={`${option.label}, ${option.fare.total.amount_display}${
             included === null ? '' : `, ${included}`
           }`}
@@ -101,9 +113,19 @@ export function FareOptionCard({
               <Text style={styles.priceNote}>incl. taxes</Text>
             </View>
 
-            <View style={[styles.radio, selected && styles.radioSelected]}>
-              {selected ? <Feather name="check" size={12} color={colors.brandOnFg} /> : null}
-            </View>
+            {summary ? (
+              // A disclosure caret, not a radio dot: there is nothing here to choose between.
+              <Feather
+                name={showBreakdown ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.muted}
+                style={styles.caret}
+              />
+            ) : (
+              <View style={[styles.radio, selected && styles.radioSelected]}>
+                {selected ? <Feather name="check" size={12} color={colors.brandOnFg} /> : null}
+              </View>
+            )}
           </View>
 
           {showBreakdown ? (
@@ -268,6 +290,8 @@ const styles = StyleSheet.create({
     marginLeft: space.sm,
   },
   radioSelected: { backgroundColor: colors.fg, borderColor: colors.fg },
+  // Same left gap the radio dot has, so the price column lands identically in both modes.
+  caret: { marginLeft: space.sm },
 
   breakdown: {
     marginTop: space.md,

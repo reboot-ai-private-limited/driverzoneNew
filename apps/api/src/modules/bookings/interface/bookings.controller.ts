@@ -35,8 +35,15 @@ import type {
   ReportPickupPinUseCase,
 } from '../application/useCases/driverProgress.usecase.js';
 import type { SelectPaymentMethodUseCase } from '../application/useCases/selectPaymentMethod.usecase.js';
-import type { VerifyPaymentUseCase } from '../application/useCases/verifyPayment.usecase.js';
-import type { DriverSwitchToCashUseCase } from '../application/useCases/driverSwitchToCash.usecase.js';
+import type {
+  VerifyExtrasPaymentUseCase,
+  VerifyPaymentUseCase,
+} from '../application/useCases/verifyPayment.usecase.js';
+import type { PayTripExtrasUseCase } from '../application/useCases/payExtras.usecase.js';
+import type {
+  CollectExtrasInCashUseCase,
+  DriverSwitchToCashUseCase,
+} from '../application/useCases/driverSwitchToCash.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
 import {
   adminBookingListQuerySchema,
@@ -49,6 +56,7 @@ import {
   reportPinSchema,
   selectPaymentMethodSchema,
   startTripSchema,
+  verifyExtrasPaymentSchema,
   verifyPaymentSchema,
 } from './bookings.validation.js';
 
@@ -170,6 +178,59 @@ export function makeVerifyPaymentController(useCase: VerifyPaymentUseCase): Requ
   });
 }
 
+/**
+ * `POST /customer/bookings/:id/extras/pay` — the checkout for an accepted day extension.
+ *
+ * NO BOOKING IN THE RESPONSE, unlike its sibling above. Nothing about the booking has changed: an
+ * order has been opened and not a rupee has moved, so returning a booking here would hand the app
+ * a DTO whose `payable.outstanding` still says the money is owed — which it is — one line above a
+ * success message. The app already holds the booking and refetches it after the capture.
+ */
+export function makePayTripExtrasController(useCase: PayTripExtrasUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const order = await useCase.execute({ bookingId: id, customerId: principalOf(req) });
+
+    sendSuccess(
+      req,
+      res,
+      {
+        payment_id: order.paymentId,
+        client_token: order.clientToken,
+        public_key: order.publicKey,
+        amount: toMoney(order.amountPaise),
+      },
+      'Proceed to checkout for your extra day',
+      200,
+    );
+  });
+}
+
+export function makeVerifyExtrasPaymentController(
+  useCase: VerifyExtrasPaymentUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = verifyExtrasPaymentSchema.parse(req.body);
+
+    const booking = await useCase.execute({
+      bookingId: id,
+      customerId: principalOf(req),
+      paymentId: body.payment_id,
+      providerPaymentId: body.razorpay_payment_id,
+      signature: body.razorpay_signature,
+    });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Extra day paid',
+    );
+  });
+}
+
 export function makeDriverSwitchToCashController(
   useCase: DriverSwitchToCashUseCase,
 ): RequestHandler {
@@ -186,6 +247,29 @@ export function makeDriverSwitchToCashController(
       res,
       { booking: toBookingDto({ booking, adjustments: [] }) },
       'Switched to cash — collect the fare from the customer',
+    );
+  });
+}
+
+/**
+ * `POST /driver/bookings/:id/extras/cash` — the extra day was handed over in cash.
+ *
+ * The narrow sibling of the one above, for a trip whose FARE was already paid online and which
+ * therefore cannot be switched to cash wholesale. See `CollectExtrasInCashUseCase`.
+ */
+export function makeCollectExtrasInCashController(
+  useCase: CollectExtrasInCashUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const booking = await useCase.execute({ bookingId: id, driverId: principalOf(req) });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Recorded — you collected the extra day in cash',
     );
   });
 }
@@ -827,6 +911,7 @@ export function makeGetAdminBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
   directory: CustomerContactContract & DriverCardContract,
+  extensions: ExtensionRepositoryPort,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -834,12 +919,23 @@ export function makeGetAdminBookingController(
     const booking = await repo.findById(id);
     if (booking === null) throw new BookingNotFoundError(id);
 
-    const [contacts, cards, adjustments] = await Promise.all([
+    /*
+     * THE EXTENSIONS TOO, and only on this read — the same rule the customer's and driver's
+     * single-trip reads follow, and for the same reason the list does not: a finished trip cannot
+     * be extended, and the list would pay a query per row to say so.
+     *
+     * Without it an admin looking at a LIVE trip could not see an extra day at all. The
+     * `DAY_EXTENSION` adjustment row that carries it on a finished trip is not written until
+     * completion, so the one moment support is most likely to be asked — the customer is on the
+     * phone and the trip is still running — was the one moment the panel had nothing to show.
+     */
+    const [contacts, cards, adjustments, extensionRows] = await Promise.all([
       directory.customerContactsByIds([booking.customerId]),
       booking.driverId === null
         ? Promise.resolve(new Map<string, DriverCard>())
         : directory.driverCardsByIds([booking.driverId]),
       charges.listAdjustments(booking.id),
+      extensions.listForBooking(booking.id),
     ]);
 
     sendSuccess(
@@ -848,6 +944,7 @@ export function makeGetAdminBookingController(
       toBookingDto({
         booking,
         adjustments,
+        extensions: extensionRows,
         revealPhones: true,
         customerCard: contacts.get(booking.customerId) ?? null,
         driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),

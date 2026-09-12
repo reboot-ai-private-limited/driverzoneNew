@@ -86,3 +86,53 @@ export interface CreateQuoteResponse {
   outstation_hours_per_day: number | null;
   options: QuoteOptionDto[];
 }
+
+/**
+ * `GET /admin/quotes/explain` — WHICH PRODUCT A PAIR OF COORDINATES RESOLVES TO, AND WHY.
+ *
+ * The support tool for "this in-city tour was charged as an outstation trip". In-city outranks
+ * outstation unconditionally and at any distance, so that complaint is never the precedence
+ * ladder being wrong — it is one of three facts about the DATA, and all three used to produce an
+ * identical, unexplained symptom:
+ *
+ *   - the drop fell outside the city polygon (`incity_rejected: 'NOT_SAME_CITY'`),
+ *   - that city has no in-city package (`'NO_PACKAGE_FOR_CITY'`),
+ *   - it has one, and every variant on it is inactive (`'NO_ACTIVE_VARIANT'`).
+ *
+ * ADMIN ONLY, and a GET so the URL can be pasted into a ticket. It writes nothing — no quote row
+ * is created — so running it does not consume anything or change what a customer would be quoted.
+ */
+export interface TripResolutionPointDto {
+  pickup_zone: { id: string; name: string } | null;
+  city_zone: { id: string; name: string } | null;
+  hill_zone: { id: string; name: string } | null;
+}
+
+export interface TripResolutionTraceDto {
+  city_zone_id: string | null;
+  to_same_city_zone: boolean;
+  terrain: Terrain;
+  distance_km: number;
+  /** In-city packages found for that city zone, before the active-variant filter. */
+  incity_candidates: number;
+  /** Null when in-city won. */
+  incity_rejected: 'NOT_SAME_CITY' | 'NO_PACKAGE_FOR_CITY' | 'NO_ACTIVE_VARIANT' | null;
+  outstation_candidates: number;
+  outstation_band_id: string | null;
+}
+
+export interface ExplainTripResponse {
+  from: TripResolutionPointDto;
+  to: TripResolutionPointDto;
+  /** Null when the pickup is not served — the ladder stops before measuring anything. */
+  distance_km: number | null;
+  /** Null when the trip never reached the package ladder. */
+  trace: TripResolutionTraceDto | null;
+  verdict: {
+    service_type: ServiceType | null;
+    package_id: string | null;
+    package_name: string | null;
+    /** The customer-facing reason when nothing can be sold. Null when something can. */
+    unavailable: string | null;
+  };
+}

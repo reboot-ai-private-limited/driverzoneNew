@@ -555,6 +555,21 @@ the total and lose every one of those facts, including which extension the drive
 **Nothing here is deleted.** A DECLINED or EXPIRED row is the record that the customer asked and
 did not get it, which is exactly what a "why was I not charged" question needs.
 
+**What was actually COLLECTED lives on the booking, not here**, in two counters:
+
+- `paidExtensionPaise` — how much of the accepted days has been paid for, whichever order carried
+  it: the booking order (an extension accepted before the customer chose a payment method) or a
+  separate `EXTENSION` order opened afterwards by `POST /customer/bookings/:id/extras/pay`.
+  `CompleteTripUseCase` refuses to end a UPI trip while `accepted − this` is above zero.
+- `cashExtensionPaise` — of that, what the DRIVER took in hand on an otherwise-UPI trip
+  (`POST /driver/bookings/:id/extras/cash`, the only way past that gate once the fare has already
+  been paid online). Tracked separately because the ledger has to tell the two apart: gateway
+  money leaves the driver owing nothing, money in their pocket comes back as a `CASH_COLLECTED`
+  row for exactly that portion.
+
+They belong to the BOOKING rather than the rows because one order can settle several days and one
+day can be split across orders, so there is no row a payment maps cleanly onto.
+
 ---
 
 ## `bookingEvents` — append-only

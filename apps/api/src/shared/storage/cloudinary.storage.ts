@@ -7,6 +7,20 @@ export interface CloudinaryConfig {
   apiSecret: string;
 }
 
+/**
+ * The resource type used when DELIVERING a stored file.
+ *
+ * `auto` is an UPLOAD-endpoint value only — it asks Cloudinary to detect the kind of file being
+ * ingested. There is no `auto` DELIVERY resource type, so `res.cloudinary.com/<cloud>/auto/...`
+ * answers HTTP 400 with a placeholder GIF. That is why documents uploaded from the phone looked
+ * missing in both the driver app and the admin web: the bytes were in Cloudinary all along, but
+ * every URL we handed out was unresolvable.
+ *
+ * `image` is correct for everything this project uploads — Cloudinary classifies PDFs as `image`
+ * as well, so the whole `UPLOAD_ALLOWED_FORMATS` whitelist is covered.
+ */
+const DELIVERY_RESOURCE_TYPE = 'image' as const;
+
 export class CloudinaryStorage implements StoragePort {
   constructor(private readonly config: CloudinaryConfig) {
     cloudinary.config({
@@ -73,17 +87,19 @@ export class CloudinaryStorage implements StoragePort {
     // This will return a 403 Forbidden or Not Found if the asset was uploaded as 'authenticated'.
     return cloudinary.url(storageKey, {
       secure: true,
-      resource_type: 'auto',
+      resource_type: DELIVERY_RESOURCE_TYPE,
     });
   }
 
   async presignDownload(storageKey: string, expiresInSeconds = 300): Promise<string> {
     // Generates a signed URL that grants temporary access to an authenticated asset.
     return cloudinary.url(storageKey, {
+      secure: true,
       sign_url: true,
       type: 'authenticated',
-      // We use auto to ensure it serves the correct resource type if it's not strictly an image.
-      resource_type: 'auto',
+      resource_type: DELIVERY_RESOURCE_TYPE,
+      // Honoured only where Cloudinary enforces signed-URL expiry; the signature above is what
+      // actually gates access. Kept so the port's contract stays truthful where it is enforced.
       expires_at: Math.round(Date.now() / 1000) + expiresInSeconds,
     });
   }

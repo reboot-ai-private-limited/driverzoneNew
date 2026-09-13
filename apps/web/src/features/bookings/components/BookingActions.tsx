@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Ban, UserCog } from 'lucide-react';
 import { Badge, Button, Dialog, Input } from '@driverzone/design-system';
 import type { BookingDto } from '@driverzone/contracts';
+import { SEARCH_DEBOUNCE_MS } from '@/lib/hooks/timing';
+import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
 import { useAssignDriver, useAssignableDrivers, useCancelBooking } from '../hooks/useBookings';
 import { groupOf } from '../lib/status';
 import {
@@ -136,7 +138,21 @@ function TransferDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [search, setSearch] = useState('');
+  /**
+   * `typed` is what the admin is typing; `search` is what is actually asked for, lagging by
+   * `SEARCH_DEBOUNCE_MS`.
+   *
+   * THE INPUT MUST BE DRIVEN BY `typed`, never by the debounced value — binding it to the lagging
+   * one makes the field drop characters under a fast typist. The same split every other search in
+   * the panel uses (`DriversScreen`, `CustomersScreen`, the finance tabs).
+   *
+   * WHY IT MATTERS HERE. The query is keyed on the search term, so eight keystrokes were eight
+   * DIFFERENT keys — and TanStack's de-duplication only collapses concurrent requests for the SAME
+   * key, so it collapsed none of them. Typing "Ramesh" put six name-regex searches on the API for
+   * one thing the admin asked for once.
+   */
+  const [typed, setTyped] = useState('');
+  const search = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState('');
 
@@ -145,7 +161,7 @@ function TransferDialog({
 
   const close = () => {
     onOpenChange(false);
-    setSearch('');
+    setTyped('');
     setSelected(null);
     setReason('');
   };
@@ -188,10 +204,10 @@ function TransferDialog({
           </label>
           <Input
             id="driver-search"
-            value={search}
+            value={typed}
             placeholder="Ramesh, or 9800000000"
             onChange={(event) => {
-              setSearch(event.target.value);
+              setTyped(event.target.value);
               // The selection belongs to the list that produced it. Keeping it across a new
               // search means the admin transfers to somebody no longer on screen.
               setSelected(null);
@@ -200,9 +216,16 @@ function TransferDialog({
         </div>
 
         <div className="max-h-56 overflow-y-auto border border-border rounded-md divide-y divide-border">
-          {search.trim().length === 0 ? (
+          {/*
+            THE HINT READS `typed`, THE RESULTS READ `search`, and the gap between them is a state
+            of its own. While the debounce is still settling, the list below is the answer to an
+            OLDER search term — so "No verified driver matches that" under a half-typed name would
+            be a confident no about a question nobody has asked yet. `typed !== search` is exactly
+            that window, and it says "Searching…" for the same reason a pending request does.
+          */}
+          {typed.trim().length === 0 ? (
             <p className="px-3 py-4 text-xs text-text-muted">Type a name or number to search.</p>
-          ) : drivers.isLoading ? (
+          ) : drivers.isLoading || typed !== search ? (
             <p className="px-3 py-4 text-xs text-text-muted">Searching…</p>
           ) : (drivers.data?.length ?? 0) === 0 ? (
             <p className="px-3 py-4 text-xs text-text-muted">

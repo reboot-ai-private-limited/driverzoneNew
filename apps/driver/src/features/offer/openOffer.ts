@@ -1,3 +1,4 @@
+import { pushLog } from '@/notifications/log';
 import { router } from 'expo-router';
 
 /**
@@ -24,8 +25,19 @@ import { router } from 'expo-router';
  * original bug did. `ringScreenOpen` is the fix: while ANY ring screen is mounted, a new offer —
  * same or different — does not get its own screen. The mounted screen's own list poll picks it up
  * and offers it as "+N more waiting" instead. See `apps/driver/app/offer/[offerId].tsx`.
+ *
+ * **A SET, AND IT ONLY EVER REFUSES AN AUTOMATIC OPEN (2026-09-21).** It was a single
+ * `routedHref` string, which remembered only the most recent offer — so with two live offers the
+ * older one was no longer deduped at all, which is the very thing this exists for.
+ *
+ * More importantly it used to refuse EVERY caller, including a driver tapping the notification.
+ * A driver who backs out of a ring screen for an offer that is still ringing — a reflex, the back
+ * gesture is where their thumb already is — could then never get back to it: the poll was refused
+ * by this latch, the notification tap was refused by this latch, and the offer simply ran out its
+ * clock against their acceptance rate. `fromTap` is the distinction that was missing. A poll is
+ * the app guessing; a tap is the driver asking, and the two should never have shared a rule.
  */
-let routedHref: string | null = null;
+const autoRoutedHrefs = new Set<string>();
 
 /**
  * True while a `[offerId].tsx` screen is mounted, however it got there.
@@ -41,12 +53,41 @@ let routedHref: string | null = null;
  */
 let ringScreenOpen = false;
 
-/** Route to a ring screen, unless one is already open. `href` is `/offer/<offerId>`. */
-export function openOffer(href: string): void {
-  if (ringScreenOpen) return;
-  if (routedHref === href) return;
-  routedHref = href;
+/**
+ * Route to a ring screen, unless one is already open. `href` is `/offer/<offerId>`.
+ *
+ * `fromTap` marks the one caller that is a DELIBERATE REQUEST rather than a trigger: the driver
+ * pressed the notification. It skips the per-href latch — see `autoRoutedHrefs` — but NOT
+ * `ringScreenOpen`, because a tap for a second offer while the first is on screen is still the
+ * stacking bug this file exists to prevent, and the mounted screen already surfaces the other
+ * offer as "+N more waiting".
+ *
+ * EVERY PATH LOGS, because the early returns below are silent refusals of the app's most
+ * important navigation, and from the outside a blocked route is indistinguishable from a push
+ * that never arrived. `[dz-push]` already carries the other half of that story — which handler
+ * took the message and which notification rung fired — and it ended exactly where the interesting
+ * question began.
+ */
+export function openOffer(href: string, options?: { fromTap?: boolean }): void {
+  const fromTap = options?.fromTap === true;
+
+  if (ringScreenOpen) {
+    pushLog('openOffer BLOCKED: a ring screen is already open', { href, fromTap });
+    return;
+  }
+  if (autoRoutedHrefs.has(href) && !fromTap) {
+    pushLog('openOffer BLOCKED: already auto-routed once this process', { href });
+    return;
+  }
+
+  /*
+   * Recorded even for a tap. Backing out again must not let the 4-second poll drag the driver
+   * straight back into a screen they just left — the latch's original job, which is still worth
+   * doing for everything that is not a deliberate press.
+   */
+  autoRoutedHrefs.add(href);
   ringScreenOpen = true;
+  pushLog('openOffer: pushing ring screen', { href, fromTap });
   router.push(href);
 }
 
@@ -61,10 +102,11 @@ export function markOfferScreenOpen(): void {
 /**
  * Call from the ring screen's unmount cleanup.
  *
- * Only releases `ringScreenOpen` — never `routedHref`, which is a PERMANENT per-href latch and
- * deliberately never cleared: offer ids are single-use (`runWave` excludes drivers already
- * offered a booking), so a stale poll response for an offer that was just resolved must never be
- * allowed to reopen it, however long after this screen has closed that poll returns.
+ * Only releases `ringScreenOpen` — never `autoRoutedHrefs`, which stays for the life of the
+ * process: offer ids are single-use (`runWave` excludes drivers already offered a booking), so a
+ * stale poll response for an offer that was just resolved must never be allowed to reopen it,
+ * however long after this screen has closed that poll returns. A driver who wants back into an
+ * offer that is still ringing taps the notification, which passes `fromTap` and is not refused.
  */
 export function markOfferScreenClosed(): void {
   ringScreenOpen = false;

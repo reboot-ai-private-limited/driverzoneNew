@@ -49,10 +49,21 @@ export function useBooking(id: string) {
  * signature stays permissive so a future caller in the same position does not reintroduce it.
  */
 /**
+ * The shortest search worth sending.
+ *
+ * A single letter matches a large fraction of the directory, so the request is expensive on the
+ * server and useless to the admin — nobody picks a driver out of two hundred rows. Two characters
+ * is the first length that narrows anything, and it is exported so the dialog can say "keep
+ * typing" rather than sit on "Searching…" for a query that will never be sent.
+ */
+export const DRIVER_SEARCH_MIN_CHARS = 2;
+
+/**
  * The driver picker for a manual transfer.
  *
- * `enabled` on a non-empty search, so opening the dialog does not fetch the whole first page of
- * drivers before the admin has typed anything — and so the query key cannot be `''` forever.
+ * `enabled` on a search of at least `DRIVER_SEARCH_MIN_CHARS`, so opening the dialog does not
+ * fetch the whole first page of drivers before the admin has typed anything — and so the query
+ * key cannot be `''` forever.
  * `staleTime.directory`: who is verified changes on an ops timescale, not a trip's.
  *
  * `bookingId`, when passed, is what lets the server annotate each row with `vehicle_compatible` —
@@ -64,7 +75,7 @@ export function useAssignableDrivers(search: string, bookingId?: string) {
       queryKey: keys.bookings.assignableDrivers(search, bookingId),
       fetch: (token, signal) => bookingsApi.assignableDrivers(token, search, bookingId, signal),
       staleTime: staleTime.directory,
-      enabled: search.trim().length > 0,
+      enabled: search.trim().length >= DRIVER_SEARCH_MIN_CHARS,
     }),
   );
 }

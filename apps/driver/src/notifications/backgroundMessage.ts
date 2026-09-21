@@ -1,5 +1,7 @@
+import notifee, { EventType } from '@notifee/react-native';
 import { getMessaging, setBackgroundMessageHandler, type RemoteMessage } from '@react-native-firebase/messaging';
 import { rememberDutyState, teardownDutyMachinery } from '@/duty/dutyRecovery';
+import { openOffer } from '@/features/offer/openOffer';
 import { ensureNotificationChannels } from './channel';
 import { pushLog } from './log';
 import { cancelOfferNotification, displayOfferNotification, type OfferPushData } from './offerNotification';
@@ -91,4 +93,49 @@ setBackgroundMessageHandler(getMessaging(), async (remoteMessage: RemoteMessage)
     // Swallowed for the reason in the header: there is nobody here to report to, and a rejection
     // buys nothing but a lost offer.
   }
+});
+
+/**
+ * TAPPING THE RING WHEN THE APP IS NOT ON SCREEN — the handler whose absence made the offer
+ * notification look dead.
+ *
+ * Notifee delivers a press to `onForegroundEvent` only while the app is actually in the
+ * FOREGROUND. Every other press — backgrounded, or killed — goes to `onBackgroundEvent`, and this
+ * app never registered one. Notifee received each tap, found nobody to give it to, logged
+ * `no background event handler has been set` and dropped it.
+ *
+ * The activity still launched, because the notification carries
+ * `pressAction: { launchActivity: 'default' }`. So the app opened on whatever screen it was last
+ * on — Duty, usually — and the trip the driver had just tapped was nowhere. From the driver's
+ * side that is "I pressed the notification and nothing happened", which is exactly how it was
+ * reported. Reproduced on a realme running Android 15: app backgrounded, one live offer, tap, and
+ * the log showed the warning above with no `openOffer` call at all.
+ *
+ * It is NOT a duplicate of the FCM handler above. That one runs when a MESSAGE arrives; this one
+ * runs when a human presses the notification that message drew.
+ *
+ * **Registered at module scope, in this file, for the same reason as the message handler:** it
+ * must exist before a press can arrive, and `index.js` imports this module before
+ * `expo-router/entry`.
+ *
+ * TWO WORLDS, ONE HANDLER:
+ *
+ *   - **Backgrounded but alive** — the common case, and the one that was broken. The router is
+ *     mounted, so `openOffer` routes immediately and the ring screen is already there when the
+ *     activity resumes.
+ *   - **Killed** — this runs headless with no navigator. `app/index.tsx` handles that case
+ *     through `getInitialOfferHref()` as part of its own boot sequence. Both resolve to the same
+ *     href, so the two agree rather than race.
+ *
+ * `fromTap` is what makes the press outrank the per-href latch in `openOffer`: a driver who
+ * backed out of a still-ringing offer is asking to go back in, and the latch exists to stop a
+ * poll from doing that by itself, not to stop them.
+ */
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  if (type !== EventType.PRESS) return;
+
+  const url = detail.notification?.data?.['url'];
+  pushLog('onBackgroundEvent PRESS', { url: typeof url === 'string' ? url : '(none)' });
+
+  if (typeof url === 'string') openOffer(url, { fromTap: true });
 });

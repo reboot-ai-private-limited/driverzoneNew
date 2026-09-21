@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { AppState } from 'react-native';
+import { setSessionEndHook } from '@/lib/auth/session';
 import { pushLog } from '@/notifications/log';
 import { registerForPush } from '@/notifications/registerDevice';
 import {
@@ -216,4 +217,24 @@ AppState.addEventListener('change', (next) => {
     pushLog('resume: duty machinery is down, re-arming');
     void ensureDutyMachinery();
   }, 1000);
+});
+
+/**
+ * STOP EVERYTHING WHEN THE SESSION ENDS, registered at module scope like the resume listener
+ * above and for the same reason: this must be in place before anything can end a session, and a
+ * hook installed by a screen would miss the case that matters most — a refresh rejected while the
+ * app sits on Home or a live trip.
+ *
+ * REGISTERED FROM THIS SIDE, not imported from `session.ts`. This module reaches the API through
+ * `notifications/registerDevice` → `lib/api/endpoints/driver`, which imports `session.ts` for the
+ * access token; importing duty back from there closed a require cycle that Metro warned about on
+ * every launch. The same inversion `client.ts` uses for `setTokenRefresher`.
+ *
+ * `rememberDutyState(false)` BEFORE the teardown. The remembered flag is what
+ * `restoreDutyMachinery()` reads on the next launch, so leaving it `true` would bring the whole
+ * apparatus back up at the login screen, for a driver with no session to ping with.
+ */
+setSessionEndHook(async () => {
+  await rememberDutyState(false);
+  await teardownDutyMachinery();
 });

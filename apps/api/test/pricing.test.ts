@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { AppError } from '../src/shared/errors/AppError.js';
 import {
   assertFareReconciles,
   computeCustomerCancellationFee,
@@ -372,6 +373,41 @@ describe('splitFare', () => {
     const split = splitFare(100_000, 40_000);
     expect(split.driverAmountPaise).toBe(40_000);
     expect(split.driverPaise).toBe(40_000);
+  });
+
+  /*
+   * THE UNMIGRATED PACKAGE. `driverAmountPaise` replaced a percentage on 2026-09-10, and Mongoose's
+   * `required: true` only validates on write — so a package written before that reads back with
+   * the field absent and arrives here as `undefined` despite the type.
+   *
+   * It used to produce `NaN`, which serialises to `null`, and the failure surfaced from
+   * `assertFareReconciles` as a reconciliation error full of nulls: an error about arithmetic
+   * that never happened, naming the wrong subsystem. Found in the field as "we could not get a
+   * price" with nothing connecting it to an unmigrated package.
+   */
+  it('refuses to split when the driver amount is missing, rather than producing NaN', () => {
+    /*
+     * The REASON is asserted, not the message. `AppError.internal` deliberately shows a customer
+     * the same neutral sentence for every fault; what identifies this one is the detail behind
+     * it, and that detail is the whole point of the guard — it names the unmigrated package
+     * instead of blaming fare arithmetic.
+     */
+    let thrown: unknown;
+    try {
+      splitFare(100_000, undefined as unknown as number);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AppError);
+    expect((thrown as AppError).details).toMatchObject({
+      reason: expect.stringMatching(/driver amount/i) as unknown as string,
+      driverAmountPaise: undefined,
+    });
+  });
+
+  it('refuses a non-finite commissionable total for the same reason', () => {
+    expect(() => splitFare(Number.NaN, 40_000)).toThrow(AppError);
   });
 
   it('takes nothing for the company at the full fare, and pays nothing at 0', () => {

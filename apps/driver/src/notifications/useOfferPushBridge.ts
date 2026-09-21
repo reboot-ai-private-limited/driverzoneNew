@@ -22,7 +22,9 @@ import {
  *
  *   app open          → `onMessage` here, which still shows a notification rather than assuming
  *                       the driver is looking at the phone
- *   app backgrounded  → `backgroundMessage.ts`, then `onForegroundEvent` when they tap
+ *   app backgrounded  → `backgroundMessage.ts`, then its `onBackgroundEvent` when they tap —
+ *                       NOT this hook's `onForegroundEvent`, which Notifee only calls while the
+ *                       app is actually on screen
  *   app killed        → `backgroundMessage.ts`, then `app/index.tsx` reads
  *                        `getInitialOfferHref()` as part of its own boot sequence — NOT this
  *                        hook, which would race that screen's routing decision
@@ -80,11 +82,21 @@ export function useOfferPushBridge(): void {
       }
     });
 
-    /** Tapping the notification while the app is alive but backgrounded. */
+    /**
+     * Tapping the notification while the app is ON SCREEN.
+     *
+     * NOT the backgrounded case, which this comment used to claim. Notifee routes a press to this
+     * handler only while the app is in the foreground; backgrounded and killed presses go to
+     * `onBackgroundEvent`, registered in `backgroundMessage.ts`. Believing otherwise is why that
+     * one did not exist and why every tap on a backgrounded app was silently dropped.
+     *
+     * So this covers the narrow case of a driver looking at the app and tapping the heads-up
+     * banner anyway — rare, but the ring screen still has to open when they do.
+     */
     const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
       if (type !== EventType.PRESS) return;
       const url = detail.notification?.data?.['url'];
-      if (typeof url === 'string') openOffer(url);
+      if (typeof url === 'string') openOffer(url, { fromTap: true });
     });
 
     /*

@@ -1,18 +1,25 @@
 import { Feather } from '@expo/vector-icons';
+import notifee from '@notifee/react-native';
 import Constants from 'expo-constants';
 import { router, useLocalSearchParams } from 'expo-router';
-import { type ReactElement, type ReactNode, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { type ReactElement, type ReactNode } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { DUTY_ALERT_CHANNEL_ID, OFFER_CHANNEL_ID } from '@/notifications/channel';
 import { colors, space, text } from '@/theme/theme';
 
 /**
  * One route standing in for the Account-tab rows that have nothing behind them yet:
  * Notifications, Help & Support, Privacy Policy, Terms & Conditions, About DriverZone. None has
- * an API surface today — no notification settings, no CMS-backed legal or help content — so a
- * single generic screen beats five near-identical files, and the one with a real answer coming
- * (notifications) says so plainly rather than pretending a local toggle is a saved setting.
+ * an API surface today — no CMS-backed legal or help content — so a single generic screen beats
+ * five near-identical files.
  *
- * Deliberately mirrors `apps/customer/app/info/[topic].tsx` — the two apps should read the same.
+ * NOTIFICATIONS IS NO LONGER ONE OF THE PLACEHOLDERS. It does not need an API surface: the
+ * settings it offers belong to Android, and it hands the driver straight to them. See
+ * `NotificationsBody`.
+ *
+ * Mirrors `apps/customer/app/info/[topic].tsx` — the two apps should read the same. The
+ * notifications topic is the one place they have diverged: that app still shows the placeholder
+ * switches, and its real channel (`booking-updates-v1`) has not been given this treatment yet.
  */
 const TOPICS = ['notifications', 'help', 'privacy', 'terms', 'about'] as const;
 type Topic = (typeof TOPICS)[number];
@@ -71,48 +78,94 @@ function DemoNotice({ children }: { children: ReactNode }): ReactElement {
   );
 }
 
-const NOTIFICATION_TOGGLES = [
-  { key: 'offers', label: 'Trip offers', hint: 'The ringing alert when a customer books' },
-  { key: 'earnings', label: 'Earnings & payouts', hint: 'Daily totals and payout confirmations' },
-  { key: 'account', label: 'Account activity', hint: 'Sign-ins and document status changes' },
+/**
+ * THE ROWS ARE THE APP'S REAL NOTIFICATION CHANNELS, and each one opens Android's own settings
+ * page for it.
+ *
+ * `channelId` must match `notifications/channel.ts` exactly — Android looks the channel up by id
+ * and silently shows the app-level page instead when it does not exist, which reads as the row
+ * being broken.
+ *
+ * `duty-status` is DELIBERATELY ABSENT. It is the LOW-importance notice that anchors the
+ * foreground service, and dismissing or disabling it stops the service — which is the one thing
+ * keeping a backgrounded app alive to receive work. Offering it here would be handing a driver a
+ * switch whose real effect is "stop receiving trips", labelled as tidying up a notification.
+ */
+const NOTIFICATION_CHANNELS = [
+  {
+    channelId: OFFER_CHANNEL_ID,
+    label: 'Trip offers',
+    hint: 'The ringing alert when a customer books. Keep this on — it is how you get work.',
+  },
+  {
+    channelId: DUTY_ALERT_CHANNEL_ID,
+    label: 'Duty alerts',
+    hint: 'Tells you when you have been taken offline and stopped receiving trips.',
+  },
 ] as const;
 
 /**
- * LOCAL STATE ONLY — there is no notification-preferences endpoint to read from or write to.
+ * Open the system page for one channel, degrading rather than failing.
  *
- * The one that matters, "Trip offers", is also the one a switch here cannot really turn off in a
- * way that helps: an offer that does not ring is a driver who misses work. So it points at the
- * battery-and-alert setup instead, which is the setting that actually governs whether offers
- * reach the phone.
+ * Android's per-channel screen is the real control: sound, vibration, Do Not Disturb and whether
+ * the channel delivers at all. None of that is ours to store — a channel's importance is fixed by
+ * the OS on first creation (see `notifications/channel.ts`) and only the driver can change it.
+ *
+ * The fallbacks matter because OEM skins move these screens around. An unknown channel, or a skin
+ * that does not implement the per-channel intent, lands on the app's own notification page, which
+ * reaches the same settings in one more tap.
+ */
+async function openChannelSettings(channelId: string): Promise<void> {
+  try {
+    await notifee.openNotificationSettings(channelId);
+  } catch {
+    try {
+      await notifee.openNotificationSettings();
+    } catch {
+      // Nothing left to try. Better a row that does nothing than a crash on the one screen a
+      // driver opened because their alerts were already misbehaving.
+    }
+  }
+}
+
+/**
+ * WHAT THESE ROWS USED TO BE: three switches held in local state, saving nothing and read by
+ * nothing. Two of them named notifications this app has never sent — there is no earnings or
+ * account-activity push anywhere in the API — so no amount of storage would have made them do
+ * something. They are gone rather than persisted.
+ *
+ * The one real notification, the trip offer, is deliberately NOT given an in-app switch either.
+ * Its off position means "stop sending me work", and a driver who flips it silently stops earning
+ * and reports it as the app being broken. Android's own channel page is the honest place for
+ * that decision: it is the switch that genuinely governs delivery, the OS shows plainly that
+ * alerts are off, and nothing here has to pretend to own a setting it cannot enforce.
  */
 function NotificationsBody(): ReactElement {
-  const [state, setState] = useState<Record<string, boolean>>({
-    offers: true,
-    earnings: true,
-    account: true,
-  });
-
   return (
     <>
-      <DemoNotice>
-        These switches are not saved — there is nowhere on the server yet for a notification
-        preference to live.
-      </DemoNotice>
+      <Text style={styles.body}>
+        Alerts are controlled by Android, not by DriverZone. Each one below opens its own settings
+        page, where you can change the sound, the vibration and whether it comes through Do Not
+        Disturb.
+      </Text>
 
-      {NOTIFICATION_TOGGLES.map((item) => (
-        <View key={item.key} style={styles.toggleRow}>
-          <View style={styles.flex}>
-            <Text style={styles.optionLabel}>{item.label}</Text>
-            <Text style={styles.toggleHint}>{item.hint}</Text>
-          </View>
-          <Switch
-            value={state[item.key] ?? false}
-            onValueChange={(next) => setState((prev) => ({ ...prev, [item.key]: next }))}
-            trackColor={{ false: colors.border, true: colors.brand }}
-            thumbColor={colors.card}
-          />
-        </View>
-      ))}
+      <View style={styles.spaced}>
+        {NOTIFICATION_CHANNELS.map((item) => (
+          <Pressable
+            key={item.channelId}
+            onPress={() => void openChannelSettings(item.channelId)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.label} notification settings`}
+            style={({ pressed }) => [styles.toggleRow, pressed && styles.rowPressed]}
+          >
+            <View style={styles.flex}>
+              <Text style={styles.optionLabel}>{item.label}</Text>
+              <Text style={styles.toggleHint}>{item.hint}</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color={colors.faint} />
+          </Pressable>
+        ))}
+      </View>
 
       <Pressable
         onPress={() => router.push('/battery-setup')}
@@ -124,7 +177,8 @@ function NotificationsBody(): ReactElement {
         <Feather name="chevron-right" size={16} color={colors.faint} />
       </Pressable>
       <Text style={styles.toggleHint}>
-        Whether trip offers actually reach your phone is controlled here, not by the switch above.
+        Whether trip offers reach your phone at all also depends on your battery settings, which
+        this checks for you.
       </Text>
     </>
   );
@@ -225,6 +279,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  rowPressed: { opacity: 0.6 },
   optionLabel: { ...text.body, color: colors.fg },
   toggleHint: { ...text.caption, color: colors.muted, marginTop: 2 },
 

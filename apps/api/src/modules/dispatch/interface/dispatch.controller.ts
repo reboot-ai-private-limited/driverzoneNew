@@ -11,6 +11,7 @@ import type {
   AcceptOfferUseCase,
   DeclineOfferUseCase,
 } from '../application/useCases/respondToOffer.usecase.js';
+import type { ScheduledBoardUseCase } from '../application/useCases/scheduledBoard.usecase.js';
 import type { TransferBookingUseCase } from '../application/useCases/transferBooking.usecase.js';
 import { requirementFromBooking, vehicleMismatchReason } from '../domain/vehicleCompatibility.js';
 
@@ -97,12 +98,33 @@ export function makeListOffersController(
      * A booking missing under a still-SENT offer is the one-offer controller's `booking === null`
      * case, carried over — filtered out here rather than failing the whole list, so a driver's
      * other, healthy offer does not disappear because one row points at a booking that is gone.
+     *
+     * AND A BOOKING THAT IS NO LONGER SEARCHING IS THE SAME KIND OF STALE, which is why the check
+     * below is on the status and not only on existence.
+     *
+     * THE BUG IT FIXES: a customer cancels while their booking is ringing. Cancelling ends the
+     * BOOKING — it does not touch the offer rows, and it cannot notify the drivers because
+     * `cancelBooking` only messages `booking.driverId`, which during `SEARCHING` is null: nobody
+     * has been assigned yet. So the offers stayed `SENT`, this endpoint kept handing them back,
+     * and the driver's phone went on ringing for a trip that no longer existed — up to the full
+     * 45-second offer TTL (60 for a favourite), with Accept failing at the end of it because
+     * `claimForDriver` requires `SEARCHING`.
+     *
+     * FILTERED HERE RATHER THAN WITHDRAWN ON CANCEL. `cancelBooking` lives in `bookings`, which
+     * knows nothing about `dispatch` and must not start to — the dependency runs the other way.
+     * This controller already loads the booking for every live offer, so the truth is in hand and
+     * the check is free. The driver app polls this every four seconds and closes a ring screen
+     * whose offer has left the list, so the phone stops within one poll.
+     *
+     * THE ROWS ARE LEFT ALONE and cost nothing: `ExpireWaveUseCase` bails on any booking that is
+     * not `SEARCHING`, so they are never lapsed and never reach anyone's acceptance rate — they
+     * simply age past `expiresAt` and stop being live.
      */
     const dtos = (
       await Promise.all(
         live.map(async (offer) => {
           const booking = await bookings.findById(offer.bookingId);
-          if (booking === null) return null;
+          if (booking === null || booking.status !== 'SEARCHING') return null;
 
           return {
             offer_id: offer.id,
@@ -214,6 +236,80 @@ export function makeAssignDriverController(useCase: TransferBookingUseCase): Req
         released_driver_id: result.releasedDriverId,
       },
       'Trip transferred',
+    );
+  });
+}
+
+// ─── The scheduled board ────────────────────────────────────────────────────────────────────
+
+/**
+ * `GET /driver/scheduled-bookings` — parked trips this driver could take.
+ *
+ * NO PAGINATION, and a cap in the use case instead. A board with hundreds of parked bookings on
+ * it is not a paging problem, it is a dispatch emergency — and the answer to that is the ops
+ * screen, not a second page here.
+ */
+export function makeListScheduledBoardController(useCase: ScheduledBoardUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const bookings = await useCase.list(driverOf(req));
+
+    const dtos = bookings.map((booking) => ({
+      booking_id: booking.id,
+      reference: booking.reference,
+      earning: toMoney(booking.fareSnapshot.fare.split.driverPaise),
+      pickup: { ...booking.pickup, address: booking.pickupAddress },
+      drop: { ...booking.drop, address: booking.dropAddress },
+      scheduled_at: booking.scheduledAt.toISOString(),
+      service_type: booking.serviceType,
+      estimated_minutes: booking.fareSnapshot.included.minutes ?? 0,
+    }));
+
+    sendSuccess(
+      req,
+      res,
+      { bookings: dtos },
+      dtos.length === 0 ? 'No scheduled trips waiting' : 'Scheduled trips waiting for a driver',
+    );
+  });
+}
+
+/**
+ * `POST /driver/scheduled-bookings/:id/accept`.
+ *
+ * A LOST RACE IS A 200. Same rule as the ring screen's accept: two drivers can be looking at this
+ * board at once and the slower one did nothing wrong. Clients branch on `claimed`.
+ */
+export function makeAcceptScheduledBookingController(
+  useCase: ScheduledBoardUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const result = await useCase.accept(id, driverOf(req));
+
+    if (!result.claimed) {
+      sendSuccess(
+        req,
+        res,
+        { claimed: false, reason: result.reason, message: result.message },
+        result.message,
+      );
+      return;
+    }
+
+    const booking = result.booking;
+    sendSuccess(
+      req,
+      res,
+      {
+        claimed: true,
+        booking_id: booking.id,
+        reference: booking.reference,
+        pickup: { ...booking.pickup, address: booking.pickupAddress },
+        drop: { ...booking.drop, address: booking.dropAddress },
+        scheduled_at: booking.scheduledAt.toISOString(),
+        earning: toMoney(booking.fareSnapshot.fare.split.driverPaise),
+      },
+      'Trip is yours',
     );
   });
 }

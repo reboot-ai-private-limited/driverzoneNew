@@ -28,11 +28,52 @@ export type OfferStatus = (typeof OFFER_STATUSES)[number];
  */
 export const COUNTS_AGAINST_ACCEPTANCE: readonly OfferStatus[] = ['DECLINED', 'LAPSED'];
 
+/**
+ * WHICH OF A SCHEDULED BOOKING'S TWO SEARCHES THIS OFFER BELONGS TO.
+ *
+ * A scheduled booking is now rung twice: once the moment it is made, and again at T−90 if nobody
+ * took it. `FINAL` is every other ring in the system — an immediate booking, a booking already
+ * inside its dispatch window, an admin retry — so it is the default and nothing that existed
+ * before this changes shape.
+ *
+ * IT IS NOT THREADED THROUGH THE JOB QUEUE. `runWave` derives it from the booking, by asking
+ * whether the clock has reached `dispatchAt` yet, so a wave-timeout job resumed after a deploy
+ * cannot disagree with the ring that scheduled it. See `attemptFor`.
+ *
+ * Recorded on the offer for two reasons that are not optional:
+ *
+ *   - The unique index is `(bookingId, driverId, attempt)`. Without the third column, the final
+ *     ring could never offer a trip to a driver the early ring had already asked — which is
+ *     precisely the driver most worth asking again, hours later, when they now know their day.
+ *   - An `EARLY` offer must never count against an acceptance rate. A driver rung at 9 pm about a
+ *     6 am trip who does not answer has done nothing wrong, and the metrics job reads this field
+ *     to know that.
+ */
+export const DISPATCH_ATTEMPTS = ['EARLY', 'FINAL'] as const;
+export type DispatchAttempt = (typeof DISPATCH_ATTEMPTS)[number];
+
+/**
+ * Which search a ring happening NOW belongs to.
+ *
+ * `dispatchAt` is the instant the final search is due — T−90 for a scheduled booking, and the
+ * booking's own creation time for everything else. So anything ringing before it is the early
+ * attempt, and anything at or after it is the real one. Deriving it from two fields the booking
+ * already carries means there is no third source of truth to drift.
+ */
+export function attemptFor(
+  booking: { isScheduled: boolean; dispatchAt: Date },
+  now: Date = new Date(),
+): DispatchAttempt {
+  if (!booking.isScheduled) return 'FINAL';
+  return now.getTime() < booking.dispatchAt.getTime() ? 'EARLY' : 'FINAL';
+}
+
 export interface DispatchOffer {
   id: string;
   bookingId: string;
   driverId: string;
   wave: number;
+  attempt: DispatchAttempt;
   status: OfferStatus;
   score: number;
   distanceMetres: number;

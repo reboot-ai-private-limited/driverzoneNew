@@ -25,6 +25,12 @@ export const TRANSFERABLE_STATUSES = new Set<BookingDto['status']>([
   'ARRIVED',
   'SEARCHING',
   'CONFIRMED',
+  /*
+   * `WAITING_DRIVER` is pre-assignment's most useful case, not an edge one. The booking has
+   * already been rung for once and nobody took it, so ops naming a driver here is the whole
+   * reason the parked state exists — and they have until T−90 to do it before the final ring.
+   */
+  'WAITING_DRIVER',
 ]);
 
 export function canTransfer(status: BookingDto['status']): boolean {

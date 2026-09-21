@@ -10,6 +10,7 @@ import {
   offerHref,
 } from '@/features/offer/openOffer';
 import { useOfferRing } from '@/features/offer/useOfferRing';
+import { pushLog } from '@/notifications/log';
 import { formatWhen } from '@/features/trips/scheduledWhen';
 import { acceptOffer, declineOffer, listOffers } from '@/lib/api/endpoints/offers';
 import { keys } from '@/lib/query/keys';
@@ -168,9 +169,42 @@ export default function OfferScreen(): ReactElement {
    * navigates again a moment later — two competing navigations off the same screen for one tap.
    */
   const acted = accept.isPending || accept.isSuccess || decline.isPending || decline.isSuccess;
+
+  /**
+   * HAS THE SERVER ANSWERED *THIS* SCREEN? — and `isSuccess` was the wrong way to ask.
+   *
+   * THE BUG THIS FIXES. This query shares `keys.offers.list()` with Home's four-second poll, so
+   * the cache almost always holds a previous answer by the time a ring screen mounts. React Query
+   * hands that cached answer over on the FIRST render with `status: 'success'` — `staleTime: 0`
+   * makes it refetch, not withhold — so `isSuccess` was already true against a list fetched
+   * BEFORE this offer existed. The offer was legitimately absent from it, and the effect below
+   * closed the screen on the strength of that, typically within a few hundred milliseconds of
+   * opening.
+   *
+   * Observed exactly once on a realme running Android 15 and it looked inexplicable: a live offer
+   * the API was returning correctly, the ring screen pushed and then gone 338ms later, after
+   * which the per-href latch refused every reopen and the offer became unreachable for the rest
+   * of the process. It is not intermittent in nature — it is decided by which caller opens the
+   * screen. A push arriving between two polls opens it against a stale cache and it self-closes;
+   * Home's own poll opens it against the answer it has just received and everything looks fine,
+   * which is why every deliberate test passed.
+   *
+   * `isFetchedAfterMount` is the honest question: it turns true only when a fetch STARTED BY THIS
+   * SCREEN has completed. Before that, this screen knows nothing about whether its offer is live,
+   * and must not act as though it does.
+   */
+  const serverAnswered = list.isFetchedAfterMount;
+
   useEffect(() => {
-    if (list.isSuccess && offer === null && outcome === null && !acted) closeOrAdvance();
-  }, [list.isSuccess, offer, outcome, acted, closeOrAdvance]);
+    if (serverAnswered && offer === null && outcome === null && !acted) {
+      pushLog('ring screen closing: offer not in list', {
+        offerId,
+        count: list.data?.offers.length ?? -1,
+        ids: list.data?.offers.map((o) => o.offer_id) ?? [],
+      });
+      closeOrAdvance();
+    }
+  }, [serverAnswered, list.data, offer, outcome, acted, closeOrAdvance, offerId]);
 
   /**
    * Ring while a live offer is on screen and unanswered.
@@ -189,7 +223,19 @@ export default function OfferScreen(): ReactElement {
    */
   useOfferRing(offer !== null && outcome === null);
 
-  if (list.isPending) {
+  /*
+   * WAIT, RATHER THAN DECLARE THE TRIP DEAD ON A CACHED ANSWER.
+   *
+   * `list.isPending` was the gate here, and it is false the moment Home's cached list is handed
+   * over — so an offer absent from that older list rendered "This trip is no longer available."
+   * over a trip that was ringing perfectly well. Same root cause as the self-close above.
+   *
+   * ONLY THE ABSENT CASE WAITS. When the cached list DOES contain this offer, it is rendered
+   * immediately — the data is right there and the refetch will correct it in a moment. Holding a
+   * spinner up in front of a driver for a round-trip we do not need would trade one bug for a
+   * slower ring.
+   */
+  if (offer === null && !serverAnswered) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.brandOnFg} />

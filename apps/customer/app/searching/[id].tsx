@@ -65,11 +65,17 @@ export default function SearchingScreen(): ReactElement {
   const booking = useQuery({
     queryKey: keys.bookings.detail(id),
     queryFn: () => getBooking(id),
+    /*
+     * THE SCHEDULED EXEMPTION IS GONE, for the same reason the redirect above it is.
+     *
+     * This used to stop polling a scheduled booking sitting at `CONFIRMED` — "a status that cannot
+     * change for days" — which was true when nothing was dispatched until T−90. It is now the
+     * exact booking that is about to change: the early ring moves it to `SEARCHING` within
+     * seconds. Leaving the exemption in would freeze this screen on the first frame it rendered
+     * and never show the search it was opened for.
+     */
     refetchInterval: (query) => {
       const data = query.state.data;
-      // A scheduled booking is leaving for the trip screen anyway; polling it every three seconds
-      // on the way out is a request per tick for a status that cannot change for days.
-      if (data?.is_scheduled === true && data.status === 'CONFIRMED') return false;
       return data === undefined || SEARCHING_STATUSES.has(data.status) ? 3000 : false;
     },
   });
@@ -77,27 +83,35 @@ export default function SearchingScreen(): ReactElement {
   const status = booking.data?.status;
 
   /*
-   * A BOOKING FOR NEXT WEEK IS NOT A SEARCH, and `CONFIRMED` alone cannot tell the two apart.
+   * A BOOKING FOR NEXT WEEK **IS** A SEARCH NOW, which is why this guard is gone.
    *
-   * `CONFIRMED` belongs in `SEARCHING_STATUSES` for an immediate booking: dispatch is a queued job
-   * and the few seconds before the first wave rings are genuinely part of the wait. On a SCHEDULED
-   * booking the same status means nothing will happen for up to three days, and this screen would
-   * spend them animating a search that has not started.
+   * It used to read `is_scheduled === true && status === 'CONFIRMED'` and send those bookings to
+   * the trip screen, because a scheduled booking was not dispatched until ninety minutes before
+   * its pickup and this screen would have animated a search that had not started.
    *
-   * CHECKED HERE RATHER THAN ONLY AT THE PUSH in `FareSheet`, because a deep link, a back
-   * navigation or a resumed app can land on this route without going through Confirm.
+   * Every scheduled booking is now rung for the moment it is made
+   * (docs/LLD/dispatch-and-assignment.md §Ring early, park, ring again), so `CONFIRMED` means the
+   * same thing it means for an immediate booking: the dispatch job is queued and about to run.
+   * Keeping the guard would have bounced every customer straight back out of the screen they had
+   * just been sent to — the trip is scheduled, the status is CONFIRMED for the second before the
+   * worker picks it up, and out they go.
+   *
+   * WHAT REPLACES IT IS THE HANDOFF BELOW, unchanged: the moment the booking stops being one of
+   * `SEARCHING_STATUSES` this screen is done. A driver found leaves via `ASSIGNED`; an early ring
+   * that found nobody leaves via `WAITING_DRIVER`, which is deliberately absent from that set —
+   * the trip screen says "Still finding you a driver" for it, which is the honest thing to show
+   * once nothing is actively ringing.
    */
-  const scheduledAndWaiting = booking.data?.is_scheduled === true && status === 'CONFIRMED';
 
   // THE HANDOFF. The moment the status is no longer one of the "still looking" ones — driver
   // found, gave up, or the customer's own cancel just now — this page is done and the trip
   // screen takes over. `replace`, not `push`: this screen must not be a back-button destination
   // once the answer exists, or leaving the trip screen would land back on a search that is over.
   useEffect(() => {
-    if (scheduledAndWaiting || (status !== undefined && !SEARCHING_STATUSES.has(status))) {
+    if (status !== undefined && !SEARCHING_STATUSES.has(status)) {
       router.replace(`/trip/${id}`);
     }
-  }, [scheduledAndWaiting, status, id]);
+  }, [status, id]);
 
   const copy = status === undefined ? null : tripStatusCopy(status);
 
@@ -168,15 +182,30 @@ export default function SearchingScreen(): ReactElement {
   return (
     <View style={styles.root}>
       {/*
-        CENTRED ON THE PICKUP, not framed to the whole route. The customer is standing at one of
-        these two points and waiting for somebody to come to it — a camera pulled back far enough
-        to include a drop 40 km away would put their own street under a pixel. `MapCanvas` still
-        draws the route bow off the edge of the screen, which is the right amount of "and then
-        we go over there" for a screen about the pickup.
+        CENTRED ON THE PICKUP, not framed to the whole route.
+
+        `frameRoute={false}` IS WHAT MAKES THAT TRUE. Passing a pickup and a drop otherwise tells
+        `MapCanvas` to pull the camera back until both are on screen, which is right for choosing a
+        trip and wrong for waiting on one: a drop 40km away puts the customer's own street under a
+        single pixel, and the sweep — which is anchored to the middle of the visible strip — then
+        pulses over the midpoint of the route instead of over them. The search is happening AT the
+        pickup, so that is where the camera sits and where the rings come from.
+
+        The route bow is still drawn, running off the edge of the screen. That is the right amount
+        of "and then we go over there" for a screen about who is coming to fetch you.
+
+        AND THE CAMERA IS LOCKED THERE. `interactive={false}` is what makes "centred on the pickup"
+        a fact for the whole wait rather than just the first frame: the sweep below is a fixed
+        overlay at the middle of the visible strip, so one stray drag would leave it pulsing over
+        empty ground with the pin it belongs to shoved off to the side. There is nothing on this
+        screen to look around for — the map is here to say WHERE you are waiting, not to be read.
       */}
       <MapCanvas
         initialCentre={{ lat: data.pickup.lat, lng: data.pickup.lng }}
+        initialZoom="street"
         markers={markers}
+        frameRoute={false}
+        interactive={false}
         bottomInset={cardHeight}
       />
 
@@ -186,8 +215,12 @@ export default function SearchingScreen(): ReactElement {
         A `<Marker>` with an animating child forces `tracksViewChanges` on, which re-rasterises the
         marker into a native bitmap every frame — a known Android jank source, and the exact reason
         `MapCanvas`'s own pickup glyph is a static halo instead of a pulse. Drawn here as a plain
-        screen-space overlay it costs nothing, and it lands on the pickup anyway because the map is
-        centred there and `bottomInset` makes "centre" mean the middle of the visible strip.
+        screen-space overlay it costs nothing.
+
+        IT LANDS ON THE PICKUP PIN because two things agree about where the middle is: the camera
+        is centred on the pickup and never pulled back to frame the route, and `bottomInset` is
+        passed as native map padding so the camera's centre RENDERS in the middle of the strip
+        above the card rather than the middle of the screen. This layer spans exactly that strip.
       */}
       <View style={[styles.sweepLayer, { bottom: cardHeight }]} pointerEvents="none">
         <Sweep />

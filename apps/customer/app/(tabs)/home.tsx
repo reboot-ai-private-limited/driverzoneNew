@@ -490,11 +490,6 @@ export default function HomeScreen(): ReactElement {
     !timesInvalid &&
     (scheduledAt === null || (direction === 'ROUND_TRIP' && returnAt === null));
 
-  const missingTimeMessage =
-    scheduledAt === null
-      ? 'Tap the Pickup row above to choose when the driver should arrive.'
-      : 'Tap the Return row above to choose when you are coming back.';
-
   /**
    * The two points travel as ROUTE PARAMS rather than in a store, because they are the entire
    * input to the fare screen and expo-router persists them across a remount for free. A
@@ -590,6 +585,13 @@ export default function HomeScreen(): ReactElement {
     };
   }, [draft, mode]);
 
+  /**
+   * The customer panned the map — the pin is over somewhere new.
+   *
+   * ONLY GENUINE PANS REACH THIS. `MapCanvas` withholds the region reports that come from its own
+   * `moveTo`, because those fire mid-animation and would overwrite a chosen place with a point the
+   * camera was flying over. See `SETTLE_SUPPRESSION_TAIL_MS` there, and `focusFound` here.
+   */
   const handleRegionSettled = useCallback((lat: number, lng: number) => {
     setDraft({ lat, lng });
   }, []);
@@ -688,9 +690,23 @@ export default function HomeScreen(): ReactElement {
   function focusFound(point: TripPoint): void {
     setSearchMissed(false);
     setMapPick(true);
-    // The map moving fires `onRegionSettled`, which sets the draft coordinate; this only gets
-    // the customer's own words on screen ahead of the reverse geocode.
+    // Their own words on screen immediately, ahead of the reverse geocode that will confirm them.
     setDraftAddress(point.address);
+    /*
+     * THE CHOSEN COORDINATE IS THE ANSWER, and it is set here rather than waited for.
+     *
+     * This used to rely entirely on the map: move the camera, and let `onRegionSettled` report
+     * back where it ended up. But `onRegionChangeComplete` fires mid-flight — a search for Sevoke
+     * More reported "settled" 271ms into a 450ms animation, 1.7km short — so the point recorded
+     * was one the camera was passing over, not the one the customer picked. `MapCanvas` now
+     * withholds those reports during its own moves, which leaves nothing to set the draft unless
+     * this does.
+     *
+     * It is also simply better information. The place came from Google with a coordinate attached;
+     * asking the camera where it thinks it is can only ever be a worse answer than the one we were
+     * given.
+     */
+    setDraft({ lat: point.lat, lng: point.lng });
     map.current?.moveTo(point.lat, point.lng, 'street');
   }
 
@@ -1276,10 +1292,16 @@ export default function HomeScreen(): ReactElement {
               >
                 <Feather name="clock" size={16} color={colors.fg} style={styles.noticeIcon} />
                 <View style={styles.flex}>
+                  {/*
+                    THE TITLE ONLY. The body used to spell out "Tap the Pickup row above to choose
+                    when the driver should arrive" — an instruction for a row that is on screen,
+                    two inches above, already labelled Pickup and already reading "Select a time".
+                    Naming what to do next is useful; narrating where the customer is already
+                    looking is noise in the one place the sheet is most crowded.
+                  */}
                   <Text style={styles.noticeTitle}>
                     {scheduledAt === null ? 'Choose a pickup time' : 'Choose a return time'}
                   </Text>
-                  <Text style={styles.noticeBody}>{missingTimeMessage}</Text>
                 </View>
               </Animated.View>
             ) : null}

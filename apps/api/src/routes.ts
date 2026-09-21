@@ -123,6 +123,13 @@ export function buildApiRouter(c: AppContainers): Router {
   router.use('/admin/bookings', c.dispatch.buildAdminRouter());
   router.use('/admin/bookings', c.bookings.buildAdminRouter());
   router.use('/driver/offers', c.dispatch.buildDriverRouter());
+
+  /*
+   * The scheduled board — parked trips a driver can browse and take. Its own prefix rather than
+   * more paths under `/driver/offers`, because an offer rings and expires while a board entry is
+   * browsed and waits; sharing a prefix would invite a client to treat one as the other.
+   */
+  router.use('/driver/scheduled-bookings', c.dispatch.buildDriverScheduledBoardRouter());
   /** The driver's own earnings. Same rows, same mapper as `/admin/drivers/:id/wallet` above. */
   router.use('/driver/wallet', c.ledger.buildDriverRouter());
 

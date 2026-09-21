@@ -4,9 +4,14 @@ import { useState } from 'react';
 import { Ban, UserCog } from 'lucide-react';
 import { Badge, Button, Dialog, Input } from '@driverzone/design-system';
 import type { BookingDto } from '@driverzone/contracts';
-import { SEARCH_DEBOUNCE_MS } from '@/lib/hooks/timing';
+import { DRIVER_PICKER_DEBOUNCE_MS } from '@/lib/hooks/timing';
 import { useDebouncedValue } from '@/lib/hooks/useDebouncedValue';
-import { useAssignDriver, useAssignableDrivers, useCancelBooking } from '../hooks/useBookings';
+import {
+  DRIVER_SEARCH_MIN_CHARS,
+  useAssignDriver,
+  useAssignableDrivers,
+  useCancelBooking,
+} from '../hooks/useBookings';
 import { groupOf } from '../lib/status';
 import {
   buildAssignPayload,
@@ -140,7 +145,7 @@ function TransferDialog({
 }) {
   /**
    * `typed` is what the admin is typing; `search` is what is actually asked for, lagging by
-   * `SEARCH_DEBOUNCE_MS`.
+   * `DRIVER_PICKER_DEBOUNCE_MS`.
    *
    * THE INPUT MUST BE DRIVEN BY `typed`, never by the debounced value — binding it to the lagging
    * one makes the field drop characters under a fast typist. The same split every other search in
@@ -150,9 +155,14 @@ function TransferDialog({
    * DIFFERENT keys — and TanStack's de-duplication only collapses concurrent requests for the SAME
    * key, so it collapsed none of them. Typing "Ramesh" put six name-regex searches on the API for
    * one thing the admin asked for once.
+   *
+   * THE WINDOW IS THIS PICKER'S OWN, AND LONGER THAN THE PANEL'S USUAL 250ms. A trailing debounce
+   * only collapses keystrokes closer together than its delay, so the natural 300–600ms rest at a
+   * space sailed straight through it and "Ramesh Kumar" was still two searches. See
+   * `DRIVER_PICKER_DEBOUNCE_MS` for why this one is allowed to lag where a list filter is not.
    */
   const [typed, setTyped] = useState('');
-  const search = useDebouncedValue(typed, SEARCH_DEBOUNCE_MS);
+  const search = useDebouncedValue(typed, DRIVER_PICKER_DEBOUNCE_MS);
   const [selected, setSelected] = useState<string | null>(null);
   const [reason, setReason] = useState('');
 
@@ -225,6 +235,17 @@ function TransferDialog({
           */}
           {typed.trim().length === 0 ? (
             <p className="px-3 py-4 text-xs text-text-muted">Type a name or number to search.</p>
+          ) : typed.trim().length < DRIVER_SEARCH_MIN_CHARS ? (
+            /*
+              BELOW THE MINIMUM NOTHING IS EVER SENT, so this must not say "Searching…" — that
+              would promise a request that is not coming and leave the panel apparently hung on
+              one letter. It reads `typed` rather than `search` so it appears on the keystroke
+              rather than after the debounce, which is the whole point of telling somebody their
+              query is too short.
+            */
+            <p className="px-3 py-4 text-xs text-text-muted">
+              Keep typing — at least {DRIVER_SEARCH_MIN_CHARS} characters.
+            </p>
           ) : drivers.isLoading || typed !== search ? (
             <p className="px-3 py-4 text-xs text-text-muted">Searching…</p>
           ) : (drivers.data?.length ?? 0) === 0 ? (

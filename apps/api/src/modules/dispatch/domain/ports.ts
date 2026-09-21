@@ -1,10 +1,17 @@
 import type { CarCategory, DeliveryChannel, VehicleTypePreference } from '@driverzone/contracts';
-import type { DispatchOffer, DriverCandidate, OfferStatus } from './offer.entity.js';
+import type {
+  DispatchAttempt,
+  DispatchOffer,
+  DriverCandidate,
+  OfferStatus,
+} from './offer.entity.js';
 
 export interface NewOffer {
   bookingId: string;
   driverId: string;
   wave: number;
+  /** Which of a scheduled booking's two searches this ring belongs to. See `attemptFor`. */
+  attempt: DispatchAttempt;
   score: number;
   distanceMetres: number;
   expiresAt: Date;
@@ -29,8 +36,19 @@ export interface OfferRepositoryPort {
 
   listForBooking(bookingId: string): Promise<DispatchOffer[]>;
 
-  /** Every driver already offered this booking, so a later wave does not ring them again. */
-  driverIdsOffered(bookingId: string): Promise<string[]>;
+  /**
+   * Every driver already offered this booking IN THIS ATTEMPT, so a later wave does not ring them
+   * again.
+   *
+   * SCOPED TO THE ATTEMPT, not the booking. A scheduled booking is rung twice, hours apart, and
+   * the drivers the early ring asked are exactly the ones the final ring should ask again — they
+   * know their morning by then. Excluding them across both searches was the same bug as never
+   * running a second search at all.
+   *
+   * Omit `attempt` for every driver ever offered, which is what `respondToOffer` wants when it
+   * supersedes the losers of a race.
+   */
+  driverIdsOffered(bookingId: string, attempt?: DispatchAttempt): Promise<string[]>;
 
   /**
    * Is anything still ringing in this wave?

@@ -274,12 +274,51 @@ export async function beginSession(result: OtpVerifyResponse): Promise<void> {
   });
 }
 
-/** Local teardown. Idempotent, and safe to call when there was never a session. */
+/**
+ * What to run when a session ends, WITHOUT importing it.
+ *
+ * The same inversion as `setTokenRefresher` in `client.ts`, and for the same reason. The duty
+ * machinery has to come down with the session, but `duty/dutyRecovery` reaches the API through
+ * `endpoints/driver`, which imports THIS file for the access token — so importing duty back from
+ * here closes a cycle. Metro allows one and warns about it, and the warning is worth heeding:
+ * a cycle resolved in the wrong order leaves one side's bindings `undefined`, which here would
+ * mean a teardown that silently never ran.
+ *
+ * `dutyRecovery` registers itself at module scope, and is loaded from `index.js` before
+ * `expo-router/entry` — so the hook is in place before anything can end a session.
+ */
+type SessionEndHook = () => Promise<void>;
+let onSessionEnd: SessionEndHook | null = null;
+
+export function setSessionEndHook(hook: SessionEndHook): void {
+  onSessionEnd = hook;
+}
+
+/**
+ * Local teardown. Idempotent, and safe to call when there was never a session.
+ *
+ * **THE DUTY MACHINERY GOES DOWN WITH THE SESSION**, which is what `renew()` above has always
+ * said must happen here and what nothing actually did. A session that ends by itself — a refresh
+ * rejected mid-shift — used to leave the foreground service up and the ping loop running with no
+ * credential: a "You're online" notification over a driver who is signed out, pinging an endpoint
+ * that answers 401 every fifteen seconds.
+ *
+ * Failure in the hook must not stop the session ending. A driver whose keystore write failed is
+ * still signed out, and a teardown that threw on the way would leave the tokens cleared but the
+ * state still `authenticated` — the worst of both.
+ */
 export async function endSession(): Promise<void> {
   stopRenewal();
   accessToken = null;
   accessTokenExpiresAt = 0;
   await clearRefreshToken();
+
+  try {
+    await onSessionEnd?.();
+  } catch {
+    // Deliberately swallowed; see above.
+  }
+
   publish({ status: 'anonymous', user: null, isNewUser: false });
 }
 

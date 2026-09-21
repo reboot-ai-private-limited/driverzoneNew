@@ -8,6 +8,7 @@ import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
 import { SessionProvider } from '@/lib/auth/SessionProvider';
+import { useSessionRedirect } from '@/lib/auth/useSessionRedirect';
 import { useOfferPushBridge } from '@/notifications/useOfferPushBridge';
 import { createQueryClient } from '@/lib/query/client';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
@@ -49,6 +50,16 @@ export default function RootLayout(): ReactElement | null {
    * after that line would violate the rules of hooks on the very first render.
    */
   useOfferPushBridge();
+
+  /**
+   * Sending a driver to the login screen when the session ends WITHOUT them asking.
+   *
+   * Here for the same reason as the bridge above: it must outlive any one screen, since the whole
+   * point is the case where the driver is sitting on Home or a live trip when the refresh is
+   * rejected. Also called before the `fontsReady` early return, so it is never conditionally
+   * skipped.
+   */
+  useSessionRedirect();
 
   // Nothing paints until the typeface is in — the native splash is still covering the screen at
   // this point, so this is invisible, not a flash of blank white.

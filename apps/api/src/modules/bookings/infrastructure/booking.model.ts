@@ -170,7 +170,18 @@ bookingSchema.index({ driverId: 1, status: 1 });
  * The sweeper's query, and partial so the index holds only the handful of rows actually waiting
  * rather than every booking ever made.
  */
-bookingSchema.index({ dispatchAt: 1 }, { partialFilterExpression: { status: 'CONFIRMED' } });
+/**
+ * The sweeper's index, and it must cover BOTH waiting states.
+ *
+ * A partial index on `status: 'CONFIRMED'` alone stopped matching the moment `findDueForDispatch`
+ * grew to include `WAITING_DRIVER` — the query would still be correct and would quietly become a
+ * collection scan every minute. `$in` in a partial filter expression is supported; the query's
+ * own filter must use the same shape for the index to be eligible.
+ */
+bookingSchema.index(
+  { dispatchAt: 1 },
+  { partialFilterExpression: { status: { $in: ['CONFIRMED', 'WAITING_DRIVER'] } } },
+);
 
 export const BookingModel =
   (mongoose.models['Booking'] as mongoose.Model<BookingDoc> | undefined) ??

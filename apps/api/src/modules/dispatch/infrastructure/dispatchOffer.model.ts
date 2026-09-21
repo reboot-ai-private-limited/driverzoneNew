@@ -1,12 +1,13 @@
 import mongoose, { Schema } from 'mongoose';
 import { DELIVERY_CHANNELS } from '@driverzone/contracts';
-import { MANUAL_ASSIGNMENT_WAVE, OFFER_STATUSES } from '../domain/offer.entity.js';
+import { DISPATCH_ATTEMPTS, MANUAL_ASSIGNMENT_WAVE, OFFER_STATUSES } from '../domain/offer.entity.js';
 
 export interface DispatchOfferDoc {
   _id: mongoose.Types.ObjectId;
   bookingId: mongoose.Types.ObjectId;
   driverId: mongoose.Types.ObjectId;
   wave: number;
+  attempt: string;
   status: string;
   score: number;
   distanceMetres: number;
@@ -29,6 +30,13 @@ const dispatchOfferSchema = new Schema<DispatchOfferDoc>(
      * the ordinary first wave.
      */
     wave: { type: Number, required: true, min: MANUAL_ASSIGNMENT_WAVE },
+
+    /*
+     * `default: 'FINAL'` is what makes this safe to deploy over existing data: every offer row
+     * written before the early ring existed was, by definition, part of the only search that
+     * booking ever got. Reading one back as `FINAL` is not a guess, it is the truth.
+     */
+    attempt: { type: String, enum: DISPATCH_ATTEMPTS, required: true, default: 'FINAL' },
     status: { type: String, enum: OFFER_STATUSES, required: true, default: 'SENT' },
     score: { type: Number, required: true },
     distanceMetres: { type: Number, required: true },
@@ -48,8 +56,20 @@ const dispatchOfferSchema = new Schema<DispatchOfferDoc>(
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
-/** One offer per driver per booking — a later wave must never ring someone twice. */
-dispatchOfferSchema.index({ bookingId: 1, driverId: 1 }, { unique: true });
+/**
+ * One offer per driver per booking PER ATTEMPT — a later wave must never ring someone twice.
+ *
+ * The third column is the early ring. Within one search the rule is unchanged: waves widen, and a
+ * driver who ignored wave 1 is not rung again at wave 2. Across the two searches of a scheduled
+ * booking it must not hold — the early ring asks at 9 pm, the final ring asks at 4:30 am, and
+ * those are different questions to the same person about a day they now know something about.
+ *
+ * **This index changes shape on an existing collection.** The old two-column unique index has to
+ * be dropped for this one to take effect; Mongoose will not replace it in place, and until it is
+ * dropped the final ring will still fail with a duplicate key on any driver the early ring
+ * already offered to.
+ */
+dispatchOfferSchema.index({ bookingId: 1, driverId: 1, attempt: 1 }, { unique: true });
 
 dispatchOfferSchema.index({ bookingId: 1, wave: 1, status: 1 });
 

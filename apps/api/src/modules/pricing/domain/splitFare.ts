@@ -42,6 +42,36 @@ import type { FareSplit } from './fare.entity.js';
  * person to discover a pricing misconfiguration.
  */
 export function splitFare(commissionablePaise: number, driverAmountPaise: number): FareSplit {
+  /**
+   * BOTH INPUTS ARE CHECKED FOR BEING REAL NUMBERS, because the type says they are and the
+   * database does not have to agree.
+   *
+   * `driverAmountPaise` replaced a percentage on 2026-09-10, and a package written before that
+   * carries `driverCommissionBps` and nothing else. Mongoose's `required: true` does not help:
+   * it validates on WRITE, so a legacy document reads back with the field simply absent, and the
+   * mapper hands it on as a `number` that is actually `undefined`.
+   *
+   * WHAT THAT USED TO PRODUCE. `Math.min(undefined, x)` is `NaN`, `NaN` serialises to `null`, and
+   * the failure surfaced from `assertFareReconciles` below as "Fare does not reconcile: driver +
+   * company + tax must equal the total" with three nulls in it — an error describing arithmetic
+   * that never happened, pointing at the wrong subsystem entirely. The customer saw "we could not
+   * get a price" and there was nothing in that message, or in the one behind it, connecting the
+   * two to an unmigrated package.
+   *
+   * So the check is here rather than in the mapper: a legacy package must still be READABLE, so
+   * ops can open it in the panel and see what is wrong, and `migrateCommissionBpsToAmount.ts` can
+   * find it. It is only when somebody tries to PRICE with it that there is no honest answer.
+   */
+  if (!Number.isFinite(driverAmountPaise) || !Number.isFinite(commissionablePaise)) {
+    throw AppError.internal('INTERNAL', {
+      reason:
+        'Cannot split a fare without a driver amount — the package predates the flat-amount ' +
+        'change and needs migrateCommissionBpsToAmount.ts run against it',
+      commissionablePaise,
+      driverAmountPaise,
+    });
+  }
+
   const driverPaise = Math.min(driverAmountPaise, commissionablePaise);
 
   return {

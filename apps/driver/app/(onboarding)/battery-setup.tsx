@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { type ReactElement, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import {
   isBatteryOptimisationActive,
@@ -36,6 +36,20 @@ import { colors, radius, shadow, space, text } from '@/theme/theme';
  * `oemIntents.ts` is best-effort and silently falls back to this app's settings page, because
  * the OEM activity names it targets get renamed between skin versions.
  */
+/**
+ * Whether this handset has a full-screen-intent permission to grant at all.
+ *
+ * API 34 is where `USE_FULL_SCREEN_INTENT` stopped being granted at install time. Below it, every
+ * app holds it already and there is no settings screen for it — `MANAGE_APP_USE_FULL_SCREEN_INTENT`
+ * does not exist as an action, which is why `openFullScreenIntentSettings()` returns early rather
+ * than opening something irrelevant.
+ *
+ * Read once at module scope: an OS version cannot change while the process is alive, and putting
+ * it in state would only invite a re-render that means nothing.
+ */
+const NEEDS_FULL_SCREEN_PERMISSION =
+  Platform.OS === 'android' && typeof Platform.Version === 'number' && Platform.Version >= 34;
+
 export default function BatterySetupScreen(): ReactElement {
   const family = useMemo(detectOemFamily, []);
   const guide = guideFor(family);
@@ -180,20 +194,32 @@ export default function BatterySetupScreen(): ReactElement {
           ) : null}
 
           {/*
-            Android 14+ only. The offer is a full-screen "call" notification, and from API 34 that
-            needs a permission the OS hands out to dialers and alarm clocks alone — every other app
-            starts denied, and the ring then shows without waking the screen. There is no runtime
-            prompt; this is the one settings screen that flips it.
+            Android 14+ only, and now ACTUALLY gated on it. The offer is a full-screen "call"
+            notification, and from API 34 that needs a permission the OS hands out to dialers and
+            alarm clocks alone — every other app starts denied, and the ring then shows without
+            waking the screen. There is no runtime prompt; this is the one settings screen that
+            flips it.
+
+            THE COMMENT SAID "Android 14+ only" AND THE BUTTON RENDERED EVERYWHERE. On Android 13
+            and below `openFullScreenIntentSettings()` returns immediately — correctly, since the
+            permission is granted automatically there and there is no screen to send anyone to —
+            so the row was a button that did nothing at all: no settings page, no message, no
+            feedback of any kind. On the screen whose entire job is walking a driver through
+            settings that decide whether they receive work, a dead control teaches them the
+            instructions cannot be trusted. Reported from the field as "it does not open any
+            settings page on other phones".
           */}
-          <Pressable
-            onPress={() => void open('fullscreen')}
-            disabled={busy !== null}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
-          >
-            <Feather name="maximize" size={16} color={colors.fg} style={styles.secondaryIcon} />
-            <Text style={styles.secondaryText}>Allow full-screen offer alerts</Text>
-          </Pressable>
+          {NEEDS_FULL_SCREEN_PERMISSION ? (
+            <Pressable
+              onPress={() => void open('fullscreen')}
+              disabled={busy !== null}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.secondary, pressed && styles.secondaryPressed]}
+            >
+              <Feather name="maximize" size={16} color={colors.fg} style={styles.secondaryIcon} />
+              <Text style={styles.secondaryText}>Allow full-screen offer alerts</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <Text style={styles.hint}>

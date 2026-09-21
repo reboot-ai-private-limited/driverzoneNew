@@ -278,6 +278,144 @@ at T-2h: push "Confirm you're still taking this 6:00 AM trip"
 The reconfirm step is what makes pre-assignment safe. Without it, a driver who took a trip
 yesterday and forgot it leaves you discovering the problem at 6:00 am with no fallback.
 
+### Ring early, park, ring again
+
+**This section reverses the opening rule above, deliberately and only partly.** That rule says
+do not dispatch a 6 am booking at 9 pm — and the reasoning still holds: a driver rung at 9 pm
+does not know their morning, so they decline or ignore. What it produced in practice, though, is
+a scheduled booking where *nothing happens at all* until T−90, and if the waves fail there, the
+booking dies ninety minutes before a pickup the customer arranged days ago. One attempt, no
+warning, no fallback.
+
+The design below keeps the "do not ring at 9 pm" instinct but adds two things it lacked: an
+early attempt that costs nothing when it fails, and a place for the booking to *wait* rather
+than die.
+
+```
+booking created, pickup more than 90 min away
+  │
+  ├─ EARLY RING, immediately          CONFIRMED → SEARCHING → waves 0..max
+  │     accepted   → ASSIGNED         (driver sees it under "Booked for later")
+  │     exhausted  → WAITING_DRIVER   (parked; customer told we are still looking)
+  │
+  ├─ PARKED WINDOW, until T−90
+  │     admin assigns       → SEARCHING → ASSIGNED
+  │     driver takes it off the board → SEARCHING → ASSIGNED
+  │
+  └─ FINAL RING at T−90               WAITING_DRIVER → SEARCHING → waves 0..max
+        accepted  → ASSIGNED
+        exhausted → NO_DRIVER_FOUND   (terminal, as today)
+```
+
+A booking **60–90 minutes out has no early ring**, because `dispatch_at = max(now, T−90)` already
+puts its only attempt at `now`. Early and final are the same instant, and running two would ring
+the same drivers twice in a row.
+
+#### `WAITING_DRIVER`, and why it is a status rather than a flag
+
+The parked state needs to be visible to ops, filterable in the panel, and distinct from both
+"nobody has looked yet" (`CONFIRMED`) and "we gave up" (`NO_DRIVER_FOUND`). A boolean on the
+booking would leave `CONFIRMED` meaning two different things depending on a column, which is how
+status tables rot.
+
+Two new edges in `TRANSITIONS`:
+
+```
+SEARCHING      → WAITING_DRIVER    -- the early ring found nobody
+WAITING_DRIVER → SEARCHING         -- final ring, admin assignment, or a driver taking it
+```
+
+**The second edge is the risky one.** The table is otherwise a one-way funnel, and `SEARCHING` is
+the state `claimForDriver`'s compare-and-swap depends on. A booking that can re-enter `SEARCHING`
+can be entered twice, so the claim must stay safe when the early ring's last lapsing offer and a
+board acceptance land in the same moment. This is the part to write tests for first.
+
+Manual assignment reaches it through `transferBooking`'s PRE-ASSIGNMENT branch, beside
+`CONFIRMED` — not through `REASSIGNABLE_STATUSES`, which is derived from `COMMITTED_STATUSES` and
+describes taking a booking AWAY from a driver who holds it. A parked booking has no driver to
+release, so it goes straight to the claim. And `findDueForDispatch` matches it as well as
+`CONFIRMED` — otherwise the sweeper stops being a safety net for exactly the bookings that most
+need one.
+
+#### The early ring must not cost drivers anything
+
+This is the condition that makes the early attempt acceptable at all. A driver rung at 9 pm for a
+6 am trip who does not answer has done nothing wrong, and the code is already careful about this
+distinction — `respondToOffer` marks a loser `SUPERSEDED` precisely so losing a race stays off an
+acceptance rate.
+
+An early-ring offer that lapses or is declined must be excluded the same way. Whether that is a
+new offer status or a flag on the row, the metrics job must not read it as a refusal. Get this
+wrong and the feature quietly punishes the drivers who take the most work.
+
+#### The final ring must be allowed to ask the same drivers again
+
+`driverIdsOffered(bookingId)` excludes every driver already rung for that booking, so that a
+later wave never rings someone twice. Across two attempts hours apart that is exactly backwards:
+the drivers the early ring asked at 9 pm are the ones worth asking again at 4:30 am.
+
+The exclusion has to be scoped to the attempt, not the booking.
+
+#### The scheduled board
+
+Between the two rings the booking sits on a board any **eligible** driver can take:
+
+```
+GET  /driver/scheduled-bookings          -- WAITING_DRIVER, future, eligible for this driver
+POST /driver/scheduled-bookings/:id/accept
+```
+
+"Eligible" means the same gates `MongoDriverPool` applies to a wave — verified, unblocked, and
+vehicle-competent for the trip (`vehicleMismatchReason`, including the hill check). It is not an
+open marketplace: a hatchback driver must not be able to take an SUV booking from a list when
+dispatch would never have rung them for it.
+
+Favourites get no priority here. They already get wave 0 in both rings, which is where that
+preference belongs; a board that hid trips from everyone else for a window would leave real work
+sitting unclaimed for no gain.
+
+Acceptance goes through `beginSearching` + `claimForDriver` with a `DRIVER` actor, the same path
+manual assignment uses — never around it, so the transition table, the event log and the claim
+race keep having one implementation each.
+
+**A driver must not be able to hold two trips that overlap.** `hasActiveBooking` answers "on a
+trip now", which is not the question here. Taking 10:00 and 10:30 on the same morning needs a
+real overlap check against the trip's expected duration.
+
+#### When the final ring fails
+
+`NO_DRIVER_FOUND`, terminal, as today. There is no cancellation fee and nothing to refund through
+the payment provider: the payment method is chosen after the trip starts, so a booking that never
+found a driver was never charged.
+
+**With one exception that is already broken today.** Wallet credit is spent at booking time —
+`createBooking` writes a `SPENT_ON_RIDE` ledger entry for `creditAppliedPaise` because the
+booking confirms synchronously and there is no later webhook to do it. `markNoDriverFound` is a
+bare status transition and touches none of it, so a customer who paid partly from their wallet
+loses that credit when the booking dies.
+
+That is a pre-existing bug, not one this design introduces — but this design makes it far worse.
+Today a booking dies minutes after being made; under this flow it can die ninety minutes before a
+pickup the customer arranged days earlier, with the credit consumed for that entire time. The
+fix belongs with this work: releasing `walletCreditPaise` and clearing `walletDebtPaise` on
+`NO_DRIVER_FOUND`.
+
+`NO_DRIVER_FOUND → SEARCHING` already exists for an admin retry, so ops keep their last resort.
+
+#### What the customer sees
+
+Three states that today are one:
+
+| Booking state | What the customer is told |
+|---|---|
+| `SEARCHING` (either ring) | the live search screen — radar, "finding your driver" |
+| `WAITING_DRIVER` | "We're still finding you a driver for <time>. We'll keep trying." |
+| `NO_DRIVER_FOUND` | already rendered by both apps |
+
+The parked message is the one that does not exist yet, and it is the whole point of the feature
+from the customer's side: the difference between silence and being told the trip is still being
+worked on.
+
 ## Reassignment and manual assignment
 
 Both are one endpoint — `POST /admin/bookings/:id/assign { driver_id, reason }` — because they are

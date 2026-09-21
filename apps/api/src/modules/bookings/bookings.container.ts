@@ -190,12 +190,21 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     contract: {
       findById: (bookingId) => repo.findById(bookingId),
 
-      beginSearching: (bookingId) =>
+      beginSearching: (bookingId, from) =>
         repo.transition({
           bookingId,
-          from: 'CONFIRMED',
+          from,
           to: 'SEARCHING',
           actor: { type: 'SYSTEM', id: null },
+        }),
+
+      markWaitingForDriver: (bookingId, reason) =>
+        repo.transition({
+          bookingId,
+          from: 'SEARCHING',
+          to: 'WAITING_DRIVER',
+          actor: { type: 'SYSTEM', id: null },
+          reason,
         }),
 
       claimForDriver: async (bookingId, driverId, actor): Promise<ClaimResult> => {
@@ -254,16 +263,70 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         return active !== null;
       },
 
-      markNoDriverFound: (bookingId, reason) =>
-        repo.transition({
+      /**
+       * The booking is given up on — AND the customer gets their wallet credit back.
+       *
+       * THE RELEASE IS NEW, AND IT FIXES A REAL LOSS. Credit is spent at booking time
+       * (`createBooking` writes `SPENT_ON_RIDE` because the booking confirms synchronously and no
+       * later webhook exists to do it), while this used to be nothing but a status transition. A
+       * customer who part-paid a fare from their wallet and was never found a driver simply lost
+       * that money: no refund path covered it, because there was no payment to refund — the card
+       * or cash is chosen after the trip starts, so the wallet was the only thing that had moved.
+       *
+       * It matters far more now than it did. A booking used to die within minutes of being made;
+       * a scheduled one can now die ninety minutes before a pickup arranged days earlier, with
+       * the credit held the whole time.
+       *
+       * `walletDebtPaise` needs no equivalent: debt is collected when a trip is paid for, so a
+       * trip that never happened never collected any.
+       *
+       * THE RELEASE MUST NOT UNDO THE TRANSITION. If appending the entry fails, the booking is
+       * still correctly `NO_DRIVER_FOUND` — that is the truth, and refusing to record it would
+       * leave a booking searching forever for a wave ladder that has already finished. The
+       * mismatch is logged loudly instead, because it is money and somebody has to fix it.
+       */
+      markNoDriverFound: async (bookingId, reason) => {
+        const given = await repo.transition({
           bookingId,
           from: 'SEARCHING',
           to: 'NO_DRIVER_FOUND',
           actor: { type: 'SYSTEM', id: null },
           reason,
-        }),
+        });
+
+        if (given === null || given.walletCreditPaise <= 0) return given;
+
+        try {
+          await deps.wallet.append([
+            {
+              customerId: given.customerId,
+              bookingId: given.id,
+              entryType: 'RELEASED_FROM_RIDE',
+              amountPaise: given.walletCreditPaise,
+              note: `Returned from trip ${given.reference} — no driver was found`,
+            },
+          ]);
+        } catch (error) {
+          logger.error(
+            {
+              err: error,
+              bookingId,
+              reference: given.reference,
+              walletCreditPaise: given.walletCreditPaise,
+            },
+            'NO_DRIVER_FOUND but the wallet credit was NOT released — customer is out of pocket',
+          );
+        }
+
+        return given;
+      },
 
       findDueForDispatch: (now, limit) => repo.findDueForDispatch(now, limit),
+
+      findWaitingForDriver: (after, limit) => repo.findWaitingForDriver(after, limit),
+
+      findUpcomingAssignedForDriver: (driverId, after) =>
+        repo.findUpcomingAssignedForDriver(driverId, after),
     },
 
     favouritesContract: {

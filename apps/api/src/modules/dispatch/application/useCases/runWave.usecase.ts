@@ -4,7 +4,7 @@ import type { Booking, BookingDispatchContract } from '../../../bookings/booking
 import type { FavouriteDriversContract } from '../../../favourites/favourites.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import type { DriverCandidate } from '../../domain/offer.entity.js';
-import { radiusForWave, rankCandidates } from '../../domain/offer.entity.js';
+import { attemptFor, radiusForWave, rankCandidates } from '../../domain/offer.entity.js';
 import type { DriverPoolPort, NewOffer, OfferRepositoryPort } from '../../domain/ports.js';
 
 /** Schedules the wave-timeout job. Injected so the domain never imports BullMQ. */
@@ -62,8 +62,18 @@ export class RunDispatchWaveUseCase {
     const booking = await this.bookings.findById(bookingId);
     if (booking === null) return { rang: false, reason: 'NOT_FOUND' };
 
-    // The first wave is what moves a booking out of CONFIRMED. Later waves find it already there.
-    if (booking.status === 'CONFIRMED') await this.bookings.beginSearching(bookingId);
+    /*
+     * The first wave is what moves a booking out of a waiting state. Later waves find it already
+     * in `SEARCHING`.
+     *
+     * TWO DOORS, not one. `CONFIRMED` is a booking nothing has looked for yet — the early ring of
+     * a scheduled booking, and every ring of an immediate one. `WAITING_DRIVER` is the final ring
+     * at T−90 picking up a booking whose early search found nobody. Both are driverless and both
+     * start the same way.
+     */
+    if (booking.status === 'CONFIRMED' || booking.status === 'WAITING_DRIVER') {
+      await this.bookings.beginSearching(bookingId, booking.status);
+    }
 
     const current = await this.bookings.findById(bookingId);
     if (current === null) return { rang: false, reason: 'NOT_FOUND' };
@@ -78,7 +88,20 @@ export class RunDispatchWaveUseCase {
     const waveSize = snapshot['dispatch.wave_size'];
     const maxNegativeBalancePaise = rupeesToPaise(snapshot['driver.max_negative_balance']);
 
-    const alreadyOffered = await this.offers.driverIdsOffered(bookingId);
+    /*
+     * WHICH SEARCH THIS IS, derived from the booking rather than carried in the job.
+     *
+     * A wave timeout enqueued by the early ring fires minutes later and re-enters here; deriving
+     * the attempt from `dispatchAt` means that resumed job reaches the same answer as the ring
+     * that scheduled it, with no payload to migrate and nothing that can drift after a deploy.
+     */
+    const attempt = attemptFor(current);
+
+    /*
+     * Scoped to this attempt. The early ring's offers must NOT exclude those drivers from the
+     * final ring hours later — see `driverIdsOffered`.
+     */
+    const alreadyOffered = await this.offers.driverIdsOffered(bookingId, attempt);
 
     if (startWave <= FAVOURITE_WAVE) {
       const rang = await this.ringFavourites(current, {
@@ -116,18 +139,61 @@ export class RunDispatchWaveUseCase {
     }
 
     /*
-     * Every radius, nobody. On a SCHEDULED booking this needs a human immediately — there is
-     * still time to solve it by phone, which is the whole advantage of booking ahead.
+     * EVERY RADIUS, NOBODY — and what that means depends on which search just ran out.
+     *
+     * On the EARLY ring it means "not yet". The booking is parked in `WAITING_DRIVER`: ops can see
+     * it, an eligible driver can take it off the scheduled board, and the final ring will ask
+     * again at T−90. Nothing is lost and the customer is told we are still looking.
+     *
+     * On the FINAL ring it means "no". There is no later search to wait for, so the booking is
+     * given up exactly as it always was.
      */
-    await this.bookings.markNoDriverFound(
-      bookingId,
-      `No available driver after ${maxWaves} waves`,
-    );
+    const reason = `No available driver after ${maxWaves} waves`;
+
+    if (attempt === 'EARLY') {
+      await this.bookings.markWaitingForDriver(bookingId, reason);
+
+      logger.info(
+        { bookingId, reference: current.reference, dispatchAt: current.dispatchAt },
+        'early ring found no driver — parked as WAITING_DRIVER, will ring again at T−90',
+      );
+
+      /*
+       * TELL THE CUSTOMER, because silence here is what the parked state exists to replace.
+       *
+       * They booked a trip and nothing visible happened; without this the app quietly changes a
+       * line of text they are not looking at. The message says the trip is still on and that we
+       * will try again — it does NOT apologise, because nothing has gone wrong yet, and it does
+       * not promise a driver, because we do not have one.
+       *
+       * Tolerant of failure like every other notification in this file: a customer who missed the
+       * push still sees the state when they open the app, and a dead token must not turn a
+       * correctly parked booking into a failed dispatch job that gets retried.
+       */
+      try {
+        await this.notifications.sendBookingUpdate(
+          { role: 'CUSTOMER', id: current.customerId },
+          {
+            bookingId,
+            reference: current.reference,
+            status: 'WAITING_DRIVER',
+            message:
+              "No one has taken your trip yet. We'll keep looking and try again closer to your pickup time.",
+          },
+        );
+      } catch (error) {
+        logger.warn({ err: error, bookingId }, 'could not tell the customer their trip is parked');
+      }
+
+      return { rang: false, reason: 'GAVE_UP' };
+    }
+
+    await this.bookings.markNoDriverFound(bookingId, reason);
 
     logger[current.isScheduled ? 'error' : 'warn'](
       { bookingId, reference: current.reference, isScheduled: current.isScheduled },
       current.isScheduled
-        ? 'SCHEDULED booking found no driver — escalate to ops now, there is still time'
+        ? 'SCHEDULED booking found no driver on the final ring — nothing left to try'
         : 'booking found no driver',
     );
 
@@ -210,6 +276,12 @@ export class RunDispatchWaveUseCase {
           bookingId: booking.id,
           driverId: candidate.driverId,
           wave,
+          /*
+           * Re-derived here rather than passed down from `execute`, so it stays correct for the
+           * favourite wave too — that path reaches `ring` by its own route. Both callers are
+           * within milliseconds of the same `dispatchAt` comparison, so the two always agree.
+           */
+          attempt: attemptFor(booking),
           score: candidate.score,
           distanceMetres: candidate.distanceMetres,
           expiresAt,

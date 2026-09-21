@@ -1,4 +1,8 @@
-import { enqueueDispatch, enqueueWaveTimeout } from '@/shared/queue/dispatchJobs.js';
+import {
+  enqueueDispatch,
+  enqueueEarlyDispatch,
+  enqueueWaveTimeout,
+} from '@/shared/queue/dispatchJobs.js';
 import { buildAdminContainer } from '@/modules/admin/admin.container.js';
 import { buildBookingsContainer } from '@/modules/bookings/bookings.container.js';
 import { buildDispatchContainer } from '@/modules/dispatch/dispatch.container.js';
@@ -112,7 +116,27 @@ export function buildContainers(): AppContainers {
     notifications: notifications.contract,
     // Tier 1, built well above — the read side, so the driver's trip list can name its customers.
     identity: identity.contract,
-    scheduleDispatch: (booking) => enqueueDispatch(booking.id, booking.dispatchAt),
+    /**
+     * TWO JOBS FOR A SCHEDULED BOOKING, one for everything else.
+     *
+     * `enqueueDispatch` is the search that has always existed: immediate for a normal booking,
+     * delayed to T−90 for a scheduled one. `enqueueEarlyDispatch` is the new first look, run the
+     * moment the booking is made, so a trip nobody wants is discovered days ahead instead of
+     * ninety minutes before the pickup. It declines to enqueue anything when the two would be too
+     * close together to be distinct searches.
+     *
+     * The early job is enqueued SECOND on purpose. If the process dies between the two, the
+     * booking still has the search it would have had before this feature existed — losing the
+     * safety net is survivable, losing the real dispatch is not.
+     */
+    scheduleDispatch: async (booking) => {
+      await enqueueDispatch(booking.id, booking.dispatchAt);
+      await enqueueEarlyDispatch({
+        bookingId: booking.id,
+        isScheduled: booking.isScheduled,
+        dispatchAt: booking.dispatchAt,
+      });
+    },
   });
 
   /*

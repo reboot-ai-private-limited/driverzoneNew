@@ -16,14 +16,21 @@ import {
   DeclineOfferUseCase,
 } from './application/useCases/respondToOffer.usecase.js';
 import { TransferBookingUseCase } from './application/useCases/transferBooking.usecase.js';
+import { ScheduledBoardUseCase } from './application/useCases/scheduledBoard.usecase.js';
 import {
   makeAcceptOfferController,
+  makeAcceptScheduledBookingController,
   makeAssignDriverController,
   makeAssignableDriversController,
   makeDeclineOfferController,
   makeListOffersController,
+  makeListScheduledBoardController,
 } from './interface/dispatch.controller.js';
-import { buildAdminRouter, buildDriverRouter } from './interface/dispatch.routes.js';
+import {
+  buildAdminRouter,
+  buildDriverRouter,
+  buildDriverScheduledBoardRouter,
+} from './interface/dispatch.routes.js';
 
 export interface DispatchDependencies {
   bookings: BookingDispatchContract;
@@ -52,6 +59,8 @@ export interface DispatchContainer {
   runWave: (bookingId: string, startWave?: number) => Promise<unknown>;
   expireWave: (bookingId: string, wave: number) => Promise<void>;
   buildDriverRouter: () => Router;
+  /** The board of parked scheduled trips — see `scheduledBoard.usecase.ts`. */
+  buildDriverScheduledBoardRouter: () => Router;
   /** `/admin/bookings/assignable-drivers` and `/admin/bookings/:id/assign`. */
   buildAdminRouter: () => Router;
 }
@@ -88,6 +97,13 @@ export function buildDispatchContainer(deps: DispatchDependencies): DispatchCont
     deps.notifications,
   );
 
+  const scheduledBoard = new ScheduledBoardUseCase(
+    deps.bookings,
+    deps.identity,
+    offers,
+    deps.notifications,
+  );
+
   return {
     runWave: (bookingId, startWave) => runWave.execute(bookingId, startWave),
     expireWave: (bookingId, wave) => expireWave.execute(bookingId, wave),
@@ -96,6 +112,12 @@ export function buildDispatchContainer(deps: DispatchDependencies): DispatchCont
         list: makeListOffersController(offers, deps.bookings),
         accept: makeAcceptOfferController(accept),
         decline: makeDeclineOfferController(decline),
+      }),
+
+    buildDriverScheduledBoardRouter: () =>
+      buildDriverScheduledBoardRouter({
+        list: makeListScheduledBoardController(scheduledBoard),
+        accept: makeAcceptScheduledBookingController(scheduledBoard),
       }),
 
     buildAdminRouter: () =>

@@ -35,6 +35,7 @@ import type { NotificationsContract } from '../src/modules/notifications/notific
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
 import { buildSnapshot } from '../src/modules/settings/domain/setting.entity.js';
 import { jobIdFor } from '../src/shared/queue/dispatchJobs.js';
+import { makeListOffersController } from '../src/modules/dispatch/interface/dispatch.controller.js';
 
 const settings: SettingsReadContract = {
   snapshot: async () => buildSnapshot([]),
@@ -617,6 +618,85 @@ describe('findAllLiveForDriver — a driver with more than one live offer', () =
     expect(await offers.findAllLiveForDriver('drv_1')).toEqual([
       offers.all().find((o) => o.id === offerB!.id),
     ]);
+  });
+});
+
+/**
+ * WHAT THE DRIVER'S PHONE IS TOLD IS STILL RINGING.
+ *
+ * The offer rows are not the whole truth: a booking can end while its offers are live, and
+ * cancelling one does not touch them. This endpoint is where the two are reconciled, so the rule
+ * is pinned here.
+ */
+describe('GET /driver/offers — offers whose booking has moved on', () => {
+  async function listFor(bookingStatus: Booking['status']) {
+    const offers = fakeOffers();
+    await offers.createMany([
+      {
+        bookingId: 'bkg_1',
+        driverId: 'drv_1',
+        wave: 1,
+        score: 0.5,
+        distanceMetres: 500,
+        expiresAt: new Date(Date.now() + 30_000),
+      },
+    ]);
+
+    const controller = makeListOffersController(
+      offers,
+      fakeBookings(booking({ status: bookingStatus })),
+    );
+
+    const req = { method: 'GET', originalUrl: '/api/driver/offers', principal: { sub: 'drv_1' } };
+
+    /*
+     * AWAITED THROUGH THE RESPONSE, not through the call. `asyncHandler` returns `void` — it
+     * calls the async function and attaches `.catch(next)` without handing the promise back — so
+     * awaiting the controller returns before it has done anything, and a naive test reads an empty
+     * response and fails on every case equally. Settling on `json`/`next` waits for the real end.
+     */
+    const body = await new Promise<{ data: { offers: unknown[] } }>((resolve, reject) => {
+      const res = {
+        status: () => res,
+        json: (sent: { data: { offers: unknown[] } }) => {
+          resolve(sent);
+          return res;
+        },
+      };
+      // A controller wants a real express Request/Response; the few fields it actually reads are
+      // above, and `any` is the honest way to say "this is not one".
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
+      controller(req as any, res as any, reject as any);
+    });
+
+    return body.data.offers;
+  }
+
+  it('still rings while the booking is SEARCHING', async () => {
+    expect(await listFor('SEARCHING')).toHaveLength(1);
+  });
+
+  /*
+   * THE CANCEL-BUT-KEEP-RINGING BUG. Cancelling ends the booking and leaves the offer rows SENT —
+   * it cannot notify the drivers, because `cancelBooking` only messages `booking.driverId` and
+   * during SEARCHING nobody is assigned. Without this filter the phone rang for the rest of the
+   * 45-second TTL for a trip that no longer existed, and Accept then failed.
+   */
+  it('goes quiet the moment the customer cancels', async () => {
+    expect(await listFor('CANCELLED_BY_CUSTOMER')).toEqual([]);
+  });
+
+  it('goes quiet when ops cancels it too', async () => {
+    expect(await listFor('CANCELLED_BY_ADMIN')).toEqual([]);
+  });
+
+  /*
+   * And when somebody else won it. `supersedeOthers` already withdraws the losing rows, so this
+   * is belt and braces — but it is the same question from the driver's point of view, and the
+   * answer must not depend on which of the two mechanisms got there first.
+   */
+  it('goes quiet when another driver has taken it', async () => {
+    expect(await listFor('ASSIGNED')).toEqual([]);
   });
 });
 

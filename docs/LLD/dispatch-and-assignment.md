@@ -330,9 +330,12 @@ the state `claimForDriver`'s compare-and-swap depends on. A booking that can re-
 can be entered twice, so the claim must stay safe when the early ring's last lapsing offer and a
 board acceptance land in the same moment. This is the part to write tests for first.
 
-`WAITING_DRIVER` joins `REASSIGNABLE_STATUSES` so the existing manual-assignment path works on it
-unchanged, and `findDueForDispatch` must match it as well as `CONFIRMED` — otherwise the sweeper
-stops being a safety net for exactly the bookings that most need one.
+Manual assignment reaches it through `transferBooking`'s PRE-ASSIGNMENT branch, beside
+`CONFIRMED` — not through `REASSIGNABLE_STATUSES`, which is derived from `COMMITTED_STATUSES` and
+describes taking a booking AWAY from a driver who holds it. A parked booking has no driver to
+release, so it goes straight to the claim. And `findDueForDispatch` matches it as well as
+`CONFIRMED` — otherwise the sweeper stops being a safety net for exactly the bookings that most
+need one.
 
 #### The early ring must not cost drivers anything
 

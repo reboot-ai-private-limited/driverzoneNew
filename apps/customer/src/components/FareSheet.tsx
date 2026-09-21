@@ -253,22 +253,30 @@ export function FareSheet({
       void queryClient.invalidateQueries({ queryKey: keys.wallet.me() });
       onClose();
       /*
-       * The SEARCHING screen, not the trip screen directly — dispatch has not run yet at this
-       * instant (CASH confirms synchronously; the wave that finds a driver is a separate queued
-       * job), so landing straight on the trip screen would show a customer a receipt with a
-       * "Finding your driver" line buried in it instead of the full-screen moment that deserves.
+       * THE SEARCHING SCREEN, FOR EVERY BOOKING. Dispatch has not run at this instant (cash
+       * confirms synchronously; the wave that finds a driver is a separate queued job), so landing
+       * straight on the trip screen would show a customer a receipt with a "Finding your driver"
+       * line buried in it instead of the full-screen moment that deserves.
        *
-       * EXCEPT WHEN THE TRIP IS FOR LATER, where that screen is a lie told for days. A scheduled
-       * booking is not dispatched until 90 minutes before its pickup, so the radar would spin and
-       * the "Searching for 41:12" chip would count up on a search that has not started and will
-       * not for three days. The trip screen already says "Booking confirmed" for this exact state,
-       * and it already carries the cancel bar.
+       * **A SCHEDULED BOOKING USED TO BE SENT STRAIGHT TO THE TRIP SCREEN, and that is no longer
+       * right.** The reason it was is written out above this line in the old code: a scheduled
+       * booking was not dispatched until ninety minutes before its pickup, so the radar would have
+       * spun for up to three days on a search that had not started.
+       *
+       * It starts now. Every scheduled booking is rung for the moment it is made
+       * (docs/LLD/dispatch-and-assignment.md §Ring early, park, ring again), so the search this
+       * screen shows is a real one — drivers' phones are ringing while the customer watches it.
+       *
+       * IN PRACTICE THIS IS THE ONLY BRANCH THAT EVER MATTERED. The picker's earliest allowed
+       * pickup is 60 minutes out and it rounds up, so `is_scheduled` was true for every booking
+       * the app could produce — which meant this screen was unreachable and the customer never saw
+       * a search at all, for any trip.
+       *
+       * Leaving is handled at the other end: the screen hands off to the trip screen the moment
+       * the booking stops being searched for — a driver found, or the early ring exhausting itself
+       * into `WAITING_DRIVER`.
        */
-      router.push(
-        result.booking.is_scheduled
-          ? `/trip/${result.booking.id}`
-          : `/searching/${result.booking.id}`,
-      );
+      router.push(`/searching/${result.booking.id}`);
     },
   });
 

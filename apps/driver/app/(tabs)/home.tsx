@@ -343,25 +343,32 @@ export default function HomeScreen(): ReactElement {
           every Home render for a list most drivers open occasionally and by choice.
 
           Below "Booked for later" on purpose: trips they already hold outrank trips they might.
+
+          WRAPPED IN `upcoming` LIKE THE GROUP ABOVE IT, even though it is a single row. That
+          wrapper is what carries the gap to the next block — a bare row carried only the 4dp that
+          separates SIBLING rows, so this one sat almost touching the duty card while the group
+          above it had 20dp. Same wrapper, same spacing, no special case.
         */}
         {onDuty ? (
-          <Pressable
-            onPress={() => router.push('/scheduled-board')}
-            accessibilityRole="button"
-            accessibilityLabel="Trips you can take, booked ahead"
-            style={({ pressed }) => [styles.upcomingRow, pressed && styles.upcomingRowPressed]}
-          >
-            <View style={styles.upcomingIcon}>
-              <Feather name="calendar" size={15} color={colors.warning} />
-            </View>
-            <View style={styles.batteryText}>
-              <Text style={styles.upcomingTitle}>Trips you can take</Text>
-              <Text style={styles.batteryBody} numberOfLines={1}>
-                Booked ahead, waiting for a driver
-              </Text>
-            </View>
-            <Feather name="chevron-right" size={18} color={colors.faint} />
-          </Pressable>
+          <View style={styles.upcoming}>
+            <Pressable
+              onPress={() => router.push('/scheduled-board')}
+              accessibilityRole="button"
+              accessibilityLabel="Trips you can take, booked ahead"
+              style={({ pressed }) => [styles.upcomingRow, pressed && styles.upcomingRowPressed]}
+            >
+              <View style={styles.upcomingIcon}>
+                <Feather name="calendar" size={15} color={colors.warning} />
+              </View>
+              <View style={styles.batteryText}>
+                <Text style={styles.upcomingTitle}>Trips you can take</Text>
+                <Text style={styles.batteryBody} numberOfLines={1}>
+                  Booked ahead, waiting for a driver
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.faint} />
+            </Pressable>
+          </View>
         ) : null}
 
         {needsBattery === true ? (
@@ -490,7 +497,7 @@ const styles = StyleSheet.create({
     borderColor: '#F0D9A0',
     borderRadius: radius.md,
     padding: space.md,
-    marginBottom: space.xl,
+    marginBottom: space.md,
   },
   batteryBannerPressed: { opacity: 0.9 },
   batteryIcon: {
@@ -507,7 +514,20 @@ const styles = StyleSheet.create({
 
   /* Quieter than the live-trip banner above it on purpose: these are jobs to know about, not jobs
      to act on. A second green card would compete with the one trip that is actually happening. */
-  upcoming: { marginBottom: space.md },
+  /*
+   * EVERY BLOCK ON THIS SCREEN LEAVES THE SAME GAP BELOW IT, and `space.md` is that gap — see
+   * `tripBanner` and `batteryBanner`, which now match. One step down the scale from `lg`, which
+   * read as too airy on a screen whose whole job is to be scanned at a glance.
+   *
+   * THE GAPS USED TO COME FROM THREE PLACES AT ONCE. This wrapper added 16, each row inside it
+   * added its own 4, the lone board row added only that 4, and the battery banner added 40 — so
+   * the same visual seam measured 20dp in one place, 4dp in the next and 40dp in the third, and
+   * the duty card sat hard against whatever happened to precede it.
+   *
+   * `gap` separates the rows INSIDE a group; `marginBottom` separates the group from what comes
+   * next. Two jobs, two properties, and neither one doubles up with the other.
+   */
+  upcoming: { marginBottom: space.md, gap: space.xs },
   upcomingHeading: {
     ...text.caption,
     color: colors.muted,
@@ -524,7 +544,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     padding: space.md,
-    marginBottom: space.xs,
   },
   upcomingRowPressed: { opacity: 0.9 },
   upcomingIcon: {

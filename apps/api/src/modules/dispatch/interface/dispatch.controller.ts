@@ -98,12 +98,33 @@ export function makeListOffersController(
      * A booking missing under a still-SENT offer is the one-offer controller's `booking === null`
      * case, carried over — filtered out here rather than failing the whole list, so a driver's
      * other, healthy offer does not disappear because one row points at a booking that is gone.
+     *
+     * AND A BOOKING THAT IS NO LONGER SEARCHING IS THE SAME KIND OF STALE, which is why the check
+     * below is on the status and not only on existence.
+     *
+     * THE BUG IT FIXES: a customer cancels while their booking is ringing. Cancelling ends the
+     * BOOKING — it does not touch the offer rows, and it cannot notify the drivers because
+     * `cancelBooking` only messages `booking.driverId`, which during `SEARCHING` is null: nobody
+     * has been assigned yet. So the offers stayed `SENT`, this endpoint kept handing them back,
+     * and the driver's phone went on ringing for a trip that no longer existed — up to the full
+     * 45-second offer TTL (60 for a favourite), with Accept failing at the end of it because
+     * `claimForDriver` requires `SEARCHING`.
+     *
+     * FILTERED HERE RATHER THAN WITHDRAWN ON CANCEL. `cancelBooking` lives in `bookings`, which
+     * knows nothing about `dispatch` and must not start to — the dependency runs the other way.
+     * This controller already loads the booking for every live offer, so the truth is in hand and
+     * the check is free. The driver app polls this every four seconds and closes a ring screen
+     * whose offer has left the list, so the phone stops within one poll.
+     *
+     * THE ROWS ARE LEFT ALONE and cost nothing: `ExpireWaveUseCase` bails on any booking that is
+     * not `SEARCHING`, so they are never lapsed and never reach anyone's acceptance rate — they
+     * simply age past `expiresAt` and stop being live.
      */
     const dtos = (
       await Promise.all(
         live.map(async (offer) => {
           const booking = await bookings.findById(offer.bookingId);
-          if (booking === null) return null;
+          if (booking === null || booking.status !== 'SEARCHING') return null;
 
           return {
             offer_id: offer.id,

@@ -1,5 +1,7 @@
 import {
+  type MutableRefObject,
   type ReactElement,
+  type RefObject,
   forwardRef,
   useEffect,
   useImperativeHandle,
@@ -49,7 +51,29 @@ export interface MapMarker {
 
 interface MapCanvasProps {
   initialCentre: { lat: number; lng: number };
+  /** How far out the map starts. Ignored after the first frame — the map keeps its own region. */
+  initialZoom?: MapZoom;
   markers?: MapMarker[];
+  /**
+   * Whether a pickup/drop pair pulls the camera back to show both.
+   *
+   * TRUE IS FOR CHOOSING A TRIP, where the question is "where does this go" and both ends have to
+   * be on screen. FALSE is for watching one, where the question is "who is coming to ME": the
+   * search screen centres on the pickup the customer is standing at and lets the route bow run off
+   * the edge, because a camera pulled back far enough to include a drop 40km away puts their own
+   * street under a single pixel.
+   */
+  frameRoute?: boolean;
+  /**
+   * Whether the customer may pan and zoom.
+   *
+   * FALSE MAKES THE CAMERA A FACT rather than a starting position. The search screen draws its
+   * sweep as a fixed screen-space overlay in the middle of the visible strip, which is over the
+   * pickup only for as long as the camera stays there — one drag and the rings would be pulsing
+   * over an empty field while the pin they belong to sat off to one side. Nothing on that screen
+   * asks the customer to look around, so the gesture that would break it is simply not offered.
+   */
+  interactive?: boolean;
   /** The fixed crosshair used while the customer is positioning a point. */
   showCentrePin?: boolean;
   /** Whether the centre pin is picking pickup or drop/destination. */
@@ -89,47 +113,167 @@ const ROUTE_ARC = 0.14;
 const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 } as const;
 
 /**
- * The most of the map that framing a route is allowed to pad away, per axis.
- *
- * WHY A CAP IS NEEDED AT ALL. `fitToCoordinates`' bottom padding is the sheet's height plus a
- * margin, and the sheet can be most of the screen — a trip summary with options and a button
- * easily runs past half of it. Once `top + bottom` approaches the map's own height there is no
- * rectangle left to fit two points into, and Google's camera solver does not degrade gracefully:
- * it returns a frame with the pins outside it, or declines to move at all. Either way the customer
- * picks a pickup and a destination and the route simply never appears.
- *
- * Capping at 70% leaves a usable strip whatever the sheet is doing. It only ever bites when the
- * padding was already impossible, so a normal-sized sheet frames exactly as before.
- */
-const MAX_FIT_PADDING_RATIO = 0.7;
-
-/**
  * How long after a new pickup/drop pair appears a sheet resize may still correct the framing.
  * Module scope, so the effect that reads it needs no dependency on it.
  */
 const FRAME_SETTLE_MS = 1200;
 
 /**
- * Shrinks a pair of opposite paddings proportionally until they fit inside `extent`.
+ * Breathing room above the route, clear of the floating search bar — AT MOST.
  *
- * PROPORTIONALLY, rather than clamping each to half the budget: the two sides mean different
- * things here — the bottom is a sheet covering the map, the top is a bar floating over it — and
- * clamping them independently would hand a 40pt top margin the same allowance as a 500pt sheet
- * and push the route up behind the sheet anyway.
+ * It is a ceiling, not an amount, because the sheet decides how much map there is to breathe in.
+ * The trip-summary sheet takes three quarters of the screen, leaving a strip of about 160dp;
+ * spending 80 of those on a top margin and 40 on a bottom one leaves the route 40dp and puts its
+ * middle nowhere near the middle of what the customer can see. Below, both are capped to a
+ * fraction of the strip, so on a tall sheet they shrink instead of swallowing it.
  */
-function fitWithin(near: number, far: number, extent: number): { near: number; far: number } {
-  const budget = extent * MAX_FIT_PADDING_RATIO;
-  const total = near + far;
-  if (extent <= 0 || total <= budget) return { near, far };
+const FRAME_MARGIN_TOP = 80;
 
-  const scale = budget / total;
-  return { near: Math.floor(near * scale), far: Math.floor(far * scale) };
+/** Ceiling on the room between the route and the top edge of the sheet. */
+const FRAME_MARGIN_BOTTOM = 40;
+
+/** The largest share of the visible strip each margin may take. */
+const FRAME_MARGIN_TOP_SHARE = 0.25;
+const FRAME_MARGIN_BOTTOM_SHARE = 0.15;
+
+/** Breathing room either side. */
+const FRAME_MARGIN_SIDE = 50;
+
+/**
+ * The smallest strip the route is ever framed into — a guard against dividing by nothing, not a
+ * preference.
+ *
+ * IT USED TO BE 160, AND THAT WAS THE BUG. With a tall sheet the real strip is smaller than that,
+ * so the floor took over and the band stopped describing where the strip was — while the aim was
+ * still being derived FROM the band. The route was framed into a 160dp band beginning 80dp down,
+ * which on that screen is behind the sheet's top edge: pickup clinging to the top corner, drop
+ * not on screen at all.
+ *
+ * A route squeezed into a genuinely thin strip is zoomed a long way out, and that is the right
+ * answer — when three quarters of the screen is sheet, there is nowhere else for the trip to go.
+ * Visible and distant beats close-up and hidden.
+ */
+const MIN_FRAME_BAND = 60;
+
+/**
+ * How much wider than the two points the frame is drawn.
+ *
+ * Without slack the pins land exactly on the edges of the band, which reads as a route cropped
+ * rather than framed.
+ */
+const FRAME_ZOOM_SLACK = 1.25;
+
+/** The smallest span a frame will zoom to — two points metres apart must not fill the street. */
+const MIN_FRAME_SPAN = 0.004;
+
+/**
+ * How long after a camera move of our own the map's settle report is ignored.
+ *
+ * THIS IS A CORRECTNESS FIX, NOT A POLISH ONE. `onRegionChangeComplete` is the screen's ONLY
+ * signal for "the customer panned the map", and the address under the crosshair is re-geocoded
+ * from it. But Android fires it DURING a programmatic animation as well — measured at 271ms into
+ * a 450ms move, with the camera still 1.7km short of the target. A place chosen from search
+ * therefore reported a coordinate somewhere along the flight path, and the pin was dropped there
+ * instead: the "sometimes it pins the wrong place" bug, worse the further the map had to travel.
+ *
+ * So every move this component makes marks a window, and reports inside it update the remembered
+ * region — which must stay truthful — without being passed on as the customer's choice. The tail
+ * covers the stragglers that arrive just after the animation's nominal end.
+ */
+const SETTLE_SUPPRESSION_TAIL_MS = 400;
+
+/**
+ * A jump this far is made INSTANTLY rather than flown. Roughly five kilometres.
+ *
+ * GOOGLE MAPS GIVES UP ON A LONG FLY-OVER, and it does so at a much shorter distance than it
+ * sounds. Two measurements, both on this device:
+ *
+ * - Kolkata, ~3.4° away: asked for 22.600, 88.385 at delta 0.006, the camera came to rest at
+ *   26.004, 88.416 at delta 0.729 — hundreds of kilometres short, at a hundred times the span.
+ * - Jalpaiguri Road Station, only ~0.3° away: the camera stopped over Siliguri College, about
+ *   a third of the way, and stayed there.
+ *
+ * So the threshold is not "another city" but "further than the customer can see": beyond a few
+ * screens' worth there is no continuity to follow anyway, and the animation is what loses the
+ * target. A cut always lands.
+ */
+const LONG_JUMP_DEGREES = 0.05;
+
+/*
+ * THE CROSSHAIR'S GEOMETRY, so its tip can be put on the coordinate it claims.
+ *
+ * The pin is drawn as a stack — head, stem, ground shadow — and its container centres that stack
+ * in the visible strip. Centring puts the stack's MIDDLE on the map's centre, which leaves the
+ * spike's tip sitting below the point actually being reported. Every pick was off by that much,
+ * consistently and in the same direction: far enough to land across a road or on the wrong side
+ * of a junction.
+ */
+const CENTRE_PIN_HEAD = 22;
+const CENTRE_PIN_HEAD_OVERLAP = 2;
+const CENTRE_PIN_STEM = 16;
+const CENTRE_PIN_SHADOW = 4;
+
+/** Head, stem and shadow together. */
+const PIN_STACK_HEIGHT =
+  CENTRE_PIN_HEAD - CENTRE_PIN_HEAD_OVERLAP + CENTRE_PIN_STEM + CENTRE_PIN_SHADOW;
+
+/** Where the stem meets the ground, measured from the top of the stack. */
+const PIN_TIP_FROM_TOP = CENTRE_PIN_HEAD - CENTRE_PIN_HEAD_OVERLAP + CENTRE_PIN_STEM;
+
+/** How far the stack is lifted so its tip, not its middle, lands on the centre. */
+const PIN_TIP_LIFT = PIN_TIP_FROM_TOP - PIN_STACK_HEIGHT / 2;
+
+/**
+ * How long a flown move takes.
+ *
+ * Also the length of the settle-suppression window it opens, so both move together.
+ */
+const CAMERA_FLY_MS = 450;
+
+/**
+ * The "duration" of a cut.
+ *
+ * NOT ZERO. `GoogleMap.animateCamera` rejects a non-positive duration outright, and
+ * `react-native-maps` passes ours straight through — so a cut is the shortest POSITIVE animation
+ * instead, which the map renders as a jump.
+ */
+const CAMERA_CUT_MS = 1;
+
+/**
+ * Point the camera somewhere, and mark the window in which the map's own settle reports are
+ * this component's doing rather than the customer's.
+ *
+ * Takes the refs rather than closing over them so the fit effect can call it without gaining a
+ * dependency that changes every render.
+ */
+function driveCamera(
+  map: RefObject<MapView | null>,
+  suppressUntil: MutableRefObject<number>,
+  from: Region,
+  to: Region,
+): void {
+  /*
+   * A JUMP ACROSS THE COUNTRY IS CUT TO — see `LONG_JUMP_DEGREES`. Measured on the larger of the
+   * two axes, because either one being that far is enough for the fly-over to be abandoned.
+   */
+  const jump = Math.max(
+    Math.abs(to.latitude - from.latitude),
+    Math.abs(to.longitude - from.longitude),
+  );
+  const duration = jump > LONG_JUMP_DEGREES ? CAMERA_CUT_MS : CAMERA_FLY_MS;
+
+  // Marked BEFORE the call: on a cut the settle report can come back almost immediately.
+  suppressUntil.current = Date.now() + duration + SETTLE_SUPPRESSION_TAIL_MS;
+  map.current?.animateToRegion(to, duration);
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
   {
     initialCentre,
+    initialZoom = 'city',
     markers = [],
+    frameRoute = true,
+    interactive = true,
     showCentrePin = false,
     centrePinKind = 'pickup',
     userLocation = null,
@@ -148,11 +292,18 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     longitudeDelta: ZOOM_DELTA.city,
   });
 
+  /**
+   * Until when a settle report is this component's own move landing, not the customer panning.
+   *
+   * See `SETTLE_SUPPRESSION_TAIL_MS` for why the two have to be told apart at all.
+   */
+  const suppressSettleUntil = useRef(0);
+
   /** The pickup/drop pair the map was last framed to, so it re-fits once per NEW pair only. */
   const framedTo = useRef<string | null>(null);
 
   /**
-   * This view's own size, so framing can be clamped against it — see `MAX_FIT_PADDING_RATIO`.
+   * This view's own size, so the route can be framed against it — see the fit effect below.
    *
    * A ref, not state: nothing renders differently for it, and the map is full-bleed, so a state
    * update here would re-render the whole canvas on every rotation for a value only one callback
@@ -164,8 +315,8 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     () => ({
       latitude: initialCentre.lat,
       longitude: initialCentre.lng,
-      latitudeDelta: ZOOM_DELTA.city,
-      longitudeDelta: ZOOM_DELTA.city,
+      latitudeDelta: ZOOM_DELTA[initialZoom],
+      longitudeDelta: ZOOM_DELTA[initialZoom],
     }),
     // First value only — the map keeps its own region after mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,10 +343,12 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
 
   const applyMove = (lat: number, lng: number, zoom?: MapZoom): void => {
     const delta = zoom === undefined ? region.current.latitudeDelta : ZOOM_DELTA[zoom];
-    map.current?.animateToRegion(
-      { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
-      450,
-    );
+    driveCamera(map, suppressSettleUntil, region.current, {
+      latitude: lat,
+      longitude: lng,
+      latitudeDelta: delta,
+      longitudeDelta: delta,
+    });
   };
 
   useImperativeHandle(ref, () => ({
@@ -264,7 +417,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
    * genuinely new pair reopens it.
    */
   const routeKey =
-    pickup !== undefined && drop !== undefined
+    frameRoute && pickup !== undefined && drop !== undefined
       ? `${pickup.lat},${pickup.lng}|${drop.lat},${drop.lng}`
       : null;
 
@@ -304,31 +457,76 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       if (p === undefined || d === undefined) return;
 
       /*
-       * CLAMPED AGAINST THE MAP'S OWN SIZE. `inset + 90` is whatever the sheet happens to be, and
-       * on a trip-summary sheet that is most of the screen — see `MAX_FIT_PADDING_RATIO`. The
-       * size comes from this view's own `onLayout`; before that has landed there is nothing to
-       * clamp against and the raw values go through, which is correct, since a map that has not
-       * been laid out has no visible strip to protect.
+       * FRAMED BY ARITHMETIC, not by `fitToCoordinates`.
+       *
+       * THE BUILT-IN FIT CANNOT DO THIS SCREEN. On Android it sets the map's padding from
+       * `edgePadding` and then asks Google's bounds solver for a camera. The trip-summary sheet
+       * takes 459 of 683dp, so the bottom padding it needs is most of the map — measured on a
+       * realme at 3x, a 1556px bottom padding inside a 2049px map. That request is impossible, and
+       * Google does not say so: it declines the camera update and leaves the map exactly where it
+       * was. No region event follows, which is how this was finally pinned down.
+       *
+       * The symptom was not a route framed badly. It was a route never framed AT ALL — the map
+       * kept whatever view the last move left it on, so the pins sat off the top of the screen and
+       * the line ran up out of view. Loosening the padding only traded that for a camera far south
+       * of both points at ten times the needed zoom.
+       *
+       * Computing the region here is arithmetic on numbers this component already holds. It cannot
+       * be silently refused, and it states exactly where the two points land: centred in the strip
+       * above the sheet.
        */
       const { width, height: viewHeight } = size.current;
-      const vertical = fitWithin(90, inset + 90, viewHeight);
-      const horizontal = fitWithin(60, 60, width);
+      if (viewHeight <= 0 || width <= 0) return;
 
-      map.current?.fitToCoordinates(
-        [
-          { latitude: p.lat, longitude: p.lng },
-          { latitude: d.lat, longitude: d.lng },
-        ],
-        {
-          edgePadding: {
-            top: vertical.near,
-            bottom: vertical.far,
-            left: horizontal.near,
-            right: horizontal.far,
-          },
-          animated: true,
-        },
-      );
+      /*
+       * THE STRIP IS WHAT THE SHEET LEAVES, and the margins are trimmed to fit inside it rather
+       * than assumed to fit. See `FRAME_MARGIN_TOP`.
+       */
+      const visible = Math.max(0, viewHeight - inset);
+      const marginTop = Math.min(FRAME_MARGIN_TOP, visible * FRAME_MARGIN_TOP_SHARE);
+      const marginBottom = Math.min(FRAME_MARGIN_BOTTOM, visible * FRAME_MARGIN_BOTTOM_SHARE);
+
+      const stripTop = marginTop;
+      const stripBottom = Math.max(stripTop, visible - marginBottom);
+
+      const band = Math.max(MIN_FRAME_BAND, stripBottom - stripTop);
+      const bandWidth = Math.max(MIN_FRAME_BAND, width - FRAME_MARGIN_SIDE * 2);
+
+      /*
+       * A floor on each span, so two points a few metres apart do not ask for an absurd zoom, and
+       * a pickup used as its own drop is still a map rather than a division by zero.
+       */
+      const latSpan = Math.max(Math.abs(p.lat - d.lat), MIN_FRAME_SPAN);
+      const lngSpan = Math.max(Math.abs(p.lng - d.lng), MIN_FRAME_SPAN);
+
+      /*
+       * A region's deltas describe the WHOLE view, but the points may only use the band — so each
+       * span is scaled up by how much smaller its band is than the view containing it.
+       */
+      const latitudeDelta = latSpan * FRAME_ZOOM_SLACK * (viewHeight / band);
+      const longitudeDelta = lngSpan * FRAME_ZOOM_SLACK * (width / bandWidth);
+
+      /*
+       * AND THE CAMERA SITS SOUTH OF THE MIDPOINT. A camera centre renders at the centre of the
+       * VIEW, while the points must appear at the centre of the BAND, which is higher up. The
+       * centre is pushed south by exactly that gap, converted from points to degrees through the
+       * delta just computed.
+       */
+      /*
+       * AND IT IS AIMED AT THE MIDDLE OF THE STRIP, not at the middle of the band. The two are the
+       * same only while the band fits; once it hits its floor the band is a zoom instruction and
+       * nothing more, while the strip's middle stays a fact about the screen. Deriving the aim
+       * from the band is what put the route behind the sheet.
+       */
+      const bandCentreFromTop = (stripTop + stripBottom) / 2;
+      const offsetDeg = ((viewHeight / 2 - bandCentreFromTop) / viewHeight) * latitudeDelta;
+
+      driveCamera(map, suppressSettleUntil, region.current, {
+        latitude: (p.lat + d.lat) / 2 - offsetDeg,
+        longitude: (p.lng + d.lng) / 2,
+        latitudeDelta,
+        longitudeDelta,
+      });
     }, 80);
     return () => clearTimeout(t);
     // `bottomInset` IS a dependency now — that is what lets the sheet's arriving height correct a
@@ -365,16 +563,53 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
          * prop never changes, so the only `setMapPadding` call is the pre-layout one that defers
          * harmlessly.
          */
-        mapPadding={mapReady ? { top: 0, right: 0, bottom: bottomInset, left: 0 } : NO_PADDING}
+        /*
+         * ON UNLESS A ROUTE IS BEING FRAMED — those are the only two ways to aim at the visible
+         * strip, and running both aims at it twice.
+         *
+         * WHAT THE PADDING IS FOR: it moves the map's idea of its own centre up out from behind
+         * the sheet, so "centre" means the middle of what the customer can SEE. The crosshair
+         * needs that — the coordinate reported has to match the spike drawn there — and so does
+         * the search screen, where the pickup has to render under the sweep rather than behind
+         * the card.
+         *
+         * WHY THE FRAME CANNOT HAVE IT: the frame reaches the same place by arithmetic, against
+         * the view's TRUE centre. Padding then moves where that computed centre renders, the two
+         * compensations stack, and the route is pushed up until the far pin is clipped by the top
+         * edge — which is exactly what it did. `routeKey` is null whenever no frame is coming,
+         * including when a screen has opted out through `frameRoute`, so this follows it.
+         */
+        mapPadding={
+          mapReady && routeKey === null
+            ? { top: 0, right: 0, bottom: bottomInset, left: 0 }
+            : NO_PADDING
+        }
         // Only the SETTLED region is needed — for `onRegionSettled` and for `moveTo` to keep the
         // current span when no zoom is passed. The intermediate `onRegionChange` stream is noise.
         onRegionChangeComplete={(next) => {
+          /*
+           * THE REMEMBERED REGION IS ALWAYS UPDATED. It is where the camera is, and a `moveTo`
+           * with no zoom reads it for the span to keep — lying about it mid-flight would make the
+           * next move zoom to wherever the last one was passing through.
+           */
           region.current = next;
+
+          /*
+           * THE CUSTOMER'S CHOICE IS NOT. Android reports a settle partway through our OWN
+           * animations, and the screen treats that report as "they panned here" and re-pins to
+           * it. Inside the window the move is ours, so nothing is passed on and the pin stays
+           * where it was put. See `SETTLE_SUPPRESSION_TAIL_MS`.
+           */
+          if (Date.now() < suppressSettleUntil.current) return;
           onRegionSettled?.(next.latitude, next.longitude);
         }}
         showsCompass={false}
         showsMyLocationButton={false}
         toolbarEnabled={false}
+        // Pan and zoom are the customer's; tilt and rotation are nobody's — a rotated map on a
+        // booking screen is only ever an accident.
+        scrollEnabled={interactive}
+        zoomEnabled={interactive}
         pitchEnabled={false}
         rotateEnabled={false}
         // The explicit `userLocation` prop is the source of truth; the OS blue dot would be a
@@ -442,7 +677,15 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         // OUTSIDE the map, inset from the bottom by the sheet's height so it lands in the middle
         // of what the customer can SEE. The pin stays still and the map moves under it — dragging
         // a marker instead means fighting the pan gesture for the same finger.
-        <View style={[styles.centrePin, { bottom: bottomInset }]} pointerEvents="none">
+        // `PIN_TIP_LIFT` raises the stack so the SPIKE, not the stack's middle, is what sits on
+        // the map's centre — the coordinate this pin claims to be pointing at.
+        <View
+          style={[
+            styles.centrePin,
+            { bottom: bottomInset, transform: [{ translateY: -PIN_TIP_LIFT }] },
+          ]}
+          pointerEvents="none"
+        >
           <View
             style={[styles.centrePinHead, centrePinKind === 'drop' && styles.centrePinHeadDrop]}
           />
@@ -632,19 +875,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   centrePinHead: {
-    width: 22,
-    height: 22,
+    width: CENTRE_PIN_HEAD,
+    height: CENTRE_PIN_HEAD,
     borderRadius: radius.pill,
     backgroundColor: colors.fg,
     borderWidth: 4,
     borderColor: colors.brand,
-    marginBottom: -2,
+    marginBottom: -CENTRE_PIN_HEAD_OVERLAP,
   },
   centrePinHeadDrop: { backgroundColor: colors.brand, borderColor: colors.fg },
-  centrePinStem: { width: 2, height: 16, backgroundColor: colors.fg },
+  centrePinStem: { width: 2, height: CENTRE_PIN_STEM, backgroundColor: colors.fg },
   centrePinShadow: {
     width: 10,
-    height: 4,
+    height: CENTRE_PIN_SHADOW,
     borderRadius: radius.pill,
     backgroundColor: 'rgba(0,0,0,0.22)',
   },

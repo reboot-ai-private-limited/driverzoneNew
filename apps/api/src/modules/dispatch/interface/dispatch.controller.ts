@@ -11,6 +11,7 @@ import type {
   AcceptOfferUseCase,
   DeclineOfferUseCase,
 } from '../application/useCases/respondToOffer.usecase.js';
+import type { ScheduledBoardUseCase } from '../application/useCases/scheduledBoard.usecase.js';
 import type { TransferBookingUseCase } from '../application/useCases/transferBooking.usecase.js';
 import { requirementFromBooking, vehicleMismatchReason } from '../domain/vehicleCompatibility.js';
 
@@ -214,6 +215,80 @@ export function makeAssignDriverController(useCase: TransferBookingUseCase): Req
         released_driver_id: result.releasedDriverId,
       },
       'Trip transferred',
+    );
+  });
+}
+
+// ─── The scheduled board ────────────────────────────────────────────────────────────────────
+
+/**
+ * `GET /driver/scheduled-bookings` — parked trips this driver could take.
+ *
+ * NO PAGINATION, and a cap in the use case instead. A board with hundreds of parked bookings on
+ * it is not a paging problem, it is a dispatch emergency — and the answer to that is the ops
+ * screen, not a second page here.
+ */
+export function makeListScheduledBoardController(useCase: ScheduledBoardUseCase): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const bookings = await useCase.list(driverOf(req));
+
+    const dtos = bookings.map((booking) => ({
+      booking_id: booking.id,
+      reference: booking.reference,
+      earning: toMoney(booking.fareSnapshot.fare.split.driverPaise),
+      pickup: { ...booking.pickup, address: booking.pickupAddress },
+      drop: { ...booking.drop, address: booking.dropAddress },
+      scheduled_at: booking.scheduledAt.toISOString(),
+      service_type: booking.serviceType,
+      estimated_minutes: booking.fareSnapshot.included.minutes ?? 0,
+    }));
+
+    sendSuccess(
+      req,
+      res,
+      { bookings: dtos },
+      dtos.length === 0 ? 'No scheduled trips waiting' : 'Scheduled trips waiting for a driver',
+    );
+  });
+}
+
+/**
+ * `POST /driver/scheduled-bookings/:id/accept`.
+ *
+ * A LOST RACE IS A 200. Same rule as the ring screen's accept: two drivers can be looking at this
+ * board at once and the slower one did nothing wrong. Clients branch on `claimed`.
+ */
+export function makeAcceptScheduledBookingController(
+  useCase: ScheduledBoardUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const result = await useCase.accept(id, driverOf(req));
+
+    if (!result.claimed) {
+      sendSuccess(
+        req,
+        res,
+        { claimed: false, reason: result.reason, message: result.message },
+        result.message,
+      );
+      return;
+    }
+
+    const booking = result.booking;
+    sendSuccess(
+      req,
+      res,
+      {
+        claimed: true,
+        booking_id: booking.id,
+        reference: booking.reference,
+        pickup: { ...booking.pickup, address: booking.pickupAddress },
+        drop: { ...booking.drop, address: booking.dropAddress },
+        scheduled_at: booking.scheduledAt.toISOString(),
+        earning: toMoney(booking.fareSnapshot.fare.split.driverPaise),
+      },
+      'Trip is yours',
     );
   });
 }

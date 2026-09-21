@@ -7,6 +7,11 @@ export interface DriverControllers {
   decline: RequestHandler;
 }
 
+export interface DriverScheduledBoardControllers {
+  list: RequestHandler;
+  accept: RequestHandler;
+}
+
 export interface AdminControllers {
   assignableDrivers: RequestHandler;
   assign: RequestHandler;
@@ -43,6 +48,25 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
   router.get('/', handlers.list);
   router.post('/:id/accept', handlers.accept);
   router.post('/:id/decline', handlers.decline);
+
+  return router;
+}
+
+/**
+ * Mounted at `/api/driver/scheduled-bookings` — the board of parked trips.
+ *
+ * ITS OWN ROUTER RATHER THAN MORE PATHS ON `/driver/offers`, because the two are different
+ * things wearing similar words. An offer rings, expires and is scored; a board entry is browsed
+ * and waits. Sharing a prefix would invite a client to treat one as the other.
+ */
+export function buildDriverScheduledBoardRouter(
+  handlers: DriverScheduledBoardControllers,
+): Router {
+  const router = Router();
+  router.use(requireAuth('DRIVER'));
+
+  router.get('/', handlers.list);
+  router.post('/:id/accept', handlers.accept);
 
   return router;
 }

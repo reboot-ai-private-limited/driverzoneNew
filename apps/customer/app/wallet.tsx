@@ -118,6 +118,7 @@ const ENTRY_ICONS: Record<WalletEntryType, FeatherName> = {
   CANCELLATION_FEE: 'x-circle',
   FINE: 'alert-triangle',
   SPENT_ON_RIDE: 'navigation',
+  RELEASED_FROM_RIDE: 'corner-up-left',
   DEBT_COLLECTED: 'check-circle',
   ADJUSTMENT: 'edit-3',
 };

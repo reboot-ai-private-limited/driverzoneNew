@@ -490,11 +490,6 @@ export default function HomeScreen(): ReactElement {
     !timesInvalid &&
     (scheduledAt === null || (direction === 'ROUND_TRIP' && returnAt === null));
 
-  const missingTimeMessage =
-    scheduledAt === null
-      ? 'Tap the Pickup row above to choose when the driver should arrive.'
-      : 'Tap the Return row above to choose when you are coming back.';
-
   /**
    * The two points travel as ROUTE PARAMS rather than in a store, because they are the entire
    * input to the fare screen and expo-router persists them across a remount for free. A
@@ -1276,10 +1271,16 @@ export default function HomeScreen(): ReactElement {
               >
                 <Feather name="clock" size={16} color={colors.fg} style={styles.noticeIcon} />
                 <View style={styles.flex}>
+                  {/*
+                    THE TITLE ONLY. The body used to spell out "Tap the Pickup row above to choose
+                    when the driver should arrive" — an instruction for a row that is on screen,
+                    two inches above, already labelled Pickup and already reading "Select a time".
+                    Naming what to do next is useful; narrating where the customer is already
+                    looking is noise in the one place the sheet is most crowded.
+                  */}
                   <Text style={styles.noticeTitle}>
                     {scheduledAt === null ? 'Choose a pickup time' : 'Choose a return time'}
                   </Text>
-                  <Text style={styles.noticeBody}>{missingTimeMessage}</Text>
                 </View>
               </Animated.View>
             ) : null}

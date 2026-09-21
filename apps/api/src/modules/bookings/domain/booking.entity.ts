@@ -37,7 +37,29 @@ import type { FareBreakdown } from '../../pricing/pricing.public.js';
 export const TRANSITIONS: Record<BookingStatus, readonly BookingStatus[]> = {
   PENDING_PAYMENT: ['CONFIRMED', 'EXPIRED', 'CANCELLED_BY_CUSTOMER'],
   CONFIRMED: ['SEARCHING', 'CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_ADMIN'],
-  SEARCHING: ['ASSIGNED', 'NO_DRIVER_FOUND', 'CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_ADMIN'],
+  /**
+   * `WAITING_DRIVER` is reachable only from the EARLY ring of a scheduled booking — the final
+   * ring at T−90 goes to `NO_DRIVER_FOUND` instead. Which of the two a wave exhaustion produces
+   * is decided by the dispatch attempt, not by this table.
+   */
+  SEARCHING: [
+    'ASSIGNED',
+    'WAITING_DRIVER',
+    'NO_DRIVER_FOUND',
+    'CANCELLED_BY_CUSTOMER',
+    'CANCELLED_BY_ADMIN',
+  ],
+  /**
+   * THE ONE EDGE THAT MAKES THIS TABLE A LOOP RATHER THAN A FUNNEL, and the reason the claim race
+   * needs testing rather than assuming.
+   *
+   * A parked booking re-enters `SEARCHING` three ways — the final ring at T−90, an admin
+   * assigning by hand, or an eligible driver taking it off the scheduled board — and all three go
+   * through `beginSearching` so that `claimForDriver`'s compare-and-swap keeps having exactly one
+   * implementation. Everywhere else in this table a status is entered once; here it can be
+   * entered twice for the same booking, hours apart.
+   */
+  WAITING_DRIVER: ['SEARCHING', 'CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_ADMIN'],
   ASSIGNED: [
     'DRIVER_EN_ROUTE',
     'SEARCHING', // ← reassignment
@@ -80,6 +102,12 @@ export const REASON_REQUIRED: ReadonlySet<BookingStatus> = new Set<BookingStatus
   'CANCELLED_BY_DRIVER',
   'CANCELLED_BY_ADMIN',
   'NO_DRIVER_FOUND',
+  /*
+   * Not terminal, but somebody will be asked about it. A parked booking is the row ops works from
+   * between the two rings, and "why is this waiting" is the first question — the reason carries
+   * how far the early search got before it ran out.
+   */
+  'WAITING_DRIVER',
 ]);
 
 export function canTransition(from: BookingStatus, to: BookingStatus): boolean {

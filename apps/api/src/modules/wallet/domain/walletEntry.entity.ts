@@ -72,6 +72,8 @@ const REQUIRED_SIGN: Record<WalletEntryType, 'POSITIVE' | 'NEGATIVE' | null> = {
   CANCELLATION_FEE: 'NEGATIVE',
   FINE: 'NEGATIVE',
   SPENT_ON_RIDE: 'NEGATIVE',
+  // The exact reversal of the line above, so it can only ever be positive.
+  RELEASED_FROM_RIDE: 'POSITIVE',
   DEBT_COLLECTED: 'POSITIVE',
   ADJUSTMENT: null,
 };

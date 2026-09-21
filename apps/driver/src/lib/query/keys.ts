@@ -17,6 +17,17 @@ export const keys = {
      */
     list: () => ['offers', 'list'] as const,
   },
+  /**
+   * The scheduled board — parked trips a driver can browse and take.
+   *
+   * A SEPARATE PREFIX FROM `offers`, not a branch of it. Accepting from the board invalidates
+   * this and the driver's own trip list; it must NOT invalidate live offers, which are a
+   * different thing on a different clock.
+   */
+  scheduledBoard: {
+    all: () => ['scheduled-board'] as const,
+    list: () => ['scheduled-board', 'list'] as const,
+  },
   documents: {
     all: () => ['documents'] as const,
     list: () => ['documents', 'list'] as const,

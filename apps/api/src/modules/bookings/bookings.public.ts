@@ -31,7 +31,28 @@ export interface BookingDispatchContract {
    * look at it, and this is that move — rather than a second way to write `ASSIGNED` onto a
    * `CONFIRMED` booking, which would put a hole in the transition table and in invariant B-2.
    */
-  beginSearching(bookingId: string): Promise<Booking | null>;
+  /**
+   * `from` IS EXPLICIT because the compare-and-swap is the point.
+   *
+   * Two statuses are driverless and may start a search: `CONFIRMED`, which has never been looked
+   * at, and `WAITING_DRIVER`, whose early ring found nobody. Reading the status here and then
+   * transitioning would open a window between the read and the write; naming it lets the update
+   * itself be the guard, so two callers racing to start the final ring resolve to one winner.
+   */
+  beginSearching(
+    bookingId: string,
+    from: 'CONFIRMED' | 'WAITING_DRIVER',
+  ): Promise<Booking | null>;
+
+  /**
+   * The early ring found nobody, and the booking is parked rather than given up on.
+   *
+   * ONLY EVER REACHED FROM THE EARLY ATTEMPT of a scheduled booking. The final ring at T−90 calls
+   * `markNoDriverFound` instead — same exhaustion, different meaning, because by then there is no
+   * later search to wait for. Requires a reason for the same purpose the terminal states do: this
+   * is a state somebody in ops will be asked about.
+   */
+  markWaitingForDriver(bookingId: string, reason: string): Promise<Booking | null>;
 
   /**
    * The accept race, as one conditional update: `driverId: null` AND `status: SEARCHING` are both
@@ -80,6 +101,18 @@ export interface BookingDispatchContract {
 
   /** Bookings whose dispatch time has passed and are still waiting — the sweeper's safety net. */
   findDueForDispatch(now: Date, limit: number): Promise<Booking[]>;
+
+  /** Parked bookings with a pickup still ahead of them — what the scheduled board is built from. */
+  findWaitingForDriver(after: Date, limit: number): Promise<Booking[]>;
+
+  /**
+   * Trips this driver already holds and has not started, for the clash check on the board.
+   *
+   * `hasActiveBooking` cannot answer this: it asks "are they on a trip now", which is false for a
+   * driver who holds Tuesday 10:00 and is sitting at home on Monday. Taking 10:00 and 10:30 on the
+   * same morning is the failure this exists to prevent.
+   */
+  findUpcomingAssignedForDriver(driverId: string, after: Date): Promise<Booking[]>;
 }
 
 /**

@@ -32,6 +32,23 @@ export function tripStatusCopy(status: BookingStatus): StatusCopy {
         body: 'This usually takes a couple of minutes.',
         icon: 'search',
       };
+    /*
+     * THE PARKED STATE, and the copy has one job: say that the trip is still being worked on.
+     *
+     * A scheduled booking is now searched for twice — once when it is made, and again ninety
+     * minutes before pickup. Between the two it sits here, on the drivers' scheduled board and in
+     * front of ops. The customer must not read that as a failure: nothing has gone wrong, and
+     * there is nothing for them to do.
+     *
+     * It deliberately does NOT promise a driver. It also avoids "searching", which is the word
+     * the live screen owns — this is the state where nobody is actively being rung.
+     */
+    case 'WAITING_DRIVER':
+      return {
+        title: 'Still finding you a driver',
+        body: "No one has taken this trip yet. We'll keep trying, and we'll try again closer to your pickup time.",
+        icon: 'clock',
+      };
     case 'ASSIGNED':
       return {
         title: 'Driver assigned',

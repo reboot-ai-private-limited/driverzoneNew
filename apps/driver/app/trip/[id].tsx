@@ -798,6 +798,10 @@ const HEADLINES: Record<BookingStatus, { title: string; body: string }> = {
   PENDING_PAYMENT: { title: 'Waiting for payment', body: 'The customer has not paid yet.' },
   CONFIRMED: { title: 'Confirmed', body: 'Waiting to be assigned.' },
   SEARCHING: { title: 'Finding a driver', body: '' },
+  WAITING_DRIVER: {
+    title: 'Waiting for a driver',
+    body: 'Nobody has taken this trip yet. It will be offered again nearer the pickup time.',
+  },
   ASSIGNED: { title: 'This trip is yours', body: 'Head to the pickup point when you are ready.' },
   DRIVER_EN_ROUTE: { title: 'On the way', body: 'Tell us when you reach the pickup point.' },
   ARRIVED: { title: 'At the pickup', body: 'Ask the customer for their 4-digit code.' },

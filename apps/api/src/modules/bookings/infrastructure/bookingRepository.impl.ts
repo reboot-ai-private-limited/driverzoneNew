@@ -490,8 +490,19 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     return docs.map((doc) => toEventEntity(doc.toObject() as BookingEventDoc));
   }
 
+  /**
+   * BOTH WAITING STATES, and `WAITING_DRIVER` is the one that most needs catching.
+   *
+   * `CONFIRMED` is a booking whose dispatch job has not run yet; `WAITING_DRIVER` is one whose
+   * early ring found nobody and which is now waiting on the final ring at T−90. A lost job on the
+   * second is worse than on the first — the customer has already been told once that we are still
+   * looking, and silently never ringing again is how that becomes a lie.
+   */
   async findDueForDispatch(now: Date, limit: number): Promise<Booking[]> {
-    const docs = await BookingModel.find({ status: 'CONFIRMED', dispatchAt: { $lte: now } })
+    const docs = await BookingModel.find({
+      status: { $in: ['CONFIRMED', 'WAITING_DRIVER'] },
+      dispatchAt: { $lte: now },
+    })
       .sort({ dispatchAt: 1 })
       .limit(limit);
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
@@ -501,6 +512,44 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     const docs = await BookingModel.find({ status: 'PENDING_PAYMENT', createdAt: { $lte: before } })
       .sort({ createdAt: 1 })
       .limit(limit);
+    return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  /**
+   * The scheduled board's contents, before any per-driver filtering.
+   *
+   * SORTED BY PICKUP, not by when the booking was made. A driver browsing this is planning their
+   * days, so the only order that helps is chronological — "what is there on Tuesday morning".
+   *
+   * `scheduledAt: { $gt: after }` drops anything whose pickup has already passed. A parked booking
+   * in the past is not work anybody can take; it is a row for ops to look at, and offering it here
+   * would let a driver accept a trip they have already missed.
+   */
+  async findWaitingForDriver(after: Date, limit: number): Promise<Booking[]> {
+    const docs = await BookingModel.find({
+      status: 'WAITING_DRIVER',
+      scheduledAt: { $gt: after },
+    })
+      .sort({ scheduledAt: 1 })
+      .limit(limit);
+    return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  /**
+   * Every trip this driver already holds that has not happened yet — the input to the clash check.
+   *
+   * `ASSIGNED` only, and that is the whole set worth asking about: a trip they are actually ON is
+   * `DRIVER_EN_ROUTE` or later, and if they are driving right now they cannot be browsing a board
+   * for a future booking anyway. What matters here is the trips they have committed to and not
+   * yet started.
+   */
+  async findUpcomingAssignedForDriver(driverId: string, after: Date): Promise<Booking[]> {
+    if (!mongoose.isValidObjectId(driverId)) return [];
+    const docs = await BookingModel.find({
+      driverId,
+      status: 'ASSIGNED',
+      scheduledAt: { $gt: after },
+    }).sort({ scheduledAt: 1 });
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
   }
 }

@@ -26,6 +26,14 @@ import {
  */
 export const STATUS_GROUPS = {
   SCHEDULED: ['PENDING_PAYMENT', 'CONFIRMED', 'SEARCHING'],
+  /*
+   * ITS OWN GROUP, for the same reason `NO_DRIVER` and `EXPIRED` are. A parked scheduled booking
+   * is the single most actionable row in this table: the search has already run once and found
+   * nobody, and ops has until T−90 to fix it by phone. Folding it into Scheduled — which is where
+   * it would land by default, since `groupOf` falls back there — hides the one state that is
+   * asking for a human.
+   */
+  WAITING: ['WAITING_DRIVER'],
   ONGOING: ['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'],
   COMPLETED: ['COMPLETED'],
   CANCELLED: ['CANCELLED_BY_CUSTOMER', 'CANCELLED_BY_DRIVER', 'CANCELLED_BY_ADMIN'],
@@ -37,6 +45,7 @@ export type StatusGroup = keyof typeof STATUS_GROUPS;
 
 export const STATUS_GROUP_LABELS: Record<StatusGroup, string> = {
   SCHEDULED: 'Scheduled',
+  WAITING: 'Waiting for driver',
   ONGOING: 'Ongoing',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
@@ -46,6 +55,7 @@ export const STATUS_GROUP_LABELS: Record<StatusGroup, string> = {
 
 const GROUP_TONES: Record<StatusGroup, BadgeTone> = {
   SCHEDULED: 'warning',
+  WAITING: 'warning',
   ONGOING: 'info',
   COMPLETED: 'success',
   CANCELLED: 'danger',
@@ -197,6 +207,7 @@ const TRANSITION_LABELS: Record<BookingStatus, string> = {
   PENDING_PAYMENT: 'Awaiting Payment',
   CONFIRMED: 'Payment Confirmed',
   SEARCHING: 'Searching for Driver',
+  WAITING_DRIVER: 'Waiting for a Driver',
   ASSIGNED: 'Driver Assigned',
   DRIVER_EN_ROUTE: 'Driver En Route',
   ARRIVED: 'Driver Arrived',

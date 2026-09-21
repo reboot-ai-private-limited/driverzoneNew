@@ -57,6 +57,7 @@ const HEADLINE: Record<BookingStatus, string> = {
   PENDING_PAYMENT: 'Waiting for payment',
   CONFIRMED: 'Confirmed',
   SEARCHING: 'Finding a driver',
+  WAITING_DRIVER: 'Waiting for a driver',
   ASSIGNED: 'Accepted',
   DRIVER_EN_ROUTE: 'On the way',
   ARRIVED: 'At the pickup',

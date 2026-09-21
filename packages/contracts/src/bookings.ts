@@ -30,6 +30,22 @@ export const BOOKING_STATUSES = [
   'PENDING_PAYMENT',
   'CONFIRMED',
   'SEARCHING',
+  /**
+   * A SCHEDULED booking that has been rung for and nobody took — parked, not given up on.
+   *
+   * It exists because a scheduled booking used to get exactly one attempt, at T−90, and dying
+   * there meant a customer discovering ninety minutes before a pickup they arranged days ago that
+   * there is no driver. Now the search runs once at booking time, and when that finds nobody the
+   * booking waits HERE: visible to ops, listed on the drivers' scheduled board, and rung again at
+   * T−90 before anything is given up.
+   *
+   * DISTINCT FROM `CONFIRMED` ON PURPOSE. That one means "nobody has looked yet"; this one means
+   * "we looked and are still looking". Folding them together would make `CONFIRMED` mean two
+   * different things depending on a column, which is how a status table stops being trustworthy.
+   *
+   * See docs/LLD/dispatch-and-assignment.md §Ring early, park, ring again.
+   */
+  'WAITING_DRIVER',
   'ASSIGNED',
   'DRIVER_EN_ROUTE',
   'ARRIVED',

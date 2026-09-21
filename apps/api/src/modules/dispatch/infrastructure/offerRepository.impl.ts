@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import type { DeliveryChannel } from '@driverzone/contracts';
 import { MANUAL_ASSIGNMENT_WAVE } from '../domain/offer.entity.js';
-import type { DispatchOffer, OfferStatus } from '../domain/offer.entity.js';
+import type { DispatchAttempt, DispatchOffer, OfferStatus } from '../domain/offer.entity.js';
 import type { NewOffer, OfferRepositoryPort } from '../domain/ports.js';
 import { DispatchOfferModel, type DispatchOfferDoc } from './dispatchOffer.model.js';
 
@@ -11,6 +11,7 @@ function toEntity(doc: DispatchOfferDoc): DispatchOffer {
     bookingId: String(doc.bookingId),
     driverId: String(doc.driverId),
     wave: doc.wave,
+    attempt: doc.attempt as DispatchOffer['attempt'],
     status: doc.status as OfferStatus,
     score: doc.score,
     distanceMetres: doc.distanceMetres,
@@ -72,9 +73,13 @@ export class MongoOfferRepository implements OfferRepositoryPort {
     return docs.map((doc) => toEntity(doc.toObject() as DispatchOfferDoc));
   }
 
-  async driverIdsOffered(bookingId: string): Promise<string[]> {
+  async driverIdsOffered(bookingId: string, attempt?: DispatchAttempt): Promise<string[]> {
     if (!mongoose.isValidObjectId(bookingId)) return [];
-    const docs = await DispatchOfferModel.find({ bookingId }).select('driverId');
+    const docs = await DispatchOfferModel.find({
+      bookingId,
+      // Absent means "every driver ever offered", which is what superseding a race wants.
+      ...(attempt === undefined ? {} : { attempt }),
+    }).select('driverId');
     return docs.map((doc) => String(doc.driverId));
   }
 
@@ -160,8 +165,17 @@ export class MongoOfferRepository implements OfferRepositoryPort {
 
     const now = new Date();
 
+    /*
+     * SCOPED TO `FINAL`, which the upsert now needs in order to have one deterministic target.
+     * With the unique index carrying `attempt`, a driver may hold two rows for one booking — the
+     * early ring's offer and the final ring's — and an unscoped `updateOne` would pick whichever
+     * Mongo reached first and quietly rewrite an early offer as an admin assignment.
+     *
+     * `FINAL` is also the truthful label: an admin naming a driver is the last word on the
+     * booking, not part of the speculative early search.
+     */
     await DispatchOfferModel.updateOne(
-      { bookingId, driverId },
+      { bookingId, driverId, attempt: 'FINAL' },
       {
         $set: {
           wave: MANUAL_ASSIGNMENT_WAVE,

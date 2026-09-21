@@ -28,6 +28,17 @@ export const WALLET_ENTRY_TYPES = [
   'FINE',
   /** Credit consumed by a booking, reducing what that trip cost. */
   'SPENT_ON_RIDE',
+  /**
+   * Credit handed back because the trip never happened.
+   *
+   * The exact reversal of `SPENT_ON_RIDE`, and its own type rather than a `CREDIT_GRANT` or an
+   * `ADJUSTMENT` because it is neither: nobody granted anything and nobody corrected a mistake.
+   * A customer reading their wallet history should see the money leave for a trip and come back
+   * when that trip did not happen, as one pair.
+   *
+   * Written when a booking ends in `NO_DRIVER_FOUND` holding credit it never used.
+   */
+  'RELEASED_FROM_RIDE',
   /** A debt collected as part of a booking's payment, bringing the balance back toward zero. */
   'DEBT_COLLECTED',
   /** An admin correction, either direction. Requires a note. */
@@ -41,6 +52,7 @@ export const WALLET_ENTRY_LABELS: Record<WalletEntryType, string> = {
   CANCELLATION_FEE: 'Cancellation fee',
   FINE: 'Fine',
   SPENT_ON_RIDE: 'Used on a trip',
+  RELEASED_FROM_RIDE: 'Returned — trip did not happen',
   DEBT_COLLECTED: 'Outstanding amount paid',
   ADJUSTMENT: 'Adjustment',
 };

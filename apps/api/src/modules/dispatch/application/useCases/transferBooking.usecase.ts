@@ -79,9 +79,14 @@ export class TransferBookingUseCase {
             : `A booking at ${booking.status} cannot be transferred.`,
         );
       }
-    } else if (booking.status === 'CONFIRMED') {
+    } else if (booking.status === 'CONFIRMED' || booking.status === 'WAITING_DRIVER') {
       /*
-       * PRE-ASSIGNMENT — the booking is scheduled for later and nothing has started looking yet.
+       * PRE-ASSIGNMENT — the booking is scheduled for later and has no driver on it.
+       *
+       * TWO STATUSES REACH HERE. `CONFIRMED` is a booking nothing has looked for yet.
+       * `WAITING_DRIVER` is one whose early ring already found nobody and which is parked until
+       * T−90 — the case where ops picking up the phone matters most, because the automatic search
+       * has already had one go and failed. Both are driverless, so both take the same path.
        *
        * Automatic dispatch does not ring for this trip until T−`dispatch.scheduled_lead_minutes`,
        * which is the right default: it rings drivers who are actually on duty near the pickup at
@@ -99,7 +104,7 @@ export class TransferBookingUseCase {
        * anybody (`runWave.usecase.ts`). Cancelling it would be a second thing to keep correct for
        * no behaviour gained.
        */
-      const searching = await this.bookings.beginSearching(input.bookingId);
+      const searching = await this.bookings.beginSearching(input.bookingId, booking.status);
 
       if (searching === null) {
         // Cancelled, or dispatched into SEARCHING on its own, between the read and here.

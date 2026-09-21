@@ -334,6 +334,36 @@ export default function HomeScreen(): ReactElement {
           </View>
         )}
 
+        {/*
+          THE SCHEDULED BOARD — trips booked ahead that nobody has taken.
+
+          Shown only ON DUTY, alongside the rest of the work surface: a driver who has gone
+          offline for the night is not browsing for Thursday, and an off-duty Home is deliberately
+          quiet. It carries no count, because knowing how many are waiting would cost a request on
+          every Home render for a list most drivers open occasionally and by choice.
+
+          Below "Booked for later" on purpose: trips they already hold outrank trips they might.
+        */}
+        {onDuty ? (
+          <Pressable
+            onPress={() => router.push('/scheduled-board')}
+            accessibilityRole="button"
+            accessibilityLabel="Trips you can take, booked ahead"
+            style={({ pressed }) => [styles.upcomingRow, pressed && styles.upcomingRowPressed]}
+          >
+            <View style={styles.upcomingIcon}>
+              <Feather name="calendar" size={15} color={colors.warning} />
+            </View>
+            <View style={styles.batteryText}>
+              <Text style={styles.upcomingTitle}>Trips you can take</Text>
+              <Text style={styles.batteryBody} numberOfLines={1}>
+                Booked ahead, waiting for a driver
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.faint} />
+          </Pressable>
+        ) : null}
+
         {needsBattery === true ? (
           <Pressable
             onPress={() => router.push('/battery-setup')}

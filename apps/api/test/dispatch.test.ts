@@ -23,6 +23,7 @@ import {
 } from '../src/modules/dispatch/application/useCases/respondToOffer.usecase.js';
 import type { FavouriteDriversContract } from '../src/modules/favourites/favourites.public.js';
 import type { AssignableDriversContract } from '../src/modules/identity/identity.public.js';
+import { tripsClash } from '../src/modules/dispatch/application/useCases/scheduledBoard.usecase.js';
 import { TransferBookingUseCase } from '../src/modules/dispatch/application/useCases/transferBooking.usecase.js';
 import { REASSIGNABLE_STATUSES } from '../src/modules/bookings/bookings.public.js';
 import type {
@@ -990,7 +991,23 @@ describe('TransferBookingUseCase — manual assignment', () => {
       adminId: 'adm_1',
     });
 
-    expect(bookings.beginSearching).toHaveBeenCalledWith('bkg_1');
+    // The `from` is asserted too: it is the compare-and-swap's guard, not a decoration, and
+    // passing the wrong one would silently refuse every pre-assignment.
+    expect(bookings.beginSearching).toHaveBeenCalledWith('bkg_1', 'CONFIRMED');
+    expect(bookings.releaseDriver).not.toHaveBeenCalled();
+  });
+
+  it('pre-assigns a booking parked in WAITING_DRIVER, which is the case ops most needs', async () => {
+    const { useCase, bookings } = build(booking({ status: 'WAITING_DRIVER', driverId: null }));
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      toDriverId: 'drv_new',
+      reason: 'Found somebody by phone after the early ring failed',
+      adminId: 'adm_1',
+    });
+
+    expect(bookings.beginSearching).toHaveBeenCalledWith('bkg_1', 'WAITING_DRIVER');
     expect(bookings.releaseDriver).not.toHaveBeenCalled();
   });
 
@@ -1203,5 +1220,50 @@ describe('TransferBookingUseCase — manual assignment', () => {
 
     expect(result.releasedDriverId).toBe('drv_old');
     expect(bookings.current().driverId).toBe('drv_new');
+  });
+});
+
+describe('the scheduled board — clash rule', () => {
+  const at = (iso: string, minutes: number | null = 60): Booking =>
+    booking({
+      scheduledAt: new Date(iso),
+      fareSnapshot: {
+        ...booking().fareSnapshot,
+        included: { minutes },
+      },
+    });
+
+  it('refuses two trips that overlap outright', () => {
+    expect(tripsClash(at('2026-10-01T10:00:00Z'), at('2026-10-01T10:30:00Z'))).toBe(true);
+  });
+
+  it('refuses a trip starting inside the buffer after another ends', () => {
+    // 10:00 + 60 min = 11:00, and the 30-minute buffer carries the block to 11:30.
+    expect(tripsClash(at('2026-10-01T10:00:00Z'), at('2026-10-01T11:15:00Z'))).toBe(true);
+  });
+
+  it('allows a trip that starts after the buffer has cleared', () => {
+    expect(tripsClash(at('2026-10-01T10:00:00Z'), at('2026-10-01T11:31:00Z'))).toBe(false);
+  });
+
+  it('is symmetric — order of the pair must not change the answer', () => {
+    const early = at('2026-10-01T10:00:00Z');
+    const late = at('2026-10-01T11:15:00Z');
+    expect(tripsClash(early, late)).toBe(tripsClash(late, early));
+  });
+
+  /*
+   * The dangerous default. A booking whose package stated no included time must not read as a
+   * zero-length trip, or a driver could stack pickups back to back on the strength of a field
+   * that was simply absent.
+   */
+  it('treats an unstated duration as a long trip rather than an instant one', () => {
+    const unstated = at('2026-10-01T10:00:00Z', null);
+    expect(tripsClash(unstated, at('2026-10-01T11:00:00Z'))).toBe(true);
+    expect(tripsClash(unstated, at('2026-10-01T12:00:00Z'))).toBe(true);
+  });
+
+  it('lets trips on different days sit side by side', () => {
+    expect(tripsClash(at('2026-10-01T10:00:00Z'), at('2026-10-02T10:00:00Z'))).toBe(false);
   });
 });

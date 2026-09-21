@@ -120,3 +120,63 @@ export type AcceptOfferResponse =
 export interface DeclineOfferResponse {
   declined: true;
 }
+
+// ─── The scheduled board ────────────────────────────────────────────────────────────────────
+
+/**
+ * One trip on the drivers' scheduled board — `GET /driver/scheduled-bookings`.
+ *
+ * A booking whose early search found nobody and which is now parked in `WAITING_DRIVER`, waiting
+ * either for a driver to take it here or for the final ring at T−90
+ * (docs/LLD/dispatch-and-assignment.md §Ring early, park, ring again).
+ *
+ * **IT IS NOT AN OFFER, and the shape says so.** An offer rings, counts against an acceptance rate
+ * and expires in forty-five seconds. This is a list a driver browses in their own time: nothing is
+ * ringing, ignoring it costs them nothing, and it stays until somebody takes it. So there is no
+ * `offer_id` and no `expires_at` — the only clock that matters is the pickup itself.
+ */
+export interface ScheduledBoardBookingDto {
+  booking_id: string;
+  reference: string;
+  /** What the driver earns — their share, after commission, exactly as on the ring screen. */
+  earning: Money;
+  pickup: LatLngDto & { address: string };
+  drop: LatLngDto & { address: string };
+  /** When the customer wants to be picked up. The whole reason this list is browsable. */
+  scheduled_at: string;
+  service_type: 'INCITY' | 'OUTSTATION';
+  /** Roughly how long the trip is expected to run, so a driver can judge it against their day. */
+  estimated_minutes: number;
+}
+
+export interface ListScheduledBoardResponse {
+  bookings: ScheduledBoardBookingDto[];
+}
+
+/**
+ * `POST /driver/scheduled-bookings/:id/accept`.
+ *
+ * SHAPED LIKE `AcceptOfferResponse` ON PURPOSE, including `claimed: false` being a 200. Two
+ * drivers can open this board and tap the same trip, and the loser has done nothing wrong — the
+ * same reasoning that governs the accept race on a ringing offer applies here, over a much longer
+ * window, because a parked booking can sit on the board for days.
+ *
+ * `reason` is for logs and `message` is for the driver, and the client must never build one from
+ * the other: "somebody else took it" and "this clashes with a trip you already hold" are the same
+ * refusal to a state machine and completely different news to a person.
+ */
+export type AcceptScheduledBookingResponse =
+  | {
+      claimed: true;
+      booking_id: string;
+      reference: string;
+      pickup: LatLngDto & { address: string };
+      drop: LatLngDto & { address: string };
+      scheduled_at: string;
+      earning: Money;
+    }
+  | {
+      claimed: false;
+      reason: string;
+      message: string;
+    };

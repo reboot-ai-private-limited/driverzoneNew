@@ -314,6 +314,10 @@ export function buildIdentityContainer(): IdentityContainer {
       // number on it is passed on — see `DriverCardContract`.
       driverCardsByIds: (ids) => directory.driverCardsByIds(ids),
 
+      // Where that driver is, so `bookings` can tell a waiting customer roughly how long they
+      // will be. Returned as recorded, age and all — `bookings` decides what counts as stale.
+      lastLocationOf: (driverId) => drivers.lastLocationOf(driverId),
+
       /*
        * The manual-assignment picker, for `dispatch`. Reuses the admin list's own paginated query
        * rather than adding a second driver search — one place decides what `search` matches.

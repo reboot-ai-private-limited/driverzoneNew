@@ -154,6 +154,38 @@ export interface DriverStatsContract {
   recordCompletedRide(driverId: string, completedAt: Date): Promise<void>;
 }
 
+/** Where a driver last reported being, and when. The age is carried, never implied. */
+export interface DriverLocation {
+  lat: number;
+  lng: number;
+  at: Date;
+}
+
+/**
+ * WHERE ONE DRIVER IS — published so `bookings` can tell a waiting customer roughly how long the
+ * driver will be, without learning that positions live on identity's driver documents.
+ *
+ * ITS OWN CONTRACT rather than a field on `DriverCard`, for the Interface Segregation reason the
+ * rest of this file follows. A card is who the driver is: it is resolved for ride-history lists,
+ * admin tables and finished trips, none of which have any use for a live position — and a
+ * position is the one thing here that is worthless the moment it is a few minutes old, so folding
+ * it into a cache-friendly identity lookup would be putting a perishable field on a durable one.
+ *
+ * NO FRESHNESS FILTER, deliberately: `at` is returned as recorded and the caller decides whether
+ * a fix of that age still means anything. Different callers answer differently — the arrival
+ * check refuses one over a minute old, the pickup estimate tolerates three — and answering it
+ * here would impose one of those on both.
+ */
+export interface DriverLocationContract {
+  /**
+   * NOT BATCHED, unlike `driverCardsByIds`, and that is a statement about the only caller rather
+   * than an oversight. This answers "how far away is the driver on THIS booking", which is a
+   * question about the single trip a customer is watching. A list of finished rides has no
+   * position to show, so there is no N+1 waiting to happen here for a batch to solve.
+   */
+  lastLocationOf(driverId: string): Promise<DriverLocation | null>;
+}
+
 /**
  * The whole surface, as returned by `buildIdentityContainer()`.
  *
@@ -214,6 +246,7 @@ export type IdentityPublicContract = CustomerBookingProfileContract &
   CustomerContactContract &
   RatingCacheContract &
   DriverStatsContract &
+  DriverLocationContract &
   AssignableDriversContract;
 
 /**

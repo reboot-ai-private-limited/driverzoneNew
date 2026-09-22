@@ -26,6 +26,7 @@ import {
   type TripHistoryRow,
   type TripStatus,
 } from '@/features/trips/tripHistory';
+import { AppIcon } from '@/components/AppIcon';
 import { listTrips } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
@@ -371,8 +372,8 @@ function TripCard({ trip }: { trip: TripHistoryRow }): ReactElement {
 
       <View style={styles.cardFooter}>
         <View style={styles.payMode}>
-          <Feather
-            name={trip.isCash ? 'dollar-sign' : 'smartphone'}
+          <AppIcon
+            name={trip.isCash ? 'rupee' : 'smartphone'}
             size={12}
             color={colors.muted}
           />

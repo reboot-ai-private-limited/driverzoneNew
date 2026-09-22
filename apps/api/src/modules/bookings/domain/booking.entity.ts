@@ -303,8 +303,26 @@ export const MAX_OTP_ATTEMPTS = 5;
 /**
  * A booking whose pickup is further out than this waits rather than dispatching immediately, and
  * earns the scheduled cancellation window.
+ *
+ * **ZERO: ANY PICKUP IN THE FUTURE IS SCHEDULED.** This was 60, and the hour was a trap rather
+ * than a saving. A trip booked at 2:05 for 2:35 fell under it and became an *immediate* booking
+ * carrying a 2:35 pickup time — rung at once, driver at the kerb by 2:20, and, because every
+ * scheduled-booking protection keys off this flag, the twenty minutes they then sat there were
+ * billable waiting time against a customer who had asked for 2:35 and got exactly that.
+ * `computeWaitingCharge` exempts a scheduled trip until shortly before its pickup; the flag was
+ * the only thing standing between that rule and the trip it was written for.
+ *
+ * NOTHING DISPATCHES LATER BECAUSE OF THIS. `createBooking` sets `dispatchAt` to
+ * `max(now, scheduledAt − lead)`, so a pickup inside the lead window still starts looking
+ * immediately — the change is that the booking now *knows* it is scheduled, which is what the
+ * waiting exemption, the cancellation window, the driver's Upcoming list and `attemptFor`'s
+ * EARLY/FINAL split all read.
+ *
+ * AN INSTANT BOOKING IS STILL INSTANT. "Now" sends no `scheduledAt`, so the server stamps the
+ * quote's own creation time — always in the past by the time the booking is made, never greater
+ * than `now`, and therefore never scheduled.
  */
-export const SCHEDULED_THRESHOLD_MINUTES = 60;
+export const SCHEDULED_THRESHOLD_MINUTES = 0;
 
 export function isScheduledBooking(scheduledAt: Date, now: Date): boolean {
   return scheduledAt.getTime() > now.getTime() + SCHEDULED_THRESHOLD_MINUTES * 60_000;

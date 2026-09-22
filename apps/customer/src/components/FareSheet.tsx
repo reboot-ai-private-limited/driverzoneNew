@@ -267,10 +267,11 @@ export function FareSheet({
        * (docs/LLD/dispatch-and-assignment.md §Ring early, park, ring again), so the search this
        * screen shows is a real one — drivers' phones are ringing while the customer watches it.
        *
-       * IN PRACTICE THIS IS THE ONLY BRANCH THAT EVER MATTERED. The picker's earliest allowed
-       * pickup is 60 minutes out and it rounds up, so `is_scheduled` was true for every booking
-       * the app could produce — which meant this screen was unreachable and the customer never saw
-       * a search at all, for any trip.
+       * IT USED TO BE THE ONLY BRANCH THAT EVER MATTERED. The picker's earliest allowed pickup
+       * was 60 minutes out and it rounded up, so `is_scheduled` was true for every booking the app
+       * could produce — which meant this screen was unreachable and the customer never saw a
+       * search at all, for any trip. An in-city trip may now leave NOW (`allowsInstant`), so the
+       * genuinely-immediate booking this screen was written for finally exists.
        *
        * Leaving is handled at the other end: the screen hands off to the trip screen the moment
        * the booking stops being searched for — a driver found, or the early ring exhausting itself

@@ -20,6 +20,57 @@ entry links to it.
 
 ---
 
+## 2026-09-22 — In-city books instantly; outstation keeps the hour's lead
+
+**Decision:** An unset pickup time now means **"now"** on an in-city trip and **"not chosen yet"**
+on an outstation one (`apps/customer/src/features/booking/schedule.ts`, `allowsInstant`). The
+customer app quotes as soon as it has two points and a served pickup, rather than waiting for a
+time, because the service type is the server's verdict and arrives only with a quote.
+
+**Why:** the old rule made somebody standing beside their own car wait an hour to be collected.
+In-city is the short, unplanned, wanted-now product; outstation takes a driver out of town for a
+day or more and is planned by its nature.
+
+**Why the picker floor stays at 60 minutes, in-city too:** `SCHEDULED_THRESHOLD_MINUTES` makes the
+server treat anything nearer than an hour as immediate, so offering "in-city at 7:30pm" at 7:05pm
+would confirm a 7:30 pickup and ring drivers at once. In-city therefore reads "now, or an hour
+out", with no band in between where the app promises one thing and dispatch does another. Closing
+that band means lowering the server threshold, which also moves the late-fine measurement and the
+free-cancel window — a dispatch decision, not a picker one.
+
+**Consequences:** nothing changed behind the wire — `scheduledAt` was already optional on
+`POST /quotes`. One extra quote is spent per abandoned destination. **The driver late fine is now
+wrong for these bookings:** `driverArrived.usecase.ts` measures against `scheduled_at` with a
+10-minute grace, and on an instant booking that instant is when the quote was made, so the grace
+can lapse before dispatch has rung anyone. Open — see `LLD/open-questions.md`.
+
+---
+
+## 2026-09-22 — The pickup ETA is a straight line, not a route
+
+**Decision:** `pickup_eta_minutes` on the customer's booking read is computed in
+`bookings/domain/pickupEta.ts` from the driver's last reported position by haversine × 1.3 at an
+assumed 22 km/h. No router is called and nothing is billed. It is null unless a driver is assigned
+and not yet arrived, with a fix under three minutes old, within 60 km.
+
+**Why not `travelDurationMinutes`:** the port exists and Google Routes implements it, but the
+customer's trip screen polls every four seconds and a moving driver leaves `CachingRoadDistance`'s
+110 m grid on almost every poll — roughly 15 billed calls per minute per live booking, with the
+cache that makes quoting cheap doing nothing for it.
+
+**Why the approximation is acceptable here and banned from pricing:** `HaversineRoadDistance`
+refuses to run in production because a band it puts a trip on the wrong side of is money. An
+arrival estimate is not money; being two minutes out is a slightly wrong expectation. The contract
+requires the apps to render it as approximate ("~8 min", never a clock time, never a countdown),
+and it is explicitly kept away from `driver.late_fine`.
+
+**Consequences:** the upgrade path is to call the router inside `estimatePickupEtaMinutes` and
+cache per booking for ~60s — not to reach for it from the read path. Identity publishes
+`DriverLocationContract` for this, returning the fix as recorded so each caller applies its own
+freshness rule.
+
+---
+
 ## 2026-09-10 — An admin cancellation charges nobody, and a transfer is release-then-claim
 
 **Decision:** Ops gets two actions on a live booking. `POST /admin/bookings/:id/cancel` moves it to

@@ -35,8 +35,15 @@ import { colors, radius } from '@/theme/theme';
  */
 
 export interface MapCanvasHandle {
-  /** Recentres with animation. `zoom` omitted keeps the current zoom. */
-  moveTo: (lat: number, lng: number, zoom?: MapZoom) => void;
+  /**
+   * Recentres with animation. `zoom` omitted keeps the current zoom.
+   *
+   * RETURNS WHETHER THE CAMERA WAS DRIVEN NOW. `false` means the native map did not exist yet and
+   * the move was queued for the `onMapReady` flush — it will very probably still happen, but a
+   * caller that only gets one chance at recentring must not spend it on a maybe. The home screen
+   * reads this to decide whether its "already centred" latch may close; see `hasCentred` there.
+   */
+  moveTo: (lat: number, lng: number, zoom?: MapZoom) => boolean;
 }
 
 export type MapZoom = 'street' | 'city';
@@ -240,6 +247,17 @@ const CAMERA_FLY_MS = 450;
 const CAMERA_CUT_MS = 1;
 
 /**
+ * How long after `onMapReady` the queued first move waits — see the flush effect for why it must
+ * wait at all.
+ *
+ * Long enough to clear the projection pass and the first `setPadding` on a mid-range Android, and
+ * short enough that nobody reads it as a stutter: the map is showing the fallback city either way
+ * until this lands, and a quarter second of that is well inside the time the sheet and the pins
+ * are still settling.
+ */
+const FIRST_MOVE_DELAY_MS = 250;
+
+/**
  * Point the camera somewhere, and mark the window in which the map's own settle reports are
  * this component's doing rather than the customer's.
  *
@@ -357,17 +375,54 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       // into a map that is not there yet.
       if (!mapReady) {
         pendingMove.current = zoom === undefined ? { lat, lng } : { lat, lng, zoom };
-        return;
+        return false;
       }
+      /*
+       * A LIVE MOVE SUPERSEDES A QUEUED ONE. Both can be in flight at once: the home screen
+       * queues the OS's cached fix before the map exists, then asks again with the accurate fix
+       * moments later. Without this the flush would fire afterwards and drag the camera back to
+       * the stale position — the retry making things worse than no retry at all.
+       */
+      pendingMove.current = null;
       applyMove(lat, lng, zoom);
+      return true;
     },
   }));
 
+  /**
+   * The queued first move, flushed a beat AFTER `mapReady` rather than in its commit.
+   *
+   * **THE DELAY IS THE WHOLE FIX, and it is not defensive padding.** Flushing inline lost the
+   * move outright: the app opened on the pilot-city fallback and stayed there, at the fallback's
+   * zoom, while the pickup row showed the customer's real coordinates — the map never followed
+   * the fix that the rest of the screen had already acted on.
+   *
+   * Two things collide in that one commit, and both are Android's. `onMapReady` fires when the
+   * `GoogleMap` object exists, which is earlier than its first projection pass, and a camera
+   * animation issued before that pass is silently dropped. The same commit also applies the first
+   * real `mapPadding` (see the prop below), and `GoogleMap.setPadding` moves the camera itself —
+   * so even a surviving animation is racing a native camera change aimed somewhere else.
+   *
+   * Waiting one turn puts the flush after both. It is not a frame (`requestAnimationFrame` is
+   * React's paint, not the map's projection) and it is not a guess at how long the map takes —
+   * `moveTo` reporting `false` is what covers the case where this is still too early, by leaving
+   * the caller free to ask again.
+   */
   useEffect(() => {
     if (!mapReady) return;
-    const queued = pendingMove.current;
-    pendingMove.current = null;
-    if (queued !== null) applyMove(queued.lat, queued.lng, queued.zoom);
+    if (pendingMove.current === null) return;
+
+    const timer = setTimeout(() => {
+      /*
+       * RE-READ, never close over the payload taken when the timer was set. A `moveTo` arriving
+       * inside this window clears the queue precisely to cancel this flush; a captured copy would
+       * ignore that and fly the camera to the superseded point anyway.
+       */
+      const queued = pendingMove.current;
+      pendingMove.current = null;
+      if (queued !== null) applyMove(queued.lat, queued.lng, queued.zoom);
+    }, FIRST_MOVE_DELAY_MS);
+    return () => clearTimeout(timer);
     // `applyMove` closes only over refs, so it needs no dependency of its own.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady]);

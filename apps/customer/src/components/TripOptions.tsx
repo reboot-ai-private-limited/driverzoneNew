@@ -4,7 +4,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import type { Direction, ServiceType } from '@driverzone/contracts';
 import { DirectionToggle } from '@/components/DirectionToggle';
-import { formatWhen, returnProblem, scheduleProblem } from '@/features/booking/schedule';
+import {
+  allowsInstant,
+  formatWhen,
+  returnProblem,
+  scheduleProblem,
+} from '@/features/booking/schedule';
 import { colors, radius, space, text } from '@/theme/theme';
 
 type FeatherName = ComponentProps<typeof Feather>['name'];
@@ -25,9 +30,18 @@ interface TripOptionsProps {
   /** Locked while a price is in flight — every control here changes the price. */
   busy?: boolean;
 
-  /** The pickup instant, or `null` when nothing is chosen yet — which blocks Continue. */
+  /**
+   * The pickup instant. `null` MEANS TWO DIFFERENT THINGS depending on the product above: "leave
+   * now" on an in-city trip, which is a complete answer, and "not chosen yet" on an outstation
+   * one, which blocks Continue. See `allowsInstant`.
+   */
   scheduledAt: Date | null;
   onPickTime: () => void;
+  /**
+   * Back to leaving now — in-city only, and only once a later time has been picked. Absent on
+   * outstation, where there is no "now" to clear back to.
+   */
+  onClearTime: () => void;
 
   /** Local-only, see `RETURN_IS_LOCAL_ONLY`. Rendered only for a round trip. */
   returnAt: Date | null;
@@ -57,12 +71,16 @@ export function TripOptions({
   busy = false,
   scheduledAt,
   onPickTime,
+  onClearTime,
   returnAt,
   onPickReturn,
   onClearReturn,
 }: TripOptionsProps): ReactElement {
-  const whenProblem = scheduleProblem(scheduledAt);
+  const whenProblem = scheduleProblem(scheduledAt, serviceType);
   const backProblem = returnProblem(returnAt, scheduledAt);
+
+  /** Whether an empty Pickup row is an answer ("Now") or a question ("Select a time"). */
+  const instant = allowsInstant(serviceType);
 
   /** Offered while unknown, kept for outstation, withdrawn only once the answer rules it out. */
   const showDirection = serviceType !== 'INCITY';
@@ -90,19 +108,32 @@ export function TripOptions({
       <OptionRow
         icon="clock"
         label="Pickup"
-        // A PROMPT, NOT A VALUE. Every trip has to name its pickup time, so an unset row says what
-        // to do about it rather than showing "Now" — which read as an answer, and as the one
-        // answer the hour's lead time refuses.
-        value={scheduledAt === null ? 'Select a time' : formatWhen(scheduledAt)}
-        muted={scheduledAt === null}
         /*
-         * NO CLEAR AFFORDANCE. There is no default to clear back to: emptying this row cannot
-         * produce a bookable trip, only an incomplete one, so the way to change a pickup time is
-         * to pick another.
+         * A VALUE IN-CITY, A PROMPT OUTSTATION, and the muting is what tells them apart. "Now" is
+         * the in-city default and reads as the answer it is; "Select a time" is muted because an
+         * outstation trip genuinely has an unanswered field there, and the customer is meant to
+         * read it as an instruction rather than as a setting.
          */
+        value={scheduledAt === null ? (instant ? 'Now' : 'Select a time') : formatWhen(scheduledAt)}
+        muted={scheduledAt === null && !instant}
+        /*
+         * CLEARABLE ONLY WHERE THERE IS SOMETHING TO CLEAR BACK TO. In-city that is "now", so a
+         * customer who picked 8pm and changed their mind has a way back without hunting for a
+         * "now" entry inside the wheel. Outstation, emptying this row produces an incomplete trip
+         * rather than a bookable one, so the only way to change the time is to pick another.
+         */
+        onClear={instant && scheduledAt !== null ? onClearTime : undefined}
         onPress={onPickTime}
         disabled={busy}
         problem={whenProblem}
+        /*
+         * SAYS WHAT "NOW" WILL DO. A pickup row reading "Now" invites the reasonable guess that a
+         * driver is already on the way — nobody has been dispatched yet, and the search does not
+         * begin until the fare is confirmed on the next screen.
+         */
+        {...(scheduledAt === null && instant
+          ? { note: 'We start looking for a driver as soon as you confirm the fare' }
+          : {})}
       />
 
       {direction === 'ROUND_TRIP' ? (
@@ -251,5 +282,4 @@ const styles = StyleSheet.create({
 
   problem: { ...text.caption, color: colors.danger, marginTop: space.xs, marginLeft: space.xs },
   note: { ...text.caption, color: colors.faint, marginTop: space.xs, marginLeft: space.xs },
-
 });

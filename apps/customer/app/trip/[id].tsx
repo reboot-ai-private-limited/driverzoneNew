@@ -32,6 +32,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { BookingDto, BookingStatus, CancelBookingResponse } from '@driverzone/contracts';
+import { AppIcon } from '@/components/AppIcon';
 import { CancelRide } from '@/components/CancelRide';
 import { DriverCard } from '@/components/DriverCard';
 import { ExtendDayCard } from '@/components/ExtendDayCard';
@@ -472,7 +473,7 @@ export default function TripScreen(): ReactElement {
                           (selectMode.isPending || checkoutInFlight) && styles.payBtnDisabled,
                         ]}
                       >
-                        <Feather name="dollar-sign" size={16} color={colors.fg} />
+                        <AppIcon name="rupee" size={16} color={colors.fg} />
                         <Text style={styles.payBtnText}>Pay Cash</Text>
                       </Pressable>
                       <Pressable
@@ -700,6 +701,36 @@ function StatusCard({ booking }: { booking: BookingDto }): ReactElement {
           {copy.body.length === 0 ? null : <Text style={styles.statusBody}>{copy.body}</Text>}
         </View>
       </View>
+
+      {/*
+        HOW LONG UNTIL THE DRIVER IS HERE — the question a customer standing outside is actually
+        asking, and one this screen could not answer at all until now.
+
+        **DELIBERATELY APPROXIMATE, AND IT SAYS SO.** The tilde is not decoration: the server
+        derives this from the driver's last reported position and a road estimate, so "8 min"
+        would claim a precision nothing behind it has. It is minutes-away rather than a clock
+        time for the same reason — "arriving 6:42 pm" is a promise, "~8 min" is an expectation,
+        and only one of those is honest about what it knows.
+
+        NOT A COUNTDOWN. It does not tick. The value refreshes on the 4s poll that drives this
+        whole screen, and animating it downward between polls would invent seconds of precision
+        out of a number that is already up to a minute old.
+
+        SILENT WHEN NULL, which is most of a trip — no driver yet, already arrived, a stale fix.
+        The row simply is not rendered and the status title above carries the screen;
+        `pickup_eta_minutes` documents each case the server declines to answer.
+      */}
+      {booking.pickup_eta_minutes === null ? null : (
+        <View style={styles.statusStat}>
+          <View style={styles.statusStatIcon}>
+            <Feather name="navigation" size={13} color={colors.muted} />
+          </View>
+          <View>
+            <Text style={styles.statusStatLabel}>Arriving in about</Text>
+            <Text style={styles.statusStatValue}>~{booking.pickup_eta_minutes} min</Text>
+          </View>
+        </View>
+      )}
 
       {includedUntil === null ? null : (
         <View style={styles.statusStat}>

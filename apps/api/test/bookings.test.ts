@@ -499,13 +499,30 @@ describe('generateReference', () => {
 describe('isScheduledBooking', () => {
   const now = new Date('2026-08-31T09:00:00Z');
 
-  it('treats an hour or less out as immediate', () => {
-    expect(isScheduledBooking(new Date('2026-08-31T09:30:00Z'), now)).toBe(false);
-    expect(isScheduledBooking(new Date('2026-08-31T10:00:00Z'), now)).toBe(false);
+  /*
+   * THIS USED TO ASSERT THE OPPOSITE for anything inside an hour, and the hour was a trap. A trip
+   * booked at 09:00 for 09:30 came back `false` — an immediate booking carrying a 09:30 pickup —
+   * so every protection that keys off this flag was withheld from it, including the waiting
+   * exemption that stops a customer being billed for the driver arriving twenty minutes early.
+   * See `SCHEDULED_THRESHOLD_MINUTES`.
+   */
+  it('treats any future pickup as scheduled, however near', () => {
+    expect(isScheduledBooking(new Date('2026-08-31T09:30:00Z'), now)).toBe(true);
+    expect(isScheduledBooking(new Date('2026-08-31T10:00:00Z'), now)).toBe(true);
+    expect(isScheduledBooking(new Date('2026-08-31T10:30:00Z'), now)).toBe(true);
+    // A minute out is still a time the customer named and expects to be kept.
+    expect(isScheduledBooking(new Date('2026-08-31T09:01:00Z'), now)).toBe(true);
   });
 
-  it('treats more than an hour out as scheduled', () => {
-    expect(isScheduledBooking(new Date('2026-08-31T10:30:00Z'), now)).toBe(true);
+  /*
+   * An instant booking sends no `scheduledAt`, so the server stamps the QUOTE's creation time —
+   * always at or before `now` by the time the booking is made. Both edges are immediate, and the
+   * `now` case is the one that matters: it is what stops a clock-tick turning "Now" into a
+   * scheduled trip.
+   */
+  it('treats now, or any past instant, as immediate', () => {
+    expect(isScheduledBooking(now, now)).toBe(false);
+    expect(isScheduledBooking(new Date('2026-08-31T08:55:00Z'), now)).toBe(false);
   });
 });
 

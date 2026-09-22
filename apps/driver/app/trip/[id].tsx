@@ -25,6 +25,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { AppIcon, type AppIconName } from '@/components/AppIcon';
 import { CancelTripSheet } from '@/components/CancelTripSheet';
 import { ExtensionRequestCard } from '@/components/ExtensionRequestCard';
 import { OtpInput } from '@/components/OtpInput';
@@ -355,7 +356,7 @@ export default function TripScreen(): ReactElement {
         <View style={styles.metaRow}>
           <Meta icon="tag" label="Fare" value={booking.payable.total.amount_display} />
           <Meta
-            icon={cash ? 'dollar-sign' : 'credit-card'}
+            icon={cash ? 'rupee' : 'credit-card'}
             label="Payment"
             value={cash ? 'Cash' : 'Prepaid'}
           />
@@ -431,7 +432,7 @@ export default function TripScreen(): ReactElement {
                 takeCash.isPending && styles.takeCashBtnDisabled,
               ]}
             >
-              <Feather name="dollar-sign" size={15} color="#92400E" />
+              <AppIcon name="rupee" size={15} color="#92400E" />
               <Text style={styles.takeCashBtnText}>Customer paid me cash instead</Text>
             </Pressable>
           </Animated.View>
@@ -480,7 +481,7 @@ export default function TripScreen(): ReactElement {
                 takeExtrasCash.isPending && styles.takeCashBtnDisabled,
               ]}
             >
-              <Feather name="dollar-sign" size={15} color="#92400E" />
+              <AppIcon name="rupee" size={15} color="#92400E" />
               <Text style={styles.takeCashBtnText}>They paid me the extra day in cash</Text>
             </Pressable>
           </Animated.View>
@@ -488,7 +489,7 @@ export default function TripScreen(): ReactElement {
 
         {cash && booking.status === 'STARTED' ? (
           <Animated.View entering={FadeIn} style={styles.cashNote}>
-            <Feather name="dollar-sign" size={16} color={colors.warning} />
+            <AppIcon name="rupee" size={16} color={colors.warning} />
             <Text style={styles.cashNoteText}>
               Collect {booking.payable.total.amount_display} in cash before you end the trip.
             </Text>
@@ -858,10 +859,10 @@ function Waypoint({
   );
 }
 
-function Meta({ icon, label, value }: { icon: FeatherName; label: string; value: string }): ReactElement {
+function Meta({ icon, label, value }: { icon: AppIconName; label: string; value: string }): ReactElement {
   return (
     <View style={styles.meta}>
-      <Feather name={icon} size={14} color={colors.muted} />
+      <AppIcon name={icon} size={14} color={colors.muted} />
       <Text style={styles.metaLabel}>{label}</Text>
       <Text style={styles.metaValue}>{value}</Text>
     </View>

@@ -21,6 +21,7 @@ import {
   tripTotalPaise,
   type TripStatus,
 } from '@/features/trips/tripHistory';
+import { AppIcon } from '@/components/AppIcon';
 import { getTrip } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
@@ -236,8 +237,8 @@ export default function TripReceiptScreen(): ReactElement {
           <Section title="Payment">
             <View style={[styles.payBanner, cash ? styles.payBannerCash : styles.payBannerPrepaid]}>
               <View style={styles.payBannerIcon}>
-                <Feather
-                  name={cash ? 'dollar-sign' : 'smartphone'}
+                <AppIcon
+                  name={cash ? 'rupee' : 'smartphone'}
                   size={16}
                   color={cash ? colors.warning : colors.dutyOn}
                 />

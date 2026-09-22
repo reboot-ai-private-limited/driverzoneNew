@@ -1,4 +1,4 @@
-import type { Role } from '@driverzone/contracts';
+import type { OtpChannel, Role } from '@driverzone/contracts';
 import { allowDevShortcuts, isProduction } from '@/config/env.js';
 import { logger } from '@/shared/logging/logger.js';
 import { AppError } from '@/shared/errors/AppError.js';
@@ -22,7 +22,7 @@ import type { OtpSenderPort } from '../domain/otpSender.port.js';
  * every number are in that host's logs — see `allowDevShortcuts` in config/env.ts.
  */
 export class LoggingOtpSender implements OtpSenderPort {
-  send(role: Role, phone: string, code: string): Promise<void> {
+  send(role: Role, phone: string, code: string, channel?: OtpChannel): Promise<void> {
     if (isProduction && !allowDevShortcuts) {
       return Promise.reject(
         AppError.internal('INTERNAL', {
@@ -41,7 +41,9 @@ export class LoggingOtpSender implements OtpSenderPort {
      * not safe, which is what that flag's boot warning is for.
      */
     logger.warn(
-      { role, dev_recipient: phone, dev_login_code: code },
+      // The requested channel is logged rather than acted on: this adapter has one output
+      // regardless, and seeing which one the screen asked for is the point of recording it.
+      { role, channel: channel ?? 'WHATSAPP', dev_recipient: phone, dev_login_code: code },
       'DEV ONLY — login code not sent by SMS, no provider configured',
     );
     return Promise.resolve();

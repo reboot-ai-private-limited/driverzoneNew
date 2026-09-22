@@ -106,6 +106,39 @@ export default function OtpScreen(): ReactElement {
     },
   });
 
+  /**
+   * "It never came on WhatsApp" — the same code, sent by SMS instead.
+   *
+   * A SEPARATE MUTATION FROM `resend`, not a flag on it, because the two are different requests
+   * with different costs and different rules. Resend is free and paced by the cooldown; this one
+   * is a paid message the server deliberately exempts from that cooldown, since the wait it would
+   * impose is the wait for a message that already failed to arrive.
+   *
+   * It is NOT gated on `canResend`. Gating it would reintroduce exactly the countdown the server
+   * stopped enforcing, and leave the control dead at the only moment anyone reaches for it.
+   */
+  const smsResend = useMutation({
+    mutationFn: () => sendOtp({ mobile_number: mobile, channel: 'SMS' }),
+    onMutate: () => {
+      setError(null);
+      setCode('');
+      submittedFor.current = null;
+    },
+    onSuccess: (result) => {
+      // Still adopts the server's countdown: the WhatsApp resend is paced by it even though this
+      // send was not, so the row above must not offer a button the server would refuse.
+      setSecondsLeft(result.retry_after_seconds);
+      setNotice('Code sent by SMS');
+    },
+    onError: (cause) => {
+      if (cause instanceof ApiError) {
+        const retryAfter = cause.retryAfterSeconds;
+        if (retryAfter !== undefined) setSecondsLeft(retryAfter);
+      }
+      setError(cause instanceof Error ? cause.message : 'Could not send the code by SMS.');
+    },
+  });
+
   const handleFilled = useCallback(
     (filled: string) => {
       if (submittedFor.current === filled) return;
@@ -194,6 +227,30 @@ export default function OtpScreen(): ReactElement {
               )}
             </View>
 
+            {/*
+              THE WAY OUT WHEN WHATSAPP DID NOT ARRIVE, and deliberately quiet: small, muted, and
+              below the resend row, because it is the second thing to try rather than the offer.
+              Most codes arrive on WhatsApp, and a prominent SMS button would push people onto a
+              paid channel they did not need.
+
+              Live even during the resend countdown — the server exempts an explicit SMS request
+              from the cooldown precisely so this works at the moment it is wanted.
+            */}
+            <View style={styles.smsRow}>
+              <Text style={styles.smsHint}>Didn&apos;t get it on WhatsApp? </Text>
+              <Pressable
+                onPress={() => smsResend.mutate()}
+                disabled={smsResend.isPending || busy}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: smsResend.isPending || busy }}
+                hitSlop={8}
+              >
+                <Text style={[styles.smsLink, (smsResend.isPending || busy) && styles.smsLinkOff]}>
+                  {smsResend.isPending ? 'Sending…' : 'Get code by SMS'}
+                </Text>
+              </Pressable>
+            </View>
+
             {/* Holds the change-number link at the foot of a tall screen; collapses on a short one. */}
             <View style={styles.spacer} />
 
@@ -252,6 +309,19 @@ const styles = StyleSheet.create({
 
   resendRow: { alignItems: 'center', marginTop: space.md },
   resendWaiting: { ...text.body, color: colors.muted },
+
+  // One line, centred, and a size down from the resend row above it — the visual order matches
+  // the order these should be tried in.
+  smsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: space.sm,
+  },
+  smsHint: { ...text.caption, color: colors.faint },
+  smsLink: { ...text.caption, color: colors.link, fontWeight: '700', fontFamily: fontFamily.bold },
+  smsLinkOff: { color: colors.faint },
   resendCountdown: { color: colors.fg, fontWeight: '700', fontFamily: fontFamily.bold },
 
   link: { ...text.body, color: colors.link },

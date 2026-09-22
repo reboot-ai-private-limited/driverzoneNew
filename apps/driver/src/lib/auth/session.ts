@@ -1,7 +1,7 @@
 import type { AuthUserDto, OtpVerifyResponse } from '@driverzone/contracts';
 import { AppState } from 'react-native';
 import { ApiError } from '../api/ApiError';
-import { setTokenRefresher } from '../api/client';
+import { setSessionEnder, setTokenRefresher } from '../api/client';
 import * as authApi from '../api/endpoints/auth';
 import { clearRefreshToken, readRefreshToken, writeRefreshToken } from './tokenStore';
 
@@ -354,6 +354,21 @@ export async function signOut(): Promise<void> {
  *    keeps the arrow pointing one way and gives the client the single-flight guarantee for free.
  */
 setTokenRefresher(renew);
+
+/**
+ * 1b. THE OTHER HALF OF THAT ARRANGEMENT: what the client does with a 401 it cannot refresh past.
+ *
+ *     `renew` handles the recoverable 401 — a token that expired in a pocket. It never saw the
+ *     two unrecoverable ones, because they do not reach it: `SESSION_REVOKED` is excluded from
+ *     `isAuthExpiry` on purpose, and a 401 on the retry has already spent its one refresh. Both
+ *     used to fall through to the caller as an ordinary error while this module still believed
+ *     the session was live, so `useSessionRedirect` — which watches for `anonymous` — never
+ *     fired, and the driver sat on a screen reading "Please sign in to continue." with no way to.
+ *
+ *     `endSession` rather than `signOut`: the server has already rejected this credential, so
+ *     there is no revocation left to request and a logout call would only 401 in turn.
+ */
+setSessionEnder(endSession);
 
 /**
  * 2. THE RESUME PATH, and the one that matters most on Android.

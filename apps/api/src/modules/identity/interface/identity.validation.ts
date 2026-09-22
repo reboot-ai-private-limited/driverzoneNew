@@ -3,6 +3,7 @@ import {
   CAR_CATEGORIES,
   DOCUMENT_SIDES,
   DOCUMENT_TYPES,
+  OTP_CHANNELS,
   VEHICLE_TYPE_PREFERENCES,
 } from '@driverzone/contracts';
 import { OTP_LENGTH } from '../domain/otpChallenge.entity.js';
@@ -31,6 +32,11 @@ const mobileNumber = z
 
 export const otpSendSchema = z.object({
   mobile_number: mobileNumber,
+  /*
+   * Optional, because every client built before this field existed sends no channel at all — and
+   * absent resolves to the same route those clients have always been given.
+   */
+  channel: z.enum(OTP_CHANNELS).optional(),
 });
 
 export const otpVerifySchema = z.object({

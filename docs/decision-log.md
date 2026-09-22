@@ -20,6 +20,40 @@ entry links to it.
 
 ---
 
+## 2026-09-22 — Login codes go WhatsApp-first over waagent, with an SMS fallback
+
+**Decision:** `waagent.in` replaces wabridge as the WhatsApp OTP gateway, and
+`startmessaging.com` carries the code by SMS when WhatsApp does not. wabridge is retained and
+reachable — the ladder in `identity.container.ts` picks waagent on its credentials, wabridge on
+its own, and the log sender otherwise, the same shape as `selectRoadDistance`.
+
+**Why a second channel at all:** a WhatsApp OTP fails in two ways and only one of them is loud. A
+gateway outage rejects and is obvious; a number with no WhatsApp account, or a template filled
+wrongly, returns 200 and delivers nothing. The second case is indistinguishable from "WhatsApp is
+slow" until somebody cannot log in, and it is the more common one.
+
+**How the silent case is caught:** waagent's `GET /v1/messages/{id}` reports a message's state,
+which only ever moves forward. `WaAgentOtpSender.onSent` hands the `wamid` to a delayed job on the
+`notifications` queue — that queue's first consumer ever — which reads the status ~10s later and
+sends the SMS if it is anything but `delivered`/`read`. An unanswerable check (401, 429, outage)
+returns `null` and sends nothing: that is not evidence about the message, and spending an SMS on
+every one would turn a bad API key into a bill.
+
+**Consequences:** the delivery check needs the worker running, and `pnpm dev:web` does not start
+it — without the worker a silent failure produces no SMS and no error. The boot line now reports
+`sms_fallback` and `delivery_check` for exactly this reason. The job payload holds the plaintext
+code for the seconds it is pending, which is a deliberate, bounded weakening of the property that
+Redis holds only the peppered hash; the alternative (mint a new code in the job) invalidates a
+WhatsApp message that arrives late. Three template facts that cannot be read from this side —
+name-vs-id, a contact variable, a copy-code button — are env flags rather than assumptions.
+
+**Also:** `OtpSendRequest.channel` lets the OTP screen ask for SMS directly, and that request is
+exempt from the resend cooldown. The cooldown still running is the one left by the failed WhatsApp
+send, so enforcing it would make the button decorative at the only moment anyone taps it. The
+hourly caps (5/phone, 10/IP) are not exempt and remain the real defence.
+
+---
+
 ## 2026-09-22 — In-city books instantly; outstation keeps the hour's lead
 
 **Decision:** An unset pickup time now means **"now"** on an in-city trip and **"not chosen yet"**

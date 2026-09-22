@@ -3,6 +3,7 @@ import { Worker } from 'bullmq';
 import { loadEnv } from '@/config/env.js';
 import { QUEUE_NAMES, closeQueues } from '@/shared/queue/queues.js';
 import { DISPATCH_JOBS, enqueueDispatch } from '@/shared/queue/dispatchJobs.js';
+import { OTP_JOBS, type OtpDeliveryJobData } from '@/shared/queue/otpDeliveryJobs.js';
 import { disconnectRedis, getRedis } from '@/shared/queue/redis.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
 import { runWithContext } from '@/shared/http/request-context.js';
@@ -78,6 +79,37 @@ async function main(): Promise<void> {
     logger.error({ id: job?.id, name: job?.name, err: err.message }, 'dispatch job failed');
   });
 
+  /**
+   * THE NOTIFICATIONS QUEUE'S FIRST CONSUMER. `QUEUE_NAMES.notifications` has been declared since
+   * the queues module was written and nothing ever read from it — every job in this process went
+   * to `dispatch`. It exists now because a sent WhatsApp OTP has to be checked a few seconds
+   * later, and that check cannot live on the request that sent it.
+   *
+   * CONCURRENCY 5, not 10: each job is one outbound HTTP call to a rate-limited status endpoint,
+   * and the queue's depth is a handful of logins rather than a dispatch fan-out.
+   */
+  const notificationsWorker = new Worker(
+    QUEUE_NAMES.notifications,
+    async (job) => {
+      const payload: unknown = job.data;
+      const inherited =
+        typeof payload === 'object' && payload !== null && 'requestId' in payload
+          ? (payload as { requestId?: unknown }).requestId
+          : undefined;
+
+      const requestId = typeof inherited === 'string' && inherited !== '' ? inherited : randomUUID();
+
+      await runWithContext({ requestId }, async () => {
+        await handleNotificationJob(containers, job.name, payload);
+      });
+    },
+    { connection: getRedis(), concurrency: 5 },
+  );
+
+  notificationsWorker.on('failed', (job, err) => {
+    logger.error({ id: job?.id, name: job?.name, err: err.message }, 'notification job failed');
+  });
+
   const sweeper = setInterval(() => {
     void runSweep(containers);
   }, SWEEPER_INTERVAL_MS);
@@ -88,8 +120,12 @@ async function main(): Promise<void> {
     void (async () => {
       logger.info({ signal }, 'signal received, closing workers');
       clearInterval(sweeper);
-      // Waits for the active job to finish. Killing mid-job leaves a booking half-dispatched.
-      await dispatchWorker.close();
+      /*
+       * BOTH WORKERS, and each waits for its active job. Killing mid-job leaves a booking
+       * half-dispatched — or, on the notifications side, a login code whose delivery was checked
+       * and whose SMS fallback never went out, which is the one failure the check exists to stop.
+       */
+      await Promise.all([dispatchWorker.close(), notificationsWorker.close()]);
       await closeQueues();
       await disconnectMongo();
       disconnectRedis();
@@ -128,6 +164,51 @@ async function handleDispatchJob(
   }
 
   logger.warn({ name }, 'unknown dispatch job');
+}
+
+/**
+ * Did that WhatsApp login code actually arrive — and if not, send an SMS.
+ *
+ * NOTHING CONFIGURED IS NOT AN ERROR. On a machine with no waagent or no SMS keys
+ * `resolveOtpDelivery` is null, and a job that somehow reached this process has nothing to do.
+ * Logging it at error level would mean a failure line on every login on a dev box.
+ *
+ * THE PAYLOAD CARRIES A PLAINTEXT CODE for the seconds it is pending — see
+ * `OtpDeliveryJobData.code` for why that trade was taken, and why nothing here logs it.
+ */
+async function handleNotificationJob(
+  containers: AppContainers,
+  name: string,
+  payload: unknown,
+): Promise<void> {
+  if (name !== OTP_JOBS.checkDelivery) {
+    logger.warn({ name }, 'unknown notification job');
+    return;
+  }
+
+  const resolve = containers.identity.resolveOtpDelivery;
+  if (resolve === null) {
+    logger.info('otp delivery check skipped — no whatsapp/sms pair configured');
+    return;
+  }
+
+  const data = payload as Partial<OtpDeliveryJobData>;
+  if (
+    typeof data.messageId !== 'string' ||
+    typeof data.role !== 'string' ||
+    typeof data.phone !== 'string' ||
+    typeof data.code !== 'string'
+  ) {
+    logger.error({ name }, 'otp delivery job with an incomplete payload — discarding');
+    return;
+  }
+
+  await resolve({
+    messageId: data.messageId,
+    role: data.role,
+    phone: data.phone,
+    code: data.code,
+  });
 }
 
 /**

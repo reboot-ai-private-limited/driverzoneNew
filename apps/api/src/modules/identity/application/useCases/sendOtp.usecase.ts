@@ -1,4 +1,4 @@
-import type { Role } from '@driverzone/contracts';
+import type { OtpChannel, Role } from '@driverzone/contracts';
 import {
   OTP_MAX_SENDS_PER_IP_PER_HOUR,
   OTP_MAX_SENDS_PER_PHONE_PER_HOUR,
@@ -20,6 +20,14 @@ export interface SendOtpInput {
   phone: string;
   /** For the per-IP cap. Absent only if the request somehow arrived without one. */
   ip?: string | undefined;
+  /**
+   * Which route the caller asked for. Absent is the default, which is what every caller sent
+   * before the field existed.
+   *
+   * `SMS` ALSO SKIPS THE RESEND COOLDOWN — see the cooldown check below for why that is the only
+   * version of this feature that is worth having.
+   */
+  channel?: OtpChannel | undefined;
 }
 
 export interface SendOtpResult {
@@ -50,10 +58,23 @@ export class SendOtpUseCase {
   async execute(input: SendOtpInput): Promise<SendOtpResult> {
     const { role, phone } = input;
 
-    // Cooldown first: it is the cheapest check and the one that most often fires, since a user
-    // tapping "resend" early is ordinary behaviour rather than abuse.
+    /*
+     * Cooldown first: it is the cheapest check and the one that most often fires, since a user
+     * tapping "resend" early is ordinary behaviour rather than abuse.
+     *
+     * **AN EXPLICIT SMS REQUEST IS EXEMPT, AND THAT IS THE WHOLE FEATURE.** "Get code by SMS"
+     * exists for the customer whose WhatsApp message never arrived, and that is exactly the
+     * moment the cooldown from that failed send is still running. Enforcing it here would show
+     * them a countdown instead of the code — the button would be decorative, and they would be
+     * stuck until it lapsed on a message that was never coming.
+     *
+     * THE HOURLY CAPS BELOW ARE NOT SKIPPED, and they are the real defence. Five sends per phone
+     * and ten per IP still bound this at a handful of messages an hour for any one number, so
+     * the exemption cannot be turned into a way to spend the SMS wallet or hammer somebody
+     * else's handset. The cooldown was pacing a human; the caps stop a machine.
+     */
     const cooldown = await this.store.cooldownRemaining(role, phone);
-    if (cooldown > 0) throw otpCooldownActive(cooldown);
+    if (cooldown > 0 && input.channel !== 'SMS') throw otpCooldownActive(cooldown);
 
     const perPhone = await this.store.countSend('phone', `${role}:${phone}`, HOUR_SECONDS);
     if (perPhone.count > OTP_MAX_SENDS_PER_PHONE_PER_HOUR) {
@@ -96,7 +117,7 @@ export class SendOtpUseCase {
       // Sending is the step that can fail for reasons outside this system. It happens after the
       // challenge is stored so that a provider timeout on a code that DID arrive still leaves a
       // verifiable challenge behind.
-      await this.sender.send(role, phone, code);
+      await this.sender.send(role, phone, code, input.channel);
     }
 
     await this.store.startCooldown(role, phone, OTP_RESEND_COOLDOWN_SECONDS);

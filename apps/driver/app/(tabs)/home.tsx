@@ -5,6 +5,7 @@ import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
+import { needsBackgroundLocationDisclosure } from '@/features/onboarding/backgroundLocationDisclosure';
 import { needsBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { formatWhen } from '@/features/trips/scheduledWhen';
@@ -108,6 +109,26 @@ export default function HomeScreen(): ReactElement {
               'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
             );
           }
+        });
+
+        /**
+         * THE PROMINENT DISCLOSURE, on the way into the first shift.
+         *
+         * Play requires it before Android's background-location prompt, and this is the only
+         * place in the app with both a reason to ask and a screen to ask from — the other two
+         * callers of `startDutyForegroundService` are the boot receiver and the resume listener,
+         * which run with nothing mounted. So the flow is: the service's own request is gated on
+         * the stored consent (see its background-permission comment), and this navigates to the
+         * screen that can write it.
+         *
+         * LAST in the callback and not awaited, deliberately. Duty already succeeded server-side
+         * and the machinery above is already starting; pushing a screen is the least urgent thing
+         * here and must not delay any of it. `needsBackgroundLocationDisclosure` answers false
+         * for everyone who has already decided, already granted, or cannot be asked — so the
+         * ordinary shift start pushes nothing at all.
+         */
+        void needsBackgroundLocationDisclosure().then((needed) => {
+          if (needed) router.push('/location-disclosure');
         });
       } else {
         // The reverse order of going on duty: stop what the service was protecting, then release

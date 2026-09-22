@@ -34,7 +34,9 @@
       "./plugins/withOfferSound",
       "./plugins/withRingOverLockScreen",
       "./plugins/withDutyForegroundService",
-      "./plugins/withOfferProguardRules"
+      "./plugins/withOfferProguardRules",
+      ["expo-image-picker", { "microphonePermission": false, "cameraPermission": false }],
+      "./plugins/withStripPermissions"
     ],
     "android": {
       "package": "in.driverzone.driver",
@@ -45,7 +47,6 @@
         "backgroundColor": "#F2F200"
       },
       "permissions": [
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",

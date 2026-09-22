@@ -29,7 +29,9 @@
         }
       ],
       "@react-native-firebase/app",
-      "./plugins/withUpiQueries.js"
+      "./plugins/withUpiQueries.js",
+      ["expo-image-picker", { "microphonePermission": false, "cameraPermission": false }],
+      "./plugins/withStripPermissions.js"
     ],
     "android": {
       "package": "in.driverzone.customer",

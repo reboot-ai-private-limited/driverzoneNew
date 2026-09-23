@@ -37,11 +37,18 @@ config.resolver.nodeModulesPaths = [
 // build, so Metro must read the exports map to find them.
 config.resolver.unstable_enablePackageExports = true;
 
-// Expo's getDefaultConfig sets server.tls to false, which Metro's own config validator
-// complains about with 'Unknown option "server.tls" with value false was found.'
-if (config.server && 'tls' in config.server) {
+config.server = config.server || {};
+if ('tls' in config.server) {
   delete config.server.tls;
 }
+const prevDriverRewrite = config.server.rewriteRequestUrl;
+config.server.rewriteRequestUrl = (url) => {
+  const rewritten = prevDriverRewrite ? prevDriverRewrite(url) : url;
+  if (rewritten.startsWith('/index.')) {
+    return `/apps/driver${rewritten}`;
+  }
+  return rewritten;
+};
 
 /**
  * `./http.js` inside `packages/contracts/src/index.ts` means `./http.ts`, and only Metro needs

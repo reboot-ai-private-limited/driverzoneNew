@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
 import { needsBackgroundLocationDisclosure } from '@/features/onboarding/backgroundLocationDisclosure';
+import { needsNotificationDisclosure } from '@/features/onboarding/notificationDisclosure';
 import { needsBatterySetup } from '@/features/onboarding/batteryOptimisation';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { formatWhen } from '@/features/trips/scheduledWhen';
@@ -92,43 +93,52 @@ export default function HomeScreen(): ReactElement {
             );
           }
         });
-        /**
-         * Register for push in the same breath.
+        /*
+         * ONE PERMISSION QUESTION AT A TIME, notifications first. A driver who has never been
+         * asked sees the "Trip alerts" explanation, and that screen shows Android's prompt and
+         * then hands over to the location disclosure if it is still needed — see
+         * `notification-disclosure.tsx`.
          *
-         * `ensureDutyMachinery` also registers, and idempotently — but it does not report back,
-         * and a refused notification permission is the one failure a driver has to be told about:
-         * it is the difference between offers that ring a closed app and offers that only arrive
-         * while they are looking at the screen.
-         *
-         * `force` because this is a deliberate "I just went on duty" moment — it must not be
-         * skipped by the rate limit that keeps the background callers from looping.
+         * Everyone else registers for push here. `ensureDutyMachinery` registers too, but only
+         * CHECKS the permission (it also runs from contexts with no screen) and does not report
+         * back — and a refused notification permission is the one failure a driver has to be
+         * told about. `force` because "I just went on duty" must not be skipped by the rate limit
+         * that keeps the background callers from looping.
          */
-        void registerForPush(true).then((pushable) => {
-          if (!pushable) {
-            setDutyError(
-              'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
-            );
+        void needsNotificationDisclosure().then((needed) => {
+          if (needed) {
+            router.push('/notification-disclosure');
+            return;
           }
-        });
 
-        /**
-         * THE PROMINENT DISCLOSURE, on the way into the first shift.
-         *
-         * Play requires it before Android's background-location prompt, and this is the only
-         * place in the app with both a reason to ask and a screen to ask from — the other two
-         * callers of `startDutyForegroundService` are the boot receiver and the resume listener,
-         * which run with nothing mounted. So the flow is: the service's own request is gated on
-         * the stored consent (see its background-permission comment), and this navigates to the
-         * screen that can write it.
-         *
-         * LAST in the callback and not awaited, deliberately. Duty already succeeded server-side
-         * and the machinery above is already starting; pushing a screen is the least urgent thing
-         * here and must not delay any of it. `needsBackgroundLocationDisclosure` answers false
-         * for everyone who has already decided, already granted, or cannot be asked — so the
-         * ordinary shift start pushes nothing at all.
-         */
-        void needsBackgroundLocationDisclosure().then((needed) => {
-          if (needed) router.push('/location-disclosure');
+          void registerForPush(true).then((pushable) => {
+            if (!pushable) {
+              setDutyError(
+                'Notifications are off, so trips will only alert you while the app is open. Turn them on in Settings.',
+              );
+            }
+          });
+
+          /**
+           * THE PROMINENT DISCLOSURE, on the way into the first shift.
+           *
+           * Play requires it before Android's background-location prompt, and this is the only
+           * place in the app with both a reason to ask and a screen to ask from — the other two
+           * callers of `startDutyForegroundService` are the boot receiver and the resume listener,
+           * which run with nothing mounted. So the flow is: the service's own request is gated on
+           * the stored consent (see its background-permission comment), and this navigates to the
+           * screen that can write it. (When the "Trip alerts" screen was shown instead, it hands
+           * over to this one itself.)
+           *
+           * LAST and not awaited, deliberately. Duty already succeeded server-side and the
+           * machinery above is already starting; pushing a screen is the least urgent thing here
+           * and must not delay any of it. `needsBackgroundLocationDisclosure` answers false for
+           * everyone who has already decided, already granted, or cannot be asked — so the
+           * ordinary shift start pushes nothing at all.
+           */
+          void needsBackgroundLocationDisclosure().then((locationNeeded) => {
+            if (locationNeeded) router.push('/location-disclosure');
+          });
         });
       } else {
         // The reverse order of going on duty: stop what the service was protecting, then release

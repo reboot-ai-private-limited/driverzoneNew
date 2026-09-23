@@ -7,6 +7,7 @@ import {
   type ReactNode,
   useCallback,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -79,14 +80,35 @@ export default function RidesScreen(): ReactElement {
     select: (response) => response.bookings.map(toRideHistoryRow),
   });
 
+  /*
+   * The FIRST focus is skipped: the query is already fetching because the screen just mounted,
+   * and refetching on top of it was a second identical request on every first visit.
+   */
+  const focusedBefore = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      if (!focusedBefore.current) {
+        focusedBefore.current = true;
+        return;
+      }
       void history.refetch();
       // `refetch` is stable for a given query key; depending on the whole query object would
       // re-run this on every status change it makes, including the refetch's own.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
+
+  /*
+   * The pull-to-refresh spinner shows ONLY for a pull. It used to follow `isRefetching`, which is
+   * also true for the silent refetch above — so every return to this tab flashed a spinner over a
+   * list that was already on screen and correct. A background refresh swaps the rows in quietly.
+   */
+  const [pulling, setPulling] = useState(false);
+  const pullToRefresh = useCallback(() => {
+    setPulling(true);
+    void history.refetch().finally(() => setPulling(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const all = useMemo(() => history.data ?? [], [history.data]);
 
@@ -211,8 +233,8 @@ export default function RidesScreen(): ReactElement {
         // "did my last ride land?" deserves an answer they can ask for directly.
         refreshControl={
           <RefreshControl
-            refreshing={history.isRefetching && !history.isPending}
-            onRefresh={() => void history.refetch()}
+            refreshing={pulling}
+            onRefresh={pullToRefresh}
             tintColor={colors.muted}
           />
         }
@@ -241,16 +263,22 @@ export default function RidesScreen(): ReactElement {
         </ScrollView>
 
         <View style={styles.statsGrid}>
-          <Stagger index={0} style={styles.statTileWrap}>
+          {/*
+            Plain Views, NOT `Stagger`. The entering animation on the first tile (no delay) froze
+            part-way on Android and left "Total Trips" pushed down over the first ride card for
+            good. These are the screen's static header, already in place the moment it opens —
+            there is nothing for them to animate into.
+          */}
+          <View style={styles.statTileWrap}>
             <StatTile icon="headphones" label="Total Trips" value={String(stats.total)} />
-          </Stagger>
-          <Stagger index={1} style={styles.statTileWrap}>
+          </View>
+          <View style={styles.statTileWrap}>
             <StatTile
               icon="credit-card"
               label="Total Spent"
               value={formatPaise(stats.totalSpent)}
             />
-          </Stagger>
+          </View>
         </View>
 
         {history.isPending ? (

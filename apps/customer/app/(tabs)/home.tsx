@@ -810,7 +810,12 @@ export default function HomeScreen(): ReactElement {
   }
 
   function recentre(): void {
-    if (location.status === 'denied' || location.status === 'failed') {
+    // The locate button is the customer asking — from any of these it goes to Android's prompt.
+    if (
+      location.status === 'denied' ||
+      location.status === 'failed' ||
+      location.status === 'needs-consent'
+    ) {
       location.locate();
       return;
     }
@@ -1367,6 +1372,30 @@ export default function HomeScreen(): ReactElement {
         )}
       </KeyboardAvoidingView>
 
+      {/*
+        BEFORE ANDROID'S LOCATION PROMPT, once. Closing the sheet counts as "Not now": the
+        customer dismissed a question, and re-showing it on every launch would be nagging.
+      */}
+      <BottomSheet visible={location.status === 'needs-consent'} onClose={location.decline}>
+        <View style={styles.consentIcon}>
+          <Feather name="map-pin" size={24} color={colors.fg} />
+        </View>
+        <Text style={styles.consentTitle}>Use your location for pickup?</Text>
+        <Text style={styles.consentBody}>
+          DriverZone uses your location to set your pickup point and to check that drivers are
+          available where you are. It is only used while the app is open. Android will ask you to
+          allow it next.
+        </Text>
+        <PrimaryButton label="Allow" onPress={location.allow} showArrow={false} />
+        <Pressable
+          onPress={location.decline}
+          accessibilityRole="button"
+          style={styles.consentDecline}
+        >
+          <Text style={styles.consentDeclineLabel}>Not now — I&apos;ll set the pickup myself</Text>
+        </Pressable>
+      </BottomSheet>
+
       <BottomSheet visible={saveOpen} onClose={() => setSaveOpen(false)}>
         <Text style={styles.menuLabel}>Save this place as</Text>
         <Text style={styles.menuAddress} numberOfLines={2}>
@@ -1776,6 +1805,19 @@ const styles = StyleSheet.create({
   // No top margin: Continue follows the coverage notice (or the saved list, when the notice is
   // silent) directly, closing the gap that made this the tallest empty stretch in the sheet.
 
+  consentIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space.md,
+  },
+  consentTitle: { ...text.heading, color: colors.fg },
+  consentBody: { ...text.body, color: colors.muted, marginTop: space.xs, marginBottom: space.lg },
+  consentDecline: { alignItems: 'center', paddingVertical: space.md },
+  consentDeclineLabel: { ...text.body, color: colors.muted },
   menuLabel: { ...text.caption, color: colors.muted },
   menuAddress: { ...text.body, color: colors.fg, marginTop: 2, marginBottom: space.md },
   menuItem: {

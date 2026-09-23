@@ -168,7 +168,8 @@ async function ensureDutyMachineryInner(): Promise<DutyMachineryResult> {
   // Re-registering matters more here than anywhere: a token is per-install, and a driver restored
   // onto a fresh install would otherwise be on duty with none, so dispatch logs "driver has no
   // registered device" and every offer lapses in silence. `$addToSet` server-side makes it free.
-  void registerForPush();
+  // Check-only: this runs with no screen to explain a prompt from — see `registerForPush`.
+  void registerForPush(false, false);
 
   return serviceUp ? 'ok' : 'no-service';
 }

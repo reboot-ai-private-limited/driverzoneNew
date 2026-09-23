@@ -171,13 +171,15 @@ export default function OnboardingProfileScreen(): ReactElement {
     },
   });
 
+  /**
+   * NO PERMISSION REQUEST HERE, deliberately. `launchImageLibraryAsync` opens the system photo
+   * picker directly — `PickVisualMedia` on Android, `PHPickerViewController` on iOS — and neither
+   * needs a permission grant to open. On Android 13+ `requestMediaLibraryPermissionsAsync()` is
+   * already a no-op; on 12 and below it put up a real "Allow photos and media" dialog for a picker
+   * that returns its result via a direct URI grant and never reads storage otherwise. See the same
+   * note in `apps/customer/app/(auth)/profile-setup.tsx`.
+   */
   async function pickPicture(): Promise<void> {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setPictureError('DriverZone needs access to your photos to set a profile picture.');
-      return;
-    }
-
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       // Square, because it renders in a circle everywhere it appears — cropping here beats

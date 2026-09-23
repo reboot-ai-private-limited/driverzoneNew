@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TripPoint } from '@/features/booking/tripPoint';
 import { reverseGeocode } from './geocoding';
+import { readLocationDecision, writeLocationDecision } from './locationConsent';
 
 /**
  * Where the map opens: the customer's own position when they allow it, Siliguri when they do
@@ -17,7 +18,12 @@ export const FALLBACK_CENTRE: TripPoint = {
   address: 'Siliguri',
 };
 
-export type LocationStatus = 'locating' | 'ready' | 'denied' | 'failed';
+/**
+ * `needs-consent` — the permission can be asked for, but the customer has not yet seen the
+ * explanation that goes before it. The screen shows that explanation and answers with `allow` or
+ * `decline`; nothing is prompted meanwhile, and the map stays on the fallback.
+ */
+export type LocationStatus = 'locating' | 'ready' | 'denied' | 'failed' | 'needs-consent';
 
 /**
  * A ceiling on every native location call, because on this platform "never" is a real answer.
@@ -45,6 +51,10 @@ interface CurrentLocation {
   /** True once a real fix has been used, so the screen knows the pin is the customer's own. */
   isReal: boolean;
   locate: () => void;
+  /** The explanation's "Allow": remembered, then Android's own prompt is shown. */
+  allow: () => void;
+  /** The explanation's "Not now": remembered, and nothing is asked until the customer asks. */
+  decline: () => void;
 }
 
 /**
@@ -97,6 +107,23 @@ export function useCurrentLocation(): CurrentLocation {
        */
       let permission = await Location.getForegroundPermissionsAsync().catch(() => null);
       if (permission !== null && !permission.granted && permission.canAskAgain) {
+        /*
+         * EXPLAIN BEFORE ASKING, but only on the automatic run at launch (`nonce === 0`). Any
+         * later run is the customer asking — Allow on the explanation, or the locate button — and
+         * that goes straight to Android's prompt. A customer who chose "Not now" is left alone on
+         * every launch after, until they tap locate themselves.
+         */
+        if (nonce === 0) {
+          const decision = await readLocationDecision();
+          if (decision === null) {
+            if (alive.current) setStatus('needs-consent');
+            return;
+          }
+          if (decision === 'declined') {
+            if (alive.current) setStatus('denied');
+            return;
+          }
+        }
         permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
       }
 
@@ -154,5 +181,15 @@ export function useCurrentLocation(): CurrentLocation {
 
   const locate = useCallback(() => setNonce((n) => n + 1), []);
 
-  return { status, point, isReal, locate };
+  const allow = useCallback(() => {
+    void writeLocationDecision('accepted').then(() => setNonce((n) => n + 1));
+  }, []);
+
+  const decline = useCallback(() => {
+    void writeLocationDecision('declined');
+    // The same state a refused Android prompt leaves: fallback map, pin moved by hand.
+    setStatus('denied');
+  }, []);
+
+  return { status, point, isReal, locate, allow, decline };
 }

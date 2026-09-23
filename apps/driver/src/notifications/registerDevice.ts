@@ -44,14 +44,23 @@ let lastRegisterResult = false;
  * Pass `force` to bypass the rate limit — the sign-in flow does, because a brand-new session must
  * register without waiting out a window left over from the previous one.
  */
-export async function registerForPush(force = false): Promise<boolean> {
+export async function registerForPush(force = false, mayPrompt = true): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
 
   if (!force && Date.now() - lastRegisterAt < REGISTER_MIN_INTERVAL_MS) {
     return lastRegisterResult;
   }
 
-  const settings = await notifee.requestPermission();
+  /*
+   * `mayPrompt: false` CHECKS the permission instead of requesting it. Duty recovery registers
+   * from the boot receiver and the resume listener as well as from the toggle, and a request there
+   * would put Android's notification prompt on screen with no explanation before it — racing the
+   * "Trip alerts" screen the duty toggle opens in the same moment. Only a caller with a screen, and
+   * a reason the driver can see, may ask.
+   */
+  const settings = mayPrompt
+    ? await notifee.requestPermission()
+    : await notifee.getNotificationSettings();
   // 0 is DENIED; anything above is granted in some form.
   if (settings.authorizationStatus === 0) {
     pushLog('registerForPush: POST_NOTIFICATIONS denied — offers will not show');

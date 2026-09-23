@@ -112,6 +112,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         // key would let a write the server already applied be applied twice.
         return request<T>(path, { ...options, token: fresh, skipAuthRefresh: true });
       }
+      /*
+       * Renewal produced no token. Either the session was rejected — the session layer has
+       * already ended it and the customer is on their way to sign-in — or the API could not be
+       * reached and the session is intact. Rethrowing the original 401 showed "Please sign in to
+       * continue." to a customer who was still signed in; the connection message is true in the
+       * case where one is shown at all.
+       */
+      throw new NetworkError();
     }
 
     throw error;

@@ -35,6 +35,24 @@ import { colors, radius, shadow, space, text } from '@/theme/theme';
  * `gestureEnabled: false` is set in the layout, because a disclosure that can be dismissed
  * without answering is one Android can then prompt behind — and a reviewer will try it.
  */
+/**
+ * How long a permission request may take before this screen stops waiting for it.
+ *
+ * Long enough for a driver to find "Allow all the time" on the settings page Android opens, short
+ * enough that a request the OS never answers (an OEM quirk, or a prompt stacked behind another)
+ * cannot leave the button spinning for good. Leaving early loses nothing: whatever the driver then
+ * chooses in Settings still applies, because nothing here reads the result.
+ */
+const PERMISSION_WAIT_MS = 45_000;
+
+/** The request's result, or `null` if it failed or did not answer in time. */
+function settleWithin<T>(request: Promise<T>): Promise<T | null> {
+  return Promise.race([
+    request.catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), PERMISSION_WAIT_MS)),
+  ]);
+}
+
 export default function LocationDisclosureScreen(): ReactElement {
   const [busy, setBusy] = useState(false);
 
@@ -52,12 +70,35 @@ export default function LocationDisclosureScreen(): ReactElement {
       setBusy(true);
       try {
         await markBackgroundLocationAccepted();
+
+        /*
+         * FOREGROUND FIRST, AND THIS IS THE FIX FOR A HUNG BUTTON. Android will not grant — or
+         * even show a request for — background location until ordinary location is granted; the
+         * request is silently ignored and `requestBackgroundPermissionsAsync` never resolves, so
+         * this button span forever. On a fresh install that is the normal case: the duty toggle
+         * asks for foreground location and pushes this screen in the same moment, so the driver
+         * can reach Allow before (or instead of) answering that first prompt.
+         *
+         * Check before asking, as everywhere else: `request…` never resolves on ColorOS when the
+         * grant already exists (see `dutyForegroundService.ts`).
+         */
+        let foreground = await Location.getForegroundPermissionsAsync().catch(() => null);
+        if (foreground !== null && !foreground.granted && foreground.canAskAgain) {
+          foreground = await settleWithin(Location.requestForegroundPermissionsAsync());
+        }
+        // No foreground grant, no background request — it could only hang. The consent is still
+        // recorded, so the duty service asks for background itself once location is allowed.
+        if (foreground === null || !foreground.granted) return;
+
+        const background = await Location.getBackgroundPermissionsAsync().catch(() => null);
+        if (background === null || background.granted || !background.canAskAgain) return;
+
         /*
          * On Android 11+ this is not a dialog but a trip to the system settings page for "Allow
          * all the time". The result is not read: the duty flow already treats background location
          * as optional, and re-checking here would only let this screen contradict it.
          */
-        await Location.requestBackgroundPermissionsAsync().catch(() => undefined);
+        await settleWithin(Location.requestBackgroundPermissionsAsync());
       } finally {
         setBusy(false);
         leave();

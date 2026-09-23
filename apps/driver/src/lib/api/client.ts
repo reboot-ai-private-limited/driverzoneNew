@@ -174,7 +174,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
        * has already ended it — this adds nothing. When renewal merely failed (offline, a 5xx),
        * the refresh token is deliberately intact and the session must survive, so nothing is
        * done here either. Both are handled where they are understood, in the session layer.
+       *
+       * WHAT IS THROWN, though, is decided here, and it is not the original 401. Its message is the
+       * server's "Please sign in to continue." — which a driver who is still signed in (the renewal
+       * just could not reach the API) reads as having been logged out, with no login screen
+       * anywhere to be seen. The honest message is the connection one. A rejected session has
+       * already been ended, so that driver is on their way to the login screen regardless.
        */
+      throw new NetworkError();
     } else if (error.status === 401) {
       /*
        * A 401 WITH NOWHERE LEFT TO GO. Either `SESSION_REVOKED` — the refresh family was

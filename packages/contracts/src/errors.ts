@@ -73,6 +73,17 @@ export const FAULT_CODES = [
   'SESSION_REVOKED',
   'REFRESH_TOKEN_INVALID',
 
+  // Admin roster. SUPER_ADMIN-only routes; see docs/decision-log.md 2026-09-23.
+  /** The change would leave no active SUPER_ADMIN, and nobody could manage admins again. 409. */
+  'LAST_SUPER_ADMIN',
+  /** An admin row already holds this number, active or not. 409. */
+  'ADMIN_PHONE_TAKEN',
+
+  // Account deletion. `publicDetails.reasons` lists every blocker, so the app can say all of them
+  // at once rather than one per attempt.
+  /** Something must be settled before the account can be closed. 409. */
+  'ACCOUNT_DELETION_BLOCKED',
+
   // Payments (docs/LLD/pricing-and-commission.md). A booking is confirmed only once its payment
   // is captured, so these are on the path between a quote and a driver being looked for.
   'PAYMENT_NOT_FOUND',

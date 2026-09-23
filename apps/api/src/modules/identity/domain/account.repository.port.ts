@@ -24,6 +24,13 @@ export interface AccountRepositoryPort {
   findByPhone(role: Role, phone: string): Promise<Account | undefined>;
 
   /**
+   * The same slice, by id. `undefined` for an account that no longer exists as far as signing in
+   * is concerned — never created, deleted, or (for an admin) deactivated — which is what refresh
+   * asks before minting a new access token.
+   */
+  findById(role: Role, id: string): Promise<Account | undefined>;
+
+  /**
    * Creates a bare account holding nothing but the number.
    *
    * **Never called for `ADMIN`** — admin accounts are provisioned out of band, and the use case

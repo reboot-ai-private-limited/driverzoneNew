@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import type { AdminRole } from '@driverzone/contracts';
 import type {
   AdminProfile,
   AdminProfileRepositoryPort,
@@ -9,17 +10,33 @@ interface RawAdmin {
   _id: mongoose.Types.ObjectId;
   phone: string;
   fullName: string;
-}
-
-function toDomain(doc: RawAdmin): AdminProfile {
-  return { id: String(doc._id), mobileNumber: doc.phone, fullName: doc.fullName };
+  adminRole?: AdminRole | null;
 }
 
 /**
- * INFRASTRUCTURE — admin profiles.
+ * What a row without `adminRole` is. Every admin before roles existed could do everything, so
+ * reading them as anything less would silently demote the people who run the system today — and
+ * could leave nobody able to open the admin roster at all.
+ */
+export const LEGACY_ADMIN_ROLE: AdminRole = 'SUPER_ADMIN';
+
+export function roleOf(doc: { adminRole?: AdminRole | null }): AdminRole {
+  return doc.adminRole ?? LEGACY_ADMIN_ROLE;
+}
+
+function toDomain(doc: RawAdmin): AdminProfile {
+  return {
+    id: String(doc._id),
+    mobileNumber: doc.phone,
+    fullName: doc.fullName,
+    adminRole: roleOf(doc),
+  };
+}
+
+/**
+ * INFRASTRUCTURE — an admin's own profile.
  *
- * Read and rename only. No create, no delete: admin records are provisioned out of band, which
- * is the safeguard that replaced the second auth factor (docs/decision-log.md, 2026-08-24).
+ * Read and rename only. Managing OTHER admins is `MongoAdminRosterRepository`.
  */
 export class MongoAdminProfileRepository implements AdminProfileRepositoryPort {
   async findById(adminId: string): Promise<AdminProfile | undefined> {

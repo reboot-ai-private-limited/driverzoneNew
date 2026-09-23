@@ -285,4 +285,10 @@ export interface BookingRepositoryPort {
    * to answer — this one stops at the first match.
    */
   hasCompletedTripTogether(customerId: string, driverId: string): Promise<boolean>;
+
+  /**
+   * Does this customer or driver hold any booking in a non-terminal status? Existence only, for
+   * account deletion — see `BookingAccountContract` on why this is wider than "active".
+   */
+  hasOpenBooking(party: 'CUSTOMER' | 'DRIVER', accountId: string): Promise<boolean>;
 }

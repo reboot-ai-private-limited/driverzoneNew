@@ -4,6 +4,7 @@ import {
   enqueueWaveTimeout,
 } from '@/shared/queue/dispatchJobs.js';
 import { buildAdminContainer } from '@/modules/admin/admin.container.js';
+import { buildAccountsContainer } from '@/modules/accounts/accounts.container.js';
 import { buildBookingsContainer } from '@/modules/bookings/bookings.container.js';
 import { buildDispatchContainer } from '@/modules/dispatch/dispatch.container.js';
 import { buildFavouritesContainer } from '@/modules/favourites/favourites.container.js';
@@ -51,6 +52,7 @@ export interface AppContainers {
   dispatch: ReturnType<typeof buildDispatchContainer>;
   reviews: ReturnType<typeof buildReviewsContainer>;
   admin: ReturnType<typeof buildAdminContainer>;
+  accounts: ReturnType<typeof buildAccountsContainer>;
 }
 
 export function buildContainers(): AppContainers {
@@ -186,6 +188,20 @@ export function buildContainers(): AppContainers {
     identity: identity.contract,
   });
 
+  /*
+   * Also top tier, beside `admin` and for the same reason: whether an account may close depends on
+   * trips, the customer wallet and the driver ledger, and only a module above all of them can ask.
+   * Identity hands over its closure half and its SUPER_ADMIN guard through the container, not the
+   * public contract — see `AccountClosureContract`.
+   */
+  const accounts = buildAccountsContainer({
+    identity: identity.accountClosure,
+    bookings: bookings.accountContract,
+    wallet: wallet.contract,
+    ledger: ledger.contract,
+    requireSuperAdmin: identity.requireSuperAdmin,
+  });
+
   return {
     health,
     settings,
@@ -203,5 +219,6 @@ export function buildContainers(): AppContainers {
     dispatch,
     reviews,
     admin,
+    accounts,
   };
 }

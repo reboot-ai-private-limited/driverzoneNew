@@ -7,10 +7,9 @@ import type {
 /**
  * APPLICATION — an admin's own profile.
  *
- * Read and rename only. There is no create path anywhere in this API: admin records are
- * provisioned out of band, which is the residual safeguard that replaced the second auth factor
- * (docs/decision-log.md, 2026-08-24). `mobileNumber` is not editable either — it is the
- * credential, so changing it is an account handover rather than a profile edit.
+ * Read and rename only. Creating and managing OTHER admins is `ManageAdminsUseCase`, behind the
+ * SUPER_ADMIN guard (docs/decision-log.md, 2026-09-23). `mobileNumber` is not editable either — it
+ * is the credential, so changing it is an account handover rather than a profile edit.
  */
 export class ManageAdminProfileUseCase {
   constructor(private readonly admins: AdminProfileRepositoryPort) {}

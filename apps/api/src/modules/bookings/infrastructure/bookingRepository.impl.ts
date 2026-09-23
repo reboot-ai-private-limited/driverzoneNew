@@ -17,6 +17,22 @@ import {
   type BookingEventDoc,
 } from './booking.model.js';
 
+/**
+ * Every status a booking can still leave. Typed against `BookingStatus` so a status added to the
+ * contract without a decision here fails to compile only if it is misspelled — adding one still
+ * means deciding whether it belongs in this list.
+ */
+const OPEN_BOOKING_STATUSES: readonly BookingStatus[] = [
+  'PENDING_PAYMENT',
+  'CONFIRMED',
+  'SEARCHING',
+  'WAITING_DRIVER',
+  'ASSIGNED',
+  'DRIVER_EN_ROUTE',
+  'ARRIVED',
+  'STARTED',
+];
+
 function toEntity(doc: BookingDoc): Booking {
   return {
     id: String(doc._id),
@@ -161,6 +177,16 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     if (!mongoose.isValidObjectId(customerId) || !mongoose.isValidObjectId(driverId)) return false;
 
     const match = await BookingModel.exists({ customerId, driverId, status: 'COMPLETED' });
+    return match !== null;
+  }
+
+  async hasOpenBooking(party: 'CUSTOMER' | 'DRIVER', accountId: string): Promise<boolean> {
+    if (!mongoose.isValidObjectId(accountId)) return false;
+
+    const match = await BookingModel.exists({
+      ...(party === 'CUSTOMER' ? { customerId: accountId } : { driverId: accountId }),
+      status: { $in: OPEN_BOOKING_STATUSES },
+    });
     return match !== null;
   }
 

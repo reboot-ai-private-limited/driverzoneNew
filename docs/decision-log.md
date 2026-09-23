@@ -20,6 +20,43 @@ entry links to it.
 
 ---
 
+## 2026-09-23 — Admins manage admins; customers and drivers can delete their accounts
+
+**Decision (admins):** two admin roles, `SUPER_ADMIN` and `ADMIN`. A super admin adds, re-roles,
+deactivates and reactivates admins through `/admin/admins`. This **supersedes "admin records are
+provisioned out of band"** from [2026-08-24](#2026-08-24--a-dev-only-fixed-otp-scoped-to-seeded-accounts)
+and `LLD/auth.md`. What that rule protected still holds: the OTP flow never creates an admin, and an
+unknown admin number is still sent nothing. Rows written before roles existed read as
+`SUPER_ADMIN` — the power they already had — so the deploy demotes nobody. Nobody can change their
+own role or deactivate themselves, and a change that would leave no active super admin is refused
+inside a transaction that makes two concurrent demotions conflict (`changeGuarded`). The role is
+read from the database per request (`requireSuperAdmin`), not carried in the token. Nothing is
+deleted; deactivation revokes every session, and refresh now refuses an account that no longer
+exists.
+
+**Decision (deletion):** a customer or driver closes their account in the app with a code sent to
+their own number, or a super admin closes one on a verified emailed request. Closing
+**anonymises** — name, contact details, addresses, vehicles, photo, documents and device tokens are
+erased; the row stays, `phone` becomes `deleted:<id>`, and trip, payment, wallet and ledger records
+keep pointing at it. It is refused, with every reason at once, while there is an unfinished
+booking (any non-terminal status, including one for next week), a driver is on duty, a customer
+owes wallet debt, or a driver's ledger balance is non-zero in either direction. A customer's wallet
+**credit** does not block; it is forfeited and the app says so first.
+
+**Codes are per purpose:** a `DELETE_ACCOUNT` code lives in its own Redis slot and cannot sign
+anyone in, nor a login code delete anything. The hourly send caps stay shared across purposes.
+
+**Where it lives:** a new top-tier `accounts` module, because the blockers need bookings, wallet
+and ledger and only a module above all of them can ask. Identity exposes the erase-and-sign-out half
+as `AccountClosureContract` through its container, not its public contract.
+
+**Not done yet:** `POST /account-deletion/{customer|driver}/{otp,confirm}` exists for the public
+`/delete-account` page, but the site form is not built; that page still describes the emailed
+route. Deleted accounts still appear in the admin directories.
+
+**Refs:** `apps/api/src/modules/accounts/`, `identity/application/useCases/{manageAdmins,closeAccount}.usecase.ts`,
+`identity/infrastructure/{adminRoster.repository.impl,accountEraser.impl}.ts`, `apps/api/test/accountsAndAdmins.test.ts`
+
 ## 2026-09-22 — Login codes go WhatsApp-first over waagent, with an SMS fallback
 
 **Decision:** `waagent.in` replaces wabridge as the WhatsApp OTP gateway, and

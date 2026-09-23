@@ -4,6 +4,7 @@ import { logger } from '@/shared/logging/logger.js';
 import { decideRefresh, hashRefreshToken } from '../../domain/session.entity.js';
 import { refreshTokenInvalid, sessionRevoked } from '../../domain/identity.errors.js';
 import type { SessionRepositoryPort } from '../../domain/session.repository.port.js';
+import type { AccountRepositoryPort } from '../../domain/account.repository.port.js';
 import type { TokenIssuer } from '../tokenIssuer.js';
 
 export interface RefreshSessionInput {
@@ -30,6 +31,7 @@ export class RefreshSessionUseCase {
   constructor(
     private readonly sessions: SessionRepositoryPort,
     private readonly tokens: TokenIssuer,
+    private readonly accounts: AccountRepositoryPort,
   ) {}
 
   async execute(input: RefreshSessionInput): Promise<RefreshSessionResult> {
@@ -72,6 +74,22 @@ export class RefreshSessionUseCase {
         'refresh token reuse detected, family revoked',
       );
       throw sessionRevoked({ familyId: session.familyId });
+    }
+
+    /**
+     * The account behind the token must still exist.
+     *
+     * Without this, deleting an account or deactivating an admin changes nothing for whoever is
+     * already signed in: they keep rotating for the whole refresh lifetime. Everything they hold is
+     * revoked, not just this family, so their other devices stop at their next refresh too.
+     *
+     * A BLOCKED customer or driver is deliberately not refused here — suspension has always been
+     * enforced at login and on the routes that matter, and changing that is its own decision.
+     */
+    const account = await this.accounts.findById(input.role, claims.sub);
+    if (account === undefined) {
+      await this.sessions.revokeAllForUser(claims.sub, input.role, now);
+      throw refreshTokenInvalid();
     }
 
     const issued = await this.tokens.issueWithinFamily(claims.sub, input.role, session.familyId, {

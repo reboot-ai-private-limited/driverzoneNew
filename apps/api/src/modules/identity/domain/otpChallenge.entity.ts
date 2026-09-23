@@ -70,6 +70,13 @@ export function otpCodeMatches(candidate: string, storedHash: string, pepper: st
   return timingSafeEqual(a, b);
 }
 
+/**
+ * What a code was sent FOR. A code is only ever good for its own purpose: a deletion code cannot
+ * sign anybody in, and a login code cannot close an account. Each purpose also gets its own slot,
+ * so starting one flow never overwrites the other's live code.
+ */
+export type OtpPurpose = 'LOGIN' | 'DELETE_ACCOUNT';
+
 /** What the store holds against a phone number while a challenge is live. */
 export interface OtpChallenge {
   codeHash: string;

@@ -466,10 +466,51 @@ export interface SubmitOnboardingResponse {
 
 // ─── Admin ──────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * What an admin may do. `SUPER_ADMIN` is everything `ADMIN` is, plus managing other admins and
+ * deleting customer or driver accounts. An admin row that predates roles counts as `SUPER_ADMIN`,
+ * which is exactly the power every admin had before this field existed.
+ */
+export const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
 export interface AdminProfileDto {
   id: string;
   mobile_number: string;
   full_name: string;
+  /** Lets the panel hide what this admin cannot use. The server enforces it regardless. */
+  admin_role: AdminRole;
+}
+
+/** One row of the admin roster (`GET /admin/admins`). SUPER_ADMIN only. */
+export interface AdminUserDto {
+  id: string;
+  mobile_number: string;
+  full_name: string;
+  admin_role: AdminRole;
+  is_active: boolean;
+  created_at: string;
+  deactivated_at: string | null;
+}
+
+export interface AdminUserListDto {
+  admins: AdminUserDto[];
+}
+
+/**
+ * `POST /admin/admins`. No invitation is sent — the new admin signs in with an OTP to this number
+ * like any other admin, and until this row exists that number receives nothing.
+ */
+export interface CreateAdminUserRequest {
+  mobile_number: string;
+  full_name: string;
+  admin_role: AdminRole;
+}
+
+/** `PATCH /admin/admins/:id`. The number is not editable: it is the credential. */
+export interface UpdateAdminUserRequest {
+  full_name?: string | undefined;
+  admin_role?: AdminRole | undefined;
 }
 
 /** `mobile_number` is deliberately absent — it is the credential, not a self-service field. */

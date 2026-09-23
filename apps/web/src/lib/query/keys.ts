@@ -20,6 +20,11 @@ import type { ListCustomersQuery } from '../api/endpoints/customers';
  * in a diff.
  */
 export const keys = {
+  /** The admin roster. One list, no filters — it is tens of rows at most. */
+  admins: {
+    all: () => ['admins'] as const,
+    list: () => ['admins', 'list'] as const,
+  },
   zones: {
     all: () => ['zones'] as const,
     list: (query?: ListZonesQuery) => ['zones', 'list', query ?? {}] as const,

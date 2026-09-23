@@ -32,6 +32,7 @@ import {
 import { DriverWalletTab } from './DriverWalletTab';
 import { DriverDutyHistoryTab } from './DriverDutyHistoryTab';
 import { DriverEditDialog } from './DriverEditDialog';
+import { DeleteAccountButton } from '@/features/accounts/components/DeleteAccountButton';
 
 export function DriverDetailsScreen() {
   const { id } = useParams() as { id: string };
@@ -300,6 +301,12 @@ export function DriverDetailsScreen() {
                 Verify
               </Button>
             )}
+
+            <DeleteAccountButton
+              kind="drivers"
+              id={profile.id}
+              name={profile.full_name || profile.mobile_number}
+            />
           </div>
         }
       />

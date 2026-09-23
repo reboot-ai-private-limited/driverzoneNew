@@ -128,7 +128,7 @@ async function countForeignAccounts(): Promise<{ customers: number; drivers: num
 async function seedAdmin(): Promise<void> {
   await AdminUserModel.findOneAndUpdate(
     { _id: oid(DEV_ADMIN.id) },
-    { $set: { phone: DEV_ADMIN.phone, fullName: DEV_ADMIN.fullName, isActive: true } },
+    { $set: { phone: DEV_ADMIN.phone, fullName: DEV_ADMIN.fullName, isActive: true, adminRole: 'SUPER_ADMIN' } },
     { upsert: true, new: true },
   ).exec();
 }

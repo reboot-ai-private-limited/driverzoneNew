@@ -6,6 +6,7 @@ import {
   type LucideIcon,
   Package,
   Settings,
+  ShieldCheck,
   Users,
   UserCog,
   Star,
@@ -23,6 +24,11 @@ export interface NavItem {
    * order is the screen list in docs/LLD/admin-panel.md.
    */
   comingSoon?: boolean;
+  /**
+   * Shown only to a SUPER_ADMIN. Hiding is a courtesy, not the guard: the server refuses these
+   * routes to anyone else, so a hidden item an admin reaches by URL renders its 403 error state.
+   */
+  superAdminOnly?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -49,4 +55,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Finance', href: '/finance', icon: Coins },
   // Enabled: the screen is built and `GET/PATCH /admin/settings` exists in `apps/api`.
   { label: 'Settings', href: '/settings', icon: Settings },
+  // SUPER_ADMIN only: who can sign in to this panel. `GET/POST/PATCH /admin/admins`.
+  { label: 'Admins', href: '/admins', icon: ShieldCheck, superAdminOnly: true },
 ];

@@ -89,7 +89,7 @@ export function SideNav({ pinned }: SideNavProps) {
       </div>
 
       <ul className="flex-1 flex flex-col gap-0.5 px-2 py-2 overflow-y-auto overflow-x-hidden">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter((item) => item.superAdminOnly !== true || admin?.admin_role === 'SUPER_ADMIN').map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
 

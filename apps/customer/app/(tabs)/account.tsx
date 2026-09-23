@@ -177,6 +177,17 @@ export default function AccountScreen(): ReactElement {
           <Feather name="log-out" size={18} color={colors.danger} />
           <Text style={styles.logoutLabel}>Logout</Text>
         </Pressable>
+
+        {/* Quiet and last on purpose: required to be reachable (Google Play), not to be tapped by
+            accident. The screen behind it explains everything and asks for a code first. */}
+        <Pressable
+          onPress={() => router.push('/delete-account')}
+          accessibilityRole="button"
+          hitSlop={8}
+          style={styles.deleteRow}
+        >
+          <Text style={styles.deleteLabel}>Delete account</Text>
+        </Pressable>
       </ScrollView>
 
       <BottomSheet
@@ -361,6 +372,8 @@ const styles = StyleSheet.create({
   },
   logoutRowPressed: { backgroundColor: colors.bgSunken },
   logoutLabel: { ...text.body, color: colors.danger, fontFamily: fontFamily.semibold },
+  deleteRow: { alignItems: 'center', paddingVertical: space.md, marginTop: space.sm },
+  deleteLabel: { ...text.caption, color: colors.muted, textDecorationLine: 'underline' },
 
   logoutModal: { alignItems: 'center' },
   logoutIcon: {

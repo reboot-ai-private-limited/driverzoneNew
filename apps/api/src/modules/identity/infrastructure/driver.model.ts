@@ -63,6 +63,9 @@ export interface DriverDoc {
    */
   fcmTokens?: string[];
 
+  /** Set when the account was deleted and its personal data erased. See `accountEraser.impl.ts`. */
+  deletedAt?: Date | null;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -141,6 +144,9 @@ const driverSchema = new Schema<DriverDoc>(
     },
     lastLocationAt: { type: Date, default: null },
     fcmTokens: { type: [String], default: [] },
+
+    // Kept, emptied, with `phone` replaced — same reasoning as `customer.model.ts`.
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

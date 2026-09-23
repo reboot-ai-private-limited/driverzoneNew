@@ -65,7 +65,7 @@ const MODULE_TIERS = [
   // Same tier, and they never speak: dispatch finds a driver for a booking, reviews reads one
   // that is already over. Both need `bookings` below them and nothing needs either.
   ['dispatch', 'reviews'], //          dispatch: the only module permitted to set bookings.driverId
-  ['admin', 'reporting'], //           top of the graph; nothing may depend on these
+  ['admin', 'reporting', 'accounts'], // top of the graph; nothing may depend on these
 ];
 
 const layeringRules = MODULE_TIERS.map((tier, index) => {

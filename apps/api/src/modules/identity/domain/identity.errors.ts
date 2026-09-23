@@ -87,3 +87,20 @@ export function sessionRevoked(details?: unknown): AppError {
     isExpected: false,
   });
 }
+
+/** Demoting or deactivating this admin would leave nobody able to manage admins. */
+export function lastSuperAdmin(): AppError {
+  return new AppError({
+    statusCode: 409,
+    code: 'LAST_SUPER_ADMIN',
+    message: 'There must always be at least one active super admin. Promote someone else first.',
+  });
+}
+
+export function adminPhoneTaken(): AppError {
+  return new AppError({
+    statusCode: 409,
+    code: 'ADMIN_PHONE_TAKEN',
+    message: 'An admin with this mobile number already exists. Reactivate them instead.',
+  });
+}

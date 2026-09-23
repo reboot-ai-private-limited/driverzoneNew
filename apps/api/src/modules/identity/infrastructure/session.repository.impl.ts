@@ -82,4 +82,10 @@ export class MongoSessionRepository implements SessionRepositoryPort {
   async revokeSession(sessionId: string, revokedAt: Date): Promise<void> {
     await SessionModel.updateOne({ sessionId, revokedAt: null }, { $set: { revokedAt } }).exec();
   }
+
+  async revokeAllForUser(userId: string, role: Role, revokedAt: Date): Promise<void> {
+    if (!mongoose.isValidObjectId(userId)) return;
+    // Same filter shape as `revokeFamily`: an earlier revocation keeps its own timestamp.
+    await SessionModel.updateMany({ userId, role, revokedAt: null }, { $set: { revokedAt } }).exec();
+  }
 }

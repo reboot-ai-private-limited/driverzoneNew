@@ -74,6 +74,21 @@ function DemoNotice({ children }: { children: ReactNode }): ReactElement {
   );
 }
 
+/** A `•` prefix baked into a wrapping paragraph's text left every continuation line flush with the
+ *  bullet instead of the text that follows it. Each item gets its own row so wraps hang correctly. */
+function BulletList({ items }: { items: string[] }): ReactElement {
+  return (
+    <View style={styles.bulletList}>
+      {items.map((item) => (
+        <View key={item} style={styles.bulletRow}>
+          <Text style={styles.bulletMark}>•</Text>
+          <Text style={styles.bulletText}>{item}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 /**
  * LOCAL STATE ONLY. There is no field on `CustomerProfileDto` for a payment preference, and
  * every booking today books in `CASH` regardless of anything picked here (`FareSheet.tsx`) — so
@@ -150,26 +165,54 @@ function HelpBody(): ReactElement {
   return (
     <>
       <Text style={styles.body}>
-        Something not working, or a trip you need to ask about? Reach the DriverZone team directly —
-        support is not automated.
+        Need help with a booking, a billing question, or want to speak with our dispatch desk? Reach the
+        DriverZone team directly in Siliguri.
       </Text>
-      <Pressable
-        onPress={() => void Linking.openURL('tel:+911234567890')}
-        style={styles.contactRow}
-      >
-        <Feather name="phone" size={16} color={colors.fg} style={styles.contactIcon} />
-        <Text style={styles.contactText}>+91 12345 67890</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => void Linking.openURL('mailto:support@driverzone.example')}
-        style={styles.contactRow}
-      >
-        <Feather name="mail" size={16} color={colors.fg} style={styles.contactIcon} />
-        <Text style={styles.contactText}>support@driverzone.example</Text>
-      </Pressable>
-      <DemoNotice>
-        Placeholder contact details — swap these for the real support line before release.
-      </DemoNotice>
+
+      <View style={styles.contactCard}>
+        <Text style={styles.sectionHeading}>Contact Numbers</Text>
+        <Pressable
+          onPress={() => void Linking.openURL('tel:+918509299342')}
+          style={({ pressed }) => [styles.contactRow, pressed && styles.rowPressed]}
+        >
+          <Feather name="phone-call" size={16} color={colors.fg} style={styles.contactIcon} />
+          <Text style={styles.contactText}>+91 85092 99342 (Primary)</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => void Linking.openURL('tel:+917001606510')}
+          style={({ pressed }) => [styles.contactRow, pressed && styles.rowPressed]}
+        >
+          <Feather name="phone" size={16} color={colors.fg} style={styles.contactIcon} />
+          <Text style={styles.contactText}>+91 70016 06510 (Support)</Text>
+        </Pressable>
+
+        <Text style={[styles.sectionHeading, styles.spaced]}>Email Support</Text>
+        <Pressable
+          onPress={() => void Linking.openURL('mailto:support@driverzoneonline.com')}
+          style={({ pressed }) => [styles.contactRow, pressed && styles.rowPressed]}
+        >
+          <Feather name="mail" size={16} color={colors.fg} style={styles.contactIcon} />
+          <Text style={styles.contactText}>support@driverzoneonline.com</Text>
+        </Pressable>
+
+        <Text style={[styles.sectionHeading, styles.spaced]}>Registered Office</Text>
+        <View style={styles.contactRow}>
+          <Feather name="map-pin" size={16} color={colors.fg} style={styles.contactIcon} />
+          <Text style={[styles.contactText, styles.addressText]}>
+            Near Uttarbanga Sangbad Office, Banipukur Road, Middle Shanti Nagar, Loknath Mandir Road,
+            Dabgram, Siliguri, West Bengal – 734004
+          </Text>
+        </View>
+
+        <Text style={[styles.sectionHeading, styles.spaced]}>Website</Text>
+        <Pressable
+          onPress={() => void Linking.openURL('https://www.driverzoneonline.com')}
+          style={({ pressed }) => [styles.contactRow, pressed && styles.rowPressed]}
+        >
+          <Feather name="globe" size={16} color={colors.link} style={styles.contactIcon} />
+          <Text style={[styles.contactText, { color: colors.link }]}>www.driverzoneonline.com</Text>
+        </Pressable>
+      </View>
     </>
   );
 }
@@ -177,30 +220,205 @@ function HelpBody(): ReactElement {
 function StaticBody({ topic }: { topic: 'privacy' | 'terms' | 'about' }): ReactElement {
   if (topic === 'about') {
     return (
-      <>
+      <View style={styles.legalContent}>
+        <Text style={styles.leadText}>Your Car. Our Driver. Your Journey.</Text>
         <Text style={styles.body}>
-          DriverZone connects customers who own a car with drivers for hire, by the hour or by the
-          trip.
+          DriverZone is Siliguri&apos;s most trusted chauffeur network, connecting car owners with
+          verified, professional, police-cleared drivers for hire by the hour or by the trip.
         </Text>
-        <Text style={[styles.body, styles.spaced]}>
-          Version {Constants.expoConfig?.version ?? '—'}
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>Services Offered</Text>
+          <BulletList
+            items={[
+              'Local city travel across Siliguri & Dabgram municipal limits',
+              'Mountain & hill tours (Darjeeling, Kurseong, Kalimpong, Gangtok, Mirik)',
+              'Airport transfers (Bagdogra IXB) & railway transfers (NJP Station)',
+              'Outstation & intercity highway travel across North Bengal, Sikkim, and Assam',
+              'Monthly corporate & personal chauffeur subscriptions',
+            ]}
+          />
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>Certifications & Compliance</Text>
+          <BulletList
+            items={[
+              'GST registered enterprise',
+              'MSME & Udyam certified (Govt. of India)',
+              'Verified municipal trade licence (Siliguri, WB)',
+              'Background-checked and road-tested chauffeurs',
+            ]}
+          />
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>Headquarters</Text>
+          <Text style={styles.sectionBody}>
+            Near Uttarbanga Sangbad Office, Banipukur Road, Middle Shanti Nagar, Loknath Mandir Road, Dabgram, Siliguri, West Bengal – 734004
+          </Text>
+          <Pressable
+            onPress={() => void Linking.openURL('https://www.driverzoneonline.com')}
+            style={({ pressed }) => [styles.webLinkRow, pressed && styles.rowPressed]}
+          >
+            <Feather name="external-link" size={14} color={colors.link} style={{ marginRight: 6 }} />
+            <Text style={styles.webLinkText}>Visit www.driverzoneonline.com</Text>
+          </Pressable>
+        </View>
+
+        <Text style={[styles.body, styles.versionFooter]}>
+          DriverZone Customer App · v{Constants.expoConfig?.version ?? '1.0.0'}
         </Text>
-      </>
+      </View>
     );
   }
 
+  if (topic === 'privacy') {
+    return (
+      <View style={styles.legalContent}>
+        <View style={styles.metaBadge}>
+          <Text style={styles.metaBadgeText}>Effective Date: January 1, 2026</Text>
+        </View>
+
+        <Text style={styles.leadText}>Privacy Policy — DriverZone Siliguri</Text>
+        <Text style={styles.body}>
+          DriverZone (&quot;Company&quot;, &quot;we&quot;, &quot;us&quot;, &quot;our&quot;), operating www.driverzoneonline.com and the DriverZone mobile applications, is strictly committed to protecting the privacy and personal data of our customers and vehicle owners.
+        </Text>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>1. Information We Collect</Text>
+          <BulletList
+            items={[
+              'Contact details: your full name, mobile number, and optional profile details.',
+              'Location: collected while the app is active in the foreground, to pinpoint your pickup point, match nearby drivers, and monitor trip progress. We do not collect your location in the background.',
+              'Vehicle details: make, model, and transmission, to assign an appropriately trained chauffeur.',
+              'Booking & transaction metadata: trip reference, schedule, pickup/drop coordinates, and payment receipts.',
+            ]}
+          />
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>2. Strict No-Data-Selling Policy</Text>
+          <Text style={styles.sectionBody}>
+            We do NOT sell, rent, trade, lease, or monetize your personal data to third-party telemarketers, advertising agencies, or data brokers under any circumstances. Your data is used exclusively to fulfill your driver bookings and related customer support.
+          </Text>
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>3. Payment Security & Razorpay PCI-DSS</Text>
+          <Text style={styles.sectionBody}>
+            All digital payments are processed through Razorpay Software Private Limited, a PCI-DSS Level 1 certified payment aggregator. DriverZone does not store or view your sensitive card numbers, CVV codes, UPI PINs, or net banking passwords. All data is encrypted using 128-bit / 256-bit SSL protocols.
+          </Text>
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>4. Purposes of Data Processing</Text>
+          <BulletList
+            items={[
+              'Allocating the nearest qualified chauffeur to your doorstep.',
+              'Sharing verified driver details and ETA updates.',
+              'Issuing GST-compliant invoices.',
+              'Processing authorised refunds as per our cancellation guidelines.',
+              'Responding to safety concerns and resolving transit grievances.',
+            ]}
+          />
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>5. Account & Data Deletion</Text>
+          <Text style={styles.sectionBody}>
+            You have the right to delete your account and personal details at any time. You can initiate instant deletion within the app under Profile → Delete Account, or request deletion online at www.driverzoneonline.com/delete-account.
+          </Text>
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>6. Grievance Officer & Contact</Text>
+          <Text style={styles.sectionBody}>
+            Grievance Officer, DriverZone{'\n'}
+            Near Uttarbanga Sangbad Office, Banipukur Road, Middle Shanti Nagar, Loknath Mandir Road,
+            Dabgram, Siliguri, West Bengal – 734004
+          </Text>
+          <Pressable
+            onPress={() => void Linking.openURL('mailto:support@driverzoneonline.com')}
+            style={({ pressed }) => [styles.webLinkRow, pressed && styles.rowPressed]}
+          >
+            <Feather name="mail" size={14} color={colors.link} style={{ marginRight: 6 }} />
+            <Text style={styles.webLinkText}>support@driverzoneonline.com</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void Linking.openURL('tel:+918509299342')}
+            style={({ pressed }) => [styles.webLinkRow, pressed && styles.rowPressed]}
+          >
+            <Feather name="phone-call" size={14} color={colors.link} style={{ marginRight: 6 }} />
+            <Text style={styles.webLinkText}>+91 85092 99342</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // topic === 'terms'
   return (
-    <>
-      <DemoNotice>
-        Placeholder text — replace with DriverZone&apos;s actual{' '}
-        {topic === 'privacy' ? 'privacy policy' : 'terms and conditions'} before this ships.
-      </DemoNotice>
+    <View style={styles.legalContent}>
+      <View style={styles.metaBadge}>
+        <Text style={styles.metaBadgeText}>Last Updated: September 2026</Text>
+      </View>
+
+      <Text style={styles.leadText}>Terms & Conditions — DriverZone</Text>
       <Text style={styles.body}>
-        {topic === 'privacy'
-          ? 'This is where DriverZone would explain what customer data it collects, why, and how it is kept safe — location while booking, contact details, and trip history among them.'
-          : 'This is where the terms a customer agrees to by using DriverZone would be set out — how bookings work, how cancellation fees apply, and what DriverZone is and is not responsible for.'}
+        These Terms govern on-demand chauffeur hire services operated by DriverZone (Siliguri, West Bengal). By booking a driver, you agree to comply with and be bound by these conditions.
       </Text>
-    </>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>1. Scope of Service: Customer&apos;s Own Vehicle</Text>
+        <Text style={styles.sectionBody}>
+          DriverZone provides professional chauffeurs to operate vehicles owned, rented, or leased by the Customer. We do not provide rental cars. Fuel, road taxes, tolls, parking fees, and vehicle maintenance remain the sole responsibility of the vehicle owner.
+        </Text>
+      </View>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>2. Vehicle Roadworthiness & Documents</Text>
+        <Text style={styles.sectionBody}>
+          Before handing over keys, the Customer warrants that the vehicle possesses valid Registration (RC), Comprehensive Motor Insurance, and Pollution Under Control (PUC) certificates. Brakes, steering, tires (including spare), headlights, and wipers must be in sound operating condition. For mountain travel, cooling and braking systems must satisfy hill safety standards.
+        </Text>
+      </View>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>3. Pricing & Night / Outstation Allowances</Text>
+        <Text style={styles.sectionBody}>
+          All tariffs are billed in Indian Rupees (INR - ₹) with GST compliance. Night allowance of ₹200 applies for duties extending between 10:00 PM and 6:00 AM. For outstation journeys or hill tours requiring overnight halt where lodging is not provided, a driver night allowance of ₹300/night applies.
+        </Text>
+      </View>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>4. Cancellation & Refund Policy (Razorpay)</Text>
+        <Text style={styles.sectionBody}>
+          Cancellations made 2 hours or more prior to the scheduled pickup time receive a 100% full refund. Refunds are credited to the original payment source within 5 to 7 working days via Razorpay.
+        </Text>
+      </View>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>5. Customer Conduct & Safety</Text>
+        <Text style={styles.sectionBody}>
+          Customers agree not to instruct the chauffeur to violate traffic rules, exceed speed limits, or carry illegal contraband or alcohol in violation of state excise laws. Mutual courtesy and safety are mandatory.
+        </Text>
+      </View>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>6. Limitation of Liability & Insurance</Text>
+        <Text style={styles.sectionBody}>
+          Vehicle damage in unforeseen road incidents is governed primarily by the vehicle&apos;s own Comprehensive Motor Insurance. Traffic challans resulting directly from driver negligence are borne by DriverZone; challans arising from expired vehicle documentation or passenger insistence remain the customer&apos;s responsibility.
+        </Text>
+      </View>
+
+      <View style={styles.policySection}>
+        <Text style={styles.sectionHeading}>7. Governing Law & Jurisdiction</Text>
+        <Text style={styles.sectionBody}>
+          These Terms are governed by the laws of India. The courts and consumer forums of Siliguri /
+          Jalpaiguri District, West Bengal, hold exclusive jurisdiction.
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -219,8 +437,9 @@ const styles = StyleSheet.create({
   back: { width: 32, height: 32, alignItems: 'flex-start', justifyContent: 'center' },
   headerTitle: { ...text.heading, color: colors.fg, flex: 1, textAlign: 'center' },
 
-  content: { padding: space.lg },
+  content: { padding: space.lg, paddingBottom: space.xl },
   body: { ...text.body, color: colors.fg, lineHeight: 22 },
+  leadText: { ...text.heading, color: colors.fg, fontSize: 16, marginBottom: space.sm },
   spaced: { marginTop: space.md },
 
   notice: {
@@ -256,7 +475,54 @@ const styles = StyleSheet.create({
   },
   toggleHint: { ...text.caption, color: colors.muted, marginTop: 1 },
 
-  contactRow: { flexDirection: 'row', alignItems: 'center', marginTop: space.md },
-  contactIcon: { marginRight: space.sm },
-  contactText: { ...text.body, color: colors.fg },
+  rowPressed: { opacity: 0.6 },
+
+  contactCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: space.lg,
+    marginTop: space.lg,
+  },
+  contactRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: space.sm },
+  contactIcon: { marginRight: space.sm, marginTop: 3 },
+  contactText: { ...text.body, color: colors.fg, flex: 1, lineHeight: 20 },
+  addressText: { fontSize: 13, color: colors.muted },
+
+  legalContent: { marginTop: space.xs },
+  metaBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.bgSunken,
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    marginBottom: space.md,
+  },
+  metaBadgeText: { ...text.caption, color: colors.muted, fontFamily: fontFamily.semibold },
+
+  policySection: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: space.md,
+    marginTop: space.md,
+  },
+  sectionHeading: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, marginBottom: space.xs },
+  sectionBody: { ...text.body, color: colors.muted, fontSize: 13, lineHeight: 20 },
+
+  bulletList: { marginTop: 2 },
+  bulletRow: { flexDirection: 'row', marginTop: space.xs },
+  bulletMark: { ...text.body, color: colors.muted, fontSize: 13, lineHeight: 20, marginRight: space.xs },
+  bulletText: { ...text.body, color: colors.muted, fontSize: 13, lineHeight: 20, flex: 1 },
+
+  webLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: space.sm,
+    paddingTop: space.xs,
+  },
+  webLinkText: { ...text.caption, color: colors.link, fontFamily: fontFamily.semibold },
+  versionFooter: { marginTop: space.xl, textAlign: 'center', color: colors.muted, fontSize: 12 },
 });

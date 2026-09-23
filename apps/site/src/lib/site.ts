@@ -17,14 +17,12 @@
  */
 
 export const CONTACT = {
-  /** TODO: the real support inbox. Also goes in the Play Console listing, which must match. */
-  email: 'support@driverzone.in',
-  /** TODO: the real support line, in international format so `tel:` works from any handset. */
-  phone: '+91 00000 00000',
-  /** How the phone number should READ on screen — spacing only, no country-code assumptions. */
-  phoneDisplay: '+91 00000 00000',
-  /** TODO: the registered business address, as it appears on your GST registration. */
-  address: 'Siliguri, West Bengal, India',
+  email: 'support@driverzoneonline.com',
+  phone: '+918509299342',
+  phoneDisplay: '+91 85092 99342',
+  phoneAlt: '+91 70016 06510',
+  address:
+    'Near Uttarbanga Sangbad Office, Banipukur Road, Middle Shanti Nagar, Loknath Mandir Road, Dabgram, Siliguri, West Bengal – 734004',
 } as const;
 
 /**

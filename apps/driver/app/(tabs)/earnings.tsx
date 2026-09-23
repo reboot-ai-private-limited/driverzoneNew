@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { AppIcon, type AppIconName } from '@/components/AppIcon';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { getEarnings, type EarningsFilter } from '@/lib/api/endpoints/driver';
@@ -480,7 +481,7 @@ export default function EarningsScreen(): ReactElement {
                 style={({ pressed }) => [styles.typeRow, pressed && styles.pressed]}
               >
                 <View style={[styles.typeIcon, { backgroundColor: ENTRY_STYLES[type].bg }]}>
-                  <Feather
+                  <AppIcon
                     name={ENTRY_STYLES[type].icon}
                     size={14}
                     color={ENTRY_STYLES[type].fg}
@@ -579,7 +580,7 @@ function EntryRow({ entry }: { entry: LedgerEntryDto }): ReactElement {
   return (
     <View style={styles.entry}>
       <View style={[styles.entryIcon, { backgroundColor: style.bg }]}>
-        <Feather name={style.icon} size={15} color={style.fg} />
+        <AppIcon name={style.icon} size={15} color={style.fg} />
       </View>
 
       <View style={styles.entryMain}>
@@ -618,13 +619,13 @@ function EntryRow({ entry }: { entry: LedgerEntryDto }): ReactElement {
  * contracts fails this file's typecheck rather than rendering as a blank square in a list of
  * money. The same guard the tab icons use.
  */
-const ENTRY_STYLES: Record<TransactionType, { icon: FeatherName; fg: string; bg: string }> = {
+const ENTRY_STYLES: Record<TransactionType, { icon: AppIconName; fg: string; bg: string }> = {
   TRIP_EARNING: { icon: 'navigation', fg: colors.dutyOn, bg: colors.dutyOnBg },
   WAITING_EARNING: { icon: 'clock', fg: colors.dutyOn, bg: colors.dutyOnBg },
   // Same green as the other two earnings: it is money in, from a day the driver agreed to stay.
   EXTENSION_EARNING: { icon: 'calendar', fg: colors.dutyOn, bg: colors.dutyOnBg },
   COMMISSION_DEBIT: { icon: 'percent', fg: colors.muted, bg: colors.bgSunken },
-  CASH_COLLECTED: { icon: 'dollar-sign', fg: colors.warning, bg: '#FFF6E0' },
+  CASH_COLLECTED: { icon: 'rupee', fg: colors.warning, bg: '#FFF6E0' },
   PAYOUT: { icon: 'arrow-up-right', fg: colors.link, bg: '#EAF1FD' },
   DEBT_COLLECTED: { icon: 'arrow-down-left', fg: colors.link, bg: '#EAF1FD' },
   ADJUSTMENT: { icon: 'edit-3', fg: colors.muted, bg: colors.bgSunken },

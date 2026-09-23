@@ -97,6 +97,7 @@ export function makeAuthControllers(role: Role, deps: AuthControllerDeps): AuthC
         role,
         phone: input.mobile_number,
         ip: req.ip,
+        channel: input.channel,
       });
 
       const body: OtpSendResponse = {

@@ -3,6 +3,7 @@ import type { BookingStatus } from '@driverzone/contracts';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import { AppError } from '../../../shared/errors/AppError.js';
+import { logger } from '../../../shared/logging/logger.js';
 import { toMoney } from '../../../shared/money/format.js';
 import type { BookingRepositoryPort } from '../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../domain/chargeRepository.port.js';
@@ -12,9 +13,11 @@ import type {
   CustomerContactContract,
   DriverCard,
   DriverCardContract,
+  DriverLocationContract,
 } from '../../identity/identity.public.js';
 import type { SettingsReadContract } from '../../settings/settings.public.js';
 import { liveAssignmentCutoff } from '../domain/booking.entity.js';
+import { estimatePickupEtaMinutes } from '../domain/pickupEta.js';
 import { BookingNotFoundError } from '../domain/booking.errors.js';
 import type { BookingExtension } from '../domain/bookingExtension.entity.js';
 import type { ExtensionRepositoryPort } from '../domain/extensionRepository.port.js';
@@ -291,11 +294,46 @@ async function cardFor(
   return cards.get(driverId) ?? null;
 }
 
+/**
+ * Roughly how long until the driver reaches the pickup, for the CUSTOMER's two live-trip reads.
+ *
+ * THE STATUS IS CHECKED BEFORE THE QUERY, not after. `estimatePickupEtaMinutes` would return null
+ * for a searching, arrived or finished booking anyway — but only after this function had paid for
+ * a position lookup to hand it. The trip screen polls every four seconds for the whole of a trip
+ * and only its first stretch can have an answer, so asking first is the difference between a
+ * query on every poll and a query on the minority of polls that can use one.
+ *
+ * NEVER FAILS THE READ. An estimate is a nicety on a screen whose real job is the trip code, the
+ * driver's number and the fare; a position lookup that errors must not turn that into an error
+ * state. It is logged, and the field goes out null — which the app already renders as silence.
+ */
+async function etaFor(
+  locations: DriverLocationContract,
+  booking: { status: BookingStatus; driverId: string | null; pickup: { lat: number; lng: number } },
+): Promise<number | null> {
+  if (booking.driverId === null) return null;
+  if (booking.status !== 'ASSIGNED' && booking.status !== 'DRIVER_EN_ROUTE') return null;
+
+  try {
+    const fix = await locations.lastLocationOf(booking.driverId);
+    return estimatePickupEtaMinutes({
+      status: booking.status,
+      pickup: booking.pickup,
+      driverAt: fix === null ? null : { lat: fix.lat, lng: fix.lng },
+      driverFixAt: fix?.at ?? null,
+      now: new Date(),
+    });
+  } catch (err) {
+    logger.warn({ err, driverId: booking.driverId }, 'pickup ETA lookup failed; omitting it');
+    return null;
+  }
+}
+
 /** The customer's own booking, which is the only view that carries the trip code. */
 export function makeGetCustomerBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
-  directory: DriverCardContract,
+  directory: DriverCardContract & DriverLocationContract,
   extensions: ExtensionRepositoryPort,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
@@ -305,7 +343,7 @@ export function makeGetCustomerBookingController(
     const booking = await repo.findById(id);
     if (booking === null || booking.customerId !== customerId) throw new BookingNotFoundError(id);
 
-    const [adjustments, startOtp, driverCard, extensionRows] = await Promise.all([
+    const [adjustments, startOtp, driverCard, extensionRows, pickupEtaMinutes] = await Promise.all([
       charges.listAdjustments(booking.id),
       // Shown to the customer so they can read it out — and only ever from here.
       repo.readStartOtp(booking.id),
@@ -313,12 +351,22 @@ export function makeGetCustomerBookingController(
       // Resolved on the single-booking read, not the list: this is the screen with the Extend
       // button on it, and a history list would pay a query per row to render nothing.
       extensions.listForBooking(booking.id),
+      // The customer is the only party who needs telling how long the driver will be, and this
+      // is the screen they are watching while they wait. See `etaFor`.
+      etaFor(directory, booking),
     ]);
 
     sendSuccess(
       req,
       res,
-      toBookingDto({ booking, adjustments, startOtp, driverCard, extensions: extensionRows }),
+      toBookingDto({
+        booking,
+        adjustments,
+        startOtp,
+        driverCard,
+        extensions: extensionRows,
+        pickupEtaMinutes,
+      }),
       'Booking',
     );
   });
@@ -469,7 +517,7 @@ export function makeListDriverTripsController(
 export function makeGetCurrentCustomerBookingController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
-  directory: DriverCardContract,
+  directory: DriverCardContract & DriverLocationContract,
   extensions: ExtensionRepositoryPort,
   settings: SettingsReadContract,
 ): RequestHandler {
@@ -485,11 +533,14 @@ export function makeGetCurrentCustomerBookingController(
       return;
     }
 
-    const [adjustments, startOtp, driverCard, extensionRows] = await Promise.all([
+    const [adjustments, startOtp, driverCard, extensionRows, pickupEtaMinutes] = await Promise.all([
       charges.listAdjustments(booking.id),
       repo.readStartOtp(booking.id),
       cardFor(directory, booking.driverId),
       extensions.listForBooking(booking.id),
+      // The app asks for this on launch, so it is the read that answers "how long?" for a
+      // customer who killed the app at the kerb and reopened it. See `etaFor`.
+      etaFor(directory, booking),
     ]);
 
     sendSuccess(
@@ -502,6 +553,7 @@ export function makeGetCurrentCustomerBookingController(
           startOtp,
           driverCard,
           extensions: extensionRows,
+          pickupEtaMinutes,
         }),
       },
       'Booking in progress',

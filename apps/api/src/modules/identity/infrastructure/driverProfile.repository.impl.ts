@@ -13,6 +13,7 @@ import type {
   DriverProfileRepositoryPort,
   LiveDriverRecord,
   LiveDriverFilter,
+  DriverLocationFix,
 } from '../domain/driverProfile.repository.port.js';
 import { DriverModel, type DriverDoc } from './driver.model.js';
 
@@ -230,6 +231,33 @@ export class MongoDriverProfileRepository implements DriverProfileRepositoryPort
       .lean()
       .exec();
     return doc === null ? undefined : toDomain(doc as unknown as RawDriver);
+  }
+
+  async lastLocationOf(driverId: string): Promise<DriverLocationFix | null> {
+    if (!mongoose.Types.ObjectId.isValid(driverId)) return null;
+
+    /*
+     * TWO FIELDS AND NOTHING ELSE. A driver document carries a phone number, licence details and
+     * onboarding state, none of which a caller asking "where are they" has any use for — and this
+     * read sits on a path the trip screen polls every few seconds.
+     */
+    const doc = await DriverModel.findById(driverId)
+      .select('lastLocation lastLocationAt')
+      .lean()
+      .exec();
+
+    if (doc === null) return null;
+
+    const coords = doc.lastLocation?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) return null;
+    /*
+     * A position with no timestamp is a position of unknown age, and no freshness rule upstream
+     * can reason about it — the same treatment `MongoDriverPool` gives it when filling a wave.
+     */
+    if (doc.lastLocationAt === null || doc.lastLocationAt === undefined) return null;
+
+    // GeoJSON order is [lng, lat]. See `recordLocation` above on why that is worth restating.
+    return { lat: coords[1]!, lng: coords[0]!, at: doc.lastLocationAt };
   }
 
   async setDutyStatus(driverId: string, isOnDuty: boolean): Promise<DriverProfile | undefined> {

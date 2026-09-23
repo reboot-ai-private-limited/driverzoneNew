@@ -208,6 +208,21 @@ export async function openBatterySettings(): Promise<void> {
     // Notifee could not resolve it either — fall through to the raw intents.
   }
 
+  /*
+   * THIS ONE IS EXPECTED TO FAIL NOW, and is kept only because failing costs nothing.
+   *
+   * `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is the one-tap dialog, and it is the only
+   * battery intent that requires holding `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. That permission
+   * was dropped from `app.json`: Play restricts it to a narrow allowlist of use cases that
+   * driver dispatch is not on, so carrying it meant defending a permission we do not need in
+   * order to save a tap. Without the grant Android refuses to resolve this action, we land in
+   * the `catch`, and the driver gets the settings LIST below instead — same destination, one
+   * more tap, no policy surface.
+   *
+   * Left in place rather than deleted because Notifee above already handles most handsets, and
+   * because a build that does re-acquire the permission for some reason should get the better
+   * dialog back without anyone having to remember this function exists.
+   */
   try {
     await IntentLauncher.startActivityAsync(
       'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
@@ -215,7 +230,7 @@ export async function openBatterySettings(): Promise<void> {
     );
     return;
   } catch {
-    // permission not granted / not a dev build — fall through
+    // Permission not held — by design. Fall through to the list, which needs no permission.
   }
 
   try {

@@ -20,8 +20,24 @@ export interface AuthPrincipal {
 
 // ─── OTP ────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * How the login code travels.
+ *
+ * WhatsApp is the default and carries its own SMS fallback on a delivery failure, so a client
+ * that never sets this behaves exactly as every client did before the field existed.
+ *
+ * `SMS` IS THE CUSTOMER SAYING IT DID NOT ARRIVE. It skips WhatsApp entirely rather than trying
+ * it again and waiting on the delivery check — the one thing already known about this attempt is
+ * that WhatsApp did not work for them. It costs real money per message (see `sendOtp`'s caps),
+ * which is why it is an explicit choice on the screen and never an automatic retry.
+ */
+export const OTP_CHANNELS = ['WHATSAPP', 'SMS'] as const;
+export type OtpChannel = (typeof OTP_CHANNELS)[number];
+
 export interface OtpSendRequest {
   mobile_number: string;
+  /** Omitted means WhatsApp, with the server's own SMS fallback behind it. */
+  channel?: OtpChannel | undefined;
 }
 
 /**

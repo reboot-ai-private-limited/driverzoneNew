@@ -166,6 +166,28 @@ but invoices need to be right from the first one you issue.
 
 ---
 
+### 🟡 Q14 — What the driver late fine measures on an instant booking
+
+`driverArrived.usecase.ts` fines the driver against `booking.scheduled_at` with a 10-minute grace
+(`driver.late_grace_minutes`), unconditionally. That was sound while every booking the customer
+app could produce was scheduled at least an hour out. It is not sound now: an in-city trip may
+leave **now** ([`../decision-log.md`](../decision-log.md), 2026-09-22), and on such a booking
+`scheduled_at` is the instant the *quote* was created — so the grace can be spent by the customer
+sitting on the fare sheet, before dispatch has rung anyone and before the driver has moved. In
+practice every instant booking fines the driver ₹50.
+
+**Recommended default: fine only scheduled bookings.** The charge is for "arriving after the
+customer was told they would", and on an instant booking nobody was told a time. The two
+alternatives are to measure from assignment plus an ETA for immediate bookings only — the
+function's own note rejects that basis for *scheduled* trips, reasoning that does not transfer
+when the customer asked for as-soon-as-possible — or to raise the grace, which is blunt and
+loosens genuine scheduled trips too.
+
+Answer this before any real driver earns against it. It is money out of a driver's ledger for
+something they did not do.
+
+---
+
 ## Assumptions made in these docs
 
 Where a decision was needed to keep writing, these were taken. Each is cheap to change now

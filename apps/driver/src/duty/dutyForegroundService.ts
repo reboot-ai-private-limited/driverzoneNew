@@ -6,6 +6,7 @@ import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { DUTY_CHANNEL_ID } from '@/notifications/channel';
 import { pushLog } from '@/notifications/log';
+import { hasAcceptedBackgroundLocation } from '@/features/onboarding/backgroundLocationDisclosure';
 
 /**
  * THE FOREGROUND SERVICE — docs/LLD/driver-app.md S-8.
@@ -174,11 +175,28 @@ async function startDutyForegroundServiceInner(): Promise<boolean> {
    * Fired and forgotten, deliberately. On Android 11+ this is not a dialog but a trip to the
    * system settings page for "Allow all the time"; awaiting it would hang the duty toggle behind
    * a screen the driver may never come back from. A refusal costs the restart path, not the shift.
+   *
+   * **GATED ON THE DISCLOSURE, and that gate is a Play policy requirement rather than a
+   * preference.** Google requires a prominent in-app disclosure BEFORE the background-location
+   * prompt appears; this function used to call `requestBackgroundPermissionsAsync` outright,
+   * which is the violation exactly. `hasAcceptedBackgroundLocation()` is written by one button on
+   * one screen (`app/(onboarding)/location-disclosure.tsx`), so the prompt cannot reach a driver
+   * who has not read it — including here, which is the hard case: this runs from the boot receiver
+   * and the resume listener as well as the duty toggle, i.e. from contexts with no UI attached
+   * and no way to show a disclosure of their own. Those paths now simply skip the ask.
+   *
+   * Routing TO the disclosure is the duty toggle's job, in `home.tsx`, where there is a screen to
+   * navigate from. See [[backgroundLocationDisclosure]].
    */
-  void Location.getBackgroundPermissionsAsync()
-    .then((background) => {
+  void hasAcceptedBackgroundLocation()
+    .then(async (accepted) => {
+      if (!accepted) {
+        pushLog('duty: background location not disclosed yet, skipping request');
+        return;
+      }
+      const background = await Location.getBackgroundPermissionsAsync();
       if (background.granted || !background.canAskAgain) return;
-      return Location.requestBackgroundPermissionsAsync().then(() => undefined);
+      await Location.requestBackgroundPermissionsAsync();
     })
     .catch(() => {
       // Never granted, never asked again, or an OEM that does not expose the setting. The service

@@ -10,5 +10,16 @@ import type { ReactElement } from 'react';
  * server's dot-paths and a bare `/profile` would collide with the account tab.
  */
 export default function OnboardingLayout(): ReactElement {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      {/*
+        The disclosure screen is the one route here that must be ANSWERED rather than escaped.
+        Play's Location Permissions policy wants an explicit accept or decline before the
+        background-location prompt, so a swipe-back that leaves the question open — and leaves the
+        driver's decision unrecorded — is the one interaction it cannot have. Both buttons leave
+        the screen; nothing else does.
+      */}
+      <Stack.Screen name="location-disclosure" options={{ gestureEnabled: false }} />
+    </Stack>
+  );
 }

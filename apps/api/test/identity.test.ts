@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { signAccessToken, signRefreshToken, verifyAccessToken, verifyRefreshToken } from '../src/shared/security/jwt.js';
 import {
   OTP_MAX_ATTEMPTS,
+  OTP_MAX_SENDS_PER_PHONE_PER_HOUR,
   generateOtpCode,
   hashOtpCode,
   judgeOtp,
@@ -78,12 +79,14 @@ function fakeStore(seed: Partial<{ challenge: OtpChallenge; cooldown: number; se
   };
 }
 
-function fakeSender(): OtpSenderPort & { sent: { phone: string; code: string }[] } {
-  const sent: { phone: string; code: string }[] = [];
+function fakeSender(): OtpSenderPort & {
+  sent: { phone: string; code: string; channel: string | undefined }[];
+} {
+  const sent: { phone: string; code: string; channel: string | undefined }[] = [];
   return {
     sent,
-    send: (_role, phone, code) => {
-      sent.push({ phone, code });
+    send: (_role, phone, code, channel) => {
+      sent.push({ phone, code, channel });
       return Promise.resolve();
     },
   };
@@ -285,6 +288,54 @@ describe('SendOtpUseCase', () => {
     expect(sender.sent).toHaveLength(1);
     // What is stored is the HMAC, never the code — a Redis dump must not hand anyone a login.
     expect(store.challenge?.codeHash).toBe(hashOtpCode(sender.sent[0]?.code ?? '', PEPPER));
+  });
+
+  /*
+   * THE COOLDOWN EXEMPTION, which is the whole of the "Get code by SMS" feature. That button is
+   * for the customer whose WhatsApp message never arrived — and the cooldown still running is the
+   * one left by that failed send. Enforcing it here would show them a countdown instead of a
+   * code, and the control would be decorative at the only moment anyone reaches for it.
+   */
+  it('lets an explicit SMS request through the cooldown, and passes the channel on', async () => {
+    const store = fakeStore({ cooldown: 41 });
+    const sender = fakeSender();
+    const useCase = new SendOtpUseCase(store, sender, fakeAccounts(), PEPPER);
+
+    await useCase.execute({ role: 'CUSTOMER', phone: '+919876543210', channel: 'SMS' });
+
+    expect(sender.sent).toHaveLength(1);
+    expect(sender.sent[0]?.channel).toBe('SMS');
+  });
+
+  /*
+   * The exemption is for SMS alone. A WhatsApp resend inside the cooldown is the ordinary
+   * impatient tap the cooldown exists to pace, and it is still refused.
+   */
+  it('still refuses a WhatsApp resend inside the cooldown', async () => {
+    const store = fakeStore({ cooldown: 41 });
+    const useCase = new SendOtpUseCase(store, fakeSender(), fakeAccounts(), PEPPER);
+
+    const err = await useCase
+      .execute({ role: 'CUSTOMER', phone: '+919876543210', channel: 'WHATSAPP' })
+      .catch((e: unknown) => e as AppError);
+
+    expect((err as AppError).code).toBe('OTP_COOLDOWN_ACTIVE');
+  });
+
+  /*
+   * THE CAPS ARE NOT EXEMPT, and they are what stops the bypass becoming a way to spend the SMS
+   * wallet or hammer somebody else's handset. Five per phone per hour holds whatever channel is
+   * asked for.
+   */
+  it('still enforces the hourly cap on an SMS request', async () => {
+    const store = fakeStore({ cooldown: 41, sendCount: OTP_MAX_SENDS_PER_PHONE_PER_HOUR + 1 });
+    const useCase = new SendOtpUseCase(store, fakeSender(), fakeAccounts(), PEPPER);
+
+    const err = await useCase
+      .execute({ role: 'CUSTOMER', phone: '+919876543210', channel: 'SMS' })
+      .catch((e: unknown) => e as AppError);
+
+    expect((err as AppError).code).toBe('OTP_SEND_LIMIT_EXCEEDED');
   });
 
   it('refuses a resend inside the cooldown and says how long is left', async () => {

@@ -111,6 +111,22 @@ export interface DriverProfileRepositoryPort {
   ): Promise<DriverProfile | undefined>;
 
   /**
+   * One driver's last reported position, or null when none has ever been recorded.
+   *
+   * THE SINGULAR READ OF WHAT `findLiveDrivers` RETURNS IN BULK, and separate from it on purpose:
+   * that one is the ops map's query — it filters on duty and freshness and returns names, phone
+   * numbers and competencies for every driver on the platform. The caller here has one booking
+   * and wants one position. Routing it through the map's query would mean fetching the fleet to
+   * find one row, and handing a phone number to a caller that has no use for it.
+   *
+   * RETURNS THE FIX AS RECORDED, with no freshness filter. Whether a position of that age is
+   * still evidence of anything is the caller's judgement, and different callers answer it
+   * differently — the arrival check refuses a fix over a minute old, the pickup estimate
+   * tolerates three. Filtering here would impose one of those answers on both.
+   */
+  lastLocationOf(driverId: string): Promise<DriverLocationFix | null>;
+
+  /**
    * Explicit admin verification for hill driving.
    *
    * This is what actual hill dispatch checks, not the driver's self-declared `canDriveHill`.
@@ -149,6 +165,13 @@ export interface DriverProfileRepositoryPort {
    * single fix, which is the fresh-install case where the app was killed before its first flush.
    */
   sweepStalePresence(cutoff: Date, limit: number): Promise<string[]>;
+}
+
+/** Where a driver last reported being, and when. The age is never implied — it is carried. */
+export interface DriverLocationFix {
+  lat: number;
+  lng: number;
+  at: Date;
 }
 
 export interface LiveDriverRecord {

@@ -70,6 +70,20 @@ export interface BookingView {
    */
   driverCard?: DriverCard | null | undefined;
   /**
+   * Roughly how long until the driver reaches the pickup. CUSTOMER READS ONLY.
+   *
+   * Passed in for the same reason `driverCard` is — resolving it needs the driver's live position
+   * from another module — and for one more: it is the only field here whose value depends on when
+   * it was computed. A list of past rides must not carry it, an admin table has no use for it,
+   * and the driver knows where they are. Not passing it is how those reads say so.
+   *
+   * `undefined` (not looked up) and `null` (looked up, no useful answer) both render as null. The
+   * distinction matters to the call site, not to the app: `pickup_eta_minutes` documents the four
+   * ways an answer can legitimately be absent, and the app treats every one of them the same way
+   * by saying nothing.
+   */
+  pickupEtaMinutes?: number | null | undefined;
+  /**
    * Lifts the live-trip gate on both phone numbers. ADMIN READS ONLY.
    *
    * `PHONE_VISIBLE_STATUSES` exists to stop the two PARTIES holding each other's numbers after
@@ -167,6 +181,13 @@ export function toBookingDto(view: BookingView): BookingDto {
     start_otp: view.startOtp ?? null,
 
     driver: toDriverDto(view),
+
+    /*
+     * ABSENT MEANS "NOT COMPUTED", and it renders as null — the same convention `driverCard` and
+     * `startOtp` follow. Every driver-facing and admin read simply does not pass it, so the field
+     * is customer-only by omission at the call site rather than by a role check in here.
+     */
+    pickup_eta_minutes: view.pickupEtaMinutes ?? null,
 
     customer: toCustomerDto(view),
 
@@ -388,9 +409,7 @@ function toExtensionBlock(view: BookingView): BookingDto['extension'] {
             amount: toMoney(pending.amountPaise),
             expires_at: pending.expiresAt.toISOString(),
             driver_amount:
-              view.revealDriverEarnings === true
-                ? toMoney(pending.driverAmountPaise)
-                : null,
+              view.revealDriverEarnings === true ? toMoney(pending.driverAmountPaise) : null,
           },
     extra_days: agreed.days,
     extra_amount: toMoney(agreed.amountPaise),

@@ -41,6 +41,51 @@ export function setTokenRefresher(refresher: TokenRefresher): void {
 }
 
 /**
+ * How this module tells the session layer that the credential is beyond saving.
+ *
+ * **THE MISSING HALF OF THE 401 RECOVERY.** `refreshAccessToken` covers the recoverable case: an
+ * access token that expired in a pocket, refreshed and retried. Nothing covered the other two,
+ * and both left the session `authenticated` while the server refused every request:
+ *
+ *   - `SESSION_REVOKED`, which `isAuthExpiry` deliberately excludes because refreshing it is
+ *     pointless — but excluding it from the REFRESH is not the same as ignoring it,
+ *   - a 401 on the retry, after a refresh that succeeded. The credential is fresh and the server
+ *     still says no, so there is nothing left to try.
+ *
+ * What the driver saw in both cases was the server's own 401 wording rendered as an ordinary
+ * screen error — "Please sign in to continue." on the trip screen, with a Try again button that
+ * could only ever fail — because `useSessionRedirect` watches for `anonymous` and the session had
+ * never become anonymous. Force-quitting was the only way out, and nothing said so.
+ *
+ * Registered by `auth/session.ts` alongside the refresher, and inverted for the same reason: that
+ * module imports `endpoints/auth`, which imports this file, so importing it back would close the
+ * cycle.
+ */
+type SessionEnder = () => Promise<void>;
+let endRejectedSession: SessionEnder | null = null;
+
+export function setSessionEnder(ender: SessionEnder): void {
+  endRejectedSession = ender;
+}
+
+/**
+ * End the session for a 401 nothing can recover from, then let the original error through.
+ *
+ * THE ERROR IS STILL THROWN. The caller's screen may paint its error state for a frame before
+ * the redirect lands, which is correct — swallowing it would leave a screen sitting on a spinner
+ * if the redirect were ever prevented. Failure to end is swallowed: a keystore write that failed
+ * must not replace the server's wording with a storage error.
+ */
+async function abandonSession(): Promise<void> {
+  if (endRejectedSession === null) return;
+  try {
+    await endRejectedSession();
+  } catch {
+    // The redirect is the goal; a failure here is not worth reporting over the original 401.
+  }
+}
+
+/**
  * The one function every request goes through. Its whole job is the envelope from
  * docs/LLD/api-contracts.md — unwrap `data` on success, throw on failure — so no screen ever
  * writes `if (body.success)`.
@@ -124,6 +169,24 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         // would let a write the server already applied be applied twice.
         return request<T>(path, { ...options, token: fresh, skipAuthRefresh: true });
       }
+      /*
+       * `null` means renewal could not produce a token. When the session was REJECTED, `renew`
+       * has already ended it — this adds nothing. When renewal merely failed (offline, a 5xx),
+       * the refresh token is deliberately intact and the session must survive, so nothing is
+       * done here either. Both are handled where they are understood, in the session layer.
+       */
+    } else if (error.status === 401) {
+      /*
+       * A 401 WITH NOWHERE LEFT TO GO. Either `SESSION_REVOKED` — the refresh family was
+       * destroyed and refreshing it is meaningless — or a 401 on the retry, where the token is
+       * newly minted and the server still refuses. This is the branch that used to fall straight
+       * through to `throw`, leaving a signed-out driver looking at a screen error with a Try
+       * again button and no way to reach the login screen.
+       *
+       * Awaited, not fired and forgotten: the session must be `anonymous` before the caller's
+       * catch runs, so the redirect and the screen's error state do not race.
+       */
+      await abandonSession();
     }
 
     throw error;

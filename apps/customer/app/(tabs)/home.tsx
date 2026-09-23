@@ -45,6 +45,7 @@ import { TripOptions } from '@/components/TripOptions';
 import { unavailableTitle } from '@/features/booking/quote';
 import { REBOOK_PARAM_KEYS, parseRebookParams } from '@/features/booking/rebook';
 import {
+  allowsInstant,
   defaultScheduleAnchor,
   returnProblem,
   scheduleBounds,
@@ -166,10 +167,7 @@ export default function HomeScreen(): ReactElement {
    * `chooseSuggestion` does — would immediately schedule a lookup for it: a paid request for a
    * place already chosen, whose results nobody would ever see.
    */
-  const places = usePlaceSuggestions(
-    suggestOpen ? search : '',
-    draft ?? pickup ?? location.point,
-  );
+  const places = usePlaceSuggestions(suggestOpen ? search : '', draft ?? pickup ?? location.point);
   const [saveOpen, setSaveOpen] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   /**
@@ -218,7 +216,21 @@ export default function HomeScreen(): ReactElement {
    * one they set by hand.
    */
   const pickupIsAutomatic = useRef(true);
-  /** The map follows the first real fix only. After that it is the customer's to move. */
+  /**
+   * The map follows the first real fix only. After that it is the customer's to move.
+   *
+   * **IT LATCHES ON THE MOVE LANDING, NOT ON US ASKING FOR IT**, and that distinction is the
+   * whole of a bug this screen shipped with. `useCurrentLocation` answers twice on purpose — the
+   * OS's cached fix almost immediately, the accurate one seconds later — and the cached one
+   * routinely beats the native map into existence. `moveTo` then queues rather than moving, and
+   * latching there spent the single recentre on a move that had not happened yet. When Android
+   * dropped the queued flush, nothing ever asked again: the map sat on the pilot-city fallback
+   * for the whole session while the Pickup row above it showed the customer's real address.
+   *
+   * So the latch closes only on a `true`, and the accurate fix that follows becomes a free second
+   * attempt. The cost of the retry is that a customer who is genuinely moving may see the camera
+   * refine once more; that is the correct picture, and it is bounded at one.
+   */
   const hasCentred = useRef(false);
 
   useEffect(() => {
@@ -227,8 +239,8 @@ export default function HomeScreen(): ReactElement {
     if (pickupIsAutomatic.current) setPickup(location.point);
 
     if (!hasCentred.current) {
-      hasCentred.current = true;
-      map.current?.moveTo(location.point.lat, location.point.lng, 'street');
+      const moved = map.current?.moveTo(location.point.lat, location.point.lng, 'street') ?? false;
+      if (moved) hasCentred.current = true;
     }
   }, [location.isReal, location.point]);
 
@@ -244,8 +256,10 @@ export default function HomeScreen(): ReactElement {
    * that a later, better fix may overwrite the pickup — a rebooked pickup is a choice, so this
    * closes that door before the fix arrives rather than after.
    *
-   * NO TIME IS RESTORED. The old trip's pickup instant is in the past; the customer picks a new
-   * one, and Continue stays blocked until they do. See `rebook.ts` on what else is left behind.
+   * NO TIME IS RESTORED, and what that leaves behind now depends on the product. The old trip's
+   * pickup instant is in the past either way. An in-city rebook simply leaves NOW, which is what
+   * "book that again" usually means; an outstation one stays blocked until the customer names a
+   * new time. See `rebook.ts` on what else is left behind.
    */
   const rebookParams = useLocalSearchParams<Record<string, string>>();
   const appliedRebook = useRef<string | null>(null);
@@ -382,18 +396,29 @@ export default function HomeScreen(): ReactElement {
    * no second round trip and shows the price on its first frame.
    */
   /**
-   * NO QUOTE UNTIL THERE IS A PICKUP TIME, and this is not merely tidiness.
+   * QUOTED AS SOON AS THERE ARE TWO POINTS AND A PICKUP WE SERVE — no pickup time required.
    *
-   * The instant decides which surcharge window the trip falls in, so a price fetched before one is
-   * chosen is a price for a different trip — and since an unset time cannot be booked at all, it
-   * would be a price nobody could buy, plus a wasted row against the 30/min quote limit. Waiting
-   * also means the "no package" verdict on this screen is always computed for the trip the
-   * customer is actually about to take.
+   * This screen used to wait for a time, on the reasoning that the instant decides which surcharge
+   * window the trip falls in and a price fetched before one is chosen prices a different trip.
+   * That reasoning survives for outstation and is now circular for in-city: an in-city trip may
+   * leave NOW, but "is this in-city?" is the server's verdict and arrives only WITH a quote. Wait
+   * for a time before asking, and the app can never learn that this particular trip never needed
+   * one. So it asks first, with no time, which `useTripQuote` sends as an absent field and the
+   * server reads as "now" off its own clock.
+   *
+   * The price stays honest either way: choosing a time afterwards re-keys the query and re-quotes,
+   * because the instant is part of the cache key. What a customer is shown is always the price of
+   * the trip as currently described.
+   *
+   * THE COST IS ONE QUOTE, and it is worth naming. A customer who sets a destination and then
+   * abandons the screen now spends a row against the 30/min limit that they previously would not
+   * have. It buys the "no package" verdict and the service type before Continue is pressed, which
+   * is what every branch below reads.
    */
   const trip = useTripQuote(
     pickup,
     drop,
-    servedHere && scheduledAt !== null,
+    servedHere,
     direction,
     scheduledAt,
     // The return leg is part of the price now — the band fare multiplies by the days it spans.
@@ -444,11 +469,25 @@ export default function HomeScreen(): ReactElement {
    * on the offending row itself, so the button still needs no explanation of its own.
    */
   const timesInvalid =
-    scheduleProblem(scheduledAt) !== null || returnProblem(returnAt, scheduledAt) !== null;
+    scheduleProblem(scheduledAt, serviceType) !== null ||
+    returnProblem(returnAt, scheduledAt) !== null;
 
   /**
-   * EVERY FIELD THE TRIP NEEDS, in one place — a destination, a pickup time, and a return time
-   * when the customer asked for a round trip. An unset field is not an ERROR and gets no red line:
+   * WHETHER THIS TRIP CAN LEAVE NOW — the one branch the instant-booking rule turns on.
+   *
+   * In-city only, and optimistically true while the quote is still in flight; `allowsInstant`
+   * carries the reasoning. When it holds, an empty pickup time is the value "now" rather than an
+   * unanswered question, so it drops out of `tripIncomplete` and out of the notice below.
+   */
+  const instant = allowsInstant(serviceType);
+
+  /**
+   * EVERY FIELD THE TRIP NEEDS, in one place — a destination, a pickup time unless the trip can
+   * leave now, and a return time when the customer asked for a round trip. An in-city trip with no
+   * time is COMPLETE, not incomplete: the absent field is the value "now", and requiring an
+   * answer there is the hour's wait this change exists to remove.
+   *
+   * An unset field is not an ERROR and gets no red line:
    * the row it belongs to says "Select a time" or "Not set" in muted type, which is an instruction
    * rather than a complaint about something they have not done yet. Red is reserved for a choice
    * that was made and cannot be used.
@@ -459,7 +498,7 @@ export default function HomeScreen(): ReactElement {
   const tripIncomplete =
     pickup === null ||
     drop === null ||
-    scheduledAt === null ||
+    (scheduledAt === null && !instant) ||
     (direction === 'ROUND_TRIP' && returnAt === null);
 
   const canContinue = !tripIncomplete && servedHere && !noPackage && !pricing && !timesInvalid;
@@ -488,7 +527,7 @@ export default function HomeScreen(): ReactElement {
     servedHere &&
     !noPackage &&
     !timesInvalid &&
-    (scheduledAt === null || (direction === 'ROUND_TRIP' && returnAt === null));
+    ((scheduledAt === null && !instant) || (direction === 'ROUND_TRIP' && returnAt === null));
 
   /**
    * The two points travel as ROUTE PARAMS rather than in a store, because they are the entire
@@ -1004,7 +1043,9 @@ export default function HomeScreen(): ReactElement {
             <GlassPanel rounded="card" style={styles.resumeBanner}>
               <Pressable
                 onPress={() =>
-                  router.push(live.status === 'SEARCHING' ? `/searching/${live.id}` : `/trip/${live.id}`)
+                  router.push(
+                    live.status === 'SEARCHING' ? `/searching/${live.id}` : `/trip/${live.id}`,
+                  )
                 }
                 accessibilityRole="button"
                 accessibilityLabel="Resume your trip in progress"
@@ -1236,6 +1277,8 @@ export default function HomeScreen(): ReactElement {
                 busy={trip.query.isFetching}
                 scheduledAt={scheduledAt}
                 onPickTime={() => setTimePicker('schedule')}
+                // Back to leaving now. Offered on in-city only, which the row itself decides.
+                onClearTime={() => setScheduledAt(null)}
                 returnAt={returnAt}
                 onPickReturn={() => setTimePicker('return')}
                 onClearReturn={() => setReturnAt(null)}
@@ -1299,8 +1342,13 @@ export default function HomeScreen(): ReactElement {
                     Naming what to do next is useful; narrating where the customer is already
                     looking is noise in the one place the sheet is most crowded.
                   */}
+                  {/* `instant` is in the test because an in-city trip with no time is not
+                      missing one — if this notice is up at all on such a trip, the empty field is
+                      the return leg. */}
                   <Text style={styles.noticeTitle}>
-                    {scheduledAt === null ? 'Choose a pickup time' : 'Choose a return time'}
+                    {scheduledAt === null && !instant
+                      ? 'Choose a pickup time'
+                      : 'Choose a return time'}
                   </Text>
                 </View>
               </Animated.View>
@@ -1376,16 +1424,23 @@ export default function HomeScreen(): ReactElement {
           visible
           title={timePicker === 'schedule' ? 'Pickup time' : 'Return time'}
           value={timePicker === 'schedule' ? scheduledAt : returnAt}
-          // A fresh picker opens on the earliest LEGAL instant rather than on "now", so the first
-          // thing the customer sees is already a valid answer. The return leg opens an hour after
-          // the pickup for the same reason.
+          /*
+           * A fresh picker opens on the earliest LEGAL instant rather than on "now", so the first
+           * thing the customer sees is already a valid answer. The return leg opens an hour after
+           * the pickup for the same reason.
+           *
+           * BOUNDS FOLLOW THE PRODUCT. In-city has no lead time, so its wheel starts at the next
+           * clean five minutes and a twenty-minute pickup is an ordinary choice; outstation still
+           * opens an hour out. Passing `serviceType` is what stops the picker offering a time the
+           * row underneath would then refuse in red.
+           */
           anchor={
             timePicker === 'return' && scheduledAt !== null
               ? new Date(scheduledAt.getTime() + 60 * 60_000)
-              : defaultScheduleAnchor()
+              : defaultScheduleAnchor(serviceType)
           }
-          minimumDate={scheduleBounds().minimumDate}
-          maximumDate={scheduleBounds().maximumDate}
+          minimumDate={scheduleBounds(serviceType).minimumDate}
+          maximumDate={scheduleBounds(serviceType).maximumDate}
           onCancel={() => setTimePicker(null)}
           onConfirm={(at) => {
             if (timePicker === 'schedule') setScheduledAt(at);

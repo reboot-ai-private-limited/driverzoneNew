@@ -43,6 +43,11 @@ import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repos
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
 import { WhatsAppOtpSender } from './infrastructure/otpSender.whatsapp.js';
+import { StartMessagingOtpSender } from './infrastructure/otpSender.startmessaging.js';
+import { WhatsAppFirstOtpSender } from './infrastructure/otpSender.whatsAppFirst.js';
+import { WaAgentOtpSender } from './infrastructure/otpSender.waagent.js';
+import { WaAgentDeliveryStatus } from './infrastructure/waagentDeliveryStatus.js';
+import { enqueueOtpDeliveryCheck } from '@/shared/queue/otpDeliveryJobs.js';
 import { CloudinaryStorage } from '@/shared/storage/cloudinary.storage.js';
 import { RedisOtpStore } from './infrastructure/otpStore.redis.js';
 import { makeAuthControllers } from './interface/auth.controller.js';
@@ -89,6 +94,21 @@ export interface IdentityContainer {
    * reason.
    */
   sweepStalePresence: (cutoff: Date, limit: number) => Promise<string[]>;
+
+  /**
+   * Decide a sent WhatsApp OTP's fate: check whether it arrived, and send an SMS if it did not.
+   *
+   * ON THE CONTAINER, NOT THE PUBLIC CONTRACT, for the same reason as `sweepStalePresence` — the
+   * only caller is the WORKER, and nothing in the tier graph needs it. Putting it on `contract`
+   * would invite another module to start sending login codes.
+   *
+   * `null` WHEN THE CHAIN IS NOT CONFIGURED, which is the ordinary case on a machine with no
+   * waagent keys or no SMS keys. The worker treats that as "this job has nothing to do" rather
+   * than an error, so a dev box does not log a failure every time somebody logs in.
+   */
+  resolveOtpDelivery:
+    | ((input: { messageId: string; role: Role; phone: string; code: string }) => Promise<void>)
+    | null;
 
   /**
    * The device registries, handed to `notifications` by the composition root.
@@ -144,19 +164,125 @@ export function buildIdentityContainer(): IdentityContainer {
     env.WA_DEVICE_ID !== undefined &&
     env.WA_TEMPLATE_ID !== undefined;
 
-  const otpSender = waConfigured
-    ? new WhatsAppOtpSender({
-        apiUrl: env.WA_API_URL,
-        appKey: env.WA_APP_KEY,
-        authKey: env.WA_AUTH_KEY,
-        deviceId: env.WA_DEVICE_ID,
-        templateId: env.WA_TEMPLATE_ID,
-        contactNumber: env.WA_OTP_CONTACT_NUMBER,
+  /**
+   * The SMS channel is independent of the WhatsApp one, and either may be absent.
+   *
+   * Keyed on credentials, like every other choice here. Unset means the fallback is simply not
+   * wired — not a broken half-configuration — and the API behaves exactly as it did before the
+   * channel existed.
+   */
+  const smsConfigured = env.SM_API_KEY !== undefined && env.SM_TEMPLATE_ID !== undefined;
+
+  const smsSender = smsConfigured
+    ? new StartMessagingOtpSender({
+        apiUrl: env.SM_API_URL,
+        apiKey: env.SM_API_KEY,
+        templateId: env.SM_TEMPLATE_ID,
+        appName: env.SM_APP_NAME,
       })
-    : new LoggingOtpSender();
+    : null;
+
+  /**
+   * waagent supersedes wabridge when configured, and wabridge stays reachable until it is.
+   *
+   * The same shape as the road-distance ladder in `quotes.container.ts`: the newer provider wins
+   * on its credentials being present, the old one is retained rather than deleted, and switching
+   * back is unsetting two variables rather than a deploy of different code.
+   */
+  const waAgentConfigured =
+    env.WA_AGENT_API_KEY !== undefined &&
+    env.WA_AGENT_PHONE_NUMBER_ID !== undefined &&
+    env.WA_AGENT_TEMPLATE !== undefined;
+
+  const whatsappConfigured = waAgentConfigured || waConfigured;
+
+  const primarySender = waAgentConfigured
+    ? new WaAgentOtpSender({
+        apiUrl: env.WA_AGENT_API_URL,
+        apiKey: env.WA_AGENT_API_KEY,
+        phoneNumberId: env.WA_AGENT_PHONE_NUMBER_ID,
+        template: env.WA_AGENT_TEMPLATE,
+        languageCode: env.WA_AGENT_TEMPLATE_LANGUAGE,
+        codeVariable: env.WA_AGENT_TEMPLATE_CODE_VARIABLE,
+        contactVariable: env.WA_AGENT_TEMPLATE_CONTACT_VARIABLE,
+        contactNumber: env.WA_OTP_CONTACT_NUMBER,
+        buttonVariable: env.WA_AGENT_TEMPLATE_BUTTON_VARIABLE,
+        /*
+         * Only worth scheduling when there is somewhere to fall back TO. With no SMS channel the
+         * check could discover a failure and do nothing about it, at the cost of a request per
+         * login — so the hook is simply not installed.
+         */
+        ...(smsSender === null ? {} : { onSent: (handle) => void enqueueOtpDeliveryCheck(handle) }),
+      })
+    : waConfigured
+      ? new WhatsAppOtpSender({
+          apiUrl: env.WA_API_URL,
+          appKey: env.WA_APP_KEY,
+          authKey: env.WA_AUTH_KEY,
+          deviceId: env.WA_DEVICE_ID,
+          templateId: env.WA_TEMPLATE_ID,
+          contactNumber: env.WA_OTP_CONTACT_NUMBER,
+        })
+      : new LoggingOtpSender();
+
+  /*
+   * SMS ALONE IS NOT AN OPTION HERE, and that is deliberate. With WhatsApp unconfigured the
+   * primary is the dev logger, and pairing a real paid gateway with a stand-in that never fails
+   * would mean the SMS leg could only ever be reached by an explicit request from the screen —
+   * a configuration that looks like a fallback and is not one. Configure WhatsApp to get a
+   * fallback; configure neither to get the logger.
+   */
+  const otpSender =
+    smsSender !== null && whatsappConfigured
+      ? new WhatsAppFirstOtpSender(primarySender, smsSender)
+      : primarySender;
+
+  /**
+   * The delivery check needs both halves: a way to ask waagent what happened, and somewhere to
+   * fall back to. Either missing and there is no job to run.
+   */
+  const deliveryStatus =
+    waAgentConfigured && env.WA_AGENT_API_KEY !== undefined
+      ? new WaAgentDeliveryStatus({
+          apiUrl: env.WA_AGENT_API_URL,
+          apiKey: env.WA_AGENT_API_KEY,
+        })
+      : null;
+
+  const resolveOtpDelivery =
+    deliveryStatus === null || smsSender === null
+      ? null
+      : async (input: { messageId: string; role: Role; phone: string; code: string }) => {
+          const verdict = await deliveryStatus.check(input.messageId);
+
+          /*
+           * `null` IS "WE DO NOT KNOW", AND IT SENDS NOTHING. A 429 or a bad key is not evidence
+           * the message failed, and spending an SMS on every unanswerable check would turn a
+           * misconfigured token into a bill. The customer still has the button.
+           */
+          if (verdict === null || verdict === 'arrived') {
+            logger.info({ role: input.role, verdict }, 'otp delivery check: no fallback needed');
+            return;
+          }
+
+          logger.warn(
+            { role: input.role },
+            'otp never reached whatsapp — falling back to sms',
+          );
+          await smsSender.send(input.role, input.phone, input.code, 'SMS');
+        };
 
   logger.info(
-    { channel: waConfigured ? 'whatsapp' : 'log' },
+    {
+      channel: waAgentConfigured ? 'waagent' : waConfigured ? 'wabridge' : 'log',
+      // Says whether a failed WhatsApp send has anywhere to go. Worth a boot line of its own:
+      // with this false, a gateway outage silently costs every login rather than half of one.
+      sms_fallback: smsSender !== null && whatsappConfigured,
+      sms_on_request: smsConfigured,
+      // And whether a SILENT failure — accepted, never delivered — is caught at all. Needs the
+      // worker running; see `worker.ts`.
+      delivery_check: resolveOtpDelivery !== null,
+    },
     'identity: login OTP delivery channel',
   );
   const documentStorage = new CloudinaryStorage({
@@ -291,6 +417,7 @@ export function buildIdentityContainer(): IdentityContainer {
     // The worker's presence sweep. See the note on `IdentityContainer` for why it sits here and
     // not on the public contract.
     sweepStalePresence: (cutoff, limit) => drivers.sweepStalePresence(cutoff, limit),
+    resolveOtpDelivery,
 
     // The same two instances the routes above register handsets into — not new ones. `container.ts`
     // hands these to `notifications`, which is the only other module that needs them.
@@ -313,6 +440,10 @@ export function buildIdentityContainer(): IdentityContainer {
       // The driver card a customer sees on their trip. `bookings` decides whether the phone
       // number on it is passed on — see `DriverCardContract`.
       driverCardsByIds: (ids) => directory.driverCardsByIds(ids),
+
+      // Where that driver is, so `bookings` can tell a waiting customer roughly how long they
+      // will be. Returned as recorded, age and all — `bookings` decides what counts as stale.
+      lastLocationOf: (driverId) => drivers.lastLocationOf(driverId),
 
       /*
        * The manual-assignment picker, for `dispatch`. Reuses the admin list's own paginated query

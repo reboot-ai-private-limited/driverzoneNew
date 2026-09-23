@@ -2,6 +2,22 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 /**
+ * A `"true"`/`"false"` variable as a real boolean.
+ *
+ * The strict enum, not a truthiness check, and that is the point: `WA_AGENT_TEMPLATE_HAS_...=yes`
+ * failing at boot with the variable named is far cheaper than it quietly reading as `false` and
+ * producing a template that WhatsApp accepts and never delivers. Matches how `STAGING_UNSAFE`
+ * has always parsed; this is that spelling in one place.
+ */
+const booleanFlag = (fallback: 'true' | 'false') =>
+  z
+    .enum(['true', 'false'])
+    .default(fallback)
+    // The default is applied BEFORE this, so it is the string form — the same order
+    // `STAGING_UNSAFE` uses, and the only one zod accepts.
+    .transform((v) => v === 'true');
+
+/**
  * Every environment variable the API reads, validated once at boot.
  *
  * Parsing here rather than reaching for `process.env` at the call site means a missing or
@@ -138,6 +154,53 @@ const schema = z.object({
    * unset value cannot reintroduce that failure.
    */
   WA_OTP_CONTACT_NUMBER: z.string().min(1).default('7044076603'),
+
+  /**
+   * The SMS channel — startmessaging.com — which carries the login code when WhatsApp fails, and
+   * when the customer taps "Get code by SMS" because nothing arrived.
+   *
+   * OPTIONAL, AND THE FALLBACK IS OFF WHEN THEY ARE UNSET. `identity.container.ts` wires the
+   * WhatsApp sender on its own in that case, exactly as it did before this channel existed — so
+   * leaving these blank is a supported configuration and not a half-built one.
+   *
+   * ONLY `/otp/send` IS USED. The provider also offers `/otp/verify`, and this system
+   * deliberately does not adopt it: the code is generated here, stored as an HMAC under
+   * `OTP_PEPPER`, and verified here. See `StartMessagingOtpSender`.
+   */
+  /**
+   * waagent.in — the WhatsApp gateway that supersedes wabridge. Set these three and
+   * `identity.container.ts` switches over; unset them and it falls back to the WA_* keys above.
+   *
+   * THE THREE TEMPLATE FLAGS BELOW ARE NOT TUNING. They describe the approved template's actual
+   * shape, and each one wrong produces the same silent failure: the gateway answers 200 and
+   * WhatsApp delivers nothing. `WA_AGENT_TEMPLATE` holds whatever `template.name` expects on this
+   * account — a template name, or its id, which is why it is not called `..._NAME`.
+   */
+  WA_AGENT_API_URL: z.string().url().default('https://api.waagent.in/v1/messages'),
+  WA_AGENT_API_KEY: z.string().min(1).optional(),
+  WA_AGENT_PHONE_NUMBER_ID: z.string().min(1).optional(),
+  WA_AGENT_TEMPLATE: z.string().min(1).optional(),
+  /** Exactly as approved — `en` and `en_US` are different templates, and a mismatch 404s. */
+  WA_AGENT_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
+  /**
+   * The key the code goes under in `template.variables` — the template's own token.
+   *
+   * waagent's quickstart shows `body.1`, which is the positional spelling and is genuinely what
+   * some templates want. A template whose variable is declared with a token wants the bare token
+   * instead (`code`), and answers `422 MESSAGE_VARIABLES_INCOMPLETE` to the positional form.
+   * `GET /v1/templates` reports the right value as `variables[].id`.
+   */
+  WA_AGENT_TEMPLATE_CODE_VARIABLE: z.string().min(1).default('body.1'),
+  /** The key for the "call us" contact number, on templates that have that variable. Unset if not. */
+  WA_AGENT_TEMPLATE_CONTACT_VARIABLE: z.string().min(1).optional(),
+  /** The key for a button that needs the code again — copy-code or one-tap autofill. Unset if not. */
+  WA_AGENT_TEMPLATE_BUTTON_VARIABLE: z.string().min(1).optional(),
+
+  SM_API_URL: z.string().url().default('https://api.startmessaging.com'),
+  SM_API_KEY: z.string().min(1).optional(),
+  SM_TEMPLATE_ID: z.string().min(1).optional(),
+  /** Fills the SMS template's `appName` variable — the name the customer reads in the message. */
+  SM_APP_NAME: z.string().min(1).default('DriverZone'),
 
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'CLOUDINARY_CLOUD_NAME is required'),
   CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),

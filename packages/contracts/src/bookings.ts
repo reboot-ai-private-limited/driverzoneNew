@@ -306,6 +306,29 @@ export interface BookingDto {
   } | null;
 
   /**
+   * ROUGHLY HOW LONG UNTIL THE DRIVER REACHES THE PICKUP, in whole minutes. Null far more often
+   * than not, and every one of those nulls is deliberate.
+   *
+   * **AN ESTIMATE, NEVER A PROMISE.** It is computed from the driver's last reported position and
+   * is approximate by construction — apps must render it as such ("~8 min"), never as a clock
+   * time and never as a countdown ticking off a value that is already up to a minute old. It has
+   * no bearing on `driver.late_fine`, which measures against `scheduled_at` and nothing else;
+   * turning this into something a driver is charged against would make a convenience for the
+   * customer into a penalty computed from an approximation.
+   *
+   * **NULL MEANS "NO USEFUL ANSWER", and the app says nothing rather than guessing.** Four cases
+   * produce it: no driver is assigned yet; the driver has already ARRIVED or the trip is under
+   * way, so the question is moot; the driver's last fix is too old to be evidence of where they
+   * are now; or the two points are implausibly far apart, which is bad data rather than a long
+   * drive. A screen that showed "0 min" or a stale figure in any of those would be worse than a
+   * screen that showed nothing.
+   *
+   * CUSTOMER READS ONLY. The driver knows where they are, and an admin looking at a booking is
+   * not standing on the kerb.
+   */
+  pickup_eta_minutes: number | null;
+
+  /**
    * Who the trip is for.
    *
    * `phone` IS THE MIRROR of `driver.phone` above — present only while the trip is live (assigned,
@@ -388,7 +411,7 @@ export interface BookingDto {
     reason: string | null;
     /** What one more day would cost, when there is a day rate to quote it from. */
     price: Money | null;
-  pending: {
+    pending: {
       id: string;
       amount: Money;
       expires_at: string;

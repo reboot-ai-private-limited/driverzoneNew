@@ -141,6 +141,18 @@ export interface BookingFavouritesContract {
   hasCompletedTripTogether(customerId: string, driverId: string): Promise<boolean>;
 }
 
+/**
+ * One question, for `accounts`: does this person still have a trip that is not finished?
+ *
+ * "Not finished" is every non-terminal status, including a CONFIRMED booking for next week and a
+ * PENDING_PAYMENT checkout — WIDER than `findActiveForCustomer`, on purpose. That one asks what to
+ * show on a home screen; this asks whether closing the account would strand a trip somebody is
+ * counting on. A booking for Saturday is exactly the case that must stop a deletion.
+ */
+export interface BookingAccountContract {
+  hasOpenBooking(party: 'CUSTOMER' | 'DRIVER', accountId: string): Promise<boolean>;
+}
+
 export type BookingsPublicContract = BookingDispatchContract;
 
 export type { Booking, FareSnapshot, GeoPoint } from './domain/booking.entity.js';

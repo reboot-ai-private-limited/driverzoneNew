@@ -21,6 +21,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 # workspace and fails if one named in the lockfile is absent. Manifests only — no source.
 COPY apps/api/package.json                apps/api/
 COPY apps/web/package.json                apps/web/
+COPY apps/site/package.json               apps/site/
 COPY apps/customer/package.json           apps/customer/
 COPY apps/driver/package.json             apps/driver/
 COPY packages/config/package.json         packages/config/

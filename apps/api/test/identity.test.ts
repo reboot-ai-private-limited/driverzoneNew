@@ -99,6 +99,7 @@ function fakeAccounts(existing?: Account): AccountRepositoryPort & { created: nu
       return state.created;
     },
     findByPhone: () => Promise.resolve(existing),
+    findById: () => Promise.resolve(existing),
     create: (_role, phone) => {
       state.created += 1;
       return Promise.resolve({ id: 'acc_new', mobileNumber: phone, fullName: null });
@@ -113,6 +114,7 @@ function fakeSessions(): SessionRepositoryPort {
     markUsed: () => Promise.resolve(true),
     revokeFamily: () => Promise.resolve(),
     revokeSession: () => Promise.resolve(),
+    revokeAllForUser: () => Promise.resolve(),
   };
 }
 

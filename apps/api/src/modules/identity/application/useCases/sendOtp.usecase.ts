@@ -6,6 +6,7 @@ import {
   OTP_TTL_SECONDS,
   generateOtpCode,
   hashOtpCode,
+  type OtpPurpose,
 } from '../../domain/otpChallenge.entity.js';
 import { otpCooldownActive, otpSendLimitExceeded } from '../../domain/identity.errors.js';
 import { AppError } from '@/shared/errors/AppError.js';
@@ -28,6 +29,11 @@ export interface SendOtpInput {
    * version of this feature that is worth having.
    */
   channel?: OtpChannel | undefined;
+  /**
+   * What the code is for. Absent is `LOGIN`, which is every caller that existed before deletion.
+   * A `DELETE_ACCOUNT` code lives in its own slot and can only be spent by the deletion flow.
+   */
+  purpose?: OtpPurpose | undefined;
 }
 
 export interface SendOtpResult {
@@ -57,6 +63,7 @@ export class SendOtpUseCase {
 
   async execute(input: SendOtpInput): Promise<SendOtpResult> {
     const { role, phone } = input;
+    const purpose = input.purpose ?? 'LOGIN';
 
     /*
      * Cooldown first: it is the cheapest check and the one that most often fires, since a user
@@ -73,7 +80,7 @@ export class SendOtpUseCase {
      * the exemption cannot be turned into a way to spend the SMS wallet or hammer somebody
      * else's handset. The cooldown was pacing a human; the caps stop a machine.
      */
-    const cooldown = await this.store.cooldownRemaining(role, phone);
+    const cooldown = await this.store.cooldownRemaining(role, phone, purpose);
     if (cooldown > 0 && input.channel !== 'SMS') throw otpCooldownActive(cooldown);
 
     const perPhone = await this.store.countSend('phone', `${role}:${phone}`, HOUR_SECONDS);
@@ -92,7 +99,9 @@ export class SendOtpUseCase {
 
     const account = await this.accounts.findByPhone(role, phone);
 
-    if (account?.isBlocked) {
+    // Only LOGIN is refused. A suspended user may still close their account: being suspended is
+    // not a reason to keep somebody's personal data against their wishes.
+    if (purpose === 'LOGIN' && account?.isBlocked) {
       throw AppError.forbidden('Your account has been suspended.');
     }
 
@@ -104,7 +113,12 @@ export class SendOtpUseCase {
      * above were already spent, and the caller below receives exactly the same result it would
      * for a real admin. The only difference is that no SMS leaves the building.
      */
-    const deliverable = role !== 'ADMIN' || account !== undefined;
+    const deliverable =
+      purpose === 'DELETE_ACCOUNT'
+        ? // Nothing to close, so nothing to send — same silent path as an unknown admin number, so the
+          // deletion form cannot be walked to learn which numbers have accounts.
+          account !== undefined && role !== 'ADMIN'
+        : role !== 'ADMIN' || account !== undefined;
 
     if (deliverable) {
       const code = generateOtpCode();
@@ -113,6 +127,7 @@ export class SendOtpUseCase {
         phone,
         { codeHash: hashOtpCode(code, this.pepper), attempts: 0 },
         OTP_TTL_SECONDS,
+        purpose,
       );
       // Sending is the step that can fail for reasons outside this system. It happens after the
       // challenge is stored so that a provider timeout on a code that DID arrive still leaves a
@@ -120,7 +135,7 @@ export class SendOtpUseCase {
       await this.sender.send(role, phone, code, input.channel);
     }
 
-    await this.store.startCooldown(role, phone, OTP_RESEND_COOLDOWN_SECONDS);
+    await this.store.startCooldown(role, phone, OTP_RESEND_COOLDOWN_SECONDS, purpose);
 
     return {
       expiresInSeconds: OTP_TTL_SECONDS,

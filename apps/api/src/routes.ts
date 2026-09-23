@@ -78,7 +78,27 @@ export function buildApiRouter(c: AppContainers): Router {
    * role router has no `/finance` route, so it calls `next()` and the request lands here.
    */
   router.use('/admin/finance', c.admin.buildFinanceRouter());
+  /*
+   * Account deletion by a SUPER_ADMIN — `POST /admin/{customers|drivers}/:id/delete-account`. Same
+   * fall-through as the wallet mounts above: nothing earlier on these prefixes matches that suffix.
+   */
+  router.use('/admin/customers', c.accounts.buildAdminRouter('CUSTOMER'));
+  router.use('/admin/drivers', c.accounts.buildAdminRouter('DRIVER'));
   router.use('/coverage', c.zones.buildCoverageRouter());
+
+  /*
+   * Closing your own account from the app — `/{customer|driver}/account/deletion`. Identity's role
+   * router has already required a token by the time a request falls through to here.
+   */
+  router.use('/customer/account', c.accounts.buildSelfRouter('CUSTOMER'));
+  router.use('/driver/account', c.accounts.buildSelfRouter('DRIVER'));
+
+  /*
+   * The public deletion form. Its OWN prefix, not under `/customer`: identity's customer router
+   * applies `requireAuth` to everything beneath it, so a public route there would answer 401 to
+   * exactly the person it exists for — someone who has uninstalled and has no session.
+   */
+  router.use('/account-deletion', c.accounts.buildPublicRouter());
 
   /**
    * Same overlapping-prefix fall-through as `/admin/zones` above, one tier down: a request to

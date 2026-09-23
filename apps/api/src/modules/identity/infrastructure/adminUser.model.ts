@@ -1,4 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
+import { ADMIN_ROLES, type AdminRole } from '@driverzone/contracts';
 
 /**
  * INFRASTRUCTURE — the `adminUsers` collection (docs/LLD/database-schema.md).
@@ -6,9 +7,9 @@ import mongoose, { Schema } from 'mongoose';
  * No password, no TOTP secret, no recovery codes: admin authenticates with phone + OTP like
  * every other role (docs/decision-log.md, 2026-08-24).
  *
- * There is deliberately **no create path in the application** — no registration endpoint, and
- * `AccountRepository.create` refuses this role. A row gets here by direct ops action only, which
- * is the residual safeguard that replaced the second factor.
+ * Rows are created by a SUPER_ADMIN through `/admin/admins`, or by direct ops action as before.
+ * The auth flow still never creates one — `AccountRepository.create` refuses this role, and an
+ * unknown admin number is sent no code (docs/decision-log.md, 2026-09-23).
  */
 
 export interface AdminUserDoc {
@@ -16,6 +17,20 @@ export interface AdminUserDoc {
   phone: string;
   fullName: string;
   isActive: boolean;
+  /**
+   * Absent on every row written before roles existed, and read as `SUPER_ADMIN` — the power those
+   * admins already had. See `LEGACY_ADMIN_ROLE` in `adminProfile.repository.impl.ts`.
+   */
+  adminRole?: AdminRole | null;
+  createdBy?: mongoose.Types.ObjectId | null;
+  deactivatedAt?: Date | null;
+  deactivatedBy?: mongoose.Types.ObjectId | null;
+  /**
+   * Bumped on every active super admin inside the transaction that demotes or deactivates one.
+   * Its only job is to make two such transactions WRITE the same documents, so Mongo aborts one
+   * of them — see `changeGuarded` in the repository.
+   */
+  rosterVersion?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +43,13 @@ const adminUserSchema = new Schema<AdminUserDoc>(
     // knows who it is for, so there is no progressive-completion case to accommodate.
     fullName: { type: String, required: true },
     isActive: { type: Boolean, default: true },
+    // No default on purpose: a default would be written onto legacy rows the next time they are
+    // saved, silently demoting the admins who have run the system so far.
+    adminRole: { type: String, enum: [...ADMIN_ROLES, null], default: undefined },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', default: null },
+    deactivatedAt: { type: Date, default: null },
+    deactivatedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', default: null },
+    rosterVersion: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

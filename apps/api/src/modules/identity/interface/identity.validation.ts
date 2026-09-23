@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ADMIN_ROLES,
   CAR_CATEGORIES,
   DOCUMENT_SIDES,
   DOCUMENT_TYPES,
@@ -207,6 +208,24 @@ export const requestDocumentUploadSchema = z.object({
 
 export const updateAdminProfileSchema = z.object({
   full_name: personName.optional(),
+});
+
+export const createAdminUserSchema = z.object({
+  mobile_number: mobileNumber,
+  // Required, unlike a customer's: whoever adds an admin knows who they are adding.
+  full_name: personName,
+  admin_role: z.enum(ADMIN_ROLES),
+});
+
+export const updateAdminUserSchema = z
+  .object({
+    full_name: personName.optional(),
+    admin_role: z.enum(ADMIN_ROLES).optional(),
+  })
+  .refine((v) => v.full_name !== undefined || v.admin_role !== undefined, 'Nothing to change');
+
+export const adminIdParamSchema = z.object({
+  id: z.string().min(1),
 });
 export const verifyHillDrivingSchema = z.object({
   verified: z.boolean(),

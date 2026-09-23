@@ -167,6 +167,19 @@ services:
     ports: ['3000:3000']
     restart: unless-stopped
 
+  # The public marketing site (apps/site). Static-ish pages, no API, no database — it depends on
+  # nothing else in this file. nginx fronts it on the main domain like web and api.
+  site:
+    build:
+      context: .
+      dockerfile: apps/site/Dockerfile
+      # Build arg for the same reason as web's: `next build` inlines NEXT_PUBLIC_*. From the
+      # repo-root `.env` — see .env.example.
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+    ports: ['3001:3001']
+    restart: unless-stopped
+
 # Named explicitly, and distinctly from the dev file's volumes. Compose's default name is
 # derived from the directory, which both files share — so without these a prod-stack run and a
 # dev-stack run would read and write the same database.

@@ -1,0 +1,92 @@
+@import 'tailwindcss';
+
+/**
+ * THE PUBLIC SITE DOES NOT IMPORT `@driverzone/design-system/theme.css`, and that is a decision
+ * rather than an omission.
+ *
+ * That package's accent is `#c0ff72`, a near-white lime chosen for the ADMIN PANEL and pinned by
+ * its own `theme.contrast.test.ts`. The customer-facing brand — the one on the app icons, the
+ * splash screens and every approved screen in `apps/customer` and `apps/driver` — is a saturated
+ * yellow with black ink. A public site is the most customer-facing surface there is, so it
+ * follows the apps.
+ *
+ * The values below are copied from `apps/customer/src/theme/theme.ts`, which explains the same
+ * split from the other side: "the two live apart until somebody decides the whole product moves
+ * to yellow". If that decision is ever made, these tokens and that file change together.
+ *
+ * Copied rather than imported because the customer palette lives in a React Native module — a
+ * `.ts` file exporting a JS object that Tailwind cannot read at build time. Sharing it properly
+ * would mean promoting it into `@driverzone/design-system` alongside the admin palette, which is
+ * the right fix on the day a second web surface needs it and overkill today.
+ */
+@theme {
+  /* Brand. Yellow is a SURFACE — ~1.1:1 against white, so nothing readable is painted in it. */
+  --color-brand: #f2f200;
+  --color-brand-bright: #fafa1e;
+  --color-brand-soft: #fefee8;
+  --color-brand-wash: #fbfbc4;
+
+  /* Surfaces */
+  --color-bg: #ffffff;
+  --color-bg-sunken: #f7f7f2;
+
+  /* Ink. `fg` is the button fill as well as the body colour — black and yellow pair directly. */
+  --color-fg: #1a1a1a;
+  --color-muted: #6b6b66;
+  --color-faint: #9a9a94;
+
+  /* Yellow on black has to be brighter than the surface yellow to stay legible at body size. */
+  --color-on-fg: #ffffff;
+  --color-brand-on-fg: #f5e500;
+
+  --color-border: #e4e4dc;
+  --color-border-strong: #c9c9bf;
+
+  --color-success: #1a7f37;
+  --color-danger: #cf222e;
+  --color-link: #1f5fd0;
+
+  /* Matches the mobile apps' `radius` scale (packages/mobile-ui). */
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+}
+
+/**
+ * LIGHT ONLY, pinned.
+ *
+ * The brand is a yellow surface carrying black ink. There is no dark counterpart designed for it,
+ * and a browser left to infer one inverts the ink while leaving the yellow alone — black text on
+ * yellow becomes white text on yellow, which is the one combination this palette cannot survive
+ * (about 1.1:1). `apps/web`'s theme pins the same thing for the same reason.
+ */
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * Anchor targets land under the sticky header without this — the heading scrolls to y=0 and the
+ * header covers it. `scroll-padding-top` reserves the header's height on every in-page jump,
+ * which is what the "How it works" and "Services" links in the header rely on.
+ */
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+}
+
+/**
+ * Respect a reader who has asked the OS for less motion. `scroll-behavior: smooth` above is the
+ * only animation this site sets globally, so switching it off here is the whole accommodation.
+ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

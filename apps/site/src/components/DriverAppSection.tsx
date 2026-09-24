@@ -141,6 +141,7 @@ export function DriverAppSection(): ReactElement {
                       alt={i >= SCREENS.length ? '' : screen.alt}
                       fill
                       sizes="(min-width: 1024px) 160px, (min-width: 768px) 30vw, (min-width: 640px) 45vw, 80vw"
+                      quality={85}
                       className="object-cover"
                       draggable={false}
                       priority={i === 0}

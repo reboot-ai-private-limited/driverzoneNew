@@ -18,6 +18,11 @@ const config: NextConfig = {
   // The monorepo root, so tracing follows the workspace rather than stopping at apps/site.
   outputFileTracingRoot: fileURLToPath(new URL('../../', import.meta.url)),
   reactStrictMode: true,
+  images: {
+    // Retina devices request 2× — make sure 2× widths are in the srcset.
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+  },
 };
 
 export default config;

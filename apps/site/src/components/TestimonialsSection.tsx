@@ -78,13 +78,13 @@ function TestimonialCard({ testimonial }: { testimonial: Testimonial }): ReactEl
         </span>
 
         <div>
-          <p className="text-[15px] font-semibold text-fg">{testimonial.name}</p>
+          <p className="text-[16px] font-semibold text-fg">{testimonial.name}</p>
           <StarRating rating={testimonial.rating} />
         </div>
       </div>
 
       {/* Review text */}
-      <p className="mt-4 text-[13px] leading-relaxed text-muted">
+      <p className="mt-4 text-[14px] leading-relaxed text-muted">
         {testimonial.review}
       </p>
 

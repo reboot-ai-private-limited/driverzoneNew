@@ -75,6 +75,7 @@ export function DriverWithUsSection(): ReactElement {
               alt="Two DriverZone team members reviewing driver documents at the Siliguri office"
               fill
               sizes="(min-width: 768px) 50vw, 100vw"
+              quality={90}
               className="object-cover"
             />
           </div>

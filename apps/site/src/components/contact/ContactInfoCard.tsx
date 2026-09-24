@@ -11,12 +11,12 @@ export function ContactInfoCard({
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className="flex flex-col items-center rounded-2xl bg-bg-sunken px-6 py-10 text-center">
+    <div className="group flex flex-col items-center rounded-2xl bg-bg-sunken px-6 py-10 text-center">
 
       {/* Stacked-card icon — brand square with rotated white card behind */}
       <div className="relative mx-auto w-fit">
-        <div className="absolute inset-0 scale-[1.18] rotate-[-10deg] rounded-2xl bg-white shadow-sm" />
-        <div className="relative flex size-[68px] items-center justify-center rounded-2xl bg-brand">
+        <div className="absolute inset-0 scale-[1.18] rotate-[-10deg] rounded-2xl bg-white shadow-sm transition-transform duration-300 group-hover:rotate-[-4deg]" />
+        <div className="relative flex size-[68px] items-center justify-center rounded-2xl bg-brand transition-transform duration-300 group-hover:rotate-6">
           <Icon size={28} className="text-fg" strokeWidth={2} aria-hidden />
         </div>
       </div>

@@ -145,10 +145,9 @@ export function HeroSlider(): ReactElement {
                   alt={slide.alt}
                   fill
                   sizes="100vw"
+                  quality={90}
                   className="object-cover"
                   draggable={false}
-                  // First slide: preloaded as the LCP asset.
-                  // Others: eager so they're decoded before they're needed.
                   priority={i === 0}
                   loading={i === 0 ? undefined : 'eager'}
                 />

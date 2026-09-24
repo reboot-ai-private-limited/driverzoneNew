@@ -49,6 +49,7 @@ import { StartMessagingOtpSender } from './infrastructure/otpSender.startmessagi
 import { WhatsAppFirstOtpSender } from './infrastructure/otpSender.whatsAppFirst.js';
 import { WaAgentOtpSender } from './infrastructure/otpSender.waagent.js';
 import { WaAgentDeliveryStatus } from './infrastructure/waagentDeliveryStatus.js';
+import { WaAgentAccountMessages } from './infrastructure/accountMessages.waagent.js';
 import { enqueueOtpDeliveryCheck } from '@/shared/queue/otpDeliveryJobs.js';
 import { CloudinaryStorage } from '@/shared/storage/cloudinary.storage.js';
 import { RedisOtpStore } from './infrastructure/otpStore.redis.js';
@@ -294,6 +295,40 @@ export function buildIdentityContainer(): IdentityContainer {
           await smsSender.send(input.role, input.phone, input.code, 'SMS');
         };
 
+  const accountMessages =
+    env.WA_AGENT_API_KEY !== undefined && env.WA_AGENT_PHONE_NUMBER_ID !== undefined
+      ? new WaAgentAccountMessages({
+          apiUrl: env.WA_AGENT_API_URL,
+          apiKey: env.WA_AGENT_API_KEY,
+          phoneNumberId: env.WA_AGENT_PHONE_NUMBER_ID,
+          welcomeCustomer:
+            env.WA_AGENT_WELCOME_TEMPLATE === undefined
+              ? undefined
+              : {
+                  name: env.WA_AGENT_WELCOME_TEMPLATE,
+                  languageCode: env.WA_AGENT_WELCOME_TEMPLATE_LANGUAGE,
+                  nameVariable: env.WA_AGENT_WELCOME_TEMPLATE_NAME_VARIABLE,
+                },
+          driverApproved:
+            env.WA_AGENT_DRIVER_APPROVED_TEMPLATE === undefined
+              ? undefined
+              : {
+                  name: env.WA_AGENT_DRIVER_APPROVED_TEMPLATE,
+                  languageCode: env.WA_AGENT_DRIVER_APPROVED_TEMPLATE_LANGUAGE,
+                  nameVariable: env.WA_AGENT_DRIVER_APPROVED_TEMPLATE_NAME_VARIABLE,
+                },
+        })
+      : undefined;
+
+  logger.info(
+    {
+      welcome_message: accountMessages !== undefined && env.WA_AGENT_WELCOME_TEMPLATE !== undefined,
+      driver_approved_message:
+        accountMessages !== undefined && env.WA_AGENT_DRIVER_APPROVED_TEMPLATE !== undefined,
+    },
+    'identity: account WhatsApp messages',
+  );
+
   logger.info(
     {
       channel: waAgentConfigured ? 'waagent' : waConfigured ? 'wabridge' : 'log',
@@ -343,7 +378,14 @@ export function buildIdentityContainer(): IdentityContainer {
       : undefined;
 
   const sendOtp = new SendOtpUseCase(otpStore, otpSender, accounts, env.OTP_PEPPER);
-  const verifyOtp = new VerifyOtpUseCase(otpStore, accounts, tokenIssuer, env.OTP_PEPPER, devBypass);
+  const verifyOtp = new VerifyOtpUseCase(
+    otpStore,
+    accounts,
+    tokenIssuer,
+    env.OTP_PEPPER,
+    devBypass,
+    accountMessages,
+  );
   const refreshSession = new RefreshSessionUseCase(sessions, tokenIssuer, accounts);
   const logout = new LogoutUseCase(sessions);
 
@@ -400,7 +442,7 @@ export function buildIdentityContainer(): IdentityContainer {
     },
     close: (role, accountId, by) => closeAccount.execute(role, accountId, by),
   };
-  const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit, dutySessions);
+  const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit, dutySessions, accountMessages);
   // Same repository the customer's own profile routes use, a different use case in front of it.
   // The narrow, self-only use cases stay exactly as they are — widening one of them to accept a
   // customer id is how an admin-shaped hole appears in the customer app's surface.

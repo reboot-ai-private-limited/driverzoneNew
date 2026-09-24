@@ -2,6 +2,7 @@ import type { DocumentStatus } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
 import { canReview } from '../../domain/driverOnboarding.entity.js';
 import type { AuditPort } from '../../domain/audit.port.js';
+import type { AccountMessagesPort } from '../../domain/accountMessages.port.js';
 import type { DriverDocument, DriverDocumentRepositoryPort } from '../../domain/driverDocument.repository.port.js';
 import type { DriverProfile, DriverProfileRepositoryPort } from '../../domain/driverProfile.repository.port.js';
 import type { DutySessionRepositoryPort } from '../../domain/dutySession.repository.port.js';
@@ -25,6 +26,7 @@ export class VerifyDriverUseCase {
     private readonly documents: DriverDocumentRepositoryPort,
     private readonly audit: AuditPort,
     private readonly dutySessions?: DutySessionRepositoryPort,
+    private readonly messages?: AccountMessagesPort,
   ) {}
 
   private async loadReviewable(driverId: string): Promise<DriverProfile> {
@@ -67,6 +69,9 @@ export class VerifyDriverUseCase {
       after: { onboardingStatus: after.onboardingStatus, isVerified: after.isVerified },
       ip: actor.ip,
     });
+
+    // Not awaited: the port never rejects, and the approval is done whether or not WhatsApp is up.
+    void this.messages?.driverApproved(after.mobileNumber, after.fullName);
 
     return after;
   }

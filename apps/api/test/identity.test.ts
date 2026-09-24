@@ -20,6 +20,7 @@ import type { OtpChallenge } from '../src/modules/identity/domain/otpChallenge.e
 import type { OtpStorePort } from '../src/modules/identity/domain/otpStore.port.js';
 import type { OtpSenderPort } from '../src/modules/identity/domain/otpSender.port.js';
 import type { Account, AccountRepositoryPort } from '../src/modules/identity/domain/account.repository.port.js';
+import type { AccountMessagesPort } from '../src/modules/identity/domain/accountMessages.port.js';
 import type { Session } from '../src/modules/identity/domain/session.entity.js';
 import type { SessionRepositoryPort } from '../src/modules/identity/domain/session.repository.port.js';
 import type { AppError } from '../src/shared/errors/AppError.js';
@@ -431,6 +432,53 @@ describe('VerifyOtpUseCase', () => {
 
     expect(result.isNewUser).toBe(false);
     expect(accounts.created).toBe(0);
+  });
+
+  describe('the welcome message', () => {
+    function recordingMessages(): AccountMessagesPort & { welcomed: string[] } {
+      const welcomed: string[] = [];
+      return {
+        welcomed,
+        welcomeCustomer: async (phone) => {
+          welcomed.push(phone);
+        },
+        driverApproved: async () => {},
+      };
+    }
+
+    const verifyWith = (accounts: AccountRepositoryPort, messages: AccountMessagesPort) =>
+      new VerifyOtpUseCase(
+        fakeStore({ challenge: liveChallenge() }),
+        accounts,
+        new TokenIssuer(fakeSessions()),
+        PEPPER,
+        undefined,
+        messages,
+      );
+
+    it('goes to a customer on their first sign-in', async () => {
+      const messages = recordingMessages();
+      await verifyWith(fakeAccounts(), messages).execute({
+        role: 'CUSTOMER',
+        phone: '+919876543210',
+        code: '123456',
+      });
+      expect(messages.welcomed).toEqual(['+919876543210']);
+    });
+
+    it('does not go to a returning customer, or to a new driver', async () => {
+      const messages = recordingMessages();
+      await verifyWith(
+        fakeAccounts({ id: 'cus_1', mobileNumber: '+919876543210', fullName: 'Anita' }),
+        messages,
+      ).execute({ role: 'CUSTOMER', phone: '+919876543210', code: '123456' });
+      await verifyWith(fakeAccounts(), messages).execute({
+        role: 'DRIVER',
+        phone: '+919876543210',
+        code: '123456',
+      });
+      expect(messages.welcomed).toEqual([]);
+    });
   });
 
   it('gives the same error for a wrong code as for no challenge at all', async () => {

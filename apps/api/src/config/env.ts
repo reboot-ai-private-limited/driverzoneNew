@@ -196,6 +196,19 @@ const schema = z.object({
   /** The key for a button that needs the code again — copy-code or one-tap autofill. Unset if not. */
   WA_AGENT_TEMPLATE_BUTTON_VARIABLE: z.string().min(1).optional(),
 
+  /**
+   * Account milestone messages over the same waagent account: a new customer's welcome and a
+   * driver's approval. Each is sent only when its template name is set AND the three waagent keys
+   * above are. The `_NAME_VARIABLE` is the approved template's own key for the recipient's name
+   * (`GET /v1/templates` → `variables[].id`, e.g. `name` or `body.1`); unset if it has none.
+   */
+  WA_AGENT_WELCOME_TEMPLATE: z.string().min(1).optional(),
+  WA_AGENT_WELCOME_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
+  WA_AGENT_WELCOME_TEMPLATE_NAME_VARIABLE: z.string().min(1).optional(),
+  WA_AGENT_DRIVER_APPROVED_TEMPLATE: z.string().min(1).optional(),
+  WA_AGENT_DRIVER_APPROVED_TEMPLATE_LANGUAGE: z.string().min(1).default('en'),
+  WA_AGENT_DRIVER_APPROVED_TEMPLATE_NAME_VARIABLE: z.string().min(1).optional(),
+
   SM_API_URL: z.string().url().default('https://api.startmessaging.com'),
   SM_API_KEY: z.string().min(1).optional(),
   SM_TEMPLATE_ID: z.string().min(1).optional(),

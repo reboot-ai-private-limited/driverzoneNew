@@ -3,6 +3,7 @@ import { otpInvalidOrExpired } from '../../domain/identity.errors.js';
 import { OtpChallengeVerifier } from '../otpChallengeVerifier.js';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { Account, AccountRepositoryPort } from '../../domain/account.repository.port.js';
+import type { AccountMessagesPort } from '../../domain/accountMessages.port.js';
 import type { OtpStorePort } from '../../domain/otpStore.port.js';
 import type { TokenIssuer } from '../tokenIssuer.js';
 
@@ -55,6 +56,7 @@ export class VerifyOtpUseCase {
     private readonly pepper: string,
     /** Absent in production and in every test that does not deliberately opt in. */
     private readonly devBypass?: DevOtpBypass | undefined,
+    private readonly messages?: AccountMessagesPort | undefined,
   ) {}
 
   /**
@@ -121,6 +123,11 @@ export class VerifyOtpUseCase {
     }
 
     const account = existing ?? (await this.accounts.create(role, phone));
+
+    // Not awaited: the port never rejects, and the customer's session must not wait on WhatsApp.
+    if (existing === undefined && role === 'CUSTOMER') {
+      void this.messages?.welcomeCustomer(account.mobileNumber, account.fullName);
+    }
 
     // Single-use: the code cannot be replayed even inside its 5-minute window.
     await this.store.burn(role, phone);

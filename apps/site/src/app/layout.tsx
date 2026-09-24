@@ -1,9 +1,18 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { Inter_Tight } from 'next/font/google';
 import { SiteFooter } from '@/components/SiteFooter';
 import { SiteHeader } from '@/components/SiteHeader';
+import { FloatingActions } from '@/components/FloatingActions';
 import { SITE_URL } from '@/lib/site';
 import './globals.css';
+
+const interTight = Inter_Tight({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700', '800'],
+  variable: '--font-inter-tight',
+  display: 'swap',
+});
 
 /**
  * THE OPPOSITE OF `apps/web`'s ROOT LAYOUT IN ONE RESPECT, and it is the important one.
@@ -14,6 +23,13 @@ import './globals.css';
  * the Open Graph data that decides what a shared link looks like in WhatsApp, which is where a
  * link to a service like this actually travels in India.
  */
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: '#f2f200',
+};
+
 export const metadata: Metadata = {
   /*
    * `metadataBase` is what lets the relative OG image below resolve to an absolute URL. Without
@@ -22,7 +38,7 @@ export const metadata: Metadata = {
    */
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'DriverZone — professional drivers for your own car',
+    default: 'Hire Verified Drivers for Your Car in Siliguri | DriverZone',
     /*
      * `%s` is filled by each page's own `title`. Keeping the brand in the template means no page
      * has to remember to append it, and a shared link always carries the name of the service.
@@ -47,7 +63,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={interTight.variable}>
       <body className="flex min-h-screen flex-col">
         {/*
           A skip link, first in the DOM and visible only once focused. Every page here is a long
@@ -65,6 +81,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
         <SiteFooter />
+        <FloatingActions />
       </body>
     </html>
   );

@@ -22,12 +22,12 @@ const SLIDES: Slide[] = [
   },
   {
     id: 2,
-    image: '/herobanner/slider1.webp',
+    image: '/herobanner/slider2.webp',
     alt: 'DriverZone drivers standing with their vehicles on a city street',
   },
   {
     id: 3,
-    image: '/herobanner/slider1.webp',
+    image: '/herobanner/slider3.webp',
     alt: 'DriverZone drivers standing with their vehicles on a city street',
   },
 ];

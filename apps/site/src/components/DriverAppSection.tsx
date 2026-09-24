@@ -19,6 +19,10 @@ const SCREENS: readonly Screen[] = [
   { id: 5, image: '/driver-app/screen-5.webp', alt: 'DriverZone driver app — trip in progress with live map' },
   { id: 6, image: '/driver-app/screen-6.webp', alt: 'DriverZone driver app — trip completion and earnings summary' },
   { id: 7, image: '/driver-app/screen-7.webp', alt: 'DriverZone driver app — driver profile and document status' },
+  { id: 8, image: '/driver-app/screen-8.webp', alt: 'DriverZone driver app — driver profile and document status' },
+  { id: 9, image: '/driver-app/screen-9.webp', alt: 'DriverZone driver app — driver profile and document status' },
+  { id: 10, image: '/driver-app/screen-10.webp', alt: 'DriverZone driver app — driver profile and document status' },
+  { id: 11, image: '/driver-app/screen-11.webp', alt: 'DriverZone driver app — driver profile and document status' },
 ];
 
 // 40 px/s, normalised to real elapsed time — same speed at 60/90/120 Hz.
@@ -130,8 +134,8 @@ export function DriverAppSection(): ReactElement {
                 className="flex-none w-full sm:w-1/2 md:w-1/3 lg:w-[calc(100%/6)] px-2"
                 aria-hidden={i >= SCREENS.length}
               >
-                <div className="w-full rounded-3xl border border-border/80 bg-bg p-3">
-                  <div className="relative aspect-[9/19] overflow-hidden rounded-xl">
+                <div className="w-full rounded-lg border border-border/80 bg-bg p-1">
+                  <div className="relative aspect-[9/19] overflow-hidden">
                     <Image
                       src={screen.image}
                       alt={i >= SCREENS.length ? '' : screen.alt}

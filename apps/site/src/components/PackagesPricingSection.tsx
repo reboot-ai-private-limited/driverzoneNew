@@ -83,7 +83,7 @@ function PackageCard({ pkg }: { pkg: Package }): ReactElement {
   return (
     <article className="flex flex-col rounded-3xl border border-border bg-bg p-3 transition-all duration-300 hover:shadow-lg">
       {/* Inset image — padded inside the card with its own border-radius */}
-      <div className="relative aspect-[4/3] overflow-hidden rounded-xl">
+      <div className="relative aspect-[4/3] overflow-hidden rounded-lg">
         <Image
           src={pkg.image}
           alt={pkg.imageAlt}

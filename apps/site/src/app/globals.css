@@ -20,6 +20,9 @@
  * the right fix on the day a second web surface needs it and overkill today.
  */
 @theme {
+  /* Typography */
+  --font-sans: var(--font-inter-tight), ui-sans-serif, system-ui, sans-serif;
+
   /* Brand. Yellow is a SURFACE — ~1.1:1 against white, so nothing readable is painted in it. */
   --color-brand: #f2f200;
   --color-brand-bright: #fafa1e;
@@ -154,4 +157,15 @@ html {
   html {
     scroll-behavior: auto;
   }
+}
+
+::selection {
+  background-color: var(--color-fg);
+  color: var(--color-brand);
+}
+
+/* Firefox */
+::-moz-selection {
+  background-color: var(--color-fg);
+  color: var(--color-brand);
 }

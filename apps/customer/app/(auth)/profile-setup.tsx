@@ -66,10 +66,18 @@ export default function ProfileSetupScreen(): ReactElement {
 
   const percent = completionPercent(draft);
 
+  /**
+   * NO PERMISSION REQUEST HERE, deliberately. `launchImageLibraryAsync` opens the system photo
+   * picker (`PickVisualMedia` on Android, `PHPickerViewController` on iOS) directly — both are
+   * privacy-preserving pickers that hand back only the one photo the customer chose, and neither
+   * needs a permission grant to open. A `requestMediaLibraryPermissionsAsync()` call ahead of it
+   * used to ask for broad photo-library access this screen never uses: on Android 13+ the library
+   * itself skips that request (it is a no-op there), but on Android 12 and below it does put up a
+   * real "Allow DriverZone to access photos and media on this device?" dialog — for a picker that
+   * does not need it, since the returned image's URI is granted directly by the picker regardless
+   * of whether this app holds any storage permission. Removing the call removes that dialog too.
+   */
   async function pickPhoto(): Promise<void> {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,

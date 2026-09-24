@@ -265,3 +265,50 @@ export type IdentityPublicContract = CustomerBookingProfileContract &
  */
 export type { DriverDeviceRepositoryPort } from './domain/driverDevice.repository.port.js';
 export type { CustomerDeviceRepositoryPort } from './domain/customerDevice.repository.port.js';
+
+/**
+ * Closing a customer or driver account — for the `accounts` module, and only for it.
+ *
+ * NOT part of `IdentityPublicContract` either, and handed over through the container like the
+ * device registries. `bookings` or `dispatch` holding a method that erases a person would be a
+ * standing invitation; `accounts` is the one module whose whole job is deciding when that may
+ * happen, and it sits at the top of the graph where it can see every reason not to.
+ *
+ * The codes here are `DELETE_ACCOUNT` codes: they live apart from login codes, and a login code
+ * cannot be spent on them (see `OtpPurpose`).
+ */
+export type { ClosableRole, ClosedBy } from './application/useCases/closeAccount.usecase.js';
+import type { ClosableRole, ClosedBy } from './application/useCases/closeAccount.usecase.js';
+
+export interface ClosableAccount {
+  id: string;
+  /** Needed to send the code to the account's own number on the in-app path. */
+  mobileNumber: string;
+  /** Always false for a customer. A driver on duty must go off duty before closing. */
+  isOnDuty: boolean;
+}
+
+export interface AccountClosureContract {
+  /** A live (not already deleted) account, by id or by number. */
+  findClosable(
+    role: ClosableRole,
+    lookup: { id: string } | { phone: string },
+  ): Promise<ClosableAccount | undefined>;
+
+  /**
+   * Same throttling, same channels and the same "no account, nothing sent, same answer" rule as a
+   * login code — it IS the login sender, with a different purpose.
+   */
+  sendClosureCode(input: {
+    role: ClosableRole;
+    phone: string;
+    ip?: string | undefined;
+    channel?: 'WHATSAPP' | 'SMS' | undefined;
+  }): Promise<{ expiresInSeconds: number; retryAfterSeconds: number }>;
+
+  /** Resolves on a correct code and spends it; throws the generic OTP error otherwise. */
+  spendClosureCode(role: ClosableRole, phone: string, code: string): Promise<void>;
+
+  /** Erase and sign out. `false` if there was nothing left to close. */
+  close(role: ClosableRole, accountId: string, by: ClosedBy): Promise<boolean>;
+}

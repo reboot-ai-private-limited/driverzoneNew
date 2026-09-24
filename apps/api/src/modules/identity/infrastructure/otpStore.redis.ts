@@ -1,6 +1,6 @@
 import type { Redis } from 'ioredis';
 import type { Role } from '@driverzone/contracts';
-import type { OtpChallenge } from '../domain/otpChallenge.entity.js';
+import type { OtpChallenge, OtpPurpose } from '../domain/otpChallenge.entity.js';
 import type { OtpStorePort } from '../domain/otpStore.port.js';
 
 /**
@@ -20,21 +20,32 @@ import type { OtpStorePort } from '../domain/otpStore.port.js';
 export class RedisOtpStore implements OtpStorePort {
   constructor(private readonly redis: Redis) {}
 
-  /** Namespaced by role: the same number may legitimately be a customer AND a driver. */
-  private challengeKey(role: Role, phone: string): string {
-    return `otp:${role}:${phone}`;
+  /**
+   * Namespaced by role: the same number may legitimately be a customer AND a driver.
+   *
+   * And by purpose, except LOGIN, which keeps the original unprefixed key so that codes already
+   * sent survive the deploy that introduced purposes.
+   */
+  private challengeKey(role: Role, phone: string, purpose: OtpPurpose): string {
+    return purpose === 'LOGIN' ? `otp:${role}:${phone}` : `otp:${purpose}:${role}:${phone}`;
   }
 
-  private cooldownKey(role: Role, phone: string): string {
-    return `otp:cd:${role}:${phone}`;
+  private cooldownKey(role: Role, phone: string, purpose: OtpPurpose): string {
+    return purpose === 'LOGIN' ? `otp:cd:${role}:${phone}` : `otp:cd:${purpose}:${role}:${phone}`;
   }
 
   private sendCountKey(scope: 'phone' | 'ip', key: string): string {
     return `otp:sent:${scope}:${key}`;
   }
 
-  async save(role: Role, phone: string, challenge: OtpChallenge, ttlSeconds: number): Promise<void> {
-    const key = this.challengeKey(role, phone);
+  async save(
+    role: Role,
+    phone: string,
+    challenge: OtpChallenge,
+    ttlSeconds: number,
+    purpose: OtpPurpose = 'LOGIN',
+  ): Promise<void> {
+    const key = this.challengeKey(role, phone, purpose);
     await this.redis
       .multi()
       // `del` first: a resend must reset the attempt counter, and HSET alone would leave the
@@ -45,8 +56,12 @@ export class RedisOtpStore implements OtpStorePort {
       .exec();
   }
 
-  async find(role: Role, phone: string): Promise<OtpChallenge | undefined> {
-    const raw = await this.redis.hgetall(this.challengeKey(role, phone));
+  async find(
+    role: Role,
+    phone: string,
+    purpose: OtpPurpose = 'LOGIN',
+  ): Promise<OtpChallenge | undefined> {
+    const raw = await this.redis.hgetall(this.challengeKey(role, phone, purpose));
     const codeHash = raw['codeHash'];
     if (codeHash === undefined || codeHash === '') return undefined;
     return { codeHash, attempts: Number(raw['attempts'] ?? 0) };
@@ -59,25 +74,34 @@ export class RedisOtpStore implements OtpStorePort {
    * and no code hash, which `find` would then report as absent while the key lingers. The
    * existence check makes a missing challenge return undefined instead, leaving nothing behind.
    */
-  async recordAttempt(role: Role, phone: string): Promise<number | undefined> {
-    const key = this.challengeKey(role, phone);
+  async recordAttempt(
+    role: Role,
+    phone: string,
+    purpose: OtpPurpose = 'LOGIN',
+  ): Promise<number | undefined> {
+    const key = this.challengeKey(role, phone, purpose);
     const exists = await this.redis.exists(key);
     if (exists === 0) return undefined;
     return this.redis.hincrby(key, 'attempts', 1);
   }
 
-  async burn(role: Role, phone: string): Promise<void> {
-    await this.redis.del(this.challengeKey(role, phone));
+  async burn(role: Role, phone: string, purpose: OtpPurpose = 'LOGIN'): Promise<void> {
+    await this.redis.del(this.challengeKey(role, phone, purpose));
   }
 
-  async cooldownRemaining(role: Role, phone: string): Promise<number> {
+  async cooldownRemaining(role: Role, phone: string, purpose: OtpPurpose = 'LOGIN'): Promise<number> {
     // -2 = no key, -1 = key with no expiry. Neither is a live cooldown.
-    const ttl = await this.redis.ttl(this.cooldownKey(role, phone));
+    const ttl = await this.redis.ttl(this.cooldownKey(role, phone, purpose));
     return ttl > 0 ? ttl : 0;
   }
 
-  async startCooldown(role: Role, phone: string, seconds: number): Promise<void> {
-    await this.redis.set(this.cooldownKey(role, phone), '1', 'EX', seconds);
+  async startCooldown(
+    role: Role,
+    phone: string,
+    seconds: number,
+    purpose: OtpPurpose = 'LOGIN',
+  ): Promise<void> {
+    await this.redis.set(this.cooldownKey(role, phone, purpose), '1', 'EX', seconds);
   }
 
   /**

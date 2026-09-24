@@ -104,10 +104,10 @@ export class CloudinaryStorage implements StoragePort {
     });
   }
 
-  async deleteFile(storageKey: string): Promise<void> {
+  async deleteFile(storageKey: string, isPrivate = true): Promise<void> {
     await cloudinary.uploader.destroy(storageKey, {
-      // Important to specify the type so Cloudinary can locate authenticated assets too.
-      type: 'authenticated',
+      // Must match the upload's type — see `presignUpload` — or Cloudinary finds nothing to delete.
+      type: isPrivate ? 'authenticated' : 'upload',
       invalidate: true,
     });
   }

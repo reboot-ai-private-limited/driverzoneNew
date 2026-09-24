@@ -9,6 +9,7 @@ import type { SettingsReadContract } from '../settings/settings.public.js';
 import type { IdentityPublicContract } from '../identity/identity.public.js';
 import { liveAssignmentCutoff, REASSIGNABLE_STATUSES } from './domain/booking.entity.js';
 import type {
+  BookingAccountContract,
   BookingFavouritesContract,
   BookingsPublicContract,
   ClaimResult,
@@ -88,6 +89,8 @@ export interface BookingsContainer {
    * needs "have these two ridden together" the dispatch contract would hand it `claimForDriver`.
    */
   favouritesContract: BookingFavouritesContract;
+  /** For `accounts` — the one thing a deletion needs to know about trips. */
+  accountContract: BookingAccountContract;
   /**
    * Called by the payment webhook once a charge settles. Wired at the composition root.
    *
@@ -332,6 +335,10 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     favouritesContract: {
       hasCompletedTripTogether: (customerId, driverId) =>
         repo.hasCompletedTripTogether(customerId, driverId),
+    },
+
+    accountContract: {
+      hasOpenBooking: (party, accountId) => repo.hasOpenBooking(party, accountId),
     },
 
     onPaymentCaptured: async (bookingId, paymentId) => {

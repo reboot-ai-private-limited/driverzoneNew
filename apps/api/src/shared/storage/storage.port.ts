@@ -63,6 +63,9 @@ export interface StoragePort {
   /**
    * Deletes a file from the storage provider.
    * @param storageKey The unique identifier of the stored file.
+   * @param isPrivate Must match how it was uploaded — the provider looks private and public files
+   *   up separately, and deleting with the wrong one silently finds nothing. Defaults to private,
+   *   which is what driver documents are.
    */
-  deleteFile(storageKey: string): Promise<void>;
+  deleteFile(storageKey: string, isPrivate?: boolean): Promise<void>;
 }

@@ -20,6 +20,8 @@ export default function OnboardingLayout(): ReactElement {
         the screen; nothing else does.
       */}
       <Stack.Screen name="location-disclosure" options={{ gestureEnabled: false }} />
+      {/* Same rule for the notification explanation, which hands over to the screen above. */}
+      <Stack.Screen name="notification-disclosure" options={{ gestureEnabled: false }} />
     </Stack>
   );
 }

@@ -23,6 +23,12 @@ import {
   View,
 } from 'react-native';
 import { FieldRow } from '@/components/FieldRow';
+import {
+  INDIA_DIALLING_CODE,
+  isValidIndianMobile,
+  normaliseInput,
+  toE164,
+} from '@/features/auth/phoneNumber';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { uploadFile } from '@/lib/api/client';
 import {
@@ -165,13 +171,15 @@ export default function OnboardingProfileScreen(): ReactElement {
     },
   });
 
+  /**
+   * NO PERMISSION REQUEST HERE, deliberately. `launchImageLibraryAsync` opens the system photo
+   * picker directly — `PickVisualMedia` on Android, `PHPickerViewController` on iOS — and neither
+   * needs a permission grant to open. On Android 13+ `requestMediaLibraryPermissionsAsync()` is
+   * already a no-op; on 12 and below it put up a real "Allow photos and media" dialog for a picker
+   * that returns its result via a direct URI grant and never reads storage otherwise. See the same
+   * note in `apps/customer/app/(auth)/profile-setup.tsx`.
+   */
   async function pickPicture(): Promise<void> {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setPictureError('DriverZone needs access to your photos to set a profile picture.');
-      return;
-    }
-
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       // Square, because it renders in a circle everywhere it appears — cropping here beats
@@ -204,7 +212,7 @@ export default function OnboardingProfileScreen(): ReactElement {
       address: profile.data.address ?? '',
       experienceYears:
         profile.data.experience_years === null ? '' : String(profile.data.experience_years),
-      alternateNumber: profile.data.alternate_number ?? '',
+      alternateNumber: toNational(profile.data.alternate_number),
       vehicleTypePreferences: profile.data.vehicle_type_preferences.filter(
         (code): code is VehicleTypePreference => code in VEHICLE_LABELS,
       ),
@@ -214,7 +222,7 @@ export default function OnboardingProfileScreen(): ReactElement {
         (code): code is CarCategory => code in CAR_CATEGORY_LABELS,
       ),
       emergencyName: profile.data.emergency_contact?.name ?? '',
-      emergencyNumber: profile.data.emergency_contact?.number ?? '',
+      emergencyNumber: toNational(profile.data.emergency_contact?.number),
       profilePicture: profile.data.profile_picture,
       canDriveHill: profile.data.can_drive_hill,
     });
@@ -269,8 +277,21 @@ export default function OnboardingProfileScreen(): ReactElement {
     const years = Number.parseInt(draft.experienceYears, 10);
     if (!Number.isNaN(years)) body.experience_years = years;
 
-    const alternate = draft.alternateNumber.trim();
-    if (alternate !== '') body.alternate_number = alternate;
+    /*
+     * The boxes hold the 10-digit number only; `+91` is added here, so a driver never types it.
+     * Checked before sending because the server takes E.164 only and would reject the whole
+     * PATCH — losing every other field — for one short number.
+     */
+    const alternate = draft.alternateNumber;
+    if (alternate !== '' && !isValidIndianMobile(alternate)) {
+      setSaveError('Enter a valid 10-digit alternate number, or leave it empty.');
+      return;
+    }
+    if (alternate !== '') body.alternate_number = toE164(alternate);
+    if (draft.emergencyNumber !== '' && !isValidIndianMobile(draft.emergencyNumber)) {
+      setSaveError('Enter a valid 10-digit emergency contact number.');
+      return;
+    }
 
     // Both multi-select sets are always sent, including as an empty array — "unchecked
     // everything" is a real answer the driver may need to give, and omitting it would leave a
@@ -288,9 +309,9 @@ export default function OnboardingProfileScreen(): ReactElement {
      * the only option that neither errors nor silently discards half of what they typed.
      */
     const emergencyName = draft.emergencyName.trim();
-    const emergencyNumber = draft.emergencyNumber.trim();
+    const emergencyNumber = draft.emergencyNumber;
     if (emergencyName !== '' && emergencyNumber !== '') {
-      body.emergency_contact = { name: emergencyName, number: emergencyNumber };
+      body.emergency_contact = { name: emergencyName, number: toE164(emergencyNumber) };
     } else if (emergencyName === '' && emergencyNumber === '') {
       body.emergency_contact = null;
     }
@@ -435,16 +456,22 @@ export default function OnboardingProfileScreen(): ReactElement {
             icon="phone"
             focused={focusedField === 'alternate'}
           >
-            <TextInput
-              value={draft.alternateNumber}
-              onChangeText={(value) => patch({ alternateNumber: value })}
-              onFocus={() => setFocusedField('alternate')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="+91 00000 00000"
-              placeholderTextColor={colors.faint}
-              keyboardType="phone-pad"
-              style={styles.input}
-            />
+            <View style={styles.phoneRow}>
+              <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
+              <TextInput
+                value={draft.alternateNumber}
+                // Digits only, and a pasted "+91 98765 43210" lands as the ten digits.
+                onChangeText={(value) => patch({ alternateNumber: normaliseInput(value) })}
+                onFocus={() => setFocusedField('alternate')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="98765 43210"
+                placeholderTextColor={colors.faint}
+                keyboardType="phone-pad"
+                maxLength={10}
+                style={[styles.input, styles.flex]}
+                accessibilityLabel="Alternate number"
+              />
+            </View>
           </FieldRow>
 
           {/* Competence, not ownership: the driver drives the CUSTOMER'S car
@@ -531,16 +558,21 @@ export default function OnboardingProfileScreen(): ReactElement {
             icon="phone-call"
             focused={focusedField === 'emergencyNumber'}
           >
-            <TextInput
-              value={draft.emergencyNumber}
-              onChangeText={(value) => patch({ emergencyNumber: value })}
-              onFocus={() => setFocusedField('emergencyNumber')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="+91 00000 00000"
-              placeholderTextColor={colors.faint}
-              keyboardType="phone-pad"
-              style={styles.input}
-            />
+            <View style={styles.phoneRow}>
+              <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
+              <TextInput
+                value={draft.emergencyNumber}
+                onChangeText={(value) => patch({ emergencyNumber: normaliseInput(value) })}
+                onFocus={() => setFocusedField('emergencyNumber')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="98765 43210"
+                placeholderTextColor={colors.faint}
+                keyboardType="phone-pad"
+                maxLength={10}
+                style={[styles.input, styles.flex]}
+                accessibilityLabel="Emergency contact number"
+              />
+            </View>
           </FieldRow>
 
           {/*
@@ -634,6 +666,17 @@ function toIsoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * A stored `+919876543210` → the `9876543210` the box holds beside its fixed `+91`. Anything that
+ * is not an Indian mobile shows as empty rather than half-parsed — the same rule as the customer
+ * app's `edit-profile.tsx`.
+ */
+function toNational(e164: string | null | undefined): string {
+  if (e164 === null || e164 === undefined) return '';
+  const digits = e164.replace(/^\+91/, '');
+  return /^\d{10}$/.test(digits) ? digits : '';
+}
+
 function formatDate(date: Date): string {
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
 }
@@ -694,6 +737,8 @@ const styles = StyleSheet.create({
   avatarError: { ...text.caption, color: colors.danger, marginTop: space.xs, textAlign: 'center' },
 
   input: { ...text.body, color: colors.fg, paddingVertical: space.sm },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  diallingCode: { ...text.body, color: colors.muted },
   inputMultiline: { minHeight: 44, textAlignVertical: 'top' },
   inputText: { ...text.body, color: colors.fg, paddingVertical: space.sm + 3 },
   placeholder: { ...text.body, color: colors.faint, paddingVertical: space.sm + 3 },

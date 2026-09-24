@@ -1,8 +1,9 @@
 import type { Role } from '@driverzone/contracts';
-import { judgeOtp } from '../../domain/otpChallenge.entity.js';
-import { otpAttemptsExceeded, otpInvalidOrExpired } from '../../domain/identity.errors.js';
+import { otpInvalidOrExpired } from '../../domain/identity.errors.js';
+import { OtpChallengeVerifier } from '../otpChallengeVerifier.js';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { Account, AccountRepositoryPort } from '../../domain/account.repository.port.js';
+import type { AccountMessagesPort } from '../../domain/accountMessages.port.js';
 import type { OtpStorePort } from '../../domain/otpStore.port.js';
 import type { TokenIssuer } from '../tokenIssuer.js';
 
@@ -55,6 +56,7 @@ export class VerifyOtpUseCase {
     private readonly pepper: string,
     /** Absent in production and in every test that does not deliberately opt in. */
     private readonly devBypass?: DevOtpBypass | undefined,
+    private readonly messages?: AccountMessagesPort | undefined,
   ) {}
 
   /**
@@ -83,29 +85,11 @@ export class VerifyOtpUseCase {
       return this.completeSignIn(input);
     }
 
-    const challenge = await this.store.find(role, phone);
-
-    /**
-     * The attempt is counted BEFORE the code is judged, and atomically.
-     *
-     * Counting after a comparison — or computing `attempts + 1` from what `find` returned —
-     * would let a burst of parallel guesses all read the same starting count and collectively
-     * consume one attempt. The store increments and reports the new value; nothing here does
-     * arithmetic on a stale read.
+    /*
+     * Counted atomically before judging, and an exhausted challenge is burned — see
+     * `OtpChallengeVerifier`, which account deletion shares so the two cannot drift apart.
      */
-    const attempts = await this.store.recordAttempt(role, phone);
-    const verdict = judgeOtp(challenge, input.code, attempts ?? 0, this.pepper);
-
-    if (verdict.outcome === 'ABSENT' || verdict.outcome === 'WRONG') {
-      throw otpInvalidOrExpired();
-    }
-
-    if (verdict.outcome === 'EXHAUSTED') {
-      // Burn it rather than leaving a spent challenge to expire: the next step is a new code, and
-      // a challenge that lingers at max attempts is just a row that can only ever return errors.
-      await this.store.burn(role, phone);
-      throw otpAttemptsExceeded();
-    }
+    await new OtpChallengeVerifier(this.store, this.pepper).check(role, phone, input.code, 'LOGIN');
 
     return this.completeSignIn(input);
   }
@@ -139,6 +123,11 @@ export class VerifyOtpUseCase {
     }
 
     const account = existing ?? (await this.accounts.create(role, phone));
+
+    // Not awaited: the port never rejects, and the customer's session must not wait on WhatsApp.
+    if (existing === undefined && role === 'CUSTOMER') {
+      void this.messages?.welcomeCustomer(account.mobileNumber, account.fullName);
+    }
 
     // Single-use: the code cannot be replayed even inside its 5-minute window.
     await this.store.burn(role, phone);

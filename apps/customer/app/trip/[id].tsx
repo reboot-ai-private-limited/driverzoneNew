@@ -59,6 +59,42 @@ import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
 type FeatherName = ComponentProps<typeof Feather>['name'];
 
 /**
+ * `RazorpayCheckout.open()`'s rejection is Razorpay Android's raw `PaymentData` JSON
+ * (`RazorpayModule.onPaymentError`), not a message meant for a screen. Most of the time
+ * `description` is a short human string ("Payment Cancelled"). For failures at the
+ * payment_authentication step — including some cancellations, observed as
+ * `BAD_REQUEST_ERROR` / `payment_error` — the Android SDK instead stuffs the ENTIRE nested
+ * `{"error":{...}}` payload into that same `description` field as a string. Read literally, that
+ * dumps raw JSON in the customer's face instead of an error; this drills into either shape and
+ * always returns something a customer can read.
+ */
+function describeCheckoutError(error: unknown): string {
+  if (typeof error !== 'object' || error === null) return 'Payment was not completed.';
+  const raw = error as { description?: unknown; error?: unknown };
+
+  let nested = typeof raw.error === 'object' && raw.error !== null ? raw.error : null;
+  if (nested === null && typeof raw.description === 'string' && raw.description.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw.description) as { error?: unknown };
+      if (typeof parsed.error === 'object' && parsed.error !== null) nested = parsed.error;
+    } catch {
+      /* not JSON after all — falls through to the plain-string case below */
+    }
+  }
+
+  if (nested !== null) {
+    const reason = 'reason' in nested ? String((nested as { reason?: unknown }).reason) : null;
+    return reason === 'payment_cancelled'
+      ? 'You cancelled the payment.'
+      : 'Your payment could not be completed.';
+  }
+
+  return typeof raw.description === 'string' && raw.description.length > 0
+    ? raw.description
+    : 'Payment was not completed.';
+}
+
+/**
  * The trip's own screen — reached from Confirm, and a ROUTE rather than a sheet.
  *
  * Every other booking surface in this app is a sheet over the map, deliberately, but a trip in
@@ -155,11 +191,7 @@ export default function TripScreen(): ReactElement {
 
         await queryClient.invalidateQueries({ queryKey: keys.bookings.detail(id) });
       } catch (error) {
-        const description =
-          typeof error === 'object' && error !== null && 'description' in error
-            ? String((error as { description?: unknown }).description)
-            : 'Payment was not completed.';
-        setPaymentError(`${description} You can try again.`);
+        setPaymentError(`${describeCheckoutError(error)} You can try again.`);
       } finally {
         setCheckoutInFlight(false);
       }

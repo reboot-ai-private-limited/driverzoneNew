@@ -1,78 +1,168 @@
 import type { Metadata } from 'next';
 import type { ReactElement } from 'react';
+import Image from 'next/image';
+import {
+  BadgeCheck,
+  Wallet,
+  Headphones,
+  Shield,
+  ClipboardList,
+  Car,
+  Globe,
+  type LucideIcon,
+} from 'lucide-react';
 import { PageHero } from '@/components/PageHero';
+import { SITE_URL } from '@/lib/site';
+
+/* ── SEO ─────────────────────────────────────────────────────────────────── */
 
 export const metadata: Metadata = {
-  title: 'About',
+  title: 'About Driver Zone — Reliable Driver Hire Services in Siliguri',
   description:
-    'DriverZone connects people who own a car with trained drivers for hire — by the hour in the city, or by the day for outstation and hill journeys.',
+    'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. Verified drivers, luxury vehicles, safe & reliable travel for local commutes, outstation trips, and long-distance journeys.',
+  alternates: {
+    canonical: `${SITE_URL}/about`,
+  },
+  openGraph: {
+    title: 'About Driver Zone — Reliable Driver Hire Services in Siliguri',
+    description:
+      'DriverZone is your trusted partner for professional Driver Hire in Siliguri. Verified drivers, luxury vehicles, safe & reliable travel for local and outstation trips.',
+    url: `${SITE_URL}/about`,
+    siteName: 'Driver Zone',
+    type: 'website',
+    images: [
+      {
+        url: `${SITE_URL}/why-choose.webp`,
+        width: 1200,
+        height: 630,
+        alt: 'DriverZone team — professional driver hire services in Siliguri',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'About Driver Zone — Reliable Driver Hire Services in Siliguri',
+    description:
+      'DriverZone is your trusted partner for professional Driver Hire in Siliguri. Verified drivers, safe & reliable travel.',
+    images: [`${SITE_URL}/why-choose.webp`],
+  },
 };
 
-/**
- * `/about`.
- *
- * Kept deliberately short and free of the things an about page usually invents: no founding year,
- * no headcount, no "thousands of happy customers", no mission statement written in the passive
- * voice. None of those are knowable from the codebase, and a number published here is a number
- * somebody has to keep true.
- *
- * What it does say is what the product is and who it is for, which is genuinely useful to a
- * customer deciding whether this is a taxi service (it is not) and to a driver deciding whether
- * to sign up.
- */
+/* ── Data ────────────────────────────────────────────────────────────────── */
+
+type Feature = { label: string; icon: LucideIcon };
+
+const FEATURES: readonly Feature[] = [
+  { label: 'Verified Drivers',          icon: BadgeCheck    },
+  { label: 'Affordable Pricing',        icon: Wallet        },
+  { label: '24/7 Service and Support',  icon: Headphones    },
+  { label: 'Safe & Trusted',            icon: Shield        },
+  { label: 'On-Time Driver Reporting',  icon: ClipboardList },
+];
+
+type Card = { title: string; icon: LucideIcon; body: string };
+
+const CARDS: readonly Card[] = [
+  {
+    title: 'Our Mission',
+    icon: Car,
+    body: 'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. We specialize in providing skilled, punctual, and verified drivers for local commutes, outstation trips, and long-distance journeys. Our mission is to make every ride safe, comfortable, and hassle-free, ensuring peace of mind for all our customers. With a commitment to excellence, we maintain a luxury fleet of vehicles, paired with drivers who know Siliguri and surrounding areas inside out. Every trip is handled with utmost professionalism, transparency, and care. Whether you need a driver for personal use, business travel, or special occasions, DriverZone guarantees dependable service and on-time arrival. Experience convenience, reliability, and safety combined, making us the preferred choice for driver services in Siliguri.',
+  },
+  {
+    title: 'Our Vision',
+    icon: Globe,
+    body: 'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. We specialize in providing skilled, punctual, and verified drivers for local commutes, outstation trips, and long-distance journeys. Our mission is to make every ride safe, comfortable, and hassle-free, ensuring peace of mind for all our customers. With a commitment to excellence, we maintain a luxury fleet of vehicles, paired with drivers who know Siliguri and surrounding areas inside out. Every trip is handled with utmost professionalism, transparency, and care. Whether you need a driver for personal use, business travel, or special occasions, DriverZone guarantees dependable service and on-time arrival. Experience convenience, reliability, and safety combined, making us the preferred choice for driver services in Siliguri.',
+  },
+];
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
+
 export default function AboutPage(): ReactElement {
   return (
     <>
       <PageHero
-        eyebrow="About"
-        title="Drivers for the car you already own"
-        lead="DriverZone is a driver-on-hire service. You keep your own car, and we bring a trained driver to it."
+        eyebrow="About Driver Zone"
+        title="Reliable Driver Hire Services Siliguri"
+        breadcrumbs={[{ label: 'About Driver Zone' }]}
       />
 
-      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-        <div className="space-y-6 text-[17px] leading-relaxed text-muted">
-          <p>
-            Plenty of journeys do not need a taxi. The car is in the driveway, it is the one the
-            family is comfortable in, and the only thing missing is somebody to drive it — because
-            the trip is long, because the roads are unfamiliar, because of an evening out, or
-            simply because driving it yourself is the part of the day you would rather skip.
-          </p>
-          <p>
-            That is the whole of what we do. A customer books a driver for a stretch of time or for
-            a journey; a driver near them takes the job; the car never leaves its owner. It is a
-            straightforward service, and most of the work is in making it dependable — that the
-            driver turns up, that they can actually drive the route, and that the fare is the one
-            that was quoted.
-          </p>
+      {/* ── Section 1: Two-column intro ─────────────────────────────────── */}
+      <section className="bg-bg">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <div className="grid items-center gap-12 md:grid-cols-2 md:gap-16">
 
-          <h2 className="pt-6 text-2xl font-bold tracking-tight text-fg">Where we operate</h2>
-          <p>
-            We are based in Siliguri and serve North Bengal, including the hill routes towards
-            Darjeeling and Kalimpong. Hill driving is priced and staffed separately from the
-            plains — it is a different skill, and we do not pretend otherwise.
-          </p>
+            {/* Left — text + features */}
+            <div>
+              <p className="text-[15px] leading-relaxed text-muted">
+                DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car
+                Driver Hire in Siliguri. We specialize in providing skilled, punctual, and verified
+                drivers for local commutes, outstation trips, and long-distance journeys. Our mission
+                is to make every ride safe, comfortable, and hassle-free, ensuring peace of mind for
+                all our customers.
+              </p>
+              <p className="mt-4 text-[15px] leading-relaxed text-muted">
+                With a commitment to excellence, we maintain a luxury fleet of vehicles, paired with
+                drivers who know Siliguri and surrounding areas inside out. Every trip is handled
+                with utmost professionalism, transparency, and care. Whether you need a driver for
+                personal use, business travel, or special occasions, DriverZone guarantees dependable
+                service and on-time arrival. Experience convenience, reliability, and safety
+                combined, making us the preferred choice for driver services in Siliguri.
+              </p>
 
-          <h2 className="pt-6 text-2xl font-bold tracking-tight text-fg">
-            How we treat our drivers
-          </h2>
-          <p>
-            Drivers are paid a set amount for each job, agreed before they accept it, rather than a
-            percentage that moves with surcharges they had no part in. If a journey runs to three
-            days, they are paid for three days. Documents are verified before a driver takes their
-            first trip, and a driver whose licence has lapsed stops receiving work until it is
-            renewed.
-          </p>
+              {/* Feature grid */}
+              <ul className="mt-8 grid grid-cols-2 gap-x-6 gap-y-5">
+                {FEATURES.map((f) => {
+                  const Icon = f.icon;
+                  return (
+                    <li key={f.label} className="flex items-center gap-3">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand">
+                        <Icon size={18} className="text-fg" aria-hidden />
+                      </span>
+                      <span className="text-[14px] font-medium text-fg">{f.label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
 
-          <h2 className="pt-6 text-2xl font-bold tracking-tight text-fg">Getting in touch</h2>
-          <p>
-            Questions about a booking, a fare or becoming a driver are all welcome on the{' '}
-            <a href="/contact" className="font-medium text-link underline underline-offset-4">
-              contact page
-            </a>
-            .
-          </p>
+            {/* Right — photo */}
+            <div className="relative aspect-[4/3] overflow-hidden rounded-2xl md:aspect-auto md:h-full md:min-h-[460px]">
+              <Image
+                src="/why-choose.webp"
+                alt="DriverZone team reviewing driver documents at the Siliguri office"
+                fill
+                sizes="(min-width: 768px) 50vw, 100vw"
+                className="object-cover"
+                priority
+              />
+            </div>
+
+          </div>
         </div>
-      </div>
+      </section>
+
+      {/* ── Section 2: Mission & Vision cards ───────────────────────────── */}
+      <section className="bg-bg-sunken">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            {CARDS.map((card) => {
+              const Icon = card.icon;
+              return (
+                <div
+                  key={card.title}
+                  className="flex flex-col items-center rounded-2xl border border-brand/30 bg-bg px-8 py-10 text-center shadow-sm"
+                >
+                  <span className="flex size-14 items-center justify-center rounded-full bg-brand">
+                    <Icon size={26} className="text-fg" aria-hidden />
+                  </span>
+                  <h2 className="mt-4 text-xl font-bold text-fg">{card.title}</h2>
+                  <p className="mt-4 text-[14px] leading-relaxed text-muted">{card.body}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
     </>
   );
 }

@@ -47,4 +47,13 @@ export interface SessionRepositoryPort {
    * would sign out the request that legitimately won.
    */
   revokeSession(sessionId: string, revokedAt: Date): Promise<void>;
+
+  /**
+   * Revokes every live session this account holds, on every device.
+   *
+   * For the moments the ACCOUNT stops being valid rather than one token: an admin deactivated, an
+   * account deleted. Revoking one family would leave the same person signed in on their other
+   * phone. Access tokens already issued still run out their 15 minutes; refresh is what stops.
+   */
+  revokeAllForUser(userId: string, role: Role, revokedAt: Date): Promise<void>;
 }

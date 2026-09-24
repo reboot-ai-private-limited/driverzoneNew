@@ -78,7 +78,72 @@ body {
  */
 html {
   scroll-behavior: smooth;
-  scroll-padding-top: 5rem;
+  scroll-padding-top: 6rem;
+}
+
+/**
+ * `glass` — the frosted surface used by the header pills, and meant for any card, section or
+ * component that sits over something worth seeing through.
+ *
+ * Three layers:
+ *   1. a translucent tint over a 10px backdrop blur — the frosted body;
+ *   2. a 1px edge drawn by `::before`, whose gradient runs bright at the top-left and
+ *      bottom-right and fades to nothing at the top-right and bottom-left. The masks cut the
+ *      pseudo-element down to just its padding ring (content-box XOR border-box), which is how a
+ *      gradient border keeps the element's `border-radius` — `border-image` cannot;
+ *   3. a soft drop shadow, so the surface still reads when what is behind it is plain white.
+ *
+ * Everything is a custom property, so a use site tunes it without a variant class:
+ * `className="glass [--glass-tint:rgb(255_255_255/0.6)]"`.
+ *
+ * In `@layer components` so a positioning utility on the same element (`sticky`, `absolute`)
+ * beats the `position: relative` here — the pseudo-element only needs *a* containing block.
+ */
+@layer components {
+  .glass {
+    --glass-tint: rgb(255 255 255 / 0.16);
+    --glass-edge: rgb(255 255 255 / 0.85);
+    --glass-blur: 10px;
+    --glass-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.28);
+
+    position: relative;
+    background-color: var(--glass-tint);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    box-shadow:
+      var(--glass-shadow),
+      inset 0 1px 0 rgb(255 255 255 / 0.18);
+  }
+
+  .glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      45deg,
+      var(--glass-edge) 0%,
+      transparent 15%,
+      transparent 85%,
+      var(--glass-edge) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+  }
+
+  /* No backdrop-filter support: fall back to a mostly opaque tint so text stays legible. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      background-color: rgb(255 255 255 / 0.85);
+    }
+  }
 }
 
 /**

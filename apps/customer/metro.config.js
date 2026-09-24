@@ -72,10 +72,17 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
-// Expo's getDefaultConfig sets server.tls to false, which Metro's own config validator
-// complains about with 'Unknown option "server.tls" with value false was found.'
-if (config.server && 'tls' in config.server) {
+config.server = config.server || {};
+if ('tls' in config.server) {
   delete config.server.tls;
 }
+const prevCustRewrite = config.server.rewriteRequestUrl;
+config.server.rewriteRequestUrl = (url) => {
+  const rewritten = prevCustRewrite ? prevCustRewrite(url) : url;
+  if (rewritten.startsWith('/index.')) {
+    return `/apps/customer${rewritten}`;
+  }
+  return rewritten;
+};
 
 module.exports = config;

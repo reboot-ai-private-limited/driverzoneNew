@@ -33,6 +33,8 @@ export interface CustomerDoc {
   ratingCount: number;
   fcmTokens?: string[];
   isBlocked: boolean;
+  /** Set when the account was deleted and its personal data erased. See `accountEraser.impl.ts`. */
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -114,6 +116,13 @@ const customerSchema = new Schema<CustomerDoc>(
     fcmTokens: { type: [String], default: [] },
 
     isBlocked: { type: Boolean, default: false },
+
+    /**
+     * The row is KEPT after deletion, emptied: bookings, payments and wallet entries still point at
+     * it and are records we must retain. `phone` is replaced with `deleted:<id>` at the same time,
+     * which frees the real number for a brand-new account.
+     */
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

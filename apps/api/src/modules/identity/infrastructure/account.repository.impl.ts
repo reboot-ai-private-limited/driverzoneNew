@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import type { Role } from '@driverzone/contracts';
 import { AppError } from '@/shared/errors/AppError.js';
 import type { Account, AccountRepositoryPort } from '../domain/account.repository.port.js';
@@ -47,6 +48,32 @@ export class MongoAccountRepository implements AccountRepositoryPort {
           mobileNumber: doc.phone,
           fullName: doc.fullName ?? null,
           isBlocked: doc.isBlocked ?? false
+        };
+  }
+
+  async findById(role: Role, id: string): Promise<Account | undefined> {
+    if (!mongoose.isValidObjectId(id)) return undefined;
+
+    if (role === 'ADMIN') {
+      const admin = await AdminUserModel.findOne({ _id: id, isActive: true }).lean().exec();
+      return admin === null
+        ? undefined
+        : { id: String(admin._id), mobileNumber: admin.phone, fullName: admin.fullName, isBlocked: false };
+    }
+
+    // `deletedAt: null` matches a missing field too, so every row that predates deletion counts.
+    const doc =
+      role === 'CUSTOMER'
+        ? await CustomerModel.findOne({ _id: id, deletedAt: null }).lean().exec()
+        : await DriverModel.findOne({ _id: id, deletedAt: null }).lean().exec();
+
+    return doc === null
+      ? undefined
+      : {
+          id: String(doc._id),
+          mobileNumber: doc.phone,
+          fullName: doc.fullName ?? null,
+          isBlocked: doc.isBlocked ?? false,
         };
   }
 

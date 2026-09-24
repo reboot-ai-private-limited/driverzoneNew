@@ -1,5 +1,5 @@
 import type { Role } from '@driverzone/contracts';
-import type { OtpChallenge } from './otpChallenge.entity.js';
+import type { OtpChallenge, OtpPurpose } from './otpChallenge.entity.js';
 
 /**
  * PORT — where a live OTP challenge lives, and the counters that throttle it.
@@ -12,12 +12,22 @@ import type { OtpChallenge } from './otpChallenge.entity.js';
  *
  * That is why `recordAttempt` returns the post-increment count rather than the use case
  * incrementing what `find` returned.
+ *
+ * Every challenge and cooldown method takes a trailing `purpose`, defaulting to `LOGIN`. The
+ * hourly send counters deliberately do NOT: a phone gets one budget of texts per hour however many
+ * flows are asking, or a second purpose would double what an attacker can make us send.
  */
 export interface OtpStorePort {
-  /** Replaces any existing challenge for this number, resetting attempts. */
-  save(role: Role, phone: string, challenge: OtpChallenge, ttlSeconds: number): Promise<void>;
+  /** Replaces any existing challenge for this number and purpose, resetting attempts. */
+  save(
+    role: Role,
+    phone: string,
+    challenge: OtpChallenge,
+    ttlSeconds: number,
+    purpose?: OtpPurpose,
+  ): Promise<void>;
 
-  find(role: Role, phone: string): Promise<OtpChallenge | undefined>;
+  find(role: Role, phone: string, purpose?: OtpPurpose): Promise<OtpChallenge | undefined>;
 
   /**
    * Atomically increments the attempt counter and returns the NEW value.
@@ -25,10 +35,10 @@ export interface OtpStorePort {
    * Returns `undefined` when no challenge exists — there is nothing to count against, and the
    * caller must not conjure one.
    */
-  recordAttempt(role: Role, phone: string): Promise<number | undefined>;
+  recordAttempt(role: Role, phone: string, purpose?: OtpPurpose): Promise<number | undefined>;
 
   /** Deletes the challenge. Called on success and on attempt exhaustion alike. */
-  burn(role: Role, phone: string): Promise<void>;
+  burn(role: Role, phone: string, purpose?: OtpPurpose): Promise<void>;
 
   /**
    * Seconds remaining on the resend cooldown, or 0 if a send is allowed right now.
@@ -36,9 +46,9 @@ export interface OtpStorePort {
    * Read separately from `startCooldown` so the caller can report the remaining time in an error
    * body without having to guess it.
    */
-  cooldownRemaining(role: Role, phone: string): Promise<number>;
+  cooldownRemaining(role: Role, phone: string, purpose?: OtpPurpose): Promise<number>;
 
-  startCooldown(role: Role, phone: string, seconds: number): Promise<void>;
+  startCooldown(role: Role, phone: string, seconds: number, purpose?: OtpPurpose): Promise<void>;
 
   /**
    * Atomically increments a rolling hourly counter and returns `{ count, ttlSeconds }`.

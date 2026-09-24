@@ -266,6 +266,7 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
         id: profile.id,
         mobile_number: profile.mobileNumber,
         full_name: profile.fullName,
+        admin_role: profile.adminRole,
       };
       sendSuccess(req, res, body, 'Profile');
     }),
@@ -279,6 +280,7 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
         id: updated.id,
         mobile_number: updated.mobileNumber,
         full_name: updated.fullName,
+        admin_role: updated.adminRole,
       };
       sendSuccess(req, res, body, 'Profile updated');
     }),

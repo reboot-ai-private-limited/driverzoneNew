@@ -604,6 +604,24 @@ describe('VerifyDriverUseCase', () => {
     expect(result.isVerified).toBe(true);
   });
 
+  it('sends the approval message to the driver', async () => {
+    const approved: Array<[string, string | null]> = [];
+    const messages = {
+      welcomeCustomer: async () => {},
+      driverApproved: async (phone: string, name: string | null) => {
+        approved.push([phone, name]);
+      },
+    };
+    const driver = submitted();
+
+    await new VerifyDriverUseCase(fakeDrivers(driver), fakeDocuments(), fakeAudit(), undefined, messages).approve(
+      'drv_1',
+      { adminId: 'adm_1' },
+    );
+
+    expect(approved).toEqual([[driver.mobileNumber, driver.fullName]]);
+  });
+
   it('records an APPROVE audit entry attributed to the acting admin', async () => {
     const audit = fakeAudit();
 

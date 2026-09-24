@@ -1,7 +1,10 @@
 import { FontAwesome5, MaterialCommunityIcons, Octicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { Tabs } from 'expo-router';
-import type { ReactElement } from 'react';
+import { type ReactElement, useEffect } from 'react';
 import { TabBar } from '@/components/TabBar';
+import { listBookings } from '@/lib/api/endpoints/bookings';
+import { keys } from '@/lib/query/keys';
 
 /**
  * The signed-in shell.
@@ -16,6 +19,18 @@ import { TabBar } from '@/components/TabBar';
  * beside it.
  */
 export default function TabsLayout(): ReactElement {
+  const queryClient = useQueryClient();
+
+  /*
+   * Ride history is fetched as soon as the signed-in shell opens, not when the Rides tab is first
+   * tapped. The tabs mount lazily, so without this the first visit after every app start showed a
+   * spinner over an empty list for however long the request took. Same key and fetcher as the
+   * screen, so the screen finds it in the cache; a request already in flight is simply joined.
+   */
+  useEffect(() => {
+    void queryClient.prefetchQuery({ queryKey: keys.bookings.list(), queryFn: listBookings });
+  }, [queryClient]);
+
   return (
     <Tabs
       // `tabBar` replaces the stock bar entirely — colours, spacing and the selected state all

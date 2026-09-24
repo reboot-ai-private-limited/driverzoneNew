@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import type { Role } from '@driverzone/contracts';
 import { allowDevShortcuts, env, isProduction } from '@/config/env.js';
 import { DEV_ACCOUNT_PHONES } from '@/config/devAccounts.js';
@@ -22,6 +22,7 @@ import { SubmitOnboardingUseCase } from './application/useCases/submitOnboarding
 import { SetDutyStatusUseCase } from './application/useCases/setDutyStatus.usecase.js';
 import { RecordLocationPingsUseCase } from './application/useCases/recordLocationPings.usecase.js';
 import { ManageAdminProfileUseCase } from './application/useCases/manageAdminProfile.usecase.js';
+import { ManageAdminsUseCase } from './application/useCases/manageAdmins.usecase.js';
 import { VerifyDriverUseCase } from './application/useCases/verifyDriver.usecase.js';
 import { ListDriversAdminUseCase } from './application/useCases/listDriversAdmin.usecase.js';
 import { ListCustomersAdminUseCase } from './application/useCases/listCustomersAdmin.usecase.js';
@@ -40,6 +41,7 @@ import { MongoCustomerDeviceRepository } from './infrastructure/customerDevice.r
 import { MongoDriverDeviceRepository } from './infrastructure/driverDevice.repository.impl.js';
 import { MongoDutySessionRepository } from './infrastructure/dutySession.repository.impl.js';
 import { MongoAdminProfileRepository } from './infrastructure/adminProfile.repository.impl.js';
+import { MongoAdminRosterRepository } from './infrastructure/adminRoster.repository.impl.js';
 import { MongoAuditLog } from './infrastructure/audit.mongo.js';
 import { LoggingOtpSender } from './infrastructure/otpSender.log.js';
 import { WhatsAppOtpSender } from './infrastructure/otpSender.whatsapp.js';
@@ -47,6 +49,7 @@ import { StartMessagingOtpSender } from './infrastructure/otpSender.startmessagi
 import { WhatsAppFirstOtpSender } from './infrastructure/otpSender.whatsAppFirst.js';
 import { WaAgentOtpSender } from './infrastructure/otpSender.waagent.js';
 import { WaAgentDeliveryStatus } from './infrastructure/waagentDeliveryStatus.js';
+import { WaAgentAccountMessages } from './infrastructure/accountMessages.waagent.js';
 import { enqueueOtpDeliveryCheck } from '@/shared/queue/otpDeliveryJobs.js';
 import { CloudinaryStorage } from '@/shared/storage/cloudinary.storage.js';
 import { RedisOtpStore } from './infrastructure/otpStore.redis.js';
@@ -58,8 +61,17 @@ import { makeDriverControllers } from './interface/driver.controller.js';
 import { buildDriverRouter } from './interface/driver.routes.js';
 import { makeAdminControllers } from './interface/admin.controller.js';
 import { buildAdminRouter } from './interface/admin.routes.js';
+import { makeAdminRosterControllers } from './interface/adminRoster.controller.js';
+import { makeRequireSuperAdmin } from './interface/requireSuperAdmin.js';
 import { registerIdentitySwaggerPaths } from './interface/identity.swagger.js';
-import type { AssignableDriver, IdentityPublicContract } from './identity.public.js';
+import type {
+  AccountClosureContract,
+  AssignableDriver,
+  IdentityPublicContract,
+} from './identity.public.js';
+import { CloseAccountUseCase } from './application/useCases/closeAccount.usecase.js';
+import { OtpChallengeVerifier } from './application/otpChallengeVerifier.js';
+import { MongoAccountEraser } from './infrastructure/accountEraser.impl.js';
 import type { DriverProfile } from './domain/driverProfile.repository.port.js';
 import type { DriverDeviceRepositoryPort } from './domain/driverDevice.repository.port.js';
 import type { CustomerDeviceRepositoryPort } from './domain/customerDevice.repository.port.js';
@@ -120,6 +132,17 @@ export interface IdentityContainer {
    */
   driverDevices: DriverDeviceRepositoryPort;
   customerDevices: CustomerDeviceRepositoryPort;
+
+  /**
+   * The SUPER_ADMIN guard, for another module's admin routes — `accounts` puts it on admin
+   * account deletion. Mount after `requireAuth('ADMIN')`. On the container rather than the
+   * contract for the same reason as the device registries: it is wiring, not a question another
+   * module asks identity.
+   */
+  requireSuperAdmin: RequestHandler;
+
+  /** Closing an account, for `accounts` only — see `AccountClosureContract`. */
+  accountClosure: AccountClosureContract;
 }
 
 /** The `AssignableDriver` shape, from a full `DriverProfile` — shared by both lookups below. */
@@ -272,6 +295,40 @@ export function buildIdentityContainer(): IdentityContainer {
           await smsSender.send(input.role, input.phone, input.code, 'SMS');
         };
 
+  const accountMessages =
+    env.WA_AGENT_API_KEY !== undefined && env.WA_AGENT_PHONE_NUMBER_ID !== undefined
+      ? new WaAgentAccountMessages({
+          apiUrl: env.WA_AGENT_API_URL,
+          apiKey: env.WA_AGENT_API_KEY,
+          phoneNumberId: env.WA_AGENT_PHONE_NUMBER_ID,
+          welcomeCustomer:
+            env.WA_AGENT_WELCOME_TEMPLATE === undefined
+              ? undefined
+              : {
+                  name: env.WA_AGENT_WELCOME_TEMPLATE,
+                  languageCode: env.WA_AGENT_WELCOME_TEMPLATE_LANGUAGE,
+                  nameVariable: env.WA_AGENT_WELCOME_TEMPLATE_NAME_VARIABLE,
+                },
+          driverApproved:
+            env.WA_AGENT_DRIVER_APPROVED_TEMPLATE === undefined
+              ? undefined
+              : {
+                  name: env.WA_AGENT_DRIVER_APPROVED_TEMPLATE,
+                  languageCode: env.WA_AGENT_DRIVER_APPROVED_TEMPLATE_LANGUAGE,
+                  nameVariable: env.WA_AGENT_DRIVER_APPROVED_TEMPLATE_NAME_VARIABLE,
+                },
+        })
+      : undefined;
+
+  logger.info(
+    {
+      welcome_message: accountMessages !== undefined && env.WA_AGENT_WELCOME_TEMPLATE !== undefined,
+      driver_approved_message:
+        accountMessages !== undefined && env.WA_AGENT_DRIVER_APPROVED_TEMPLATE !== undefined,
+    },
+    'identity: account WhatsApp messages',
+  );
+
   logger.info(
     {
       channel: waAgentConfigured ? 'waagent' : waConfigured ? 'wabridge' : 'log',
@@ -321,8 +378,15 @@ export function buildIdentityContainer(): IdentityContainer {
       : undefined;
 
   const sendOtp = new SendOtpUseCase(otpStore, otpSender, accounts, env.OTP_PEPPER);
-  const verifyOtp = new VerifyOtpUseCase(otpStore, accounts, tokenIssuer, env.OTP_PEPPER, devBypass);
-  const refreshSession = new RefreshSessionUseCase(sessions, tokenIssuer);
+  const verifyOtp = new VerifyOtpUseCase(
+    otpStore,
+    accounts,
+    tokenIssuer,
+    env.OTP_PEPPER,
+    devBypass,
+    accountMessages,
+  );
+  const refreshSession = new RefreshSessionUseCase(sessions, tokenIssuer, accounts);
   const logout = new LogoutUseCase(sessions);
 
   const getCustomerProfile = new GetCustomerProfileUseCase(customers);
@@ -352,7 +416,33 @@ export function buildIdentityContainer(): IdentityContainer {
   const customerDevices = new MongoCustomerDeviceRepository();
 
   const adminProfile = new ManageAdminProfileUseCase(admins);
-  const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit, dutySessions);
+  const manageAdmins = new ManageAdminsUseCase(new MongoAdminRosterRepository(), sessions, audit);
+  const requireSuperAdmin = makeRequireSuperAdmin(admins);
+
+  const closeAccount = new CloseAccountUseCase(new MongoAccountEraser(), sessions, documentStorage, audit);
+  const closureCodes = new OtpChallengeVerifier(otpStore, env.OTP_PEPPER);
+  const accountClosure: AccountClosureContract = {
+    findClosable: async (role, lookup) => {
+      // Both lookups skip a deleted account: `findById` filters `deletedAt`, and a deleted row's
+      // phone is a tombstone no real number can match.
+      const account =
+        'id' in lookup
+          ? await accounts.findById(role, lookup.id)
+          : await accounts.findByPhone(role, lookup.phone);
+      if (account === undefined) return undefined;
+
+      const isOnDuty = role === 'DRIVER' ? ((await drivers.findById(account.id))?.isOnDuty ?? false) : false;
+      return { id: account.id, mobileNumber: account.mobileNumber, isOnDuty };
+    },
+    sendClosureCode: (input) => sendOtp.execute({ ...input, purpose: 'DELETE_ACCOUNT' }),
+    spendClosureCode: async (role, phone, code) => {
+      await closureCodes.check(role, phone, code, 'DELETE_ACCOUNT');
+      // Single-use, like a login code.
+      await otpStore.burn(role, phone, 'DELETE_ACCOUNT');
+    },
+    close: (role, accountId, by) => closeAccount.execute(role, accountId, by),
+  };
+  const verifyDriver = new VerifyDriverUseCase(drivers, documents, audit, dutySessions, accountMessages);
   // Same repository the customer's own profile routes use, a different use case in front of it.
   // The narrow, self-only use cases stay exactly as they are — widening one of them to accept a
   // customer id is how an admin-shaped hole appears in the customer app's surface.
@@ -404,7 +494,7 @@ export function buildIdentityContainer(): IdentityContainer {
       getDriverDutyHistory: getDriverDutyHistoryAdmin,
       listCustomers: listCustomersAdmin,
       manageCustomer: manageCustomerAdmin
-    }));
+    }), makeAdminRosterControllers(manageAdmins), requireSuperAdmin);
   };
 
   // Backs the read-side and rating-cache halves of the public contract. Stateless, so it is
@@ -423,6 +513,8 @@ export function buildIdentityContainer(): IdentityContainer {
     // hands these to `notifications`, which is the only other module that needs them.
     driverDevices: devices,
     customerDevices,
+    requireSuperAdmin,
+    accountClosure,
 
     contract: {
       // The read side and the rating cache. Consumed by `reviews`, which renders names in the

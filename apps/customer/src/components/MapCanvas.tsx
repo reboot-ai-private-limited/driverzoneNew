@@ -258,6 +258,15 @@ const CAMERA_CUT_MS = 1;
 const FIRST_MOVE_DELAY_MS = 250;
 
 /**
+ * How long after a move is issued it is checked for having LANDED — the fly time plus a margin for
+ * the settle report to arrive.
+ */
+const MOVE_CHECK_MS = CAMERA_FLY_MS + 350;
+
+/** How many times one move is re-issued before giving up. Bounded so a stuck map cannot loop. */
+const MAX_MOVE_ATTEMPTS = 3;
+
+/**
  * Point the camera somewhere, and mark the window in which the map's own settle reports are
  * this component's doing rather than the customer's.
  *
@@ -359,15 +368,69 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
    */
   const pendingMove = useRef<{ lat: number; lng: number; zoom?: MapZoom } | null>(null);
 
-  const applyMove = (lat: number, lng: number, zoom?: MapZoom): void => {
+  /**
+   * The move this component last asked for, until it is seen to have landed.
+   *
+   * **A MOVE ISSUED ONCE THE MAP IS READY CAN STILL BE LOST**, and the delayed flush below cannot
+   * help with it because it never queued. Measured on a device: `onMapReady`, then the map's own
+   * first `setPadding` settle, then the location fix's `moveTo` ~280ms later — sent straight to
+   * `animateToRegion` — and the next settle came back at the fallback city, zoom unchanged. The
+   * camera never left, while `moveTo` had already reported success, so the screen never asked
+   * again and the map sat off-centre for the whole session with the customer's own marker at its
+   * edge.
+   *
+   * So a move is CHECKED, not trusted: once it should have finished, the remembered region is
+   * compared with the target, and a move that visibly did not land is sent again — at most
+   * `MAX_MOVE_ATTEMPTS` times. Cleared the moment the customer pans, so a retry can never drag
+   * the map out from under their finger.
+   */
+  const intendedMove = useRef<{ lat: number; lng: number; zoom?: MapZoom; attempt: number } | null>(
+    null,
+  );
+  const moveCheck = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyMove = (lat: number, lng: number, zoom?: MapZoom, attempt = 1): void => {
     const delta = zoom === undefined ? region.current.latitudeDelta : ZOOM_DELTA[zoom];
+    intendedMove.current = zoom === undefined ? { lat, lng, attempt } : { lat, lng, zoom, attempt };
     driveCamera(map, suppressSettleUntil, region.current, {
       latitude: lat,
       longitude: lng,
       latitudeDelta: delta,
       longitudeDelta: delta,
     });
+
+    if (moveCheck.current !== null) clearTimeout(moveCheck.current);
+    moveCheck.current = setTimeout(() => {
+      moveCheck.current = null;
+      const wanted = intendedMove.current;
+      if (wanted === null) return;
+
+      /*
+       * "Landed" is generous on purpose: the target must be within one span of the target
+       * zoom of where the camera now sits. Map padding shifts the reported centre a little
+       * from the requested one on every move, and that must not read as a miss; a dropped move
+       * leaves the camera kilometres away, which no padding explains.
+       */
+      const span = wanted.zoom === undefined ? delta : ZOOM_DELTA[wanted.zoom];
+      const off = Math.max(
+        Math.abs(region.current.latitude - wanted.lat),
+        Math.abs(region.current.longitude - wanted.lng),
+      );
+
+      if (off > span && wanted.attempt < MAX_MOVE_ATTEMPTS) {
+        applyMove(wanted.lat, wanted.lng, wanted.zoom, wanted.attempt + 1);
+        return;
+      }
+      intendedMove.current = null;
+    }, MOVE_CHECK_MS);
   };
+
+  useEffect(
+    () => () => {
+      if (moveCheck.current !== null) clearTimeout(moveCheck.current);
+    },
+    [],
+  );
 
   useImperativeHandle(ref, () => ({
     moveTo: (lat, lng, zoom) => {
@@ -656,6 +719,8 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
            * where it was put. See `SETTLE_SUPPRESSION_TAIL_MS`.
            */
           if (Date.now() < suppressSettleUntil.current) return;
+          // The customer has taken the map: a pending move check must not pull it back.
+          intendedMove.current = null;
           onRegionSettled?.(next.latitude, next.longitude);
         }}
         showsCompass={false}

@@ -185,17 +185,15 @@ export default function OnboardingDocumentsScreen(): ReactElement {
     void pickAndUpload(type, side, {});
   }
 
+  /**
+   * NO PERMISSION REQUEST HERE, deliberately — see the same note in `onboarding-profile.tsx`.
+   * `launchImageLibraryAsync` opens the system photo picker directly and needs no grant to do so.
+   */
   async function pickAndUpload(
     type: DocumentType,
     side: DocumentSide,
     details: UploadDetails,
   ): Promise<void> {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError('DriverZone needs access to your photos to upload a document.');
-      return;
-    }
-
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       // A photo of a licence has to be legible to an admin, so quality matters more than bytes —

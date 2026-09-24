@@ -143,6 +143,16 @@ export default function AccountScreen(): ReactElement {
             />
           </View>
 
+          {/* Quiet and last on purpose — see the same link in the customer app. */}
+          <Pressable
+            onPress={() => router.push('/delete-account')}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={styles.deleteRow}
+          >
+            <Text style={styles.deleteLabel}>Delete account</Text>
+          </Pressable>
+
           <Text style={styles.version}>
             DriverZone Driver · v{Constants.expoConfig?.version ?? '0.1.0'}
           </Text>
@@ -290,4 +300,6 @@ const styles = StyleSheet.create({
   sheetActions: { gap: space.sm },
   sheetCancel: { alignItems: 'center', paddingVertical: space.md },
   sheetCancelText: { ...text.body, color: colors.muted },
+  deleteRow: { alignItems: 'center', paddingVertical: space.sm },
+  deleteLabel: { ...text.caption, color: colors.muted, textDecorationLine: 'underline' },
 });

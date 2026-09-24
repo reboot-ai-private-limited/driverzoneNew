@@ -35,6 +35,7 @@ import { useCustomer } from '../hooks/useCustomer';
 import { CustomerWalletSection } from './CustomerWalletSection';
 import { useUpdateCustomer } from '../hooks/useUpdateCustomer';
 import { CustomerEditDialog } from './CustomerEditDialog';
+import { DeleteAccountButton } from '@/features/accounts/components/DeleteAccountButton';
 
 const GENDER_LABELS: Record<string, string> = {
   MALE: 'Male',
@@ -147,6 +148,13 @@ export function CustomerDetailScreen() {
               >
                 Suspend
               </Button>
+            )}
+            {customer !== undefined && (
+              <DeleteAccountButton
+                kind="customers"
+                id={customer.id}
+                name={customer.full_name ?? formatMobile(customer.mobile_number)}
+              />
             )}
           </div>
         }

@@ -10,6 +10,7 @@ const QUICK_LINKS = [
   { label: 'Our Packages',      href: '/#packages-pricing' },
   { label: 'Terms & conditions', href: '/terms' },
   { label: 'Privacy Policy',   href: '/privacy' },
+  { label: 'Delete Account',    href: '/delete-account' },
   { label: 'Contact Us',        href: '/contact' },
 ] as const;
 
@@ -32,8 +33,8 @@ export function SiteFooter(): ReactElement {
             />
             <p className="mt-4 text-[13px] leading-relaxed text-white/55">
               DriverZone offers trusted Driver Hire in Siliguri and Car Driver Hire in Siliguri
-              with verified drivers, luxury vehicles, and on-time service. Enjoy safe, reliable,
-              and convenient travel solutions for all your local and outstation trips.
+              with verified, licensed drivers for your own car and on-time service. Enjoy safe,
+              reliable, and convenient travel for all your local and outstation trips.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <Link

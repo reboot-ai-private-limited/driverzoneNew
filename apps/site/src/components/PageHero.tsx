@@ -37,7 +37,7 @@ export function PageHero({
               {allCrumbs.map((crumb, i) => {
                 const isLast = i === allCrumbs.length - 1;
                 return (
-                  <li key={i} className="flex items-center gap-1">
+                  <li key={crumb.label} className="flex items-center gap-1">
                     {i === 0 && (
                       <Home size={13} className="shrink-0 text-muted" aria-hidden />
                     )}

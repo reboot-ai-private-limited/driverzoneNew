@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
  *
  * NO `transpilePackages`. The panel compiles `@driverzone/contracts` and `@driverzone/geo` from
  * TypeScript source and needs a webpack `extensionAlias` to survive their NodeNext `.js`
- * specifiers. This site talks to no API and imports no workspace package, so none of that
+ * specifiers. This site imports no workspace package (its one API call, the deletion form, is a
+ * plain `fetch`), so none of that
  * machinery applies — and adding it "to match" would couple a brochure site to the release
  * cycle of the contracts package for no benefit.
  *

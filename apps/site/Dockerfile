@@ -39,6 +39,9 @@ COPY apps/site apps/site
 # that advertise http://localhost:3001 as their own address.
 ARG NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+# The API the /delete-account form posts to (browser-side, so also build-time).
+ARG NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ENV NODE_ENV=production
 
 RUN test -n "$NEXT_PUBLIC_SITE_URL" || { \

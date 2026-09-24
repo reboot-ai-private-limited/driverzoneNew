@@ -96,7 +96,7 @@ export function DriverAppSection(): ReactElement {
     drag.current.active = false;
   }, []);
 
-  const allScreens = [...SCREENS, ...SCREENS];
+  const allScreens = [...SCREENS, ...SCREENS].map((s, i) => ({ ...s, key: `${s.id}-${i < SCREENS.length ? "a" : "b"}` }));
 
   return (
     <section id="driver-app" className="bg-bg-sunken">
@@ -126,7 +126,7 @@ export function DriverAppSection(): ReactElement {
           <div ref={trackRef} className="flex will-change-transform">
             {allScreens.map((screen, i) => (
               <div
-                key={i}
+                key={screen.key}
                 className="flex-none w-full sm:w-1/2 md:w-1/3 lg:w-[calc(100%/6)] px-2"
                 aria-hidden={i >= SCREENS.length}
               >

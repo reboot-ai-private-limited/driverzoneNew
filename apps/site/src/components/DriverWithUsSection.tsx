@@ -42,12 +42,11 @@ export function DriverWithUsSection(): ReactElement {
               all our customers.
             </p>
             <p className="mt-4 text-[15px] leading-relaxed text-muted">
-              With a commitment to excellence, we maintain a fleet of vehicles paired with drivers
-              who know Siliguri and surrounding areas inside out. Every trip is handled with utmost
+              We do not provide vehicles — we provide the driver for yours, someone who knows
+              Siliguri and the surrounding areas inside out. Every trip is handled with
               professionalism, transparency, and care. Whether you need a driver for personal use,
-              business travel, or special occasions, DriverZone guarantees dependable service and
-              on-time arrival. Experience convenience, reliability, and safety combined, making us
-              the preferred choice for driver services in Siliguri.
+              business travel, or special occasions, DriverZone is built for dependable service and
+              on-time arrival, making us the preferred choice for driver services in Siliguri.
             </p>
 
             {/* Feature grid — 2 columns, last item spans if odd */}

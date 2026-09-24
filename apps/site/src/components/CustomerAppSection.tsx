@@ -112,7 +112,7 @@ export function CustomerAppSection(): ReactElement {
   }, []);
 
   // Render original + duplicate so the seamless-loop jump is invisible.
-  const allScreens = [...SCREENS, ...SCREENS];
+  const allScreens = [...SCREENS, ...SCREENS].map((s, i) => ({ ...s, key: `${s.id}-${i < SCREENS.length ? "a" : "b"}` }));
 
   return (
     <section id="customer-app" className="bg-bg">
@@ -147,7 +147,7 @@ export function CustomerAppSection(): ReactElement {
           <div ref={trackRef} className="flex will-change-transform">
             {allScreens.map((screen, i) => (
               <div
-                key={i}
+                key={screen.key}
                 // % widths are relative to the container, not the viewport.
                 //   mobile (<sm)  : w-full          → 1 visible
                 //   sm  (640 px)  : w-1/2            → 2 visible

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactElement } from 'react';
+import { DeleteAccountForm } from '@/components/DeleteAccountForm';
 import { LegalPage, LegalSection } from '@/components/LegalPage';
 import { CONTACT } from '@/lib/site';
 
@@ -11,43 +12,40 @@ export const metadata: Metadata = {
 };
 
 /**
- * `/delete-account` — a Google Play requirement, and the reason this page exists as a URL at all.
- *
- * Play requires any app that lets people create an account to offer account deletion **from a web
- * page reachable without installing the app**, and that URL is submitted in the Data Safety form.
- * A deletion option buried in the app alone does not satisfy it: the reviewer has to be able to
- * reach this from a browser, and so does someone who has already uninstalled.
- *
- * **THE IN-APP HALF IS NOT BUILT YET.** Play wants both — this page AND a path inside each app —
- * and there is currently no `deleteAccount` endpoint in `apps/api` and no row in either app's
- * Account screen. So this page documents a request-by-email process, which is a legitimate
- * mechanism on its own, and the copy below is written to be true of that process rather than of
- * a button that does not exist.
- *
- * When the endpoint and the in-app flow land, the "How to ask" section gains a first option
- * pointing at them and this page stays as the web route it is required to be.
+ * `/delete-account` — the web deletion route Google Play requires, submitted in the Data Safety
+ * form. It must work without the app installed, so the form here uses the session-less
+ * `/api/account-deletion/:role/{otp,confirm}` endpoints; the apps have their own in-app flow.
  */
 export default function DeleteAccountPage(): ReactElement {
   return (
     <LegalPage
       title="Delete your account"
-      lead="You can ask us to close your DriverZone account and delete the personal data we hold about you."
+      lead="You can close your DriverZone account and delete the personal data we hold about you — right here, without the app."
     >
-      <LegalSection title="How to ask">
+      <LegalSection title="Delete your account now">
         <p>
-          Email <a href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a> from the address on your
-          account, or write to us from any address with the subject line{' '}
-          <strong>Delete my account</strong>, including:
+          Choose your account type and enter the mobile number you sign in with. We will send a
+          6-digit code to that number on WhatsApp (or by SMS) to confirm it is really you, then
+          delete the account straight away.
         </p>
+        <div className="mt-6">
+          <DeleteAccountForm />
+        </div>
+      </LegalSection>
+
+      <LegalSection title="Other ways to delete">
         <ul>
-          <li>the phone number your DriverZone account uses;</li>
-          <li>whether it is a customer account or a driver account.</li>
+          <li>
+            <strong>In the app:</strong> open the DriverZone app, go to <strong>Account → Delete
+            account</strong>, and follow the steps.
+          </li>
+          <li>
+            <strong>By email:</strong> if you no longer have access to your phone number, email{' '}
+            <a href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a> with the subject line{' '}
+            <strong>Delete my account</strong>, your account&apos;s phone number, and whether it is
+            a customer or driver account. We will verify the request before deleting anything.
+          </li>
         </ul>
-        <p>
-          We will confirm the request is genuinely from you — usually by sending a code to that
-          phone number — before we delete anything. This step exists to stop somebody else closing
-          your account.
-        </p>
       </LegalSection>
 
       <LegalSection title="What gets deleted">
@@ -89,15 +87,16 @@ export default function DeleteAccountPage(): ReactElement {
 
       <LegalSection title="How long it takes">
         <p>
-          We aim to complete verified deletion requests within 30 days, and will confirm by email
-          once it is done.
+          Deleting through this page or the app happens immediately. Requests sent by email are
+          completed within 30 days of verification, and we confirm by email once done.
         </p>
       </LegalSection>
 
       <LegalSection title="Before you go">
         <p>
-          If you have a trip booked, it will be cancelled. If you are a driver with earnings not
-          yet paid out, settle those with us first — we cannot pay out to a deleted account.
+          An account can&apos;t be deleted while a trip is still open — complete or cancel it
+          first. Drivers must be off duty and have no unsettled earnings or commission, since we
+          cannot pay out to a deleted account. Unused wallet credit is lost when you delete.
         </p>
       </LegalSection>
     </LegalPage>

@@ -102,14 +102,22 @@ export function SiteFooter(): ReactElement {
                   +91 8509299342
                 </a>
               </li>
-              <li className="flex items-center gap-3">
-                <Mail size={15} className="shrink-0 text-brand" aria-hidden />
-                <a
-                  href="mailto:info@driverzoneonline.com"
-                  className="text-[13px] text-white/55 transition-colors hover:text-white"
-                >
-                  info@driverzoneonline.com
-                </a>
+              <li className="flex items-start gap-3">
+                <Mail size={15} className="mt-0.5 shrink-0 text-brand" aria-hidden />
+                <div className="flex flex-col gap-0.5">
+                  <a
+                    href="mailto:info@driverzoneonline.com"
+                    className="text-[13px] text-white/55 transition-colors hover:text-white"
+                  >
+                    info@driverzoneonline.com
+                  </a>
+                  <a
+                    href="mailto:driverzone.india@gmail.com"
+                    className="text-[13px] text-white/55 transition-colors hover:text-white"
+                  >
+                    driverzone.india@gmail.com
+                  </a>
+                </div>
               </li>
               <li className="flex items-start gap-3">
                 <MapPin size={15} className="mt-0.5 shrink-0 text-brand" aria-hidden />

@@ -19,6 +19,8 @@ const SCREENS: readonly Screen[] = [
   { id: 5, image: '/customer-app/screen-5.webp', alt: 'DriverZone customer app — live trip tracking on map' },
   { id: 6, image: '/customer-app/screen-6.webp', alt: 'DriverZone customer app — fare summary and payment' },
   { id: 7, image: '/customer-app/screen-7.webp', alt: 'DriverZone customer app — rate your driver' },
+  { id: 8, image: '/customer-app/screen-8.webp', alt: 'DriverZone customer app — rate your driver' },
+  { id: 9, image: '/customer-app/screen-9.webp', alt: 'DriverZone customer app — rate your driver' },
 ];
 
 // Continuous speed: 40 px/s, normalised to real elapsed time so it looks the
@@ -163,8 +165,8 @@ export function CustomerAppSection(): ReactElement {
                   the source image's own dimensions. Image uses `fill` +
                   `object-contain` so the full screenshot is always visible.
                 */}
-                <div className="w-full rounded-3xl border border-border/80 bg-bg p-3">
-                  <div className="relative aspect-[9/19] overflow-hidden rounded-xl">
+                <div className="w-full rounded-lg border border-border/80 bg-bg p-1">
+                  <div className="relative aspect-[9/19] overflow-hidden">
                     <Image
                       src={screen.image}
                       alt={i >= SCREENS.length ? '' : screen.alt}

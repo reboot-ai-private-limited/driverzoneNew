@@ -15,13 +15,21 @@
 # they build to store binaries via EAS. That is the whole answer to "do I need to ship the
 # mobile code to the API server" — no, and there is nowhere for it to go.
 #
-# On a real host, nginx terminates TLS in front of web:3000 and api:4000 — see
+# On a real host, nginx terminates TLS in front of web:3000, api:4000 and site:3002 — see
 # docs/engineering/build-and-deploy.md.
+#
+# THE DATABASE: set MONGO_URI in the repo-root `.env` (e.g. MongoDB Atlas) and the stack uses it;
+# the local `mongo` container is then never started. To run the whole thing with a local mongo
+# instead — verifying a release on your machine — leave MONGO_URI unset and set
+# COMPOSE_PROFILES=local-db in that `.env`. See .env.example.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
   mongo:
     image: mongo:7
+    # Only with COMPOSE_PROFILES=local-db. A deployment on an external database (MONGO_URI in the
+    # root .env) never starts it; every `depends_on: mongo` below is `required: false` for that.
+    profiles: ['local-db']
     # A replica set, even with one node. Multi-document transactions require one, and the
     # booking→ledger write in docs/LLD/pricing-and-commission.md needs a transaction to stay consistent.
     command: ['--replSet', 'rs0', '--bind_ip_all']
@@ -41,6 +49,7 @@ services:
   # but refuses every write with "not primary".
   mongo-init:
     image: mongo:7
+    profiles: ['local-db']
     depends_on:
       mongo: { condition: service_healthy }
     restart: 'no'
@@ -71,16 +80,17 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     depends_on:
-      mongo: { condition: service_healthy }
+      mongo: { condition: service_healthy, required: false }
       redis: { condition: service_healthy }
     # A separate file from apps/api/.env, which holds the localhost URIs the host-run dev API
     # uses. Loading that one here would set NODE_ENV=development inside a production image and
     # point CORS at localhost.
     env_file: [apps/api/.env.prod]
-    # Set after env_file, so these win: inside the network the hosts are service names, and no
-    # .env.prod should be able to misdirect them.
+    # Set after env_file, so these win and no .env.prod can misdirect them. MONGO_URI comes from
+    # the repo-root .env when set there (an external database such as Atlas), else the local
+    # `mongo` service; redis is always the service on this network.
     environment:
-      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true}
       REDIS_URL: redis://redis:6379
       # WITHOUT THIS, EVERY TRIP OFFER IS A `MockPushSender` NO-OP and nothing reaches a driver's
       # phone in the background. The path is inside the container; the file arrives via the bind
@@ -110,11 +120,11 @@ services:
       dockerfile: apps/api/Dockerfile
     command: ['node', 'dist/worker.js']
     depends_on:
-      mongo: { condition: service_healthy }
+      mongo: { condition: service_healthy, required: false }
       redis: { condition: service_healthy }
     env_file: [apps/api/.env.prod]
     environment:
-      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true}
       REDIS_URL: redis://redis:6379
       # The worker sends push too — the dispatch wave runs here, and so does the presence sweep's
       # "you've gone offline" notice. Same key, same mount as `api`.
@@ -131,7 +141,8 @@ services:
   #
   # Run it AFTER the stack is up, so mongo-init has promoted the replica set. The script itself
   # refuses to run against NODE_ENV=production unless STAGING_UNSAFE=true is in .env.prod — the
-  # accounts it creates have a published login, so this is a staging-only convenience.
+  # accounts it creates have a published login, so this is a staging-only convenience. For a real
+  # production database use `bootstrap` below instead.
   seed:
     build:
       context: .
@@ -140,11 +151,31 @@ services:
     # dist/scripts/, not dist/ — esbuild mirrors each entrypoint's path below src/.
     command: ['node', 'dist/scripts/seed.js']
     depends_on:
-      mongo: { condition: service_healthy }
+      mongo: { condition: service_healthy, required: false }
     env_file: [apps/api/.env.prod]
     # Same overrides as api and worker: service names win over anything in the env file.
     environment:
-      MONGO_URI: mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true}
+      REDIS_URL: redis://redis:6379
+    restart: 'no'
+
+  # The PRODUCTION counterpart of `seed`: one real super-admin, whose number you pass at run time,
+  # plus the starter zones. No demo drivers, customers, booking or reviews, and no STAGING_UNSAFE —
+  # nothing here has a committed login. Idempotent; rerun it to add a second admin.
+  #
+  #   docker compose -f docker-compose.prod.yml run --rm \
+  #     -e ADMIN_PHONE=+919876543210 -e ADMIN_NAME="Jane Doe" bootstrap
+  bootstrap:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles: ['bootstrap']
+    command: ['node', 'dist/scripts/bootstrap.js']
+    depends_on:
+      mongo: { condition: service_healthy, required: false }
+    env_file: [apps/api/.env.prod]
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/driverzone?replicaSet=rs0&directConnection=true}
       REDIS_URL: redis://redis:6379
     restart: 'no'
 
@@ -179,7 +210,9 @@ services:
       args:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
-    ports: ['3001:3001']
+    # Host port 3002, loopback only: nginx is the sole way in, and 3001 on the pilot VM is taken
+    # by another stack. Inside the container the site still listens on 3001.
+    ports: ['127.0.0.1:3002:3001']
     restart: unless-stopped
 
 # Named explicitly, and distinctly from the dev file's volumes. Compose's default name is

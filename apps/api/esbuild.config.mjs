@@ -24,14 +24,15 @@ const external = Object.keys(pkg.dependencies).filter((d) => !d.startsWith('@dri
 
 await esbuild.build({
   /**
-   * Three entrypoints, three composition roots. `seed.ts` is here so a DEPLOYED stack can be
-   * seeded — the runtime image carries `dist/` and production node_modules, with no `tsx` and no
+   * Four entrypoints, four composition roots. `seed.ts` and `bootstrap.ts` are here so a DEPLOYED
+   * stack can be seeded — the runtime image carries `dist/` and production node_modules, with no `tsx` and no
    * TypeScript to run `src/scripts/seed.ts` with. It lands at `dist/scripts/seed.js` — esbuild
    * mirrors each entrypoint's path below the common ancestor, so it does NOT sit beside
    * server.js. See the `seed` service in docker-compose.prod.yml; it refuses to run unless
-   * STAGING_UNSAFE is set.
+   * STAGING_UNSAFE is set. `bootstrap.ts` (dist/scripts/bootstrap.js) is its production-safe
+   * sibling: one real admin plus the starter zones — the `bootstrap` service.
    */
-  entryPoints: ['src/server.ts', 'src/worker.ts', 'src/scripts/seed.ts'],
+  entryPoints: ['src/server.ts', 'src/worker.ts', 'src/scripts/seed.ts', 'src/scripts/bootstrap.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',

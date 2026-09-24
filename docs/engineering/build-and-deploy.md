@@ -276,6 +276,31 @@ docker compose -f docker-compose.prod.yml run --rm seed node dist/scripts/seed.j
 Run it after the stack is up, so `mongo-init` has promoted the replica set. It refuses to run
 without `STAGING_UNSAFE`.
 
+### Production: external database and `bootstrap`
+
+Production runs on an external MongoDB (Atlas). Set `MONGO_URI` in the repo-root `.env` and leave
+`COMPOSE_PROFILES` unset there: the api, worker and one-shot services pick it up, and the bundled
+`mongo`/`mongo-init` (profile `local-db`) never start. Atlas is a replica set already, so the
+booking→ledger transactions work unchanged.
+
+A fresh production database is prepared with `src/scripts/bootstrap.ts`, not the seed. It creates
+one `SUPER_ADMIN` on a number you supply and the starter zones from `config/devZones.ts` — no demo
+accounts, bookings or reviews, and no `STAGING_UNSAFE`:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm \
+  -e ADMIN_PHONE=+919876543210 -e ADMIN_NAME="Jane Doe" bootstrap
+```
+
+Idempotent: admins are keyed on phone, zones on `code`, so rerunning it adds a second admin or
+restores a missing zone without touching anything reshaped in the editor.
+
+### The marketing site
+
+`apps/site` is published on `127.0.0.1:3002` (it listens on 3001 inside the container) and nginx
+fronts it on the main domain. Its `/delete-account` form calls the API from the browser, so its
+origins — with and without `www` — belong in `CORS_ORIGINS`.
+
 ## Release checklist
 
 - [ ] `pnpm check` green

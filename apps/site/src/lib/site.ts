@@ -26,6 +26,31 @@ export const CONTACT = {
 } as const;
 
 /**
+ * The business facts the legal pages state. Values marked TODO are defaults chosen to be
+ * reasonable, NOT decisions anyone has made — confirm or replace each before publishing.
+ */
+export const LEGAL = {
+  // TODO: the registered name, exactly as in Play Console's developer name and on the GST/company registration.
+  entityName: 'DriverZone',
+  // TODO: the Grievance Officer's name (IT Rules 2011 / DPDP Act). The title and email render meanwhile.
+  grievanceOfficerName: null as string | null,
+  grievanceOfficerEmail: 'support@driverzoneonline.com',
+  // TODO: confirm with the payment provider's actual settlement time.
+  refundWorkingDays: '5–7',
+  // TODO: confirm with your accountant — Indian tax law requires books to be kept for several years.
+  recordRetentionYears: 8,
+  // Mirrors the defaults in apps/api settings (`cancellation.*`). Change both together.
+  cancellation: {
+    freeWindowMinutes: 5,
+    scheduledFreeUntilMinutesBefore: 60,
+    customerFeeEnRoute: 50,
+    customerFeeArrived: 100,
+    driverPenaltyEnRoute: 50,
+    driverPenaltyArrived: 100,
+  },
+} as const;
+
+/**
  * Where "Get the app" points.
  *
  * `null` until each store listing is live, and every button that links to a store checks for it:
@@ -55,10 +80,17 @@ export const APP_LINKS = {
 export const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3001';
 
 /**
+ * The API the `/delete-account` form posts to — the same value `apps/web` uses, ending in `/api`.
+ * Dot access on purpose: Next inlines `process.env.NEXT_PUBLIC_*` into browser code only in that
+ * form. The site's origin must also be listed in the API's `CORS_ORIGINS`.
+ */
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000/api';
+
+/**
  * The date the legal pages were last substantively changed, shown on both.
  *
  * Hardcoded rather than derived from the file's git mtime or `new Date()`: a policy's effective
  * date is a legal claim about when the terms changed, not a build timestamp. A date that moves
  * every deploy tells a reader their terms changed when they did not.
  */
-export const LEGAL_LAST_UPDATED = '22 September 2026';
+export const LEGAL_LAST_UPDATED = '24 September 2026';

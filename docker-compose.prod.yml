@@ -167,8 +167,9 @@ services:
     ports: ['3000:3000']
     restart: unless-stopped
 
-  # The public marketing site (apps/site). Static-ish pages, no API, no database — it depends on
-  # nothing else in this file. nginx fronts it on the main domain like web and api.
+  # The public marketing site (apps/site). No database; its /delete-account form calls the api
+  # from the browser, so the site's origin must be in the api's CORS_ORIGINS. nginx fronts it on
+  # the main domain like web and api.
   site:
     build:
       context: .
@@ -177,6 +178,7 @@ services:
       # repo-root `.env` — see .env.example.
       args:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
     ports: ['3001:3001']
     restart: unless-stopped
 

@@ -19,14 +19,14 @@ import { SITE_URL } from '@/lib/site';
 export const metadata: Metadata = {
   title: 'About Driver Zone — Reliable Driver Hire Services in Siliguri',
   description:
-    'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. Verified drivers, luxury vehicles, safe & reliable travel for local commutes, outstation trips, and long-distance journeys.',
+    'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. Verified, licensed drivers for your own car — local commutes, outstation trips and long-distance journeys.',
   alternates: {
     canonical: `${SITE_URL}/about`,
   },
   openGraph: {
     title: 'About Driver Zone — Reliable Driver Hire Services in Siliguri',
     description:
-      'DriverZone is your trusted partner for professional Driver Hire in Siliguri. Verified drivers, luxury vehicles, safe & reliable travel for local and outstation trips.',
+      'DriverZone is your trusted partner for professional Driver Hire in Siliguri. Verified drivers for your own car, safe & reliable travel for local and outstation trips.',
     url: `${SITE_URL}/about`,
     siteName: 'Driver Zone',
     type: 'website',
@@ -66,12 +66,12 @@ const CARDS: readonly Card[] = [
   {
     title: 'Our Mission',
     icon: Car,
-    body: 'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. We specialize in providing skilled, punctual, and verified drivers for local commutes, outstation trips, and long-distance journeys. Our mission is to make every ride safe, comfortable, and hassle-free, ensuring peace of mind for all our customers. With a commitment to excellence, we maintain a luxury fleet of vehicles, paired with drivers who know Siliguri and surrounding areas inside out. Every trip is handled with utmost professionalism, transparency, and care. Whether you need a driver for personal use, business travel, or special occasions, DriverZone guarantees dependable service and on-time arrival. Experience convenience, reliability, and safety combined, making us the preferred choice for driver services in Siliguri.',
+    body: 'Our mission is to make it simple for anyone who owns a car to get a skilled, verified and punctual driver whenever they need one. We do not rent out vehicles — you keep the comfort of your own car, and we provide a professional driver who knows Siliguri and the surrounding hills inside out. Every driver is licence-checked and document-verified before their first trip, every fare is shown upfront before you book, and every trip is handled with professionalism, transparency and care — whether it is a daily commute, a business trip, a special occasion or a long outstation journey.',
   },
   {
     title: 'Our Vision',
     icon: Globe,
-    body: 'DriverZone is your trusted partner for professional Driver Hire in Siliguri and Car Driver Hire in Siliguri. We specialize in providing skilled, punctual, and verified drivers for local commutes, outstation trips, and long-distance journeys. Our mission is to make every ride safe, comfortable, and hassle-free, ensuring peace of mind for all our customers. With a commitment to excellence, we maintain a luxury fleet of vehicles, paired with drivers who know Siliguri and surrounding areas inside out. Every trip is handled with utmost professionalism, transparency, and care. Whether you need a driver for personal use, business travel, or special occasions, DriverZone guarantees dependable service and on-time arrival. Experience convenience, reliability, and safety combined, making us the preferred choice for driver services in Siliguri.',
+    body: 'We want DriverZone to be the most trusted name for driver hire in North Bengal and beyond — the service people think of first when they need someone reliable behind the wheel of their own car. We are building towards that by giving drivers fair, steady work and a respected profession, giving customers safe, dependable drivers at honest prices, and using technology to make booking, tracking and paying for a driver as easy as booking a cab.',
   },
 ];
 
@@ -101,12 +101,11 @@ export default function AboutPage(): ReactElement {
                 all our customers.
               </p>
               <p className="mt-4 text-[15px] leading-relaxed text-muted">
-                With a commitment to excellence, we maintain a luxury fleet of vehicles, paired with
-                drivers who know Siliguri and surrounding areas inside out. Every trip is handled
-                with utmost professionalism, transparency, and care. Whether you need a driver for
-                personal use, business travel, or special occasions, DriverZone guarantees dependable
-                service and on-time arrival. Experience convenience, reliability, and safety
-                combined, making us the preferred choice for driver services in Siliguri.
+                We do not provide vehicles — we provide the driver for yours. Every DriverZone driver
+                knows Siliguri and the surrounding areas inside out, and every trip is handled with
+                professionalism, transparency and care. Whether you need a driver for personal use,
+                business travel, or special occasions, DriverZone is built for dependable service
+                and on-time arrival, making us the preferred choice for driver services in Siliguri.
               </p>
 
               {/* Feature grid */}

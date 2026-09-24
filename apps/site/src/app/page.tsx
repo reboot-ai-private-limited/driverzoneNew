@@ -8,7 +8,6 @@ import { CustomerAppSection } from '@/components/CustomerAppSection';
 import { DriverWithUsSection } from '@/components/DriverWithUsSection';
 import { DriverAppSection } from '@/components/DriverAppSection';
 import { PromoBanner } from '@/components/PromoBanner';
-import { TestimonialsSection } from '@/components/TestimonialsSection';
 
 export default function HomePage(): ReactElement {
   return (
@@ -22,7 +21,7 @@ export default function HomePage(): ReactElement {
       <DriverWithUsSection />
       <DriverAppSection />
       <PromoBanner />
-      <TestimonialsSection />
+      {/* TestimonialsSection is off until it holds real customer reviews — its copy is placeholder. */}
     </>
   );
 }

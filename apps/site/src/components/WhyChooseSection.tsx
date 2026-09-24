@@ -9,7 +9,6 @@ import {
   ClipboardList,
   Shield,
   SlidersHorizontal,
-  ShieldPlus,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -72,7 +71,7 @@ const FEATURES = [
     title: 'On Time Driver Reporting',
     body: [
       'Every Driver Zone driver is expected to arrive at the pickup point on time, every time. Our platform tracks driver punctuality and maintains a record of each trip\'s reporting time.',
-      'Drivers who consistently meet their reporting commitments are highlighted in our system. Customers can see a driver\'s rating and reliability history before a booking is confirmed.',
+      'Drivers who consistently meet their reporting commitments are highlighted in our system, and customers can see their driver\'s rating once a driver is assigned.',
       'Late arrivals are flagged and followed up with the driver directly. We hold our drivers to the same standard of professionalism that you would expect from any trusted service provider.',
     ],
   },
@@ -86,7 +85,7 @@ const FEATURES = [
     body: [
       'Safety is at the core of everything Driver Zone does. From verified driver credentials to real-time trip tracking, every feature is designed with the passenger\'s security in mind.',
       'Our drivers carry valid licences and undergo background checks before joining the platform. Documents are reviewed on a rolling basis — a driver whose papers lapse is automatically suspended from accepting new trips.',
-      'Customers can share live trip details with a contact of their choice, giving families and employers full visibility of every journey from start to finish.',
+      'Customers can share their trip and driver details with a contact of their choice straight from the app, so family or colleagues know who is driving and where the trip is headed.',
     ],
   },
   {
@@ -100,19 +99,6 @@ const FEATURES = [
       'No two trips are the same, and Driver Zone is built to accommodate that. Customers can choose their pickup time, preferred package duration, trip type, and terrain — all from a single booking screen.',
       'For outstation journeys, specify whether the trip is one-way or round, and select the terrain that matches the route. The system calculates the fare based on your exact requirements.',
       'Regular customers can save preferences and rebook frequently-used trips in a few taps. We designed the booking flow to reduce friction so you spend less time on the app and more time on your journey.',
-    ],
-  },
-  {
-    id: 'insurance',
-    label: 'Insurance',
-    icon: ShieldPlus,
-    image: '/why-choose/insurance.webp',
-    imageAlt: 'Illustration of an insurance coverage document',
-    title: 'Insurance Coverage',
-    body: [
-      'Every trip booked through Driver Zone is covered under a basic passenger protection policy. This gives customers an additional layer of assurance for both in-city and outstation journeys.',
-      'Our insurance framework is built to cover unforeseen incidents during the trip, providing peace of mind for passengers and families who rely on Driver Zone for their regular travel needs.',
-      'Details of coverage are available in the app under your booking summary. We are transparent about what is included so there are no surprises if you ever need to make a claim.',
     ],
   },
 ] as const satisfies readonly Feature[];
@@ -190,7 +176,7 @@ export function WhyChooseSection(): ReactElement {
               <h3 className="text-2xl font-bold text-fg">{active.title}</h3>
               <div className="mt-4 space-y-3">
                 {active.body.map((para, i) => (
-                  <p key={i} className="text-[15px] leading-relaxed text-muted">
+                  <p key={para} className="text-[15px] leading-relaxed text-muted">
                     {para}
                   </p>
                 ))}

@@ -27,7 +27,7 @@ export function LegalPage({
     <>
       <PageHero eyebrow="Legal" title={title} lead={lead} />
 
-      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+      <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
         <p className="text-sm text-faint">Last updated: {LEGAL_LAST_UPDATED}</p>
 
         <div

@@ -31,6 +31,7 @@ export default function ContactPage(): ReactElement {
         eyebrow="Contact"
         title="Talk to us"
         lead="Questions about a booking, a fare, or driving with us — all reach the same place."
+        breadcrumbs={[{ label: 'Contact' }]}
       />
 
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">

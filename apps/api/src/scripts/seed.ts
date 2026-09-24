@@ -11,6 +11,7 @@ import {
   type DevAccount,
 } from '@/config/devAccounts.js';
 import { DEV_ZONES } from '@/config/devZones.js';
+import { seedZones } from '@/scripts/seedZones.js';
 import { connectMongo, disconnectMongo } from '@/shared/db/mongo.js';
 import { logger } from '@/shared/logging/logger.js';
 import { buildZonesContainer } from '@/modules/zones/zones.container.js';
@@ -499,38 +500,6 @@ const DEMO_FARE_SNAPSHOT = {
   },
 } as const;
 
-async function seedZones(zones: ZonesPublicContract): Promise<Map<string, 'created' | 'present'>> {
-  const actor = { adminId: DEV_ADMIN.id };
-
-  // One query, not one per zone. Active-only is the right filter: a superseded version keeps its
-  // code, and the partial unique index means only the active one can block a create.
-  const existing = new Set((await zones.list({ isActive: true })).map((z) => z.code));
-
-  const outcome = new Map<string, 'created' | 'present'>();
-
-  for (const zone of DEV_ZONES) {
-    if (existing.has(zone.code)) {
-      outcome.set(zone.code, 'present');
-      continue;
-    }
-
-    await zones.create(
-      {
-        type: zone.type,
-        name: zone.name,
-        code: zone.code,
-        geometry: zone.geometry,
-        pickupChargeType: zone.pickupChargeType,
-        pickupChargePaise: zone.pickupChargePaise,
-      },
-      actor,
-    );
-    outcome.set(zone.code, 'created');
-  }
-
-  return outcome;
-}
-
 /**
  * `--reset` for zones — through the contract, not `ZoneModel.deleteMany`.
  *
@@ -706,7 +675,7 @@ async function main(): Promise<void> {
   await seedDemoBooking();
 
   // After the admin exists — every zone is `createdBy` that account.
-  const zoneOutcome = await seedZones(zones);
+  const zoneOutcome = await seedZones(zones, DEV_ADMIN.id);
 
   const foreign = await countForeignAccounts();
 

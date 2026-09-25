@@ -38,6 +38,15 @@ export interface DevOtpBypass {
 }
 
 /**
+ * The app-store review login — one CUSTOMER number with a fixed code, allowed in production.
+ * Wired from `REVIEW_LOGIN_PHONE` / `REVIEW_LOGIN_OTP` in `identity.container.ts`.
+ */
+export interface ReviewLogin {
+  phone: string;
+  code: string;
+}
+
+/**
  * APPLICATION — trade a correct code for a session.
  *
  * Two rules carry the weight here, and both are about what the caller is NOT told:
@@ -57,7 +66,14 @@ export class VerifyOtpUseCase {
     /** Absent in production and in every test that does not deliberately opt in. */
     private readonly devBypass?: DevOtpBypass | undefined,
     private readonly messages?: AccountMessagesPort | undefined,
+    private readonly reviewLogin?: ReviewLogin | undefined,
   ) {}
+
+  /** Customer role only: the demo number must never become a way into the driver or admin apps. */
+  private isReviewLogin(role: Role, phone: string, code: string): boolean {
+    if (this.reviewLogin === undefined || role !== 'CUSTOMER') return false;
+    return this.reviewLogin.phone === phone && this.reviewLogin.code === code;
+  }
 
   /**
    * Whether this exact (number, code) pair is the development shortcut.
@@ -81,7 +97,7 @@ export class VerifyOtpUseCase {
      * account rules below: an admin number that was never provisioned still fails, because that
      * check lives past this branch.
      */
-    if (this.isDevBypass(phone, input.code)) {
+    if (this.isDevBypass(phone, input.code) || this.isReviewLogin(role, phone, input.code)) {
       return this.completeSignIn(input);
     }
 

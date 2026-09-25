@@ -637,3 +637,77 @@ describe('VerifyOtpUseCase — dev bypass', () => {
     expect(accounts.created).toBe(0);
   });
 });
+
+// ─── App-store review login ─────────────────────────────────────────────────────────────────
+
+describe('review login', () => {
+  const REVIEW = { phone: '+919000000000', code: '000000' };
+
+  function verifier(store: OtpStorePort, accounts: AccountRepositoryPort, review = REVIEW): VerifyOtpUseCase {
+    return new VerifyOtpUseCase(
+      store,
+      accounts,
+      new TokenIssuer(fakeSessions()),
+      PEPPER,
+      undefined,
+      undefined,
+      review,
+    );
+  }
+
+  it('signs the demo number in as a customer with the fixed code and no challenge', async () => {
+    const accounts = fakeAccounts();
+
+    const result = await verifier(fakeStore(), accounts).execute({
+      role: 'CUSTOMER',
+      phone: REVIEW.phone,
+      code: REVIEW.code,
+    });
+
+    expect(result.accessToken).toBeTruthy();
+    expect(result.isNewUser).toBe(true);
+    expect(accounts.created).toBe(1);
+  });
+
+  it('is never accepted for a driver or admin login', async () => {
+    const existing: Account = { id: 'acc_1', mobileNumber: REVIEW.phone, fullName: 'X', isBlocked: false };
+    for (const role of ['DRIVER', 'ADMIN'] as const) {
+      const code = await codeOfRejection(
+        verifier(fakeStore(), fakeAccounts(existing)).execute({ role, phone: REVIEW.phone, code: REVIEW.code }),
+      );
+      expect(code).toBe('OTP_INVALID_OR_EXPIRED');
+    }
+  });
+
+  it('refuses the fixed code on any other number, and a wrong code on the demo number', async () => {
+    const other = await codeOfRejection(
+      verifier(fakeStore(), fakeAccounts()).execute({ role: 'CUSTOMER', phone: '+919876543210', code: REVIEW.code }),
+    );
+    const wrong = await codeOfRejection(
+      verifier(fakeStore(), fakeAccounts()).execute({ role: 'CUSTOMER', phone: REVIEW.phone, code: '123456' }),
+    );
+
+    expect(other).toBe('OTP_INVALID_OR_EXPIRED');
+    expect(wrong).toBe('OTP_INVALID_OR_EXPIRED');
+  });
+
+  it('still refuses a suspended demo account', async () => {
+    const blocked: Account = { id: 'acc_1', mobileNumber: REVIEW.phone, fullName: 'X', isBlocked: true };
+
+    const code = await codeOfRejection(
+      verifier(fakeStore(), fakeAccounts(blocked)).execute({ role: 'CUSTOMER', phone: REVIEW.phone, code: REVIEW.code }),
+    );
+
+    expect(code).toBe('FORBIDDEN');
+  });
+
+  it('sends no code to the demo number, but still sends to everyone else', async () => {
+    const sender = fakeSender();
+    const useCase = new SendOtpUseCase(fakeStore(), sender, fakeAccounts(), PEPPER, REVIEW.phone);
+
+    await useCase.execute({ role: 'CUSTOMER', phone: REVIEW.phone });
+    await useCase.execute({ role: 'CUSTOMER', phone: '+919876543210' });
+
+    expect(sender.sent.map((s) => s.phone)).toEqual(['+919876543210']);
+  });
+});

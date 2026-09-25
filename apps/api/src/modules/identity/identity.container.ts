@@ -377,7 +377,19 @@ export function buildIdentityContainer(): IdentityContainer {
       ? { code: env.DEV_FIXED_OTP, phones: DEV_ACCOUNT_PHONES }
       : undefined;
 
-  const sendOtp = new SendOtpUseCase(otpStore, otpSender, accounts, env.OTP_PEPPER);
+  // The app-store demo login (config/env.ts). `loadEnv()` guarantees both are set or neither.
+  const reviewLogin =
+    env.REVIEW_LOGIN_PHONE !== undefined && env.REVIEW_LOGIN_OTP !== undefined
+      ? { phone: env.REVIEW_LOGIN_PHONE, code: env.REVIEW_LOGIN_OTP }
+      : undefined;
+
+  const sendOtp = new SendOtpUseCase(
+    otpStore,
+    otpSender,
+    accounts,
+    env.OTP_PEPPER,
+    reviewLogin?.phone,
+  );
   const verifyOtp = new VerifyOtpUseCase(
     otpStore,
     accounts,
@@ -385,6 +397,7 @@ export function buildIdentityContainer(): IdentityContainer {
     env.OTP_PEPPER,
     devBypass,
     accountMessages,
+    reviewLogin,
   );
   const refreshSession = new RefreshSessionUseCase(sessions, tokenIssuer, accounts);
   const logout = new LogoutUseCase(sessions);

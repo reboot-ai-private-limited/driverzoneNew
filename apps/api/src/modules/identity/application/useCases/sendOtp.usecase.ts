@@ -59,6 +59,8 @@ export class SendOtpUseCase {
     private readonly sender: OtpSenderPort,
     private readonly accounts: AccountRepositoryPort,
     private readonly pepper: string,
+    /** The demo customer number (`REVIEW_LOGIN_PHONE`): no code is generated or sent for it. */
+    private readonly reviewPhone?: string | undefined,
   ) {}
 
   async execute(input: SendOtpInput): Promise<SendOtpResult> {
@@ -120,7 +122,12 @@ export class SendOtpUseCase {
           account !== undefined && role !== 'ADMIN'
         : role !== 'ADMIN' || account !== undefined;
 
-    if (deliverable) {
+    // The demo number signs in with its fixed code (VerifyOtpUseCase), so a real code would only
+    // spend an SMS on a number nobody holds. Everything around it — cooldown, caps — still runs.
+    const isReviewNumber =
+      role === 'CUSTOMER' && this.reviewPhone !== undefined && phone === this.reviewPhone;
+
+    if (deliverable && !isReviewNumber) {
       const code = generateOtpCode();
       await this.store.save(
         role,

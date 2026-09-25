@@ -120,6 +120,24 @@ const schema = z.object({
     .optional(),
 
   /**
+   * A demo login for app-store review: ONE customer number that signs in with a fixed code, in
+   * production, with no SMS sent. Set both or neither — `loadEnv()` refuses one without the other.
+   *
+   * Unlike `DEV_FIXED_OTP` this needs no escape hatch, because what it opens is bounded: a single
+   * CUSTOMER account whose number and code the operator chose. It is never accepted for a driver
+   * or admin login, and the account rules (suspension included) still apply — blocking the
+   * account in the admin panel shuts it off without a redeploy.
+   */
+  REVIEW_LOGIN_PHONE: z
+    .string()
+    .regex(/^\+[1-9]\d{7,14}$/, 'REVIEW_LOGIN_PHONE must be E.164, e.g. +919000000000')
+    .optional(),
+  REVIEW_LOGIN_OTP: z
+    .string()
+    .regex(/^\d{6}$/, 'REVIEW_LOGIN_OTP must be exactly 6 digits')
+    .optional(),
+
+  /**
    * Cloudinary credentials for media storage (driver documents, profile pictures).
    */
   /**
@@ -351,6 +369,14 @@ export function loadEnv(): Env {
       'Invalid environment:\n  DEV_FIXED_OTP: must not be set when NODE_ENV=production — ' +
         'it is a login bypass. Set STAGING_UNSAFE=true as well if this really is a ' +
         'throwaway staging host.',
+    );
+    process.exit(1);
+  }
+
+  // Half a demo login is a typo, not a choice: fail loudly rather than silently have none.
+  if ((parsed.data.REVIEW_LOGIN_PHONE === undefined) !== (parsed.data.REVIEW_LOGIN_OTP === undefined)) {
+    console.error(
+      'Invalid environment:\n  REVIEW_LOGIN_PHONE and REVIEW_LOGIN_OTP must be set together, or neither.',
     );
     process.exit(1);
   }

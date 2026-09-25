@@ -1,13 +1,14 @@
 import Image from 'next/image';
 import Link from 'next/link';
 
-import { Phone, MessageCircle, Mail, MapPin, Check } from 'lucide-react';
+import { Phone, MessageCircle, Mail, MapPin, Sparkle } from 'lucide-react';
 import type { ReactElement } from 'react';
 
 const QUICK_LINKS = [
   { label: 'Home',              href: '/' },
   { label: 'About Us',          href: '/about' },
-  { label: 'Our Packages',      href: '/#packages-pricing' },
+  { label: 'Services',          href: '/services' },
+  { label: 'Packages & Pricing', href: '/packages' },
   { label: 'Terms & conditions', href: '/terms' },
   { label: 'Privacy Policy',   href: '/privacy' },
   { label: 'Delete Account',    href: '/delete-account' },
@@ -16,11 +17,11 @@ const QUICK_LINKS = [
 
 export function SiteFooter(): ReactElement {
   return (
-    <footer className="bg-[#0e0e12]">
+    <footer className="bg-gradient-to-b from-brand/20 to-white border-t border-brand/80">
       <div className="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
 
         {/* ── Main 4-column grid ──────────────────────────────────────── */}
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-10 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_1fr]">
 
           {/* Col 1 — Brand */}
           <div>
@@ -29,9 +30,9 @@ export function SiteFooter(): ReactElement {
               alt="DriverZone — Now you can tell us"
               width={160}
               height={80}
-              className="h-16 w-auto invert brightness-0"
+              className="h-16 w-auto"
             />
-            <p className="mt-4 text-[13px] leading-relaxed text-white/55">
+            <p className="mt-4 text-[16px] leading-relaxed text-brand-fg">
               DriverZone offers trusted Driver Hire in Siliguri and Car Driver Hire in Siliguri
               with verified, licensed drivers for your own car and on-time service. Enjoy safe,
               reliable, and convenient travel for all your local and outstation trips.
@@ -39,13 +40,13 @@ export function SiteFooter(): ReactElement {
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <Link
                 href="/#get-the-app"
-                className="rounded-pill border border-brand px-5 py-2 text-sm font-semibold text-brand transition-colors hover:bg-brand hover:text-fg"
+                className="rounded-pill px-5 py-2 text-sm font-semibold bg-black text-white transition-colors hover:bg-brand hover:text-fg"
               >
                 Hire Driver
               </Link>
               <Link
                 href="/#get-the-app"
-                className="rounded-pill border border-white/30 px-5 py-2 text-sm font-medium text-white/75 transition-colors hover:border-white/60 hover:text-white"
+                className="rounded-pill border border-gray-800 px-5 py-2 text-sm font-medium text-brand-fg transition-colors hover:bg-gray-800 hover:text-white"
               >
                 Become a Driver
               </Link>
@@ -54,15 +55,15 @@ export function SiteFooter(): ReactElement {
 
           {/* Col 2 — Quick links (nav) */}
           <div>
-            <h3 className="text-[15px] font-semibold text-white">Quick Link</h3>
+            <h3 className="text-[24px] font-semibold text-brand-fg">Quick Link</h3>
             <ul className="mt-5 space-y-3.5">
               {QUICK_LINKS.map((link) => (
                 <li key={link.href}>
                   <Link
                     href={link.href}
-                    className="flex items-center gap-2.5 text-[13px] text-white/55 transition-colors hover:text-white"
+                    className="flex items-center gap-2.5 text-[16px] text-brand-fg transition-colors"
                   >
-                    <Check size={14} className="shrink-0 text-brand" aria-hidden />
+                    <Sparkle size={14} className="shrink-0 text-brand-fg/60" aria-hidden />
                     {link.label}
                   </Link>
                 </li>
@@ -72,14 +73,14 @@ export function SiteFooter(): ReactElement {
 
           {/* Col 3 — Contact */}
           <div>
-            <h3 className="text-[15px] font-semibold text-white">Quick Link</h3>
+            <h3 className="text-[24px] font-semibold text-brand-fg">Contact Us</h3>
             <ul className="mt-5 space-y-4">
               <li className="flex items-start gap-3">
-                <Phone size={15} className="mt-0.5 shrink-0 text-brand" aria-hidden />
-                <span className="text-[13px] leading-relaxed text-white/55">
-                  <a href="tel:03533568917" className="hover:text-white transition-colors">(0353) 3568917</a>{' '}
-                  <a href="tel:+918509299342" className="hover:text-white transition-colors">+91 8509299342</a><br />
-                  <a href="tel:+917001606510" className="hover:text-white transition-colors">+91 7001606510</a>
+                <Phone size={15} className="mt-0.5 shrink-0 text-brand-fg" aria-hidden />
+                <span className="text-[16px] leading-relaxed text-brand-fg">
+                  <a href="tel:03533568917" className="transition-colors">(0353) 3568917</a>{' '} / 
+                  <a href="tel:+918509299342" className="transition-colors">+91 8509299342</a><br />
+                  <a href="tel:+917001606510" className="transition-colors">+91 7001606510</a>
                 </span>
               </li>
               <li className="flex items-center gap-3">
@@ -87,7 +88,7 @@ export function SiteFooter(): ReactElement {
                 <svg
                   viewBox="0 0 24 24"
                   fill="currentColor"
-                  className="size-[15px] shrink-0 text-brand"
+                  className="size-[15px] shrink-0 text-brand-fg"
                   aria-hidden
                 >
                   <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
@@ -97,35 +98,35 @@ export function SiteFooter(): ReactElement {
                   href="https://wa.me/918509299342"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[13px] text-white/55 transition-colors hover:text-white"
+                  className="text-[13px] text-brand-fg-fg transition-colors"
                 >
                   +91 8509299342
                 </a>
               </li>
               <li className="flex items-start gap-3">
-                <Mail size={15} className="mt-0.5 shrink-0 text-brand" aria-hidden />
+                <Mail size={15} className="mt-0.5 shrink-0 text-brand-fg" aria-hidden />
                 <div className="flex flex-col gap-0.5">
                   <a
                     href="mailto:info@driverzoneonline.com"
-                    className="text-[13px] text-white/55 transition-colors hover:text-white"
+                    className="text-[16px] text-brand-fg-fg transition-colors"
                   >
                     info@driverzoneonline.com
                   </a>
                   <a
                     href="mailto:driverzone.india@gmail.com"
-                    className="text-[13px] text-white/55 transition-colors hover:text-white"
+                    className="text-[16px] text-brand-fg-fg transition-colors"
                   >
                     driverzone.india@gmail.com
                   </a>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <MapPin size={15} className="mt-0.5 shrink-0 text-brand" aria-hidden />
+                <MapPin size={15} className="mt-0.5 shrink-0 text-brand-fg" aria-hidden />
                 <a
                   href="https://maps.app.goo.gl/e8CL8U2uQP5K9gJd9"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[13px] leading-relaxed text-white/55 transition-colors hover:text-white"
+                  className="text-[16px] leading-relaxed text-brand-fg-fg transition-colors"
                 >
                   Kalibari, Shanti Nagar, Siliguri, West Bengal - 734004
                 </a>
@@ -145,6 +146,7 @@ export function SiteFooter(): ReactElement {
                 loading="lazy"
                 referrerPolicy="strict-origin-when-cross-origin"
                 title="DriverZone office — Kalibari, Siliguri on Google Maps"
+                className="grayscale transition-[filter] duration-300 hover:grayscale-0"
               />
             </div>
 
@@ -155,7 +157,7 @@ export function SiteFooter(): ReactElement {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="DriverZone on Facebook"
-                className="flex size-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-brand hover:text-fg"
+                className="flex size-10 items-center justify-center rounded-full bg-brand text-fg transition-all duration-200 hover:bg-fg hover:text-brand hover:scale-110"
               >
                 {/* Facebook icon */}
                 <svg viewBox="0 0 24 24" fill="currentColor" className="size-[18px]" aria-hidden>
@@ -167,7 +169,7 @@ export function SiteFooter(): ReactElement {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="DriverZone on Instagram"
-                className="flex size-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-brand hover:text-fg"
+                className="flex size-10 items-center justify-center rounded-full bg-brand text-fg transition-all duration-200 hover:bg-fg hover:text-brand hover:scale-110"
               >
                 {/* Instagram icon */}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-[18px]" aria-hidden>
@@ -182,10 +184,10 @@ export function SiteFooter(): ReactElement {
         </div>
 
         {/* ── Bottom bar ──────────────────────────────────────────────── */}
-        <div className="mt-10 flex flex-col gap-3 border-t border-white/10 py-6 text-[13px] text-white/45 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-10 flex flex-col gap-3 border-t border-gray-200 py-6 text-[16px] text-gray-700 sm:flex-row sm:items-center sm:justify-between">
           <p>
             © Copyright{' '}
-            <span className="font-semibold text-brand">Driver Zone</span>
+            <span className="font-semibold text-gray-800">Driver Zone</span>
             {' '}- 2026 | All Right Reserved
           </p>
           <p className="flex items-center gap-2">
@@ -194,7 +196,7 @@ export function SiteFooter(): ReactElement {
               alt="Reboot AI"
               width={137}
               height={11}
-              className="h-[14px] w-auto"
+              className="h-[14px] w-auto brightness-0"
             />
           </p>
         </div>

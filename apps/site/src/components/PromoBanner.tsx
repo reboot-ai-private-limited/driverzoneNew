@@ -9,17 +9,17 @@ const WA_NUMBER = '918509299342';
 export function PromoBanner(): ReactElement {
   const [phone, setPhone] = useState('');
 
-  const handleBook = useCallback(() => {
-    const message = phone.trim()
-      ? `*Hello DriverZone!*\n\nI would like to book a cab.\n\nMy contact number: ${phone.trim()}\n\nPlease confirm availability and pricing for my trip. Thank you!`
-      : `*Hello DriverZone!*\n\nI would like to book a cab.\n\nPlease share available packages and pricing for my trip. Thank you!`;
+  const isValid = phone.length === 10;
 
+  const handleBook = useCallback(() => {
+    if (!isValid) return;
+    const message = `*Hello DriverZone!*\n\nI would like to book a cab.\n\nMy contact number: ${phone}\n\nPlease confirm availability and pricing for my trip. Thank you!`;
     window.open(
       `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(message)}`,
       '_blank',
       'noopener,noreferrer',
     );
-  }, [phone]);
+  }, [phone, isValid]);
 
   return (
     <section
@@ -31,6 +31,8 @@ export function PromoBanner(): ReactElement {
         src="/promo-banner.webp"
         alt="DriverZone cars and professional drivers ready to serve across North Bengal"
         fill
+        sizes="100vw"
+        quality={90}
         className="object-cover object-center"
         priority
       />
@@ -65,19 +67,21 @@ export function PromoBanner(): ReactElement {
               </span>
               <input
                 type="tel"
+                inputMode="numeric"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                 placeholder="Enter your mobile number"
-                maxLength={15}
+                maxLength={10}
                 className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/60 outline-none"
               />
             </div>
 
-            {/* CTA button — opens WhatsApp with pre-filled message */}
+            {/* CTA button — enabled only when 10-digit number is entered */}
             <button
               type="button"
               onClick={handleBook}
-              className="shrink-0 rounded-pill bg-brand px-5 py-3.5 text-sm font-bold text-fg shadow-lg transition-opacity hover:opacity-90 active:scale-[0.97] whitespace-nowrap"
+              disabled={!isValid}
+              className="shrink-0 rounded-pill bg-brand px-5 py-3.5 text-sm font-bold text-fg shadow-lg transition-all whitespace-nowrap hover:opacity-90 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Book a Cab Now
             </button>

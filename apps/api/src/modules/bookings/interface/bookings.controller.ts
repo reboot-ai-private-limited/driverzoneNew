@@ -50,8 +50,10 @@ import type {
   DriverSwitchToCashUseCase,
 } from '../application/useCases/driverSwitchToCash.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
+import type { Booking } from '../domain/booking.entity.js';
 import {
   adminBookingListQuerySchema,
+  adminCreateBookingSchema,
   bookingIdParamSchema,
   cancelBookingSchema,
   completeTripSchema,
@@ -127,6 +129,117 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       },
       'Booking confirmed',
       201,
+    );
+  });
+}
+
+/**
+ * `POST /admin/bookings` — an admin books a trip for a customer from the panel.
+ *
+ * THE SAME USE CASE AS THE APP'S, with two arguments added: `dispatchMode: 'MANUAL'`, so no driver
+ * is rung — the admin assigns one — and `createdBy` the admin, so the event log says who actually
+ * made it. The quote must belong to the named customer; `CreateBookingUseCase` already refuses
+ * anyone else's, which is what stops an admin booking customer A onto customer B's price.
+ *
+ * The customer is checked to exist first, because this is the one create path where the customer
+ * id did not come from that customer's own signed token.
+ *
+ * The response CARRIES `start_otp` — the admin has to be able to pass it on.
+ */
+export function makeAdminCreateBookingController(
+  useCase: CreateBookingUseCase,
+  repo: BookingRepositoryPort,
+  directory: CustomerContactContract,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const body = adminCreateBookingSchema.parse(req.body);
+
+    const contacts = await directory.customerContactsByIds([body.customer_id]);
+    const customer = contacts.get(body.customer_id);
+    if (customer === undefined) throw AppError.notFound('That customer does not exist.');
+
+    const result = await useCase.execute({
+      customerId: body.customer_id,
+      quoteId: body.quote_id,
+      pickupAddress: body.pickup_address,
+      dropAddress: body.drop_address,
+      carCategory: body.car_category,
+      vehicleType: body.vehicle_type,
+      preferFavouriteDrivers: false,
+      idempotencyKey: idempotencyKeyOf(req),
+      dispatchMode: 'MANUAL',
+      createdBy: { type: 'ADMIN', id: principalOf(req) },
+    });
+
+    const startOtp = await repo.readStartOtp(result.booking.id);
+
+    sendSuccess(
+      req,
+      res,
+      {
+        booking: toBookingDto({
+          booking: result.booking,
+          adjustments: [],
+          startOtp,
+          revealPhones: true,
+          customerCard: customer,
+        }),
+      },
+      'Booking created — assign a driver',
+      201,
+    );
+  });
+}
+
+/**
+ * `POST /admin/bookings/:id/auto-dispatch` — hand a MANUAL booking back to automatic dispatch.
+ *
+ * For when ops booked a trip intending to pick the driver and then would rather the system find
+ * one. Only a driverless, waiting booking can be flipped; the swap is conditional on exactly that,
+ * so it cannot race an assignment made a second earlier.
+ */
+export function makeEnableAutoDispatchController(
+  repo: BookingRepositoryPort,
+  settings: SettingsReadContract,
+  scheduleDispatch: (booking: Booking) => Promise<void>,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+
+    const booking = await repo.findById(id);
+    if (booking === null) throw new BookingNotFoundError(id);
+    if (booking.dispatchMode !== 'MANUAL') {
+      throw AppError.conflict('This booking is already dispatched automatically.');
+    }
+
+    // The same rule `createBooking` uses: a scheduled trip starts looking at T−lead, never earlier
+    // than now.
+    const snapshot = await settings.snapshot();
+    const leadMs = snapshot['dispatch.scheduled_lead_minutes'] * 60_000;
+    const now = Date.now();
+    const dispatchAt = booking.isScheduled
+      ? new Date(Math.max(now, booking.scheduledAt.getTime() - leadMs))
+      : new Date(now);
+
+    const flipped = await repo.enableAutoDispatch(id, dispatchAt);
+    if (flipped === null) {
+      throw AppError.conflict(
+        'This booking moved on while you were changing it — it may already have a driver. Reload and check.',
+      );
+    }
+
+    try {
+      await scheduleDispatch(flipped);
+    } catch (error) {
+      // The sweeper re-enqueues anything due and AUTO, so this heals on its own within a minute.
+      logger.error({ err: error, bookingId: id }, 'could not enqueue dispatch after enabling it');
+    }
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking: flipped, adjustments: [] }) },
+      'Automatic dispatch enabled',
     );
   });
 }
@@ -972,9 +1085,9 @@ export function makeListAdminBookingsController(
 /**
  * `GET /admin/bookings/:id` — one booking, in full.
  *
- * Named on the row's own terms rather than either party's: no start OTP (the code exists so the
- * customer can prove themselves to the driver, and an admin reading it defeats that), and names
- * without phone numbers, matching the list.
+ * Named on the row's own terms rather than either party's. CARRIES the start OTP: admins book
+ * trips on customers' behalf from the panel and have to be able to pass the code on (see the note
+ * at the lookup below). Both parties' phone numbers are revealed — see `revealPhones`.
  */
 export function makeGetAdminBookingController(
   repo: BookingRepositoryPort,
@@ -998,13 +1111,20 @@ export function makeGetAdminBookingController(
      * completion, so the one moment support is most likely to be asked — the customer is on the
      * phone and the trip is still running — was the one moment the panel had nothing to show.
      */
-    const [contacts, cards, adjustments, extensionRows] = await Promise.all([
+    /*
+     * THE TRIP CODE TOO — on this single read only, never the list. Admins book trips for
+     * customers from the panel now, often for someone without the app, and the code is what the
+     * customer must give the driver at pickup. Support also gets asked for it by a customer whose
+     * phone has died. A page of every code in the city stays off the list read.
+     */
+    const [contacts, cards, adjustments, extensionRows, startOtp] = await Promise.all([
       directory.customerContactsByIds([booking.customerId]),
       booking.driverId === null
         ? Promise.resolve(new Map<string, DriverCard>())
         : directory.driverCardsByIds([booking.driverId]),
       charges.listAdjustments(booking.id),
       extensions.listForBooking(booking.id),
+      repo.readStartOtp(booking.id),
     ]);
 
     sendSuccess(
@@ -1014,6 +1134,7 @@ export function makeGetAdminBookingController(
         booking,
         adjustments,
         extensions: extensionRows,
+        startOtp,
         revealPhones: true,
         customerCard: contacts.get(booking.customerId) ?? null,
         driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),

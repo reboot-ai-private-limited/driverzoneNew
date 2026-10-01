@@ -159,9 +159,16 @@ const assignableQuerySchema = z.object({
 const assignSchema = z
   .object({
     driver_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Not a valid driver id.'),
-    reason: z.string().trim().min(1).max(500),
+    /*
+     * OPTIONAL. Ops assigns by hand after phoning the driver, and typing why on every assignment
+     * was friction with no reader. A blank one is recorded as `DEFAULT_ASSIGN_REASON`, so the
+     * event log never carries an empty reason.
+     */
+    reason: z.string().trim().max(500).optional(),
   })
   .strict();
+
+const DEFAULT_ASSIGN_REASON = 'Assigned by admin';
 
 const bookingIdParamSchema = z.object({ id: z.string().min(1) });
 
@@ -222,7 +229,7 @@ export function makeAssignDriverController(useCase: TransferBookingUseCase): Req
     const result = await useCase.execute({
       bookingId: id,
       toDriverId: body.driver_id,
-      reason: body.reason,
+      reason: body.reason === undefined || body.reason === '' ? DEFAULT_ASSIGN_REASON : body.reason,
       adminId: adminOf(req),
     });
 

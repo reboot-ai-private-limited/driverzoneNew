@@ -172,6 +172,7 @@ export function toBookingDto(view: BookingView): BookingDto {
     car_category: booking.carCategory,
     vehicle_type: booking.vehicleType,
     prefer_favourite_drivers: booking.preferFavouriteDrivers,
+    dispatch_mode: booking.dispatchMode,
 
     wallet_credit: toMoney(booking.walletCreditPaise),
     wallet_debt: toMoney(booking.walletDebtPaise),

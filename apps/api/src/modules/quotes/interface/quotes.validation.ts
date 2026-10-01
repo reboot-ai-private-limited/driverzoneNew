@@ -51,6 +51,17 @@ export const createQuoteSchema = z
     { path: ['returnAt'], message: 'The return has to be after the pickup.' },
   );
 
+/**
+ * `POST /admin/quotes` — only the `customer_id` is checked here. `.passthrough()` hands every
+ * other key on to `createQuoteSchema`, which stays the single definition of a trip request (and
+ * stays `.strict()` about it).
+ */
+export const adminQuoteCustomerSchema = z
+  .object({
+    customer_id: z.string().regex(/^[a-f0-9]{24}$/i, 'customer_id must be a customer id'),
+  })
+  .passthrough();
+
 export type CreateQuoteBody = z.input<typeof createQuoteSchema>;
 export type CreateQuoteInputParsed = z.infer<typeof createQuoteSchema>;
 

@@ -8,6 +8,8 @@
  * number without its country code, and neither of those is true anywhere else in the panel.
  */
 
+import type { BookingDto } from '@driverzone/contracts';
+
 const IST = 'Asia/Kolkata';
 
 /**
@@ -17,6 +19,62 @@ const IST = 'Asia/Kolkata';
  * other columns, and "2026" versus "26" is four characters per row that buy nothing — an admin
  * looking at today's bookings already knows what year it is.
  */
+/** `200` → `3h 20m`, `45` → `45m`, `180` → `3h`. */
+export function formatMinutes(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (h === 0) return `${rest}m`;
+  return rest === 0 ? `${h}h` : `${h}h ${rest}m`;
+}
+
+/**
+ * The duration line on the booking page, at every stage of the trip — never a bare "not
+ * available" on the bookings that most need explaining.
+ *
+ *   - finished: what it actually took, `started_at` → `completed_at`.
+ *   - running: how long it has been going, so support can see a 3-hour rental at hour four.
+ *   - not started: what was BOOKED — the in-city package's included time. An outstation trip is
+ *     a package with no hours figure (`included_minutes` is null), so it says so instead.
+ *   - never started and over (cancelled, no driver, expired): there was no trip to time.
+ */
+export function tripDurationText(
+  booking: Pick<BookingDto, 'status' | 'service_type' | 'included_minutes' | 'timestamps'>,
+  now: Date = new Date(),
+): string {
+  const { started_at, completed_at } = booking.timestamps;
+
+  if (started_at !== null && completed_at !== null) {
+    return `${formatMinutes((Date.parse(completed_at) - Date.parse(started_at)) / 60_000)} taken`;
+  }
+  if (started_at !== null && booking.status === 'STARTED') {
+    return `Running ${formatMinutes((now.getTime() - Date.parse(started_at)) / 60_000)}`;
+  }
+  if (started_at === null && TRIP_ENDED_UNSTARTED.has(booking.status)) {
+    return 'Trip did not start';
+  }
+  if (booking.included_minutes !== null) {
+    return `${formatMinutes(booking.included_minutes)} booked`;
+  }
+  return booking.service_type === 'OUTSTATION' ? 'Outstation package' : 'Not started yet';
+}
+
+const TRIP_ENDED_UNSTARTED = new Set<BookingDto['status']>([
+  'CANCELLED_BY_CUSTOMER',
+  'CANCELLED_BY_DRIVER',
+  'CANCELLED_BY_ADMIN',
+  'NO_DRIVER_FOUND',
+  'EXPIRED',
+]);
+
+/** In-city trips are priced on time, not distance, so no distance is frozen onto them. */
+export function tripDistanceText(
+  booking: Pick<BookingDto, 'distance_km' | 'service_type'>,
+): string {
+  if (booking.distance_km !== null) return `${booking.distance_km.toFixed(1)} km`;
+  return booking.service_type === 'INCITY' ? 'In-city — priced by time' : 'Distance not recorded';
+}
+
 export function formatBookingDate(iso: string): string {
   return new Intl.DateTimeFormat('en-IN', {
     day: '2-digit',

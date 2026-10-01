@@ -42,6 +42,10 @@ export interface DriverControllers {
 }
 
 export interface AdminControllers {
+  /** `POST /admin/bookings` — book a trip for a customer from the panel. Manual dispatch. */
+  create: RequestHandler;
+  /** `POST /admin/bookings/:id/auto-dispatch` — hand a manual booking to automatic dispatch. */
+  enableAutoDispatch: RequestHandler;
   list: RequestHandler;
   get: RequestHandler;
   events: RequestHandler;
@@ -121,6 +125,7 @@ export function buildAdminRouter(handlers: AdminControllers): Router {
   router.use(requireAuth('ADMIN'));
 
   router.get('/', handlers.list);
+  router.post('/', handlers.create);
   router.get('/:id', handlers.get);
   router.get('/:id/events', handlers.events);
   router.post('/:id/force-arrive', handlers.forceArrive);
@@ -129,6 +134,7 @@ export function buildAdminRouter(handlers: AdminControllers): Router {
    * not share a handler with the customer's cancel despite taking the identical body.
    */
   router.post('/:id/cancel', handlers.cancel);
+  router.post('/:id/auto-dispatch', handlers.enableAutoDispatch);
 
   return router;
 }

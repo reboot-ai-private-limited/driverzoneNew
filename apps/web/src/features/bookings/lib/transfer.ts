@@ -37,22 +37,32 @@ export function canTransfer(status: BookingDto['status']): boolean {
   return TRANSFERABLE_STATUSES.has(status);
 }
 
-/** The submit button stays disabled until a driver is picked and a reason is typed. */
+/**
+ * The submit button stays disabled until a driver is picked. The REASON IS OPTIONAL — ops assigns
+ * after phoning the driver, and the server records "Assigned by admin" when none is given.
+ */
 export function isTransferSubmitDisabled(input: {
   selected: string | null;
-  reason: string;
   isPending: boolean;
 }): boolean {
-  return input.selected === null || input.reason.trim().length === 0 || input.isPending;
+  return input.selected === null || input.isPending;
 }
 
-/** The trimmed payload `useAssignDriver` sends — trimming happens once, here, not at the call site. */
+/**
+ * The payload `useAssignDriver` sends — trimming happens once, here, not at the call site. A
+ * blank reason is LEFT OUT rather than sent empty, so the server's default applies.
+ */
 export function buildAssignPayload(input: {
   bookingId: string;
   driverId: string;
   reason: string;
-}): { id: string; driverId: string; reason: string } {
-  return { id: input.bookingId, driverId: input.driverId, reason: input.reason.trim() };
+}): { id: string; driverId: string; reason?: string } {
+  const reason = input.reason.trim();
+  return {
+    id: input.bookingId,
+    driverId: input.driverId,
+    ...(reason === '' ? {} : { reason }),
+  };
 }
 
 /**

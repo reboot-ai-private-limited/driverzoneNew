@@ -1,8 +1,17 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { AdminListBookingsQuery } from '@driverzone/contracts';
+import type {
+  AdminCreateBookingRequest,
+  AdminCreateBookingResponse,
+  AdminCreateCustomerRequest,
+  AdminCreateCustomerResponse,
+  AdminCreateQuoteRequest,
+  AdminListBookingsQuery,
+} from '@driverzone/contracts';
 import { bookingsApi } from '@/lib/api/endpoints/bookings';
+import { customersApi } from '@/lib/api/endpoints/customers';
+import { quotesApi, type AdminQuoteResult } from '@/lib/api/endpoints/quotes';
 import { authedQueryOptions } from '@/lib/query/factory';
 import { useApiMutation } from '@/lib/query/mutation';
 import { keys, staleTime } from '@/lib/query/keys';
@@ -81,7 +90,7 @@ export function useAssignableDrivers(search: string, bookingId?: string) {
 }
 
 /**
- * Cancel a booking as an admin. Charges nobody and refunds a prepaid trip in full.
+ * Cancel a booking as an admin. Charges nobody.
  *
  * Invalidates the whole `bookings` subtree rather than the one row: the list is filtered and
  * paged server-side, so a cancelled booking can drop out of the current filter entirely, and the
@@ -97,10 +106,47 @@ export function useCancelBooking() {
 
 /** Hand a booking to a different driver. Same invalidation reasoning as the cancel above. */
 export function useAssignDriver() {
-  return useApiMutation<{ id: string; driverId: string; reason: string }, unknown>({
+  return useApiMutation<{ id: string; driverId: string; reason?: string }, unknown>({
     call: (token, { id, driverId, reason }) => bookingsApi.assign(token, id, driverId, reason),
     invalidates: [keys.bookings.all()],
-    successMessage: 'Trip transferred to the new driver.',
+    successMessage: 'Driver assigned to the trip.',
+  });
+}
+
+/**
+ * Price a trip for the customer being booked for. A MUTATION rather than a query: each call
+ * writes a quote row that expires in ten minutes, and refetching one on window focus would mint a
+ * new price behind the admin's back.
+ */
+export function useAdminQuote() {
+  return useApiMutation<AdminCreateQuoteRequest, AdminQuoteResult>({
+    call: (token, body) => quotesApi.create(token, body),
+  });
+}
+
+/** Book the trip. Manual dispatch — see `bookingsApi.create`. */
+export function useCreateBooking() {
+  return useApiMutation<AdminCreateBookingRequest, AdminCreateBookingResponse>({
+    call: (token, body, idempotencyKey) => bookingsApi.create(token, body, idempotencyKey),
+    invalidates: [keys.bookings.all()],
+    successMessage: 'Booking created. Assign a driver to it.',
+  });
+}
+
+/** Find, or create, the customer behind a phone number. */
+export function useCreateCustomer() {
+  return useApiMutation<AdminCreateCustomerRequest, AdminCreateCustomerResponse>({
+    call: (token, body) => customersApi.create(token, body),
+    invalidates: [keys.customers.all()],
+  });
+}
+
+/** Hand a manual booking to automatic dispatch. */
+export function useEnableAutoDispatch() {
+  return useApiMutation<{ id: string }, unknown>({
+    call: (token, { id }) => bookingsApi.enableAutoDispatch(token, id),
+    invalidates: [keys.bookings.all()],
+    successMessage: 'Automatic dispatch is now looking for a driver.',
   });
 }
 

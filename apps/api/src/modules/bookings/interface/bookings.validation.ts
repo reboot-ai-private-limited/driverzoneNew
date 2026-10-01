@@ -35,6 +35,21 @@ export const createBookingSchema = z
   })
   .strict();
 
+/**
+ * `POST /admin/bookings` — an admin booking ON A CUSTOMER'S BEHALF. Snake_case like the rest of
+ * the admin surface. No `payment_mode`: payment is chosen after the ride starts, as always.
+ */
+export const adminCreateBookingSchema = z
+  .object({
+    customer_id: z.string().regex(/^[a-f0-9]{24}$/i, 'customer_id must be a customer id'),
+    quote_id: z.string().min(1),
+    pickup_address: z.string().trim().min(1).max(500),
+    drop_address: z.string().trim().min(1).max(500),
+    car_category: z.enum(CAR_CATEGORIES),
+    vehicle_type: z.enum(VEHICLE_TYPE_PREFERENCES),
+  })
+  .strict();
+
 export const selectPaymentMethodSchema = z
   .object({
     payment_mode: z.enum(PAYMENT_MODES),

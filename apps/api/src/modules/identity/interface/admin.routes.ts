@@ -36,9 +36,14 @@ export function buildAdminRouter(
   router.post('/admins/:id/deactivate', requireSuperAdmin, roster.deactivate);
   router.post('/admins/:id/reactivate', requireSuperAdmin, roster.reactivate);
 
-  // Customers are read and edited here, never created: an account comes into existence only when
-  // somebody verifies an OTP with their own phone. There is deliberately no POST.
+  /*
+   * Customers are read, edited, and — since admins book trips for customers from the panel —
+   * CREATED here too: `POST /customers` makes the same bare account `otp/verify` would, for someone
+   * who has never opened the app. It is idempotent on the number, so it never makes a second
+   * account for a person who already has one.
+   */
   router.get('/customers', controllers.listCustomers);
+  router.post('/customers', controllers.createCustomer);
   router.get('/customers/:id', controllers.getCustomerDetails);
   router.patch('/customers/:id', controllers.updateCustomer);
 

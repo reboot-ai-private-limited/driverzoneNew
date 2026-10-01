@@ -43,6 +43,16 @@ export interface CreateQuoteRequest {
   insurance?: boolean | undefined;
 }
 
+/**
+ * `POST /admin/quotes` — the same quote, priced for a customer the ADMIN names.
+ *
+ * Exactly the customer request plus whose quote it is: the quote is bound to `customer_id`, so the
+ * booking made from it (`POST /admin/bookings`) belongs to that customer and nobody else.
+ */
+export interface AdminCreateQuoteRequest extends CreateQuoteRequest {
+  customer_id: string;
+}
+
 /** One line on the fare card. `code` is stable; `label` is prose and may be rewritten. */
 export interface FareLineDto {
   code: string;

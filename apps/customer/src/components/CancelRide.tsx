@@ -2,9 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { useMutation } from '@tanstack/react-query';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { CancelBookingResponse } from '@driverzone/contracts';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -141,6 +140,11 @@ export function CancelRide({
       animationType="slide"
       presentationStyle="fullScreen"
       onRequestClose={goBack}
+      // Edge-to-edge, like the app behind it — the keyboard controller measures the keyboard
+      // against a window that reaches the screen edges. The screen pads its own insets (above and
+      // the footer below), so nothing ends up under the system bars.
+      statusBarTranslucent
+      navigationBarTranslucent
     >
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.header}>
@@ -160,9 +164,10 @@ export function CancelRide({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          // iOS never resizes for the keyboard; Android's `adjustResize` already has, and padding
-          // on top of that would shrink the view twice.
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // `react-native-keyboard-controller`'s version, `padding` on both platforms: it reads the
+          // real keyboard height, where React Native's relied on Android's `adjustResize` — which
+          // edge-to-edge (Android 15+) no longer applies, leaving the "Other" box behind the keys.
+          behavior="padding"
         >
           <ScrollView
             ref={scrollRef}

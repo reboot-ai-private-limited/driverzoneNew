@@ -14,6 +14,7 @@ import { HaversineRoadDistance } from './infrastructure/haversine.roadDistance.j
 import { CreateQuoteUseCase } from './application/useCases/createQuote.usecase.js';
 import { ExplainTripUseCase } from './application/useCases/explainTrip.usecase.js';
 import {
+  makeAdminCreateQuoteController,
   makeCreateQuoteController,
   makeExplainTripController,
 } from './interface/quotes.controller.js';
@@ -100,6 +101,10 @@ export function buildQuotesContainer(deps: QuotesDependencies): QuotesContainer 
       },
     },
     buildCustomerRouter: () => buildCustomerRouter({ createQuote: makeCreateQuoteController(create) }),
-    buildAdminRouter: () => buildAdminRouter({ explainTrip: makeExplainTripController(explain) }),
+    buildAdminRouter: () =>
+      buildAdminRouter({
+        explainTrip: makeExplainTripController(explain),
+        createQuote: makeAdminCreateQuoteController(create),
+      }),
   };
 }

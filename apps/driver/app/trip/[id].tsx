@@ -7,15 +7,17 @@ import { type ComponentProps, type ReactElement, useEffect, useRef, useState } f
 import {
   ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import {
+  KeyboardAwareScrollView,
+  type KeyboardAwareScrollViewRef,
+} from 'react-native-keyboard-controller';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -121,14 +123,13 @@ export default function TripScreen(): ReactElement {
    * gets them out of the way on its own.
    *
    * The code block is the LAST thing in the scroll on an ARRIVED trip, so it is exactly where the
-   * keyboard lands. On iOS the view never resizes at all; on Android the activity does resize,
-   * which shrinks the ScrollView but leaves it scrolled where it was — either way the driver is
-   * typing a code they cannot see, while a customer waits next to them.
+   * keyboard lands. `KeyboardAwareScrollView` brings the focused cell into view; this goes one
+   * step further and scrolls to the END, so the Start button under the code is visible too —
+   * the driver should not have to dismiss the keyboard to find it while a customer waits.
    *
-   * Scrolling to the end when the keyboard appears is what puts the cells above it. Gated on
-   * ARRIVED so that focusing anything else on this screen does not yank the page down.
+   * Gated on ARRIVED so that focusing anything else on this screen does not yank the page down.
    */
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
 
   useEffect(() => {
     if (status !== 'ARRIVED') return undefined;
@@ -308,22 +309,22 @@ export default function TripScreen(): ReactElement {
       </View>
 
       {/*
-        `padding` on iOS, nothing on Android. iOS never resizes the window for the keyboard, so
-        the view has to be padded by hand; Android's `adjustResize` already shrinks it, and adding
-        padding on top of that would shrink it twice and leave a gap the size of the keyboard.
+        THE START-TRIP CODE, THE CASH AMOUNT AND THE RATING COMMENT ALL SIT LOW ON THIS SCREEN.
+        `KeyboardAwareScrollView` scrolls whichever is focused above the keyboard, on both
+        platforms. The old `KeyboardAvoidingView` padded iOS only and relied on Android's
+        `adjustResize` — which edge-to-edge (Android 15+) no longer applies — so on Android the
+        driver typed the customer's code into cells hidden behind the keys.
       */}
-      <KeyboardAvoidingView
+      <KeyboardAwareScrollView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        bottomOffset={24}
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        // Without this, the first tap anywhere while the OTP keyboard is up is swallowed by the
+        // dismiss instead of hitting the button the driver aimed at.
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          // Without this, the first tap anywhere while the OTP keyboard is up is swallowed by the
-          // dismiss instead of hitting the button the driver aimed at.
-          keyboardShouldPersistTaps="handled"
-        >
         <Stepper status={booking.status} />
 
         <Animated.View layout={LinearTransition.springify().damping(18)}>
@@ -358,7 +359,9 @@ export default function TripScreen(): ReactElement {
           <Meta
             icon={cash ? 'rupee' : 'credit-card'}
             label="Payment"
-            value={cash ? 'Cash' : 'Prepaid'}
+            value={
+              cash ? 'Cash' : booking.payment_mode === 'UPI' ? 'Online' : 'Pay at end'
+            }
           />
         </View>
 
@@ -694,8 +697,7 @@ export default function TripScreen(): ReactElement {
             </View>
           </Animated.View>
         ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
 
       <CancelTripSheet
         visible={cancelling}

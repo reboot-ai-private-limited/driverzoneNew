@@ -1,4 +1,5 @@
 import { AppError } from '@/shared/errors/AppError.js';
+import type { AccountRepositoryPort } from '../../domain/account.repository.port.js';
 import type { AuditPort } from '../../domain/audit.port.js';
 import type {
   CustomerProfile,
@@ -18,7 +19,47 @@ export class ManageCustomerAdminUseCase {
   constructor(
     private readonly customers: CustomerProfileRepositoryPort,
     private readonly audit: AuditPort,
+    private readonly accounts: AccountRepositoryPort,
   ) {}
+
+  /**
+   * Creates the account behind a phone number so an admin can book a trip for someone who has
+   * never opened the app — exactly the bare account `otp/verify` would have created on their first
+   * sign-in, through the same port, so the two cannot produce different shapes of customer.
+   *
+   * IDEMPOTENT ON THE NUMBER: an existing account is returned with `created: false`. A blocked one
+   * is refused — booking a trip for an account ops deliberately shut is the same decision being
+   * unmade by accident.
+   */
+  async create(
+    input: { phone: string; fullName?: string | undefined },
+    actor: ActorContext,
+  ): Promise<{ customer: CustomerProfile; created: boolean }> {
+    const existing = await this.accounts.findByPhone('CUSTOMER', input.phone);
+    if (existing?.isBlocked) {
+      throw AppError.conflict('This customer is blocked. Unblock them before booking a trip.');
+    }
+    if (existing !== undefined) return { customer: await this.get(existing.id), created: false };
+
+    const account = await this.accounts.create('CUSTOMER', input.phone);
+    let customer = await this.get(account.id);
+
+    if (input.fullName !== undefined && input.fullName !== '') {
+      customer =
+        (await this.customers.updateProfile(account.id, { fullName: input.fullName })) ?? customer;
+    }
+
+    await this.audit.record({
+      adminId: actor.adminId,
+      entityType: 'Customer',
+      entityId: account.id,
+      action: 'CREATE',
+      after: { mobileNumber: input.phone, fullName: customer.fullName },
+      ip: actor.ip,
+    });
+
+    return { customer, created: true };
+  }
 
   async get(customerId: string): Promise<CustomerProfile> {
     const customer = await this.customers.findById(customerId);

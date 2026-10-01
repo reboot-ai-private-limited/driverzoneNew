@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { type ReactElement, useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
 import { SessionProvider } from '@/lib/auth/SessionProvider';
 import { useSessionRedirect } from '@/lib/auth/useSessionRedirect';
@@ -72,6 +73,14 @@ export default function RootLayout(): ReactElement | null {
         FIRST render of every screen sees zeros and only corrects after a layout pass — which on
         a screen that paints immediately shows as content sitting under the status bar.
       */}
+      {/*
+        KEYBOARD INSETS FOR EVERY SCREEN. Android draws edge-to-edge from Android 15, and in that
+        mode `adjustResize` no longer shrinks the window around the keyboard — so the old
+        `KeyboardAvoidingView behavior={ios ? 'padding' : undefined}` did nothing on Android and
+        fields near the bottom were typed into blind. `react-native-keyboard-controller` reads the
+        real keyboard insets on both platforms; screens use its `KeyboardAwareScrollView`.
+      */}
+      <KeyboardProvider>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <QueryClientProvider client={queryClient}>
           <SessionProvider>
@@ -107,6 +116,7 @@ export default function RootLayout(): ReactElement | null {
           </SessionProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

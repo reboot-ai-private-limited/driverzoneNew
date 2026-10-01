@@ -5,6 +5,7 @@ import {
   BOOKING_STATUSES,
   CAR_CATEGORIES,
   DIRECTIONS,
+  DISPATCH_MODES,
   PAYMENT_MODES,
   SERVICE_TYPES,
   VEHICLE_TYPE_PREFERENCES,
@@ -30,6 +31,7 @@ export interface BookingDoc {
   carCategory?: string | null;
   vehicleType?: string | null;
   preferFavouriteDrivers?: boolean;
+  dispatchMode?: string;
   walletCreditPaise?: number;
   walletDebtPaise?: number;
   quoteId: mongoose.Types.ObjectId;
@@ -98,6 +100,12 @@ const bookingSchema = new Schema<BookingDoc>(
      * feature existed want exactly the same behaviour, which is the one dispatch has always had.
      */
     preferFavouriteDrivers: { type: Boolean, default: false },
+
+    /*
+     * `MANUAL` — an admin booked it from the panel and assigns the driver by hand; automatic
+     * dispatch never touches it. Defaults to `AUTO`, which is what every older row means.
+     */
+    dispatchMode: { type: String, enum: DISPATCH_MODES, default: 'AUTO' },
 
     /*
      * What the wallet did to this trip's price, frozen at creation. Never both non-zero — a

@@ -450,6 +450,12 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
 
     buildAdminRouter: () =>
       buildAdminRouter({
+        create: controllers.makeAdminCreateBookingController(create, repo, deps.identity),
+        enableAutoDispatch: controllers.makeEnableAutoDispatchController(
+          repo,
+          deps.settings,
+          deps.scheduleDispatch,
+        ),
         list: controllers.makeListAdminBookingsController(repo, charges, deps.identity),
         get: controllers.makeGetAdminBookingController(repo, charges, deps.identity, extensions),
         events: controllers.makeListEventsController(repo),

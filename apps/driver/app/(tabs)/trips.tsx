@@ -377,7 +377,7 @@ function TripCard({ trip }: { trip: TripHistoryRow }): ReactElement {
             size={12}
             color={colors.muted}
           />
-          <Text style={styles.payModeLabel}>{trip.isCash ? 'Cash' : 'Prepaid'}</Text>
+          <Text style={styles.payModeLabel}>{trip.paymentLabel}</Text>
         </View>
         <Text style={styles.fare}>{trip.totalDisplay}</Text>
         <Feather name="chevron-right" size={16} color={colors.faint} />

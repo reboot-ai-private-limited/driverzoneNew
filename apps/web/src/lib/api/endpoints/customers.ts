@@ -1,4 +1,6 @@
 import type {
+  AdminCreateCustomerRequest,
+  AdminCreateCustomerResponse,
   AdminCustomerDetailsDto,
   AdminCustomerListDto,
   AdminCustomerWalletDetailsDto,
@@ -57,6 +59,14 @@ export const customersApi = {
 
   get: (token: string, id: string, signal?: AbortSignal) =>
     request<AdminCustomerDetailsDto>(`/admin/customers/${id}`, { token, signal }),
+
+  /**
+   * `POST /admin/customers` — the account behind a phone number, for booking a trip for someone
+   * who has never opened the app. Idempotent on the number: an existing account comes back with
+   * `created: false`.
+   */
+  create: (token: string, body: AdminCreateCustomerRequest) =>
+    request<AdminCreateCustomerResponse>('/admin/customers', { token, method: 'POST', body }),
 
   /**
    * One customer's wallet statement — filtered, paged, with totals over the whole selection.

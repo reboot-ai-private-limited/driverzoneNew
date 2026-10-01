@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { type ReactElement, useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import {
   SafeAreaProvider,
   SafeAreaView,
@@ -55,6 +56,14 @@ export default function RootLayout(): ReactElement | null {
         a screen that paints immediately shows as content sitting under the status bar, sometimes
         without ever settling if nothing forces a re-layout.
       */}
+      {/*
+        KEYBOARD INSETS FOR EVERY SCREEN. Android draws edge-to-edge from Android 15, and in that
+        mode `adjustResize` no longer shrinks the window around the keyboard — so the old
+        `KeyboardAvoidingView behavior={ios ? 'padding' : undefined}` did nothing on Android and
+        fields near the bottom were typed into blind. `react-native-keyboard-controller` reads the
+        real keyboard insets on both platforms; screens use its `KeyboardAwareScrollView`.
+      */}
+      <KeyboardProvider>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <QueryClientProvider client={queryClient}>
           <SessionProvider>
@@ -103,6 +112,7 @@ export default function RootLayout(): ReactElement | null {
           </SessionProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

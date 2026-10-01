@@ -31,6 +31,11 @@ export interface TripHistoryRow {
   pickup: string;
   drop: string;
   isCash: boolean;
+  /**
+   * 'Cash' / 'Online' once the customer has chosen. Payment is picked AFTER the ride starts, so a
+   * trip not yet at that point has no method — it is "Pay at end", never "Prepaid".
+   */
+  paymentLabel: string;
   /** Fare plus adjustments, in paise. Sorting needs a number, not a formatted string. */
   totalPaise: number;
   /** The server's own formatting where it is still correct — see `toTripHistoryRow`. */
@@ -110,6 +115,8 @@ export function toTripHistoryRow(booking: BookingDto): TripHistoryRow {
     pickup: booking.pickup.address,
     drop: booking.drop.address,
     isCash: booking.payment_mode === 'CASH',
+    paymentLabel:
+      booking.payment_mode === 'CASH' ? 'Cash' : booking.payment_mode === 'UPI' ? 'Online' : 'Pay at end',
     totalPaise,
     /*
      * The server's string whenever one describes this figure — which is whenever nothing has been

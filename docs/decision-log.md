@@ -20,6 +20,24 @@ entry links to it.
 
 ---
 
+## 2026-10-01 — Admins book trips for customers; those trips are dispatched by hand
+
+**Decision:** an admin can book a trip on a customer's behalf from the panel (`/bookings/new`) —
+same quote engine, same booking — and may create the customer's account by phone number to do it.
+Such bookings carry `dispatchMode: 'MANUAL'`: no driver is rung, an admin assigns one. Admins now
+see the trip code (`start_otp`) on the single-booking read.
+
+**Supersedes:** "customers are never created by an admin" (`identity/interface/admin.routes.ts`)
+and "`start_otp` is null on every admin read". The second protected the code from people with no
+need for it; an admin booking for someone without the app is exactly the person who needs it. The
+list read still never carries it.
+
+**Consequences:** two guards keep automatic dispatch away from a manual booking (the sweeper query
+and the wave). A manual booking nobody assigns stays `CONFIRMED` — the panel says so on its page.
+See [`LLD/dispatch-and-assignment.md`](LLD/dispatch-and-assignment.md) §Manual-dispatch bookings.
+
+---
+
 ## 2026-09-23 — Admins manage admins; customers and drivers can delete their accounts
 
 **Decision (admins):** two admin roles, `SUPER_ADMIN` and `ADMIN`. A super admin adds, re-roles,

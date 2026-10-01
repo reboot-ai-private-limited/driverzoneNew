@@ -460,7 +460,7 @@ export function buildIdentityContainer(): IdentityContainer {
   // The narrow, self-only use cases stay exactly as they are — widening one of them to accept a
   // customer id is how an admin-shaped hole appears in the customer app's surface.
   const listCustomersAdmin = new ListCustomersAdminUseCase(customers);
-  const manageCustomerAdmin = new ManageCustomerAdminUseCase(customers, audit);
+  const manageCustomerAdmin = new ManageCustomerAdminUseCase(customers, audit, accounts);
 
   const listDriversAdmin = new ListDriversAdminUseCase(drivers, documents, documentStorage);
   const getDriverDetailsAdmin = new GetDriverDetailsAdminUseCase(drivers, documents, documentStorage);

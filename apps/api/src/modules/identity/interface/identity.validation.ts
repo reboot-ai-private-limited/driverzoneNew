@@ -329,6 +329,14 @@ export const adminUpdateCustomerSchema = z.object({
   is_blocked: z.boolean().optional(),
 });
 
+/** `POST /admin/customers` — the number IS the account, so it is the one required field. */
+export const adminCreateCustomerSchema = z
+  .object({
+    mobile_number: mobileNumber,
+    full_name: personName.optional(),
+  })
+  .strict();
+
 export const adminUpdateDriverSchema = z.object({
   full_name: personName.optional(),
   dob: isoDate.nullable().optional(),

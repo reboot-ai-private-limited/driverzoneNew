@@ -278,9 +278,33 @@ gated the same way the two phone numbers are.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `POST` | `/admin/bookings/:id/cancel` | `{ reason }`. Charges NOBODY; refunds a prepaid trip in full |
+| `POST` | `/admin/bookings/:id/cancel` | `{ reason }`. Charges NOBODY |
 | `GET` | `/admin/bookings/assignable-drivers?search=` | Verified, unblocked drivers, with `is_on_duty` as a warning |
-| `POST` | `/admin/bookings/:id/assign` | `{ driver_id, reason }`. Release-then-claim; 409 on a STARTED trip |
+| `POST` | `/admin/bookings/:id/assign` | `{ driver_id, reason? }`. Reason optional (recorded as "Assigned by admin" when blank). Release-then-claim; 409 on a STARTED trip |
+| `GET` | `/admin/bookings/:id` | Full booking. Carries `start_otp` (the list never does) |
+| `POST` | `/admin/bookings/:id/auto-dispatch` | A `MANUAL` booking with no driver → `AUTO`, and dispatch is enqueued. 409 otherwise |
+
+### Admin booking for a customer
+
+An admin books a trip **on a customer's behalf** from the panel — the app's flow, without the
+customer signing in.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `POST` | `/admin/customers` | `{ mobile_number, full_name? }`. Creates the bare account `otp/verify` would. Idempotent on the number: `{ customer, created }`, 201 or 200. 409 on a blocked account |
+| `POST` | `/admin/quotes` | `CreateQuoteRequest` + `customer_id`. The same quote engine and the same union response (`available: false` is a 200) |
+| `POST` | `/admin/bookings` | `{ customer_id, quote_id, pickup_address, drop_address, car_category, vehicle_type }`, `Idempotency-Key` required. 201 `{ booking }` with `start_otp` filled in |
+
+The booking it creates differs from a customer's in two ways only:
+
+- **`dispatch_mode: 'MANUAL'`** — no dispatch is enqueued, the sweeper skips it and a wave refuses
+  it. It stays `CONFIRMED` until an admin assigns a driver (`/assign`) or hands it to automatic
+  dispatch (`/auto-dispatch`).
+- **Its first two events name the admin** (`actor_type: ADMIN`), with `forCustomerId` in the
+  creation event's metadata.
+
+Payment is unchanged: chosen after the ride starts, cash to the driver or online. The quote must
+belong to `customer_id`, so an admin cannot book one customer onto another's price.
 
 Both assignment routes are served by `dispatch` despite the path saying bookings — writing
 `bookings.driverId` is its exclusive right. See

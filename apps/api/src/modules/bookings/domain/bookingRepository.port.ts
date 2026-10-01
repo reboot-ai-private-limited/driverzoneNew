@@ -15,6 +15,12 @@ export interface NewBooking {
   carCategory: Booking['carCategory'];
   vehicleType: Booking['vehicleType'];
   preferFavouriteDrivers: boolean;
+  dispatchMode: Booking['dispatchMode'];
+  /**
+   * Who made the booking, for its first `bookingEvents` row. The customer themselves, or the admin
+   * who booked it on their behalf from the panel.
+   */
+  createdBy: Actor;
   walletCreditPaise: number;
   walletDebtPaise: number;
   fareSnapshot: FareSnapshot;
@@ -270,8 +276,18 @@ export interface BookingRepositoryPort {
 
   listEvents(bookingId: string): Promise<BookingEvent[]>;
 
-  /** Bookings whose `dispatchAt` has passed and are still waiting. The sweeper's safety net. */
+  /**
+   * Bookings whose `dispatchAt` has passed and are still waiting. The sweeper's safety net.
+   * `MANUAL` bookings are never returned — nothing is supposed to dispatch them.
+   */
   findDueForDispatch(now: Date, limit: number): Promise<Booking[]>;
+
+  /**
+   * Hands a `MANUAL` booking back to automatic dispatch. Compare-and-swap on the mode AND on a
+   * driverless waiting status, so it cannot flip a booking an admin has just assigned. Returns
+   * null when the swap lost.
+   */
+  enableAutoDispatch(id: string, dispatchAt: Date): Promise<Booking | null>;
 
   /** Bookings stuck at PENDING_PAYMENT past a cutoff, for expiry. */
   findAbandonedPayments(before: Date, limit: number): Promise<Booking[]>;

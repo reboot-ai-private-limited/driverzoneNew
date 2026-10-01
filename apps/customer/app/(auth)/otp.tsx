@@ -4,14 +4,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Logo } from '@/components/Logo';
 import { OtpInput } from '@/components/OtpInput';
 import { WaveHeaderEdge } from '@/components/Wave';
@@ -142,124 +140,121 @@ export default function OtpScreen(): ReactElement {
 
   return (
     <View style={styles.root}>
-      <KeyboardAvoidingView
+      <KeyboardAwareScrollView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        bottomOffset={24}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.header}>
-            <View style={styles.headerBar}>
-              <Pressable
-                onPress={() => router.back()}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel="Go back"
-                style={styles.backButton}
-              >
-                <Feather name="arrow-left" size={22} color={colors.fg} />
-              </Pressable>
-              <Text style={styles.headerTitle}>Verify OTP</Text>
-              {/* Balances the back button so the title stays optically centred. */}
-              <View style={styles.backButton} />
-            </View>
-
-            <View style={styles.headerLogo}>
-              <Logo width={180} />
-            </View>
-          </View>
-
-          <WaveHeaderEdge height={54} />
-
-          <View style={styles.body}>
-            <Text style={styles.title}>Enter the {OTP_LENGTH}-digit code</Text>
-            <Text style={styles.sub}>
-              Sent to <Text style={styles.number}>{formatForDisplay(mobile)}</Text>
-            </Text>
-
-            <View style={styles.otpBlock}>
-              <OtpInput
-                value={code}
-                onChange={(next) => {
-                  setCode(next);
-                  if (error !== null) setError(null);
-                }}
-                onFilled={handleFilled}
-                length={OTP_LENGTH}
-                editable={!busy}
-                invalid={error !== null}
-              />
-            </View>
-
-            {/* ONE reserved line for every transient message — verifying, resent, rejected — so
-                none of them shifts the layout as it appears and clears. */}
-            <View style={styles.statusRow} accessibilityLiveRegion="polite">
-              {busy ? (
-                <>
-                  <ActivityIndicator size="small" color={colors.focus} />
-                  <Text style={styles.statusText}>Verifying…</Text>
-                </>
-              ) : error !== null ? (
-                <Text style={styles.errorText}>{error}</Text>
-              ) : notice !== null ? (
-                <Text style={styles.noticeText}>{notice}</Text>
-              ) : null}
-            </View>
-
-            <View style={styles.resendRow}>
-              {canResend ? (
-                <Pressable onPress={() => resend.mutate()} accessibilityRole="button" hitSlop={8}>
-                  <Text style={styles.linkStrong}>Resend OTP</Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.resendWaiting}>
-                  Resend OTP in{' '}
-                  <Text style={styles.resendCountdown}>{formatCountdown(secondsLeft)}</Text>
-                </Text>
-              )}
-            </View>
-
-            {/*
-              THE WAY OUT WHEN WHATSAPP DID NOT ARRIVE, and deliberately quiet: small, muted, and
-              below the resend row, because it is the second thing to try rather than the offer.
-              Most codes arrive on WhatsApp, and a prominent SMS button would push people onto a
-              paid channel they did not need.
-
-              Live even during the resend countdown — the server exempts an explicit SMS request
-              from the cooldown precisely so this works at the moment it is wanted.
-            */}
-            <View style={styles.smsRow}>
-              <Text style={styles.smsHint}>Didn&apos;t get it on WhatsApp? </Text>
-              <Pressable
-                onPress={() => smsResend.mutate()}
-                disabled={smsResend.isPending || busy}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: smsResend.isPending || busy }}
-                hitSlop={8}
-              >
-                <Text style={[styles.smsLink, (smsResend.isPending || busy) && styles.smsLinkOff]}>
-                  {smsResend.isPending ? 'Sending…' : 'Get code by SMS'}
-                </Text>
-              </Pressable>
-            </View>
-
-            {/* Holds the change-number link at the foot of a tall screen; collapses on a short one. */}
-            <View style={styles.spacer} />
-
+        <View style={styles.header}>
+          <View style={styles.headerBar}>
             <Pressable
               onPress={() => router.back()}
+              hitSlop={12}
               accessibilityRole="button"
-              hitSlop={8}
-              style={styles.changeButton}
+              accessibilityLabel="Go back"
+              style={styles.backButton}
             >
-              <Text style={styles.link}>Change mobile number</Text>
+              <Feather name="arrow-left" size={22} color={colors.fg} />
+            </Pressable>
+            <Text style={styles.headerTitle}>Verify OTP</Text>
+            {/* Balances the back button so the title stays optically centred. */}
+            <View style={styles.backButton} />
+          </View>
+
+          <View style={styles.headerLogo}>
+            <Logo width={180} />
+          </View>
+        </View>
+
+        <WaveHeaderEdge height={54} />
+
+        <View style={styles.body}>
+          <Text style={styles.title}>Enter the {OTP_LENGTH}-digit code</Text>
+          <Text style={styles.sub}>
+            Sent to <Text style={styles.number}>{formatForDisplay(mobile)}</Text>
+          </Text>
+
+          <View style={styles.otpBlock}>
+            <OtpInput
+              value={code}
+              onChange={(next) => {
+                setCode(next);
+                if (error !== null) setError(null);
+              }}
+              onFilled={handleFilled}
+              length={OTP_LENGTH}
+              editable={!busy}
+              invalid={error !== null}
+            />
+          </View>
+
+          {/* ONE reserved line for every transient message — verifying, resent, rejected — so
+              none of them shifts the layout as it appears and clears. */}
+          <View style={styles.statusRow} accessibilityLiveRegion="polite">
+            {busy ? (
+              <>
+                <ActivityIndicator size="small" color={colors.focus} />
+                <Text style={styles.statusText}>Verifying…</Text>
+              </>
+            ) : error !== null ? (
+              <Text style={styles.errorText}>{error}</Text>
+            ) : notice !== null ? (
+              <Text style={styles.noticeText}>{notice}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.resendRow}>
+            {canResend ? (
+              <Pressable onPress={() => resend.mutate()} accessibilityRole="button" hitSlop={8}>
+                <Text style={styles.linkStrong}>Resend OTP</Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.resendWaiting}>
+                Resend OTP in{' '}
+                <Text style={styles.resendCountdown}>{formatCountdown(secondsLeft)}</Text>
+              </Text>
+            )}
+          </View>
+
+          {/*
+            THE WAY OUT WHEN WHATSAPP DID NOT ARRIVE, and deliberately quiet: small, muted, and
+            below the resend row, because it is the second thing to try rather than the offer.
+            Most codes arrive on WhatsApp, and a prominent SMS button would push people onto a
+            paid channel they did not need.
+
+            Live even during the resend countdown — the server exempts an explicit SMS request
+            from the cooldown precisely so this works at the moment it is wanted.
+          */}
+          <View style={styles.smsRow}>
+            <Text style={styles.smsHint}>Didn&apos;t get it on WhatsApp? </Text>
+            <Pressable
+              onPress={() => smsResend.mutate()}
+              disabled={smsResend.isPending || busy}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: smsResend.isPending || busy }}
+              hitSlop={8}
+            >
+              <Text style={[styles.smsLink, (smsResend.isPending || busy) && styles.smsLinkOff]}>
+                {smsResend.isPending ? 'Sending…' : 'Get code by SMS'}
+              </Text>
             </Pressable>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+          {/* Holds the change-number link at the foot of a tall screen; collapses on a short one. */}
+          <View style={styles.spacer} />
+
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={styles.changeButton}
+          >
+            <Text style={styles.link}>Change mobile number</Text>
+          </Pressable>
+        </View>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

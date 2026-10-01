@@ -48,20 +48,15 @@ describe('canTransfer', () => {
 
 describe('isTransferSubmitDisabled', () => {
   it('is disabled with no driver selected', () => {
-    expect(isTransferSubmitDisabled({ selected: null, reason: 'Vehicle broke down', isPending: false })).toBe(true);
-  });
-
-  it('is disabled with an empty or whitespace-only reason', () => {
-    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: '', isPending: false })).toBe(true);
-    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: '   ', isPending: false })).toBe(true);
+    expect(isTransferSubmitDisabled({ selected: null, isPending: false })).toBe(true);
   });
 
   it('is disabled while the mutation is pending', () => {
-    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: 'Vehicle broke down', isPending: true })).toBe(true);
+    expect(isTransferSubmitDisabled({ selected: 'drv_1', isPending: true })).toBe(true);
   });
 
-  it('is enabled once a driver is selected and a reason is typed', () => {
-    expect(isTransferSubmitDisabled({ selected: 'drv_1', reason: 'Vehicle broke down', isPending: false })).toBe(false);
+  it('is enabled as soon as a driver is selected — the reason is optional', () => {
+    expect(isTransferSubmitDisabled({ selected: 'drv_1', isPending: false })).toBe(false);
   });
 });
 
@@ -70,6 +65,13 @@ describe('buildAssignPayload', () => {
     expect(
       buildAssignPayload({ bookingId: 'bkg_1', driverId: 'drv_1', reason: '  Vehicle broke down  ' }),
     ).toEqual({ id: 'bkg_1', driverId: 'drv_1', reason: 'Vehicle broke down' });
+  });
+
+  it('leaves a blank reason out, so the server records its default', () => {
+    expect(buildAssignPayload({ bookingId: 'bkg_1', driverId: 'drv_1', reason: '   ' })).toEqual({
+      id: 'bkg_1',
+      driverId: 'drv_1',
+    });
   });
 });
 

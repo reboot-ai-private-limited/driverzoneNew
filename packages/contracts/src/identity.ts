@@ -679,6 +679,26 @@ export interface AdminUpdateCustomerRequest {
 }
 
 /**
+ * `POST /admin/customers` — an admin creates the account behind a phone number, so a trip can be
+ * booked for somebody who has never opened the app.
+ *
+ * IDEMPOTENT ON THE NUMBER. A number that already has an account returns that account with
+ * `created: false` rather than a 409: the admin's intent — "I need this customer" — is met either
+ * way. The customer later signs in with the same number and finds the account (and the trip)
+ * waiting.
+ */
+export interface AdminCreateCustomerRequest {
+  /** E.164, e.g. `+919876543210`. */
+  mobile_number: string;
+  full_name?: string | undefined;
+}
+
+export interface AdminCreateCustomerResponse {
+  customer: AdminCustomerDetailsDto;
+  created: boolean;
+}
+
+/**
  * What an ADMIN may change on a driver's profile directly.
  */
 export interface AdminUpdateDriverRequest {

@@ -7,8 +7,6 @@ import { type ReactElement, useCallback, useEffect, useRef, useState } from 'rea
 import {
   ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -16,6 +14,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -232,6 +231,13 @@ export default function HomeScreen(): ReactElement {
    * refine once more; that is the correct picture, and it is bounded at one.
    */
   const hasCentred = useRef(false);
+  /**
+   * The place the customer just CHOSE from search. While the draft still sits on it, its own name
+   * ("Hakimpara, Haren Mukherjee Road") is kept — a reverse geocode of that coordinate returns only
+   * the street and would replace the place they picked. A pan moves the draft off it, and the
+   * reverse geocode takes over again.
+   */
+  const searchedPoint = useRef<TripPoint | null>(null);
 
   useEffect(() => {
     if (!location.isReal) return;
@@ -604,6 +610,12 @@ export default function HomeScreen(): ReactElement {
   useEffect(() => {
     if (mode === 'idle' || draft === null) return;
 
+    // Keep the searched place's own name while the pin is still on it.
+    if (samePoint(searchedPoint.current, { ...draft, address: '' })) {
+      setResolving(false);
+      return;
+    }
+
     let cancelled = false;
     setResolving(true);
 
@@ -641,6 +653,7 @@ export default function HomeScreen(): ReactElement {
 
     setMode(next);
     setMapPick(false);
+    searchedPoint.current = null;
     setDraft({ lat: seed.lat, lng: seed.lng });
     setDraftAddress(seed.address.length > 0 ? seed.address : null);
     setSearch('');
@@ -731,6 +744,7 @@ export default function HomeScreen(): ReactElement {
     setMapPick(true);
     // Their own words on screen immediately, ahead of the reverse geocode that will confirm them.
     setDraftAddress(point.address);
+    searchedPoint.current = point;
     /*
      * THE CHOSEN COORDINATE IS THE ANSWER, and it is set here rather than waited for.
      *
@@ -1072,10 +1086,16 @@ export default function HomeScreen(): ReactElement {
         ) : null}
       </View>
 
+      {/*
+        `react-native-keyboard-controller`'s KeyboardAvoidingView, `padding` on BOTH platforms. The
+        sheet is anchored to the bottom edge, so the search box in it is exactly where the keyboard
+        lands. React Native's own version relied on Android's `adjustResize`, which edge-to-edge
+        (Android 15+) no longer applies — the search field sat behind the keys on Android.
+      */}
       <KeyboardAvoidingView
         style={styles.sheetLayer}
         pointerEvents="box-none"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
       >
         {/*
           THE RECENTRE BUTTON RIDES THE SHEET, so it has to know when to get off.

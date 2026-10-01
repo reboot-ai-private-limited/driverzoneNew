@@ -5,15 +5,14 @@ import { router } from 'expo-router';
 import { type ReactElement, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type {
   CustomerProfileDto,
   EmergencyContactDto,
@@ -289,256 +288,253 @@ export default function EditProfileScreen(): ReactElement {
           <ActivityIndicator size="large" color={colors.muted} />
         </View>
       ) : (
-        <KeyboardAvoidingView
+        <KeyboardAwareScrollView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          bottomOffset={24}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <ScrollView
-            contentContainerStyle={styles.content}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+          <FieldRow
+            icon="user"
+            label="Full name"
+            focused={focusedField === 'fullName'}
+            error={fieldErrors['fullName'] ?? null}
           >
-            <FieldRow
-              icon="user"
-              label="Full name"
-              focused={focusedField === 'fullName'}
-              error={fieldErrors['fullName'] ?? null}
-            >
-              <TextInput
-                value={form.fullName}
-                onChangeText={(value) => {
-                  patch({ fullName: value });
-                  clearFieldError('fullName');
-                }}
-                onFocus={() => setFocusedField('fullName')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="Enter your full name"
-                placeholderTextColor={colors.faint}
-                autoCapitalize="words"
-                autoComplete="name"
-                style={styles.input}
-                accessibilityLabel="Full name"
-              />
-            </FieldRow>
+            <TextInput
+              value={form.fullName}
+              onChangeText={(value) => {
+                patch({ fullName: value });
+                clearFieldError('fullName');
+              }}
+              onFocus={() => setFocusedField('fullName')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Enter your full name"
+              placeholderTextColor={colors.faint}
+              autoCapitalize="words"
+              autoComplete="name"
+              style={styles.input}
+              accessibilityLabel="Full name"
+            />
+          </FieldRow>
 
-            <FieldRow label="Gender" boxed={false}>
-              <View style={styles.genderRow}>
-                {GENDER_OPTIONS.map((option) => {
-                  const selected = form.gender === option.value;
-                  return (
-                    <Pressable
-                      key={option.value}
-                      onPress={() => patch({ gender: selected ? null : option.value })}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected }}
-                      style={({ pressed }) => [
-                        styles.genderChip,
-                        selected && styles.genderChipSelected,
-                        pressed && !selected && styles.genderChipPressed,
-                      ]}
-                    >
-                      <Text style={[styles.genderLabel, selected && styles.genderLabelSelected]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </FieldRow>
-
-            <FieldRow icon="calendar" label="Date of birth">
-              <View style={styles.triggerRow}>
-                <Pressable
-                  onPress={() => setShowDatePicker(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Select your date of birth"
-                  style={styles.flex}
-                >
-                  <Text style={form.dob === null ? styles.placeholder : styles.value}>
-                    {form.dob === null ? 'Select date' : formatDob(form.dob)}
-                  </Text>
-                </Pressable>
-                {form.dob === null ? (
-                  <Feather name="chevron-right" size={18} color={colors.faint} />
-                ) : (
+          <FieldRow label="Gender" boxed={false}>
+            <View style={styles.genderRow}>
+              {GENDER_OPTIONS.map((option) => {
+                const selected = form.gender === option.value;
+                return (
                   <Pressable
-                    onPress={() => patch({ dob: null })}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear date of birth"
+                    key={option.value}
+                    onPress={() => patch({ gender: selected ? null : option.value })}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.genderChip,
+                      selected && styles.genderChipSelected,
+                      pressed && !selected && styles.genderChipPressed,
+                    ]}
                   >
-                    <Feather name="x" size={16} color={colors.muted} />
+                    <Text style={[styles.genderLabel, selected && styles.genderLabelSelected]}>
+                      {option.label}
+                    </Text>
                   </Pressable>
-                )}
-              </View>
-            </FieldRow>
-
-            {/* SAFETY & CONTACT — the fields the server always stored but no screen ever offered.
-                Grouped under their own heading because "who to call if something goes wrong" is a
-                different thought from "who I am", and a customer scanning the form should be able
-                to skip straight to it or straight past it. */}
-            <View style={styles.sectionHeader}>
-              <Feather name="shield" size={14} color={colors.muted} />
-              <Text style={styles.sectionTitle}>Safety &amp; contact</Text>
+                );
+              })}
             </View>
+          </FieldRow>
 
-            <FieldRow
-              label="Languages you speak"
-              hint="(Optional)"
-              boxed={false}
-            >
-              <View style={styles.chipWrap}>
-                {LANGUAGE_OPTIONS.map((language) => {
-                  const selected = form.languages.includes(language);
-                  return (
-                    <Pressable
-                      key={language}
-                      onPress={() => toggleLanguage(language)}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: selected }}
-                      style={({ pressed }) => [
-                        styles.langChip,
-                        selected && styles.langChipSelected,
-                        pressed && !selected && styles.genderChipPressed,
-                      ]}
-                    >
-                      {selected ? (
-                        <Feather
-                          name="check"
-                          size={13}
-                          color={colors.fg}
-                          style={styles.langChipTick}
-                        />
-                      ) : null}
-                      <Text style={[styles.langLabel, selected && styles.genderLabelSelected]}>
-                        {language}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </FieldRow>
+          <FieldRow icon="calendar" label="Date of birth">
+            <View style={styles.triggerRow}>
+              <Pressable
+                onPress={() => setShowDatePicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Select your date of birth"
+                style={styles.flex}
+              >
+                <Text style={form.dob === null ? styles.placeholder : styles.value}>
+                  {form.dob === null ? 'Select date' : formatDob(form.dob)}
+                </Text>
+              </Pressable>
+              {form.dob === null ? (
+                <Feather name="chevron-right" size={18} color={colors.faint} />
+              ) : (
+                <Pressable
+                  onPress={() => patch({ dob: null })}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear date of birth"
+                >
+                  <Feather name="x" size={16} color={colors.muted} />
+                </Pressable>
+              )}
+            </View>
+          </FieldRow>
 
-            <FieldRow
-              icon="phone"
-              label="Alternate mobile number"
-              hint="(Optional)"
-              focused={focusedField === 'alternateNumber'}
-              error={fieldErrors['alternateNumber'] ?? null}
-            >
-              <View style={styles.phoneRow}>
-                <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
-                <TextInput
-                  value={form.alternateNumber}
-                  onChangeText={(value) => {
-                    patch({ alternateNumber: normaliseInput(value) });
+          {/* SAFETY & CONTACT — the fields the server always stored but no screen ever offered.
+              Grouped under their own heading because "who to call if something goes wrong" is a
+              different thought from "who I am", and a customer scanning the form should be able
+              to skip straight to it or straight past it. */}
+          <View style={styles.sectionHeader}>
+            <Feather name="shield" size={14} color={colors.muted} />
+            <Text style={styles.sectionTitle}>Safety &amp; contact</Text>
+          </View>
+
+          <FieldRow
+            label="Languages you speak"
+            hint="(Optional)"
+            boxed={false}
+          >
+            <View style={styles.chipWrap}>
+              {LANGUAGE_OPTIONS.map((language) => {
+                const selected = form.languages.includes(language);
+                return (
+                  <Pressable
+                    key={language}
+                    onPress={() => toggleLanguage(language)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected }}
+                    style={({ pressed }) => [
+                      styles.langChip,
+                      selected && styles.langChipSelected,
+                      pressed && !selected && styles.genderChipPressed,
+                    ]}
+                  >
+                    {selected ? (
+                      <Feather
+                        name="check"
+                        size={13}
+                        color={colors.fg}
+                        style={styles.langChipTick}
+                      />
+                    ) : null}
+                    <Text style={[styles.langLabel, selected && styles.genderLabelSelected]}>
+                      {language}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </FieldRow>
+
+          <FieldRow
+            icon="phone"
+            label="Alternate mobile number"
+            hint="(Optional)"
+            focused={focusedField === 'alternateNumber'}
+            error={fieldErrors['alternateNumber'] ?? null}
+          >
+            <View style={styles.phoneRow}>
+              <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
+              <TextInput
+                value={form.alternateNumber}
+                onChangeText={(value) => {
+                  patch({ alternateNumber: normaliseInput(value) });
+                  clearFieldError('alternateNumber');
+                }}
+                onFocus={() => setFocusedField('alternateNumber')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="98765 43210"
+                placeholderTextColor={colors.faint}
+                keyboardType="phone-pad"
+                maxLength={10}
+                style={styles.input}
+                accessibilityLabel="Alternate mobile number"
+              />
+              {form.alternateNumber.length > 0 ? (
+                <Pressable
+                  onPress={() => {
+                    patch({ alternateNumber: '' });
                     clearFieldError('alternateNumber');
                   }}
-                  onFocus={() => setFocusedField('alternateNumber')}
-                  onBlur={() => setFocusedField(null)}
-                  placeholder="98765 43210"
-                  placeholderTextColor={colors.faint}
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  style={styles.input}
-                  accessibilityLabel="Alternate mobile number"
-                />
-                {form.alternateNumber.length > 0 ? (
-                  <Pressable
-                    onPress={() => {
-                      patch({ alternateNumber: '' });
-                      clearFieldError('alternateNumber');
-                    }}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear alternate number"
-                  >
-                    <Feather name="x" size={16} color={colors.muted} />
-                  </Pressable>
-                ) : null}
-              </View>
-            </FieldRow>
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear alternate number"
+                >
+                  <Feather name="x" size={16} color={colors.muted} />
+                </Pressable>
+              ) : null}
+            </View>
+          </FieldRow>
 
-            <FieldRow
-              icon="user-check"
-              label="Emergency contact name"
-              hint="(Optional)"
-              focused={focusedField === 'emergencyName'}
-              error={fieldErrors['emergencyName'] ?? null}
-            >
+          <FieldRow
+            icon="user-check"
+            label="Emergency contact name"
+            hint="(Optional)"
+            focused={focusedField === 'emergencyName'}
+            error={fieldErrors['emergencyName'] ?? null}
+          >
+            <TextInput
+              value={form.emergencyName}
+              onChangeText={(value) => {
+                patch({ emergencyName: value });
+                clearFieldError('emergencyName');
+              }}
+              onFocus={() => setFocusedField('emergencyName')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="Who should we call"
+              placeholderTextColor={colors.faint}
+              autoCapitalize="words"
+              style={styles.input}
+              accessibilityLabel="Emergency contact name"
+            />
+          </FieldRow>
+
+          <FieldRow
+            icon="phone-call"
+            label="Emergency contact number"
+            hint="(Optional)"
+            focused={focusedField === 'emergencyNumber'}
+            error={fieldErrors['emergencyNumber'] ?? null}
+          >
+            <View style={styles.phoneRow}>
+              <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
               <TextInput
-                value={form.emergencyName}
+                value={form.emergencyNumber}
                 onChangeText={(value) => {
-                  patch({ emergencyName: value });
-                  clearFieldError('emergencyName');
+                  patch({ emergencyNumber: normaliseInput(value) });
+                  clearFieldError('emergencyNumber');
                 }}
-                onFocus={() => setFocusedField('emergencyName')}
+                onFocus={() => setFocusedField('emergencyNumber')}
                 onBlur={() => setFocusedField(null)}
-                placeholder="Who should we call"
+                placeholder="98765 43210"
                 placeholderTextColor={colors.faint}
-                autoCapitalize="words"
+                keyboardType="phone-pad"
+                maxLength={10}
                 style={styles.input}
-                accessibilityLabel="Emergency contact name"
+                accessibilityLabel="Emergency contact number"
               />
-            </FieldRow>
-
-            <FieldRow
-              icon="phone-call"
-              label="Emergency contact number"
-              hint="(Optional)"
-              focused={focusedField === 'emergencyNumber'}
-              error={fieldErrors['emergencyNumber'] ?? null}
-            >
-              <View style={styles.phoneRow}>
-                <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
-                <TextInput
-                  value={form.emergencyNumber}
-                  onChangeText={(value) => {
-                    patch({ emergencyNumber: normaliseInput(value) });
+              {form.emergencyNumber.length > 0 ? (
+                <Pressable
+                  onPress={() => {
+                    patch({ emergencyNumber: '' });
                     clearFieldError('emergencyNumber');
                   }}
-                  onFocus={() => setFocusedField('emergencyNumber')}
-                  onBlur={() => setFocusedField(null)}
-                  placeholder="98765 43210"
-                  placeholderTextColor={colors.faint}
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  style={styles.input}
-                  accessibilityLabel="Emergency contact number"
-                />
-                {form.emergencyNumber.length > 0 ? (
-                  <Pressable
-                    onPress={() => {
-                      patch({ emergencyNumber: '' });
-                      clearFieldError('emergencyNumber');
-                    }}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear emergency contact number"
-                  >
-                    <Feather name="x" size={16} color={colors.muted} />
-                  </Pressable>
-                ) : null}
-              </View>
-            </FieldRow>
-
-            {saveError !== null ? (
-              <Text style={styles.saveError} accessibilityLiveRegion="polite">
-                {saveError}
-              </Text>
-            ) : null}
-
-            <View style={styles.actions}>
-              <PrimaryButton
-                label="Save changes"
-                onPress={handleSave}
-                loading={save.isPending}
-                disabled={!dirty}
-                showArrow={false}
-              />
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear emergency contact number"
+                >
+                  <Feather name="x" size={16} color={colors.muted} />
+                </Pressable>
+              ) : null}
             </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </FieldRow>
+
+          {saveError !== null ? (
+            <Text style={styles.saveError} accessibilityLiveRegion="polite">
+              {saveError}
+            </Text>
+          ) : null}
+
+          <View style={styles.actions}>
+            <PrimaryButton
+              label="Save changes"
+              onPress={handleSave}
+              loading={save.isPending}
+              disabled={!dirty}
+              showArrow={false}
+            />
+          </View>
+        </KeyboardAwareScrollView>
       )}
 
       {showDatePicker && form !== null ? (

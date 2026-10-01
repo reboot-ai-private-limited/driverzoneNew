@@ -1,7 +1,12 @@
 import { randomInt } from 'node:crypto';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
-import type { CarCategory, PaymentMode, VehicleTypePreference } from '@driverzone/contracts';
+import type {
+  CarCategory,
+  DispatchMode,
+  PaymentMode,
+  VehicleTypePreference,
+} from '@driverzone/contracts';
 import type { DispatchScheduler } from './confirmBookingPayment.usecase.js';
 import type { QuoteConsumptionContract } from '../../../quotes/quotes.public.js';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
@@ -9,6 +14,7 @@ import type { WalletPublicContract } from '../../../wallet/wallet.public.js';
 import {
   generateReference,
   isScheduledBooking,
+  type Actor,
   type Booking,
   type FareSnapshot,
 } from '../../domain/booking.entity.js';
@@ -34,6 +40,17 @@ export interface CreateBookingInput {
   preferFavouriteDrivers: boolean;
   /** One tap, one key. Passed to the gateway so a retried request charges once. */
   idempotencyKey: string;
+  /**
+   * `MANUAL` when an admin is booking from the panel: the booking is created and confirmed exactly
+   * as the app's would be, but NO DISPATCH IS ENQUEUED — an admin assigns the driver by hand.
+   * Omitted means `AUTO`, which is every customer booking.
+   */
+  dispatchMode?: DispatchMode | undefined;
+  /**
+   * Who is making the booking, for the event log. Omitted means the customer themselves; an admin
+   * booking on their behalf passes `{ type: 'ADMIN', id }`.
+   */
+  createdBy?: Actor | undefined;
 }
 
 export interface CreatedBooking {
@@ -99,6 +116,9 @@ export class CreateBookingUseCase {
      */
     const plan = await this.wallet.planFor(input.customerId, quote.fare.totalPaise);
 
+    const dispatchMode: DispatchMode = input.dispatchMode ?? 'AUTO';
+    const createdBy: Actor = input.createdBy ?? { type: 'CUSTOMER', id: input.customerId };
+
     const now = new Date();
     const snapshot = await this.settings.snapshot();
 
@@ -137,6 +157,8 @@ export class CreateBookingUseCase {
       carCategory: input.carCategory,
       vehicleType: input.vehicleType,
       preferFavouriteDrivers: input.preferFavouriteDrivers,
+      dispatchMode,
+      createdBy,
       walletCreditPaise: plan.creditAppliedPaise,
       walletDebtPaise: plan.debtAddedPaise,
       fareSnapshot,
@@ -173,8 +195,11 @@ export class CreateBookingUseCase {
       bookingId: booking.id,
       from: 'PENDING_PAYMENT',
       to: 'CONFIRMED',
-      actor: { type: 'SYSTEM', id: null },
-      metadata: { via: 'booking_creation' },
+      actor: createdBy.type === 'ADMIN' ? createdBy : { type: 'SYSTEM', id: null },
+      metadata: {
+        via: createdBy.type === 'ADMIN' ? 'admin_booking' : 'booking_creation',
+        dispatchMode,
+      },
     });
 
     const result = confirmed ?? booking;
@@ -200,6 +225,18 @@ export class CreateBookingUseCase {
           'could not spend wallet credit on a confirmed booking',
         );
       }
+    }
+
+    /*
+     * A MANUAL booking enqueues nothing: an admin hands it to a driver they choose. The sweeper
+     * skips it too (`findDueForDispatch`), so it stays CONFIRMED until that happens.
+     */
+    if (dispatchMode === 'MANUAL') {
+      logger.info(
+        { bookingId: booking.id, reference: booking.reference, by: createdBy.id },
+        'admin booking confirmed — awaiting manual driver assignment',
+      );
+      return settled(result);
     }
 
     try {

@@ -63,6 +63,18 @@ export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 export const BOOKING_ACTOR_TYPES = ['CUSTOMER', 'DRIVER', 'ADMIN', 'SYSTEM'] as const;
 export type BookingActorType = (typeof BOOKING_ACTOR_TYPES)[number];
 
+/**
+ * How a booking finds its driver.
+ *
+ * `AUTO` — dispatch rings drivers in waves, as every booking made from the customer app does.
+ * `MANUAL` — nobody is rung. An admin booked this trip from the panel on the customer's behalf and
+ * will hand it to a driver they choose (`POST /admin/bookings/:id/assign`). The sweeper and the
+ * wave both skip it, so an unassigned admin booking is never picked up by automatic dispatch
+ * behind the admin's back. `POST /admin/bookings/:id/auto-dispatch` turns it into `AUTO`.
+ */
+export const DISPATCH_MODES = ['AUTO', 'MANUAL'] as const;
+export type DispatchMode = (typeof DISPATCH_MODES)[number];
+
 export const SERVICE_TYPES = ['INCITY', 'OUTSTATION'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
@@ -200,6 +212,32 @@ export interface CreateBookingResponse {
   amount: Money | null;
 }
 
+/**
+ * `POST /admin/bookings` — an admin books a trip ON A CUSTOMER'S BEHALF from the panel.
+ *
+ * The same booking the app would make, from a quote the admin got through `POST /admin/quotes`
+ * for that same customer. Two differences, both deliberate:
+ *
+ *   - `dispatch_mode` is `MANUAL`: no driver is rung. The admin assigns one by hand.
+ *   - the response's `booking.start_otp` is filled in, so the admin can pass the code on to a
+ *     customer who may not have the app at all.
+ *
+ * Payment is unchanged — chosen after the ride starts, cash to the driver or online.
+ * `Idempotency-Key` is required, exactly as on the customer's own create.
+ */
+export interface AdminCreateBookingRequest {
+  customer_id: string;
+  quote_id: string;
+  pickup_address: string;
+  drop_address: string;
+  car_category: CarCategory;
+  vehicle_type: VehicleTypePreference;
+}
+
+export interface AdminCreateBookingResponse {
+  booking: BookingDto;
+}
+
 export interface BookingDto {
   id: string;
   /** `DZ-8F3K2M`. What the customer reads out to support — never the raw id. */
@@ -260,6 +298,12 @@ export interface BookingDto {
   prefer_favourite_drivers: boolean;
 
   /**
+   * `MANUAL` on a booking an admin made from the panel — no driver is rung automatically, an admin
+   * assigns one. `AUTO` on everything else, including every booking made before this existed.
+   */
+  dispatch_mode: DispatchMode;
+
+  /**
    * Incity only, frozen at booking time. Outstation is null — a package there is a package
    * however long it takes, there is no minutes figure to freeze (see the same field on
    * `QuoteOptionDto`). Lets the trip screen say when an incity rental is due back without
@@ -270,9 +314,11 @@ export interface BookingDto {
   /**
    * The four-digit code the customer reads to the driver at pickup.
    *
-   * PRESENT ONLY ON THE CUSTOMER'S OWN READ of their own booking, and null everywhere else — the
-   * driver's view of the same booking never carries it, because the whole point is that the
-   * driver has to be told it by a person who is standing there.
+   * PRESENT ON THE CUSTOMER'S OWN READ of their own booking, and on the ADMIN's single-booking read
+   * (`GET /admin/bookings/:id`) — an admin who booked a trip on a customer's behalf has to be able
+   * to pass the code on. Null everywhere else: the driver's view never carries it, because the
+   * whole point is that the driver has to be told it by a person who is standing there, and no
+   * LIST carries it, because a page of trip codes is not something any screen needs.
    */
   start_otp: string | null;
 

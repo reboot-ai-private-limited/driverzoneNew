@@ -3,14 +3,12 @@ import { useMutation } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { type ReactElement, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Logo } from '@/components/Logo';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Skyline } from '@/components/Skyline';
@@ -65,88 +63,85 @@ export default function PhoneScreen(): ReactElement {
       <Skyline height={280} />
       <WaveBottom height={116} />
 
-      <KeyboardAvoidingView
+      <KeyboardAwareScrollView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        bottomOffset={24}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+        <View style={styles.logoBlock}>
+          <Logo width={168} />
+        </View>
+
+        <Text style={styles.title}>Enter your mobile number</Text>
+        <Text style={styles.subtitle}>
+          We will send a 6-digit verification code to confirm it is you.
+        </Text>
+
+        <Text style={styles.fieldLabel}>Mobile number</Text>
+        <View
+          style={[
+            styles.field,
+            focused && styles.fieldFocused,
+            error !== null && styles.fieldError,
+          ]}
         >
-          <View style={styles.logoBlock}>
-            <Logo width={168} />
+          {/* Fixed at +91 for now. A `View` rather than a disabled picker, because a control
+              that opens nothing is worse than no control — the second country arrives with
+              the market that needs it. */}
+          <View style={styles.dialCode}>
+            <Text style={styles.flag}>{'\u{1F1EE}\u{1F1F3}'}</Text>
+            <Text style={styles.dialCodeText}>+91</Text>
+            <Feather name="chevron-down" size={16} color={colors.faint} />
           </View>
+          <View style={styles.fieldDivider} />
+          <TextInput
+            value={national}
+            onChangeText={(raw) => {
+              setNational(normaliseInput(raw));
+              if (error !== null) setError(null);
+            }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder="00000 00000"
+            placeholderTextColor={colors.faint}
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            textContentType="telephoneNumber"
+            maxLength={10}
+            style={styles.input}
+            returnKeyType="go"
+            onSubmitEditing={handleContinue}
+            accessibilityLabel="Mobile number"
+          />
+        </View>
 
-          <Text style={styles.title}>Enter your mobile number</Text>
-          <Text style={styles.subtitle}>
-            We will send a 6-digit verification code to confirm it is you.
+        {error !== null ? (
+          <Text style={styles.errorText} accessibilityLiveRegion="polite">
+            {error}
           </Text>
+        ) : null}
 
-          <Text style={styles.fieldLabel}>Mobile number</Text>
-          <View
-            style={[
-              styles.field,
-              focused && styles.fieldFocused,
-              error !== null && styles.fieldError,
-            ]}
-          >
-            {/* Fixed at +91 for now. A `View` rather than a disabled picker, because a control
-                that opens nothing is worse than no control — the second country arrives with
-                the market that needs it. */}
-            <View style={styles.dialCode}>
-              <Text style={styles.flag}>{'\u{1F1EE}\u{1F1F3}'}</Text>
-              <Text style={styles.dialCodeText}>+91</Text>
-              <Feather name="chevron-down" size={16} color={colors.faint} />
-            </View>
-            <View style={styles.fieldDivider} />
-            <TextInput
-              value={national}
-              onChangeText={(raw) => {
-                setNational(normaliseInput(raw));
-                if (error !== null) setError(null);
-              }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              placeholder="00000 00000"
-              placeholderTextColor={colors.faint}
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              maxLength={10}
-              style={styles.input}
-              returnKeyType="go"
-              onSubmitEditing={handleContinue}
-              accessibilityLabel="Mobile number"
-            />
-          </View>
+        <View style={styles.buttonBlock}>
+          <PrimaryButton
+            label="Continue"
+            onPress={handleContinue}
+            loading={mutation.isPending}
+            disabled={!valid}
+          />
+        </View>
 
-          {error !== null ? (
-            <Text style={styles.errorText} accessibilityLiveRegion="polite">
-              {error}
-            </Text>
-          ) : null}
+        {/* Pushes the legal line to the foot of the screen on a tall device and collapses on a
+            short one, so it never floats mid-screen. */}
+        <View style={styles.spacer} />
 
-          <View style={styles.buttonBlock}>
-            <PrimaryButton
-              label="Continue"
-              onPress={handleContinue}
-              loading={mutation.isPending}
-              disabled={!valid}
-            />
-          </View>
-
-          {/* Pushes the legal line to the foot of the screen on a tall device and collapses on a
-              short one, so it never floats mid-screen. */}
-          <View style={styles.spacer} />
-
-          <Text style={styles.legal}>
-            By continuing, you agree to our{' '}
-            <Text style={styles.legalLink}>Terms &amp; Conditions</Text> and{' '}
-            <Text style={styles.legalLink}>Privacy Policy</Text>
-          </Text>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <Text style={styles.legal}>
+          By continuing, you agree to our{' '}
+          <Text style={styles.legalLink}>Terms &amp; Conditions</Text> and{' '}
+          <Text style={styles.legalLink}>Privacy Policy</Text>
+        </Text>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

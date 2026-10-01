@@ -11,6 +11,7 @@ import {
   Copy,
   CreditCard,
   IndianRupee,
+  KeyRound,
   MapPin,
   Phone,
   Printer,
@@ -36,9 +37,14 @@ import { toErrorState } from '@/lib/api/toErrorState';
 import { formatTime } from '@/lib/format';
 import { useCustomer } from '@/features/customers/hooks/useCustomer';
 import { useDriverDetails } from '@/features/drivers/hooks/useDriverDetails';
-import { useBooking, useBookingEvents } from '../hooks/useBookings';
+import { useBooking, useBookingEvents, useEnableAutoDispatch } from '../hooks/useBookings';
 import { BookingActions } from './BookingActions';
-import { formatBookingDate, formatBookingMobile } from '../lib/format';
+import {
+  formatBookingDate,
+  formatBookingMobile,
+  tripDistanceText,
+  tripDurationText,
+} from '../lib/format';
 import {
   paymentStatusLabel,
   paymentStatusTone,
@@ -123,6 +129,8 @@ function BookingBody({ booking }: { booking: BookingDto }) {
   return (
     <div className="flex flex-col gap-4">
       <BookingSummary booking={booking} />
+
+      <ManualDispatchNotice booking={booking} />
 
       {/*
         FULL WIDTH, on its own — not a grid cell. A horizontal stepper only reads as one when it
@@ -222,8 +230,81 @@ function BookingSummary({ booking }: { booking: BookingDto }) {
         <SummaryStat icon={<IndianRupee aria-hidden className="size-4" />} label="Total Amount">
           <span className="text-base font-semibold">{booking.payable.total.amount_display}</span>
         </SummaryStat>
+
+        {booking.start_otp !== null && showsTripCode(booking.status) && (
+          <SummaryStat icon={<KeyRound aria-hidden className="size-4" />} label="Trip Code (OTP)">
+            <TripCode code={booking.start_otp} />
+          </SummaryStat>
+        )}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * The code is only worth showing while somebody still has to type it — up to the pickup. After
+ * the trip starts it has done its job, and a finished trip's code is just a number on a page.
+ */
+function showsTripCode(status: BookingDto['status']): boolean {
+  return ['CONFIRMED', 'SEARCHING', 'WAITING_DRIVER', 'ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED'].includes(
+    status,
+  );
+}
+
+function TripCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="font-mono text-base font-semibold tracking-[0.3em]">{code}</span>
+      <button
+        type="button"
+        aria-label="Copy trip code"
+        className="text-text-subtle hover:text-interactive print:hidden"
+        onClick={() =>
+          void navigator.clipboard.writeText(code).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+        }
+      >
+        {copied ? (
+          <Check aria-hidden className="size-3.5 text-success" />
+        ) : (
+          <Copy aria-hidden className="size-3.5" />
+        )}
+      </button>
+    </span>
+  );
+}
+
+/**
+ * A booking ops made from the panel, still waiting for the driver ops will pick.
+ *
+ * NOBODY IS BEING RUNG, and the page has to say so: an admin glancing at "Confirmed" on an
+ * immediate trip would otherwise assume dispatch is looking. Gone the moment a driver is assigned
+ * or the booking is handed to automatic dispatch.
+ */
+function ManualDispatchNotice({ booking }: { booking: BookingDto }) {
+  const auto = useEnableAutoDispatch();
+  if (booking.dispatch_mode !== 'MANUAL' || booking.driver !== null) return null;
+  if (!['CONFIRMED', 'WAITING_DRIVER', 'SEARCHING'].includes(booking.status)) return null;
+
+  return (
+    <div className="flex flex-col items-start justify-between gap-3 rounded-md border border-interactive/30 bg-interactive/10 px-4 py-3 text-sm sm:flex-row sm:items-center print:hidden">
+      <span>
+        <strong>Booked from the panel — no driver is being rung.</strong> Use “Assign a driver”
+        above to give it to someone, and pass the trip code to the customer.
+      </span>
+      <Button
+        size="sm"
+        onClick={() => auto.mutate({ id: booking.id })}
+        disabled={auto.isPending}
+        loading={auto.isPending}
+      >
+        Let the system find a driver
+      </Button>
+    </div>
   );
 }
 
@@ -445,26 +526,12 @@ function Dash() {
 // ─── Pickup & Destination ───────────────────────────────────────────────────────────────────
 
 /**
- * Real elapsed time — `started_at` to `completed_at` — not an ETA. The mockup shows a pre-trip
- * estimate; a completed booking has something better than an estimate, which is what actually
- * happened, so that is what this shows. A trip still in progress or that never started has
- * nothing to compute yet and this returns `null` rather than guessing.
- */
-function tripDurationMinutes(booking: BookingDto): number | null {
-  const { started_at, completed_at } = booking.timestamps;
-  if (started_at === null || completed_at === null) return null;
-  return Math.round((new Date(completed_at).getTime() - new Date(started_at).getTime()) / 60_000);
-}
-
-/**
  * Explicitly placed at column 3, rows 1-2 — see the comment on the grid in `BookingBody`. The
  * map itself is `flex-1`, not a fixed height: this card is now as tall as Customer/Driver plus
  * Fare/Payment combined, and a map that stayed the height it was in the old three-card row would
  * leave most of this card as the exact dead space the grid stretch fix exists to avoid.
  */
 function RouteCard({ booking }: { booking: BookingDto }) {
-  const duration = tripDurationMinutes(booking);
-
   return (
     <Panel
       title="Pickup & Destination"
@@ -496,11 +563,11 @@ function RouteCard({ booking }: { booking: BookingDto }) {
         <div className="flex items-center gap-4 border-t border-border pt-3 text-xs text-text-subtle">
           <span className="flex items-center gap-1.5">
             <Route aria-hidden className="size-3.5" />
-            {booking.distance_km === null ? 'Distance not recorded' : `${booking.distance_km.toFixed(1)} km`}
+            {tripDistanceText(booking)}
           </span>
           <span className="flex items-center gap-1.5">
             <Clock aria-hidden className="size-3.5" />
-            {duration === null ? 'Duration not available' : `${duration} mins`}
+            {tripDurationText(booking)}
           </span>
         </div>
       </div>
@@ -511,13 +578,10 @@ function RouteCard({ booking }: { booking: BookingDto }) {
 // ─── Trip Timeline ──────────────────────────────────────────────────────────────────────────
 
 /**
- * `booking.status` TRANSITIONS ONLY — not "OTP Sent" or "OTP Verified", which the mockup this
- * page was built from shows alongside the four-digit code itself. That code exists so the
- * customer can prove themselves to the driver in person; `BookingDto.start_otp` is null on
- * every admin read for exactly that reason, and no booking EVENT records it either (confirmed
- * against `startTrip.usecase.ts` — the STARTED transition's metadata is empty). A timeline
- * that showed it would be a genuine data leak, not a cosmetic simplification, so it is not
- * built here at all rather than built with a placeholder.
+ * `booking.status` TRANSITIONS ONLY — not "OTP Sent" or "OTP Verified". The code itself is shown
+ * once, in the summary, while it is still needed (admins book trips for customers from the panel
+ * and must be able to pass it on); no booking EVENT records it, so the timeline has nothing to
+ * show about it and does not pretend otherwise.
  */
 function TripTimelineCard({ booking }: { booking: BookingDto }) {
   const events = useBookingEvents(booking.id);
@@ -652,17 +716,15 @@ function FareBreakdownCard({ booking }: { booking: BookingDto }) {
  * status, and when it happened, all backed by data this read already carries.
  */
 function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
-  const events = useBookingEvents(booking.id);
-
   /*
-   * UPI is paid the moment the booking leaves PENDING_PAYMENT — the CONFIRMED event's timestamp.
-   * CASH is collected at the end — `completed_at`. Neither is invented; both are read off events
-   * that already exist for a different reason.
+   * PAY-AT-END, both ways. Cash is handed over at the end, and an online payment must capture
+   * before the driver can complete the trip — so `completed_at` is when either was settled.
+   *
+   * It used to read the CONFIRMED event for UPI, from when UPI was prepaid; under pay-at-end that
+   * is the moment the booking was made, when nothing had been paid at all. No event records the
+   * capture itself, so a paid-online trip still running shows no time rather than a wrong one.
    */
-  const paidAt =
-    booking.payment_mode === 'UPI' && booking.payment_status === 'PAID'
-      ? (events.data?.events.find((e) => e.to_status === 'CONFIRMED' || e.metadata?.paymentStatus === 'PAID')?.at ?? null)
-      : booking.timestamps.completed_at;
+  const paidAt = booking.status === 'COMPLETED' ? booking.timestamps.completed_at : null;
 
   return (
     <Panel title="Payment Details" icon={<CreditCard aria-hidden className="size-4" />} className={CARD}>

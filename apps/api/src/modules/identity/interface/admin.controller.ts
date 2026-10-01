@@ -1,6 +1,7 @@
 import type { Request, RequestHandler } from 'express';
 import type {
   AdminProfileDto,
+  AdminCreateCustomerResponse,
   AdminCustomerDetailsDto,
   AdminCustomerListDto,
   AdminCustomerListItemDto,
@@ -41,6 +42,7 @@ import {
   adminDriverDutyHistoryQuerySchema,
   suspendDriverSchema,
   adminCustomerListQuerySchema,
+  adminCreateCustomerSchema,
   adminUpdateCustomerSchema,
   adminUpdateDriverSchema,
   customerIdParamSchema,
@@ -256,6 +258,7 @@ export interface AdminControllers {
   listCustomers: RequestHandler;
   getCustomerDetails: RequestHandler;
   updateCustomer: RequestHandler;
+  createCustomer: RequestHandler;
 }
 
 export function makeAdminControllers(deps: AdminControllerDeps): AdminControllers {
@@ -517,6 +520,29 @@ export function makeAdminControllers(deps: AdminControllerDeps): AdminController
       );
 
       sendSuccess(req, res, mapCustomerToDetailsDto(updated), 'Customer updated');
+    }),
+
+    /*
+     * `POST /admin/customers` — so a trip can be booked from the panel for someone who has never
+     * signed in. 201 when an account was made, 200 when the number already had one.
+     */
+    createCustomer: asyncHandler(async (req, res) => {
+      const input = adminCreateCustomerSchema.parse(req.body);
+      const { customer, created } = await deps.manageCustomer.create(
+        { phone: input.mobile_number, fullName: input.full_name },
+        { adminId: actorId(req), ip: req.ip },
+      );
+      const body: AdminCreateCustomerResponse = {
+        customer: mapCustomerToDetailsDto(customer),
+        created,
+      };
+      sendSuccess(
+        req,
+        res,
+        body,
+        created ? 'Customer created' : 'Customer already exists',
+        created ? 201 : 200,
+      );
     }),
   };
 }

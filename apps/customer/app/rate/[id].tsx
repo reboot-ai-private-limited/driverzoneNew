@@ -5,12 +5,12 @@ import { type ComponentProps, type ReactElement, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { FavouriteHeart } from '@/components/FavouriteHeart';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -198,7 +198,12 @@ export default function RateDriverScreen(): ReactElement {
           <ActivityIndicator size="large" color={colors.muted} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <KeyboardAwareScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          bottomOffset={24}
+        >
           {booking.data?.driver === null || booking.data === undefined ? null : (
             <View style={styles.card}>
               <View style={styles.driverRow}>
@@ -356,7 +361,7 @@ export default function RateDriverScreen(): ReactElement {
             <Feather name="lock" size={12} color={colors.faint} />
             <Text style={styles.lockText}>Your feedback is safe and secure with us.</Text>
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       )}
     </View>
   );

@@ -1,4 +1,6 @@
 import type {
+  AdminCreateBookingRequest,
+  AdminCreateBookingResponse,
   AdminBookingListDto,
   AdminListBookingsQuery,
   BookingDto,
@@ -77,6 +79,28 @@ export const bookingsApi = {
   get: (token: string, id: string, signal?: AbortSignal) =>
     request<BookingDto>(`/admin/bookings/${id}`, { token, signal }),
 
+  /**
+   * `POST /admin/bookings` — book a trip for a customer from the panel.
+   *
+   * MANUAL DISPATCH: nobody is rung, the admin assigns the driver afterwards. The response's
+   * `booking.start_otp` is filled in so it can be passed on to the customer. Idempotency-Key is
+   * required — one click, one booking, however many retries.
+   */
+  create: (token: string, body: AdminCreateBookingRequest, idempotencyKey: string) =>
+    request<AdminCreateBookingResponse>('/admin/bookings', {
+      token,
+      method: 'POST',
+      body,
+      idempotencyKey,
+    }),
+
+  /** `POST /admin/bookings/:id/auto-dispatch` — let the system find a driver for a manual booking. */
+  enableAutoDispatch: (token: string, id: string) =>
+    request<{ booking: BookingDto }>(`/admin/bookings/${id}/auto-dispatch`, {
+      token,
+      method: 'POST',
+    }),
+
   events: (token: string, id: string, signal?: AbortSignal) =>
     request<BookingEventsDto>(`/admin/bookings/${id}/events`, { token, signal }),
 
@@ -115,7 +139,8 @@ export const bookingsApi = {
    * `bookings.driverId` and dispatch is the only module permitted to. Refused on a STARTED trip:
    * moving one of those is a cancellation plus a new booking, not a transfer.
    */
-  assign: (token: string, id: string, driverId: string, reason: string) =>
+  /** `reason` is optional — omitted, the server records "Assigned by admin". */
+  assign: (token: string, id: string, driverId: string, reason?: string) =>
     request<{
       booking_id: string;
       reference: string;
@@ -124,6 +149,6 @@ export const bookingsApi = {
     }>(`/admin/bookings/${id}/assign`, {
       token,
       method: 'POST',
-      body: { driver_id: driverId, reason },
+      body: { driver_id: driverId, ...(reason === undefined ? {} : { reason }) },
     }),
 };

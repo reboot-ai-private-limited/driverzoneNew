@@ -4,14 +4,12 @@ import { router } from 'expo-router';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { AccountDeletionBlocker } from '@driverzone/contracts';
 import { OtpInput } from '@/components/OtpInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -164,134 +162,134 @@ export default function DeleteAccountScreen(): ReactElement {
         <View style={styles.backButton} />
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {step === 'review' ? (
-            <>
-              <View style={styles.warningIcon}>
-                <Feather name="alert-triangle" size={26} color={colors.danger} />
+      <KeyboardAwareScrollView
+        style={styles.flex}
+        bottomOffset={24}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {step === 'review' ? (
+          <>
+            <View style={styles.warningIcon}>
+              <Feather name="alert-triangle" size={26} color={colors.danger} />
+            </View>
+            <Text style={styles.title}>This cannot be undone</Text>
+
+            <Text style={styles.sectionLabel}>What is deleted</Text>
+            {ERASED.map((line) => (
+              <View key={line} style={styles.bulletRow}>
+                <Feather name="x" size={15} color={colors.danger} style={styles.bulletIcon} />
+                <Text style={styles.bulletText}>{line}</Text>
               </View>
-              <Text style={styles.title}>This cannot be undone</Text>
+            ))}
 
-              <Text style={styles.sectionLabel}>What is deleted</Text>
-              {ERASED.map((line) => (
-                <View key={line} style={styles.bulletRow}>
-                  <Feather name="x" size={15} color={colors.danger} style={styles.bulletIcon} />
-                  <Text style={styles.bulletText}>{line}</Text>
-                </View>
-              ))}
+            <Text style={styles.sectionLabel}>What is kept</Text>
+            <Text style={styles.bodyText}>{KEPT}</Text>
 
-              <Text style={styles.sectionLabel}>What is kept</Text>
-              <Text style={styles.bodyText}>{KEPT}</Text>
-
-              {forfeited > 0 && (
-                <View style={styles.forfeitCard}>
-                  <Feather name="gift" size={16} color={colors.fg} />
-                  <Text style={styles.forfeitText}>
-                    Your wallet credit of <Text style={styles.strong}>{formatRupees(forfeited)}</Text> will be
-                    lost.
-                  </Text>
-                </View>
-              )}
-
-              {preview.isPending ? (
-                <ActivityIndicator style={styles.spinner} color={colors.muted} />
-              ) : preview.isError ? (
-                <Text style={styles.errorText}>
-                  {preview.error instanceof Error ? preview.error.message : 'Could not check your account.'}
+            {forfeited > 0 && (
+              <View style={styles.forfeitCard}>
+                <Feather name="gift" size={16} color={colors.fg} />
+                <Text style={styles.forfeitText}>
+                  Your wallet credit of <Text style={styles.strong}>{formatRupees(forfeited)}</Text> will be
+                  lost.
                 </Text>
-              ) : shownBlockers.length > 0 ? (
-                <View style={styles.blockersCard}>
-                  <Text style={styles.blockersTitle}>You can’t delete your account yet</Text>
-                  {shownBlockers.map((blocker) => (
-                    <View key={blocker.code} style={styles.bulletRow}>
-                      <Feather name="info" size={15} color={colors.danger} style={styles.bulletIcon} />
-                      <Text style={styles.bulletText}>{blocker.message}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-
-              {error !== null && <Text style={styles.errorText}>{error}</Text>}
-
-              <View style={styles.actions}>
-                <PrimaryButton
-                  label={mobile === null ? 'Send code' : `Send code to ${formatForDisplay(mobile)}`}
-                  onPress={() => send.mutate(undefined)}
-                  loading={send.isPending}
-                  disabled={!canDelete}
-                  showArrow={false}
-                />
-                <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
-                  <Text style={styles.cancelText}>Keep my account</Text>
-                </Pressable>
               </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.title}>Enter the {OTP_LENGTH}-digit code</Text>
-              <Text style={styles.bodyText}>
-                Sent to <Text style={styles.strong}>{mobile === null ? 'your number' : formatForDisplay(mobile)}</Text>
-                . Entering it deletes your account straight away.
+            )}
+
+            {preview.isPending ? (
+              <ActivityIndicator style={styles.spinner} color={colors.muted} />
+            ) : preview.isError ? (
+              <Text style={styles.errorText}>
+                {preview.error instanceof Error ? preview.error.message : 'Could not check your account.'}
               </Text>
-
-              <View style={styles.otpBlock}>
-                <OtpInput
-                  value={code}
-                  onChange={(next) => {
-                    setCode(next);
-                    if (error !== null) setError(null);
-                  }}
-                  onFilled={handleFilled}
-                  length={OTP_LENGTH}
-                  editable={!busy}
-                  invalid={error !== null}
-                />
+            ) : shownBlockers.length > 0 ? (
+              <View style={styles.blockersCard}>
+                <Text style={styles.blockersTitle}>You can’t delete your account yet</Text>
+                {shownBlockers.map((blocker) => (
+                  <View key={blocker.code} style={styles.bulletRow}>
+                    <Feather name="info" size={15} color={colors.danger} style={styles.bulletIcon} />
+                    <Text style={styles.bulletText}>{blocker.message}</Text>
+                  </View>
+                ))}
               </View>
+            ) : null}
 
-              <View style={styles.statusRow} accessibilityLiveRegion="polite">
-                {busy ? (
-                  <>
-                    <ActivityIndicator size="small" color={colors.danger} />
-                    <Text style={styles.statusText}>Deleting your account…</Text>
-                  </>
-                ) : error !== null ? (
-                  <Text style={styles.errorText}>{error}</Text>
-                ) : notice !== null ? (
-                  <Text style={styles.noticeText}>{notice}</Text>
-                ) : null}
-              </View>
+            {error !== null && <Text style={styles.errorText}>{error}</Text>}
 
-              <View style={styles.resendRow}>
-                {secondsLeft <= 0 ? (
-                  <Pressable
-                    onPress={() => send.mutate(undefined)}
-                    disabled={send.isPending || busy}
-                    accessibilityRole="button"
-                    hitSlop={8}
-                  >
-                    <Text style={styles.link}>Resend code</Text>
-                  </Pressable>
-                ) : (
-                  <Text style={styles.muted}>Resend code in {secondsLeft}s</Text>
-                )}
+            <View style={styles.actions}>
+              <PrimaryButton
+                label={mobile === null ? 'Send code' : `Send code to ${formatForDisplay(mobile)}`}
+                onPress={() => send.mutate(undefined)}
+                loading={send.isPending}
+                disabled={!canDelete}
+                showArrow={false}
+              />
+              <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancel}>
+                <Text style={styles.cancelText}>Keep my account</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.title}>Enter the {OTP_LENGTH}-digit code</Text>
+            <Text style={styles.bodyText}>
+              Sent to <Text style={styles.strong}>{mobile === null ? 'your number' : formatForDisplay(mobile)}</Text>
+              . Entering it deletes your account straight away.
+            </Text>
+
+            <View style={styles.otpBlock}>
+              <OtpInput
+                value={code}
+                onChange={(next) => {
+                  setCode(next);
+                  if (error !== null) setError(null);
+                }}
+                onFilled={handleFilled}
+                length={OTP_LENGTH}
+                editable={!busy}
+                invalid={error !== null}
+              />
+            </View>
+
+            <View style={styles.statusRow} accessibilityLiveRegion="polite">
+              {busy ? (
+                <>
+                  <ActivityIndicator size="small" color={colors.danger} />
+                  <Text style={styles.statusText}>Deleting your account…</Text>
+                </>
+              ) : error !== null ? (
+                <Text style={styles.errorText}>{error}</Text>
+              ) : notice !== null ? (
+                <Text style={styles.noticeText}>{notice}</Text>
+              ) : null}
+            </View>
+
+            <View style={styles.resendRow}>
+              {secondsLeft <= 0 ? (
                 <Pressable
-                  onPress={() => send.mutate('SMS')}
+                  onPress={() => send.mutate(undefined)}
                   disabled={send.isPending || busy}
                   accessibilityRole="button"
                   hitSlop={8}
                 >
-                  <Text style={styles.link}>Get code by SMS</Text>
+                  <Text style={styles.link}>Resend code</Text>
                 </Pressable>
-              </View>
-            </>
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
+              ) : (
+                <Text style={styles.muted}>Resend code in {secondsLeft}s</Text>
+              )}
+              <Pressable
+                onPress={() => send.mutate('SMS')}
+                disabled={send.isPending || busy}
+                accessibilityRole="button"
+                hitSlop={8}
+              >
+                <Text style={styles.link}>Get code by SMS</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+      </KeyboardAwareScrollView>
     </View>
   );
 }

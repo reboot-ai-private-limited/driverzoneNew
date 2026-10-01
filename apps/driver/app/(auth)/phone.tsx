@@ -3,14 +3,12 @@ import { useMutation } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { type ReactElement, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Logo } from '@/components/Logo';
 import { isValidIndianMobile, normaliseInput, toE164 } from '@/features/auth/phoneNumber';
@@ -65,87 +63,87 @@ export default function PhoneScreen(): ReactElement {
         <Text style={styles.tagline}>Drive with DriverZone</Text>
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+      <KeyboardAwareScrollView
+        style={styles.flex}
+        bottomOffset={24}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.title}>Enter your mobile number</Text>
+        <Text style={styles.subtitle}>
+          We will send a 6-digit verification code to confirm it is you.
+        </Text>
+
+        <Text style={styles.fieldLabel}>Mobile number</Text>
+        <View
+          style={[styles.field, focused && styles.fieldFocused, error !== null && styles.fieldError]}
         >
-          <Text style={styles.title}>Enter your mobile number</Text>
-          <Text style={styles.subtitle}>
-            We will send a 6-digit verification code to confirm it is you.
-          </Text>
-
-          <Text style={styles.fieldLabel}>Mobile number</Text>
-          <View
-            style={[styles.field, focused && styles.fieldFocused, error !== null && styles.fieldError]}
-          >
-            {/* Fixed at +91 for now. A `View` rather than a disabled picker, because a control
-                that opens nothing is worse than no control — the second country arrives with the
-                market that needs it. */}
-            <View style={styles.dialCode}>
-              <Text style={styles.flag}>{'\u{1F1EE}\u{1F1F3}'}</Text>
-              <Text style={styles.dialCodeText}>+91</Text>
-              <Feather name="chevron-down" size={16} color={colors.faint} />
-            </View>
-            <View style={styles.fieldDivider} />
-            <TextInput
-              value={national}
-              onChangeText={(raw) => {
-                setNational(normaliseInput(raw));
-                if (error !== null) setError(null);
-              }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              placeholder="00000 00000"
-              placeholderTextColor={colors.faint}
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              /*
-               * ROOM FOR A COUNTRY CODE THAT IS ABOUT TO BE STRIPPED, not for a longer number.
-               * `normaliseInput` returns at most ten digits and `value` is bound to its result, so
-               * the field can never actually display more than that.
-               *
-               * At 10 this silently broke: a driver typing `919876543210` had the input capped
-               * before `normaliseInput` could see the `91` to remove, leaving `9198765432` — ten
-               * digits, valid-looking, and the wrong person's number. The cap has to sit above
-               * the longest thing someone might paste, not at the length of the answer.
-               */
-              maxLength={16}
-              style={styles.input}
-              returnKeyType="go"
-              onSubmitEditing={handleContinue}
-              accessibilityLabel="Mobile number"
-            />
+          {/* Fixed at +91 for now. A `View` rather than a disabled picker, because a control
+              that opens nothing is worse than no control — the second country arrives with the
+              market that needs it. */}
+          <View style={styles.dialCode}>
+            <Text style={styles.flag}>{'\u{1F1EE}\u{1F1F3}'}</Text>
+            <Text style={styles.dialCodeText}>+91</Text>
+            <Feather name="chevron-down" size={16} color={colors.faint} />
           </View>
+          <View style={styles.fieldDivider} />
+          <TextInput
+            value={national}
+            onChangeText={(raw) => {
+              setNational(normaliseInput(raw));
+              if (error !== null) setError(null);
+            }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder="00000 00000"
+            placeholderTextColor={colors.faint}
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            textContentType="telephoneNumber"
+            /*
+             * ROOM FOR A COUNTRY CODE THAT IS ABOUT TO BE STRIPPED, not for a longer number.
+             * `normaliseInput` returns at most ten digits and `value` is bound to its result, so
+             * the field can never actually display more than that.
+             *
+             * At 10 this silently broke: a driver typing `919876543210` had the input capped
+             * before `normaliseInput` could see the `91` to remove, leaving `9198765432` — ten
+             * digits, valid-looking, and the wrong person's number. The cap has to sit above
+             * the longest thing someone might paste, not at the length of the answer.
+             */
+            maxLength={16}
+            style={styles.input}
+            returnKeyType="go"
+            onSubmitEditing={handleContinue}
+            accessibilityLabel="Mobile number"
+          />
+        </View>
 
-          {error !== null ? (
-            <Text style={styles.errorText} accessibilityLiveRegion="polite">
-              {error}
-            </Text>
-          ) : null}
-
-          <View style={styles.buttonBlock}>
-            <PrimaryButton
-              label="Continue"
-              onPress={handleContinue}
-              loading={mutation.isPending}
-              disabled={!valid}
-            />
-          </View>
-
-          {/* Pushes the legal line to the foot of a tall screen and collapses on a short one, so
-              it never floats mid-screen. */}
-          <View style={styles.spacer} />
-
-          <Text style={styles.legal}>
-            By continuing, you agree to our{' '}
-            <Text style={styles.legalLink}>Terms &amp; Conditions</Text> and{' '}
-            <Text style={styles.legalLink}>Privacy Policy</Text>
+        {error !== null ? (
+          <Text style={styles.errorText} accessibilityLiveRegion="polite">
+            {error}
           </Text>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        ) : null}
+
+        <View style={styles.buttonBlock}>
+          <PrimaryButton
+            label="Continue"
+            onPress={handleContinue}
+            loading={mutation.isPending}
+            disabled={!valid}
+          />
+        </View>
+
+        {/* Pushes the legal line to the foot of a tall screen and collapses on a short one, so
+            it never floats mid-screen. */}
+        <View style={styles.spacer} />
+
+        <Text style={styles.legal}>
+          By continuing, you agree to our{' '}
+          <Text style={styles.legalLink}>Terms &amp; Conditions</Text> and{' '}
+          <Text style={styles.legalLink}>Privacy Policy</Text>
+        </Text>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

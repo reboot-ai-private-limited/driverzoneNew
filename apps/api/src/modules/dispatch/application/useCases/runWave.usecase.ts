@@ -63,6 +63,17 @@ export class RunDispatchWaveUseCase {
     if (booking === null) return { rang: false, reason: 'NOT_FOUND' };
 
     /*
+     * AN ADMIN IS ASSIGNING THIS ONE BY HAND. The sweeper already skips it; this covers any job
+     * that reaches here anyway — a stale enqueue, a retried job — so no driver is ever rung for a
+     * booking ops booked from the panel. `POST /admin/bookings/:id/auto-dispatch` flips the mode
+     * first when ops does want it rung.
+     */
+    if (booking.dispatchMode === 'MANUAL') {
+      logger.info({ bookingId }, 'manual-dispatch booking reached a wave — not ringing anybody');
+      return { rang: false, reason: 'NOT_SEARCHING' };
+    }
+
+    /*
      * The first wave is what moves a booking out of a waiting state. Later waves find it already
      * in `SEARCHING`.
      *

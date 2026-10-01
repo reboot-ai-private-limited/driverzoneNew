@@ -418,6 +418,24 @@ worked on.
 
 ## Reassignment and manual assignment
 
+### Manual-dispatch bookings
+
+A booking an admin makes from the panel for a customer carries `dispatchMode: 'MANUAL'`, and
+**automatic dispatch never touches it**. Two doors are shut, because either one alone would leak:
+
+- `createBooking` enqueues no dispatch job for it, and the sweeper's `findDueForDispatch` filters it
+  out (`dispatchMode: { $ne: 'MANUAL' }` — rows from before the field have no value and are still
+  swept).
+- `RunDispatchWaveUseCase` returns `NOT_SEARCHING` for it before touching the status, for any job
+  that reaches it anyway.
+
+It waits at `CONFIRMED` until ops assigns a driver through the endpoint below, which already
+handles a driverless `CONFIRMED` booking (`beginSearching` then claim). `POST
+/admin/bookings/:id/auto-dispatch` flips it to `AUTO` — conditional on it still being driverless
+and waiting — and enqueues dispatch at `max(now, scheduledAt − lead)`.
+
+### Assigning
+
 Both are one endpoint — `POST /admin/bookings/:id/assign { driver_id, reason }` — because they are
 one act: put this booking on this driver. Whether somebody has to be taken off it first is a
 detail of the booking's current state, not a different feature.

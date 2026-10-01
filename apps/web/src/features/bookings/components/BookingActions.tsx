@@ -96,7 +96,7 @@ function CancelDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={`Cancel ${booking.reference}`}
-      description="Nobody is charged. The customer is refunded in full and the driver keeps a clean record."
+      description="Nobody is charged, and the driver keeps a clean record."
       footer={
         <div className="flex justify-end gap-2">
           <Button size="sm" onClick={() => onOpenChange(false)}>
@@ -200,9 +200,15 @@ function TransferDialog({
             size="sm"
             variant="primary"
             onClick={submit}
-            disabled={isTransferSubmitDisabled({ selected, reason, isPending: assign.isPending })}
+            disabled={isTransferSubmitDisabled({ selected, isPending: assign.isPending })}
           >
-            {assign.isPending ? 'Transferring…' : 'Transfer trip'}
+            {booking.driver === null
+              ? assign.isPending
+                ? 'Assigning…'
+                : 'Assign driver'
+              : assign.isPending
+                ? 'Transferring…'
+                : 'Transfer trip'}
           </Button>
         </div>
       }
@@ -294,7 +300,7 @@ function TransferDialog({
 
         <div className="flex flex-col gap-2">
           <label className="text-xs font-medium text-text-muted" htmlFor="transfer-reason">
-            Reason — the outgoing driver sees this
+            Reason (optional){booking.driver === null ? '' : ' — the outgoing driver sees this'}
           </label>
           <Input
             id="transfer-reason"

@@ -6,15 +6,14 @@ import * as ImagePicker from 'expo-image-picker';
 import { type ReactElement, useState } from 'react';
 import {
   Image,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { UpdateCustomerProfileRequest } from '@driverzone/contracts';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FieldRow } from '@/components/FieldRow';
@@ -133,205 +132,202 @@ export default function ProfileSetupScreen(): ReactElement {
 
   return (
     <View style={styles.root}>
-      <KeyboardAvoidingView
+      <KeyboardAwareScrollView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        bottomOffset={24}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.header}>
+        <View style={styles.header}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={styles.back}
+          >
+            <Feather name="arrow-left" size={22} color={colors.fg} />
+          </Pressable>
+          <View style={styles.headerLogo}>
+            <Logo width={150} />
+          </View>
+          {/* Balances the back button so the logo stays optically centred. */}
+          <View style={styles.back} />
+        </View>
+
+        <WaveHeaderEdge height={40} />
+
+        <View style={styles.titleRow}>
+          <View style={styles.flex}>
+            <Text style={styles.title}>Complete your profile</Text>
+            <Text style={styles.subtitle}>All of this is optional — skip anything you like.</Text>
+          </View>
+          <ProgressRing percent={percent} size={72} strokeWidth={6} />
+        </View>
+
+        <View style={styles.form}>
+          <View style={styles.avatarBlock}>
             <Pressable
-              onPress={() => router.back()}
-              hitSlop={12}
+              onPress={() => void pickPhoto()}
               accessibilityRole="button"
-              accessibilityLabel="Go back"
-              style={styles.back}
+              accessibilityLabel={
+                draft.photoUri === null ? 'Add a profile photo' : 'Change your profile photo'
+              }
+              style={({ pressed }) => [styles.avatarPress, pressed && styles.pressedDim]}
             >
-              <Feather name="arrow-left" size={22} color={colors.fg} />
-            </Pressable>
-            <View style={styles.headerLogo}>
-              <Logo width={150} />
-            </View>
-            {/* Balances the back button so the logo stays optically centred. */}
-            <View style={styles.back} />
-          </View>
-
-          <WaveHeaderEdge height={40} />
-
-          <View style={styles.titleRow}>
-            <View style={styles.flex}>
-              <Text style={styles.title}>Complete your profile</Text>
-              <Text style={styles.subtitle}>All of this is optional — skip anything you like.</Text>
-            </View>
-            <ProgressRing percent={percent} size={72} strokeWidth={6} />
-          </View>
-
-          <View style={styles.form}>
-            <View style={styles.avatarBlock}>
-              <Pressable
-                onPress={() => void pickPhoto()}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  draft.photoUri === null ? 'Add a profile photo' : 'Change your profile photo'
-                }
-                style={({ pressed }) => [styles.avatarPress, pressed && styles.pressedDim]}
-              >
-                {draft.photoUri === null ? (
-                  <View style={styles.avatarPlaceholder}>
-                    <Feather name="user" size={38} color={colors.faint} />
-                  </View>
-                ) : (
-                  <Image source={{ uri: draft.photoUri }} style={styles.avatar} />
-                )}
-                <View style={styles.cameraBadge}>
-                  <Feather name="camera" size={14} color={colors.fg} />
+              {draft.photoUri === null ? (
+                <View style={styles.avatarPlaceholder}>
+                  <Feather name="user" size={38} color={colors.faint} />
                 </View>
-              </Pressable>
-              <Text style={styles.avatarCaption}>
-                {draft.photoUri === null ? 'Add a photo' : 'Change photo'}
-              </Text>
-            </View>
-
-            <FieldRow icon="user" label="Full name" focused={focus === 'name'} error={nameError}>
-              <TextInput
-                value={draft.fullName}
-                onChangeText={(value) => {
-                  patch({ fullName: value });
-                  if (nameError !== null) setNameError(null);
-                }}
-                onFocus={() => setFocus('name')}
-                onBlur={() => setFocus(null)}
-                placeholder="Enter your full name"
-                placeholderTextColor={colors.faint}
-                autoCapitalize="words"
-                autoComplete="name"
-                style={styles.input}
-                accessibilityLabel="Full name"
-              />
-            </FieldRow>
-
-            <FieldRow label="Gender" boxed={false}>
-              <View style={styles.genderRow}>
-                {GENDER_OPTIONS.map((option) => {
-                  const selected = draft.gender === option.value;
-                  return (
-                    <Pressable
-                      key={option.value}
-                      onPress={() => patch({ gender: selected ? null : option.value })}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected }}
-                      style={({ pressed }) => [
-                        styles.genderChip,
-                        selected && styles.genderChipSelected,
-                        pressed && !selected && styles.genderChipPressed,
-                      ]}
-                    >
-                      <Text style={[styles.genderLabel, selected && styles.genderLabelSelected]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              ) : (
+                <Image source={{ uri: draft.photoUri }} style={styles.avatar} />
+              )}
+              <View style={styles.cameraBadge}>
+                <Feather name="camera" size={14} color={colors.fg} />
               </View>
-            </FieldRow>
-
-            <FieldRow icon="calendar" label="Date of birth">
-              <Pressable
-                onPress={() => setShowDatePicker(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Select your date of birth"
-                style={styles.triggerRow}
-              >
-                <Text style={draft.dob === null ? styles.placeholder : styles.value}>
-                  {draft.dob === null ? 'Select date' : formatDob(draft.dob)}
-                </Text>
-                <Feather name="chevron-right" size={18} color={colors.faint} />
-              </Pressable>
-            </FieldRow>
-
-            <FieldRow icon="mail" label="Email" focused={focus === 'email'} error={emailError}>
-              <TextInput
-                value={draft.email}
-                onChangeText={(value) => {
-                  patch({ email: value });
-                  if (emailError !== null) setEmailError(null);
-                }}
-                onFocus={() => setFocus('email')}
-                onBlur={() => setFocus(null)}
-                placeholder="you@example.com"
-                placeholderTextColor={colors.faint}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-                style={styles.input}
-                accessibilityLabel="Email address"
-              />
-            </FieldRow>
-
-            <FieldRow icon="credit-card" label="Preferred payment method">
-              <Pressable
-                onPress={() => setShowPaymentSheet(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Select your preferred payment method"
-                style={styles.triggerRow}
-              >
-                <Text style={selectedPayment === undefined ? styles.placeholder : styles.value}>
-                  {selectedPayment?.label ?? 'Select method'}
-                </Text>
-                <Feather name="chevron-down" size={18} color={colors.faint} />
-              </Pressable>
-            </FieldRow>
-
-            <FieldRow icon="map-pin" label="Current address" focused={focus === 'address'}>
-              <TextInput
-                value={draft.address}
-                onChangeText={(value) => patch({ address: value })}
-                onFocus={() => setFocus('address')}
-                onBlur={() => setFocus(null)}
-                placeholder="House, street, area"
-                placeholderTextColor={colors.faint}
-                style={styles.input}
-                accessibilityLabel="Current address"
-              />
-            </FieldRow>
-
-            {/* Honest about the gap: `PATCH /customer/profile` only persists name, gender and
-                dob today. The other fields are collected to match the approved design, but a
-                customer should not walk away believing a photo or an address was stored. */}
-            <Text style={styles.storageNote}>
-              Saved now: name, gender and date of birth. Photo, email, payment method and address
-              are coming soon.
+            </Pressable>
+            <Text style={styles.avatarCaption}>
+              {draft.photoUri === null ? 'Add a photo' : 'Change photo'}
             </Text>
-
-            {saveError !== null ? (
-              <Text style={styles.saveError} accessibilityLiveRegion="polite">
-                {saveError}
-              </Text>
-            ) : null}
-
-            <View style={styles.actions}>
-              <PrimaryButton
-                label="Save & Continue"
-                onPress={handleSave}
-                loading={save.isPending}
-              />
-
-              <Pressable
-                onPress={() => router.replace('/home')}
-                accessibilityRole="button"
-                disabled={save.isPending}
-                hitSlop={8}
-                style={styles.skipButton}
-              >
-                <Text style={styles.skipLabel}>Skip for now</Text>
-              </Pressable>
-            </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+          <FieldRow icon="user" label="Full name" focused={focus === 'name'} error={nameError}>
+            <TextInput
+              value={draft.fullName}
+              onChangeText={(value) => {
+                patch({ fullName: value });
+                if (nameError !== null) setNameError(null);
+              }}
+              onFocus={() => setFocus('name')}
+              onBlur={() => setFocus(null)}
+              placeholder="Enter your full name"
+              placeholderTextColor={colors.faint}
+              autoCapitalize="words"
+              autoComplete="name"
+              style={styles.input}
+              accessibilityLabel="Full name"
+            />
+          </FieldRow>
+
+          <FieldRow label="Gender" boxed={false}>
+            <View style={styles.genderRow}>
+              {GENDER_OPTIONS.map((option) => {
+                const selected = draft.gender === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => patch({ gender: selected ? null : option.value })}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.genderChip,
+                      selected && styles.genderChipSelected,
+                      pressed && !selected && styles.genderChipPressed,
+                    ]}
+                  >
+                    <Text style={[styles.genderLabel, selected && styles.genderLabelSelected]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </FieldRow>
+
+          <FieldRow icon="calendar" label="Date of birth">
+            <Pressable
+              onPress={() => setShowDatePicker(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Select your date of birth"
+              style={styles.triggerRow}
+            >
+              <Text style={draft.dob === null ? styles.placeholder : styles.value}>
+                {draft.dob === null ? 'Select date' : formatDob(draft.dob)}
+              </Text>
+              <Feather name="chevron-right" size={18} color={colors.faint} />
+            </Pressable>
+          </FieldRow>
+
+          <FieldRow icon="mail" label="Email" focused={focus === 'email'} error={emailError}>
+            <TextInput
+              value={draft.email}
+              onChangeText={(value) => {
+                patch({ email: value });
+                if (emailError !== null) setEmailError(null);
+              }}
+              onFocus={() => setFocus('email')}
+              onBlur={() => setFocus(null)}
+              placeholder="you@example.com"
+              placeholderTextColor={colors.faint}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              style={styles.input}
+              accessibilityLabel="Email address"
+            />
+          </FieldRow>
+
+          <FieldRow icon="credit-card" label="Preferred payment method">
+            <Pressable
+              onPress={() => setShowPaymentSheet(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Select your preferred payment method"
+              style={styles.triggerRow}
+            >
+              <Text style={selectedPayment === undefined ? styles.placeholder : styles.value}>
+                {selectedPayment?.label ?? 'Select method'}
+              </Text>
+              <Feather name="chevron-down" size={18} color={colors.faint} />
+            </Pressable>
+          </FieldRow>
+
+          <FieldRow icon="map-pin" label="Current address" focused={focus === 'address'}>
+            <TextInput
+              value={draft.address}
+              onChangeText={(value) => patch({ address: value })}
+              onFocus={() => setFocus('address')}
+              onBlur={() => setFocus(null)}
+              placeholder="House, street, area"
+              placeholderTextColor={colors.faint}
+              style={styles.input}
+              accessibilityLabel="Current address"
+            />
+          </FieldRow>
+
+          {/* Honest about the gap: `PATCH /customer/profile` only persists name, gender and
+              dob today. The other fields are collected to match the approved design, but a
+              customer should not walk away believing a photo or an address was stored. */}
+          <Text style={styles.storageNote}>
+            Saved now: name, gender and date of birth. Photo, email, payment method and address
+            are coming soon.
+          </Text>
+
+          {saveError !== null ? (
+            <Text style={styles.saveError} accessibilityLiveRegion="polite">
+              {saveError}
+            </Text>
+          ) : null}
+
+          <View style={styles.actions}>
+            <PrimaryButton
+              label="Save & Continue"
+              onPress={handleSave}
+              loading={save.isPending}
+            />
+
+            <Pressable
+              onPress={() => router.replace('/home')}
+              accessibilityRole="button"
+              disabled={save.isPending}
+              hitSlop={8}
+              style={styles.skipButton}
+            >
+              <Text style={styles.skipLabel}>Skip for now</Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAwareScrollView>
 
       {showDatePicker ? (
         <DateTimePicker

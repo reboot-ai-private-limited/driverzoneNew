@@ -50,6 +50,7 @@ function toEntity(doc: BookingDoc): Booking {
     carCategory: (doc.carCategory ?? null) as Booking['carCategory'],
     vehicleType: (doc.vehicleType ?? null) as Booking['vehicleType'],
     preferFavouriteDrivers: doc.preferFavouriteDrivers ?? false,
+    dispatchMode: doc.dispatchMode === 'MANUAL' ? 'MANUAL' : 'AUTO',
     walletCreditPaise: doc.walletCreditPaise ?? 0,
     walletDebtPaise: doc.walletDebtPaise ?? 0,
     quoteId: String(doc.quoteId),
@@ -106,16 +107,22 @@ function toEventEntity(doc: BookingEventDoc): BookingEvent {
  * logged rather than thrown for the same reason: an event we failed to write is a gap in the
  * history, and losing the booking as well would be strictly worse.
  */
-export async function recordCreationEvent(booking: Booking, actorId: string): Promise<void> {
+export async function recordCreationEvent(booking: Booking, actor: Actor): Promise<void> {
   try {
     await BookingEventModel.create({
       bookingId: new mongoose.Types.ObjectId(booking.id),
       fromStatus: null,
       toStatus: 'PENDING_PAYMENT',
-      actorType: 'CUSTOMER',
-      actorId: new mongoose.Types.ObjectId(actorId),
+      actorType: actor.type,
+      actorId: actor.id === null ? null : new mongoose.Types.ObjectId(actor.id),
       reason: null,
-      metadata: { reference: booking.reference, quoteId: booking.quoteId },
+      metadata: {
+        reference: booking.reference,
+        quoteId: booking.quoteId,
+        dispatchMode: booking.dispatchMode,
+        // On an admin booking the actor is the admin, so the customer it was made for is named.
+        ...(actor.type === 'CUSTOMER' ? {} : { forCustomerId: booking.customerId }),
+      },
     });
   } catch (error) {
     logger.error({ err: error, bookingId: booking.id }, 'could not record the booking creation event');
@@ -124,8 +131,9 @@ export async function recordCreationEvent(booking: Booking, actorId: string): Pr
 
 export class MongoBookingRepository implements BookingRepositoryPort {
   async create(data: NewBooking): Promise<Booking> {
+    const { createdBy, ...fields } = data;
     const doc = await BookingModel.create({
-      ...data,
+      ...fields,
       customerId: new mongoose.Types.ObjectId(data.customerId),
       quoteId: new mongoose.Types.ObjectId(data.quoteId),
       status: 'PENDING_PAYMENT',
@@ -136,7 +144,7 @@ export class MongoBookingRepository implements BookingRepositoryPort {
 
     // The history has to start where the booking does. This one event cannot go through
     // `transition()` — it has no `from` status — so it is written here instead.
-    await recordCreationEvent(booking, data.customerId);
+    await recordCreationEvent(booking, createdBy);
 
     return booking;
   }
@@ -528,10 +536,28 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     const docs = await BookingModel.find({
       status: { $in: ['CONFIRMED', 'WAITING_DRIVER'] },
       dispatchAt: { $lte: now },
+      // An admin assigns these by hand. `$ne` rather than `'AUTO'` so rows written before the
+      // field existed — which have no value at all — are still swept.
+      dispatchMode: { $ne: 'MANUAL' },
     })
       .sort({ dispatchAt: 1 })
       .limit(limit);
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  async enableAutoDispatch(id: string, dispatchAt: Date): Promise<Booking | null> {
+    if (!mongoose.isValidObjectId(id)) return null;
+    const doc = await BookingModel.findOneAndUpdate(
+      {
+        _id: id,
+        dispatchMode: 'MANUAL',
+        driverId: null,
+        status: { $in: ['CONFIRMED', 'WAITING_DRIVER'] },
+      },
+      { $set: { dispatchMode: 'AUTO', dispatchAt } },
+      { new: true },
+    );
+    return doc === null ? null : toEntity(doc.toObject() as BookingDoc);
   }
 
   async findAbandonedPayments(before: Date, limit: number): Promise<Booking[]> {

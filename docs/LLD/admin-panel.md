@@ -414,6 +414,31 @@ DZ-8F3K2M · Siliguri Hourly 3H · Sedan · ₹945
 
 Support staff should never need an engineer to explain what happened to a booking.
 
+The summary shows the **trip code (OTP)** while it is still needed (up to `ARRIVED`), with a copy
+button — admins book trips for customers who may not have the app and must pass it on. A booking
+made from the panel and not yet assigned shows a notice that nobody is being rung, with a "Let the
+system find a driver" action (`/auto-dispatch`).
+
+## New booking (`/bookings/new`)
+
+An admin books a trip on a customer's behalf, in the app's order:
+
+1. **Customer** — search by name or number, or add one by mobile number (`POST /admin/customers`,
+   idempotent on the number).
+2. **Pickup and destination — on the map**, which fills the left of the screen. Search above it
+   (Google Places; the label keeps the place's own name, "Hakimpara, Haren Mukherjee Road, …"),
+   click it, or drag either pin. The active end is highlighted in the form; clicking a field
+   switches the map to it. A click or drag is labelled by reverse geocoding (Plus Codes skipped),
+   falling back to the coordinate if the key lacks the Geocoding API. Without a Maps key, an
+   address plus a typed coordinate.
+3. **When** (now or scheduled, IST), outstation direction and return, insurance.
+4. **Fare** — `POST /admin/quotes` for that customer; several options for incity, one for
+   outstation. Changing the customer or the trip discards the price.
+5. **Car** — category and gearbox; they decide which drivers are eligible.
+6. **Confirm** — `POST /admin/bookings`, then to the booking's page to assign a driver.
+
+No payment step: as everywhere, payment is chosen after the ride starts.
+
 ## Settings
 
 The tunable numbers — fare surcharges, waiting, dispatch, cancellation — at `/settings`.

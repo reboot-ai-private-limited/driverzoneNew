@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CalendarClock, Columns3, Eye, FileSpreadsheet, Printer, RotateCcw } from 'lucide-react';
+import {
+  CalendarClock,
+  Columns3,
+  Eye,
+  FileSpreadsheet,
+  Plus,
+  Printer,
+  RotateCcw,
+} from 'lucide-react';
 import {
   Badge,
   Button,
@@ -317,6 +325,16 @@ export function BookingsScreen() {
         <PageHeader
           title="Booking Management"
           breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Bookings' }]}
+          actions={
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Plus aria-hidden className="size-3.5" />}
+              onClick={() => router.push('/bookings/new')}
+            >
+              New booking
+            </Button>
+          }
         />
       </div>
 

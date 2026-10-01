@@ -13,15 +13,14 @@ import { type ReactElement, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { FieldRow } from '@/components/FieldRow';
 import {
   INDIA_DIALLING_CODE,
@@ -334,279 +333,279 @@ export default function OnboardingProfileScreen(): ReactElement {
         <View style={styles.headerSpacer} />
       </View>
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/*
-            The avatar sits above the form rather than inside it because it does not save with
-            the form — the upload runs on pick, and only its resulting key travels with the PATCH.
-          */}
-          <View style={styles.avatarBlock}>
-            <Pressable
-              onPress={() => void pickPicture()}
-              disabled={picture.isPending}
-              accessibilityRole="button"
-              accessibilityLabel="Change profile photo"
-              style={styles.avatar}
-            >
-              {picture.isPending ? (
-                <ActivityIndicator color={colors.fg} />
-              ) : pictureUri !== null ? (
-                <Image source={{ uri: pictureUri }} style={styles.avatarImage} />
-              ) : (
-                <Feather name="camera" size={24} color={colors.muted} />
-              )}
-              <View style={styles.avatarBadge}>
-                <Feather name="edit-2" size={11} color={colors.brandOnFg} />
-              </View>
-            </Pressable>
-
-            <Text style={styles.avatarHint}>
-              {pictureUri !== null
-                ? 'Photo ready — save to attach it'
-                : draft.profilePicture !== null
-                  ? 'A photo is already saved. Tap to replace it.'
-                  : 'Add a profile photo (optional)'}
-            </Text>
-
-            {pictureError !== null ? (
-              <Text style={styles.avatarError} accessibilityLiveRegion="polite">
-                {pictureError}
-              </Text>
-            ) : null}
-          </View>
-
-          <FieldRow
-            label="Full name"
-            required
-            icon="user"
-            focused={focusedField === 'fullName'}
-          >
-            <TextInput
-              value={draft.fullName}
-              onChangeText={(value) => patch({ fullName: value })}
-              onFocus={() => setFocusedField('fullName')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="As printed on your licence"
-              placeholderTextColor={colors.faint}
-              style={styles.input}
-              autoCapitalize="words"
-            />
-          </FieldRow>
-
-          <FieldRow label="Date of birth" required icon="calendar">
-            <Pressable onPress={() => setShowDatePicker(true)} accessibilityRole="button">
-              <Text style={draft.dob === null ? styles.placeholder : styles.inputText}>
-                {draft.dob === null ? 'Select your date of birth' : formatDate(draft.dob)}
-              </Text>
-            </Pressable>
-          </FieldRow>
-
-          <FieldRow label="Gender" required boxed={false}>
-            <View style={styles.chipRow}>
-              {GENDER_OPTIONS.map((value) => (
-                <Chip
-                  key={value}
-                  label={GENDER_LABELS[value]}
-                  selected={draft.gender === value}
-                  onPress={() => patch({ gender: value })}
-                />
-              ))}
-            </View>
-          </FieldRow>
-
-          <FieldRow label="Address" required icon="map-pin" focused={focusedField === 'address'}>
-            <TextInput
-              value={draft.address}
-              onChangeText={(value) => patch({ address: value })}
-              onFocus={() => setFocusedField('address')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="Where you are based"
-              placeholderTextColor={colors.faint}
-              style={[styles.input, styles.inputMultiline]}
-              multiline
-            />
-          </FieldRow>
-
-          <Text style={styles.sectionHeading}>Optional</Text>
-
-          <FieldRow
-            label="Years of driving experience"
-            icon="award"
-            focused={focusedField === 'experience'}
-          >
-            <TextInput
-              value={draft.experienceYears}
-              onChangeText={(value) => patch({ experienceYears: value.replace(/[^0-9]/g, '').slice(0, 2) })}
-              onFocus={() => setFocusedField('experience')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="e.g. 8"
-              placeholderTextColor={colors.faint}
-              keyboardType="number-pad"
-              style={styles.input}
-            />
-          </FieldRow>
-
-          <FieldRow
-            label="Alternate number"
-            hint="(Optional)"
-            icon="phone"
-            focused={focusedField === 'alternate'}
-          >
-            <View style={styles.phoneRow}>
-              <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
-              <TextInput
-                value={draft.alternateNumber}
-                // Digits only, and a pasted "+91 98765 43210" lands as the ten digits.
-                onChangeText={(value) => patch({ alternateNumber: normaliseInput(value) })}
-                onFocus={() => setFocusedField('alternate')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="98765 43210"
-                placeholderTextColor={colors.faint}
-                keyboardType="phone-pad"
-                maxLength={10}
-                style={[styles.input, styles.flex]}
-                accessibilityLabel="Alternate number"
-              />
-            </View>
-          </FieldRow>
-
-          {/* Competence, not ownership: the driver drives the CUSTOMER'S car
-              (docs/LLD/open-questions.md Q5), so this says what they can handle, not what they
-              have parked outside. */}
-          <FieldRow label="Transmission you can drive" hint="(choose any)" boxed={false}>
-            <View style={styles.chipRow}>
-              {VEHICLE_OPTIONS.map((value) => {
-                const selected = draft.vehicleTypePreferences.includes(value);
-                return (
-                  <Chip
-                    key={value}
-                    label={VEHICLE_LABELS[value]}
-                    selected={selected}
-                    onPress={() =>
-                      patch({
-                        vehicleTypePreferences: selected
-                          ? draft.vehicleTypePreferences.filter((code) => code !== value)
-                          : [...draft.vehicleTypePreferences, value],
-                      })
-                    }
-                  />
-                );
-              })}
-            </View>
-          </FieldRow>
-
-          {/* Multi-select, unlike the rows above: a driver comfortable in a hatchback is usually
-              fine in a sedan too, and this is what decides which bookings they can be OFFERED
-              (`prd.md` FR-B6) rather than what any of them costs. */}
-          <FieldRow
-            label="Car types you can drive"
-            hint="(choose any)"
-            boxed={false}
-          >
-            <View style={styles.chipRow}>
-              {CAR_CATEGORY_OPTIONS.map((value) => {
-                const selected = draft.vehicleCategoryPreference.includes(value);
-                return (
-                  <Chip
-                    key={value}
-                    label={CAR_CATEGORY_LABELS[value]}
-                    selected={selected}
-                    multiSelect
-                    onPress={() =>
-                      patch({
-                        vehicleCategoryPreference: selected
-                          ? draft.vehicleCategoryPreference.filter((code) => code !== value)
-                          : [...draft.vehicleCategoryPreference, value],
-                      })
-                    }
-                  />
-                );
-              })}
-            </View>
-          </FieldRow>
-
-          {/*
-            Emergency contact. Both halves or neither — see the note in `handleSave`: the server
-            takes this as one object with two required strings, so half of it fails the whole
-            PATCH and would cost the driver their other edits.
-          */}
-          <FieldRow
-            label="Emergency contact name"
-            hint="(Optional)"
-            icon="user"
-            focused={focusedField === 'emergencyName'}
-          >
-            <TextInput
-              value={draft.emergencyName}
-              onChangeText={(value) => patch({ emergencyName: value })}
-              onFocus={() => setFocusedField('emergencyName')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="Who should we call"
-              placeholderTextColor={colors.faint}
-              style={styles.input}
-              autoCapitalize="words"
-            />
-          </FieldRow>
-
-          <FieldRow
-            label="Emergency contact number"
-            hint={draft.emergencyName.trim() === '' ? '(Optional)' : '(needed with the name)'}
-            icon="phone-call"
-            focused={focusedField === 'emergencyNumber'}
-          >
-            <View style={styles.phoneRow}>
-              <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
-              <TextInput
-                value={draft.emergencyNumber}
-                onChangeText={(value) => patch({ emergencyNumber: normaliseInput(value) })}
-                onFocus={() => setFocusedField('emergencyNumber')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="98765 43210"
-                placeholderTextColor={colors.faint}
-                keyboardType="phone-pad"
-                maxLength={10}
-                style={[styles.input, styles.flex]}
-                accessibilityLabel="Emergency contact number"
-              />
-            </View>
-          </FieldRow>
-
-          {/*
-            Self-declared, and it gates nothing on its own. Hill dispatch reads
-            `can_drive_hill_verified`, which only an admin can set (docs/LLD/user.md). Saying so
-            here stops a driver assuming they will start getting hill trips the moment they tick
-            the box.
-          */}
+      <KeyboardAwareScrollView
+        style={styles.flex}
+        bottomOffset={24}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/*
+          The avatar sits above the form rather than inside it because it does not save with
+          the form — the upload runs on pick, and only its resulting key travels with the PATCH.
+        */}
+        <View style={styles.avatarBlock}>
           <Pressable
-            onPress={() => patch({ canDriveHill: !draft.canDriveHill })}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: draft.canDriveHill }}
-            style={styles.toggleRow}
+            onPress={() => void pickPicture()}
+            disabled={picture.isPending}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+            style={styles.avatar}
           >
-            <View style={[styles.checkbox, draft.canDriveHill && styles.checkboxOn]}>
-              {draft.canDriveHill ? <Feather name="check" size={15} color={colors.onFg} /> : null}
-            </View>
-            <View style={styles.toggleText}>
-              <Text style={styles.toggleLabel}>I can drive hill routes</Text>
-              <Text style={styles.toggleHint}>An admin confirms this before hill trips are offered.</Text>
+            {picture.isPending ? (
+              <ActivityIndicator color={colors.fg} />
+            ) : pictureUri !== null ? (
+              <Image source={{ uri: pictureUri }} style={styles.avatarImage} />
+            ) : (
+              <Feather name="camera" size={24} color={colors.muted} />
+            )}
+            <View style={styles.avatarBadge}>
+              <Feather name="edit-2" size={11} color={colors.brandOnFg} />
             </View>
           </Pressable>
 
-          {saveError !== null ? (
-            <Text style={styles.saveError} accessibilityLiveRegion="polite">
-              {saveError}
+          <Text style={styles.avatarHint}>
+            {pictureUri !== null
+              ? 'Photo ready — save to attach it'
+              : draft.profilePicture !== null
+                ? 'A photo is already saved. Tap to replace it.'
+                : 'Add a profile photo (optional)'}
+          </Text>
+
+          {pictureError !== null ? (
+            <Text style={styles.avatarError} accessibilityLiveRegion="polite">
+              {pictureError}
             </Text>
           ) : null}
+        </View>
 
-          <View style={styles.actions}>
-            <PrimaryButton label="Save details" onPress={handleSave} loading={save.isPending} showArrow={false} />
+        <FieldRow
+          label="Full name"
+          required
+          icon="user"
+          focused={focusedField === 'fullName'}
+        >
+          <TextInput
+            value={draft.fullName}
+            onChangeText={(value) => patch({ fullName: value })}
+            onFocus={() => setFocusedField('fullName')}
+            onBlur={() => setFocusedField(null)}
+            placeholder="As printed on your licence"
+            placeholderTextColor={colors.faint}
+            style={styles.input}
+            autoCapitalize="words"
+          />
+        </FieldRow>
+
+        <FieldRow label="Date of birth" required icon="calendar">
+          <Pressable onPress={() => setShowDatePicker(true)} accessibilityRole="button">
+            <Text style={draft.dob === null ? styles.placeholder : styles.inputText}>
+              {draft.dob === null ? 'Select your date of birth' : formatDate(draft.dob)}
+            </Text>
+          </Pressable>
+        </FieldRow>
+
+        <FieldRow label="Gender" required boxed={false}>
+          <View style={styles.chipRow}>
+            {GENDER_OPTIONS.map((value) => (
+              <Chip
+                key={value}
+                label={GENDER_LABELS[value]}
+                selected={draft.gender === value}
+                onPress={() => patch({ gender: value })}
+              />
+            ))}
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FieldRow>
+
+        <FieldRow label="Address" required icon="map-pin" focused={focusedField === 'address'}>
+          <TextInput
+            value={draft.address}
+            onChangeText={(value) => patch({ address: value })}
+            onFocus={() => setFocusedField('address')}
+            onBlur={() => setFocusedField(null)}
+            placeholder="Where you are based"
+            placeholderTextColor={colors.faint}
+            style={[styles.input, styles.inputMultiline]}
+            multiline
+          />
+        </FieldRow>
+
+        <Text style={styles.sectionHeading}>Optional</Text>
+
+        <FieldRow
+          label="Years of driving experience"
+          icon="award"
+          focused={focusedField === 'experience'}
+        >
+          <TextInput
+            value={draft.experienceYears}
+            onChangeText={(value) => patch({ experienceYears: value.replace(/[^0-9]/g, '').slice(0, 2) })}
+            onFocus={() => setFocusedField('experience')}
+            onBlur={() => setFocusedField(null)}
+            placeholder="e.g. 8"
+            placeholderTextColor={colors.faint}
+            keyboardType="number-pad"
+            style={styles.input}
+          />
+        </FieldRow>
+
+        <FieldRow
+          label="Alternate number"
+          hint="(Optional)"
+          icon="phone"
+          focused={focusedField === 'alternate'}
+        >
+          <View style={styles.phoneRow}>
+            <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
+            <TextInput
+              value={draft.alternateNumber}
+              // Digits only, and a pasted "+91 98765 43210" lands as the ten digits.
+              onChangeText={(value) => patch({ alternateNumber: normaliseInput(value) })}
+              onFocus={() => setFocusedField('alternate')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="98765 43210"
+              placeholderTextColor={colors.faint}
+              keyboardType="phone-pad"
+              maxLength={10}
+              style={[styles.input, styles.flex]}
+              accessibilityLabel="Alternate number"
+            />
+          </View>
+        </FieldRow>
+
+        {/* Competence, not ownership: the driver drives the CUSTOMER'S car
+            (docs/LLD/open-questions.md Q5), so this says what they can handle, not what they
+            have parked outside. */}
+        <FieldRow label="Transmission you can drive" hint="(choose any)" boxed={false}>
+          <View style={styles.chipRow}>
+            {VEHICLE_OPTIONS.map((value) => {
+              const selected = draft.vehicleTypePreferences.includes(value);
+              return (
+                <Chip
+                  key={value}
+                  label={VEHICLE_LABELS[value]}
+                  selected={selected}
+                  onPress={() =>
+                    patch({
+                      vehicleTypePreferences: selected
+                        ? draft.vehicleTypePreferences.filter((code) => code !== value)
+                        : [...draft.vehicleTypePreferences, value],
+                    })
+                  }
+                />
+              );
+            })}
+          </View>
+        </FieldRow>
+
+        {/* Multi-select, unlike the rows above: a driver comfortable in a hatchback is usually
+            fine in a sedan too, and this is what decides which bookings they can be OFFERED
+            (`prd.md` FR-B6) rather than what any of them costs. */}
+        <FieldRow
+          label="Car types you can drive"
+          hint="(choose any)"
+          boxed={false}
+        >
+          <View style={styles.chipRow}>
+            {CAR_CATEGORY_OPTIONS.map((value) => {
+              const selected = draft.vehicleCategoryPreference.includes(value);
+              return (
+                <Chip
+                  key={value}
+                  label={CAR_CATEGORY_LABELS[value]}
+                  selected={selected}
+                  multiSelect
+                  onPress={() =>
+                    patch({
+                      vehicleCategoryPreference: selected
+                        ? draft.vehicleCategoryPreference.filter((code) => code !== value)
+                        : [...draft.vehicleCategoryPreference, value],
+                    })
+                  }
+                />
+              );
+            })}
+          </View>
+        </FieldRow>
+
+        {/*
+          Emergency contact. Both halves or neither — see the note in `handleSave`: the server
+          takes this as one object with two required strings, so half of it fails the whole
+          PATCH and would cost the driver their other edits.
+        */}
+        <FieldRow
+          label="Emergency contact name"
+          hint="(Optional)"
+          icon="user"
+          focused={focusedField === 'emergencyName'}
+        >
+          <TextInput
+            value={draft.emergencyName}
+            onChangeText={(value) => patch({ emergencyName: value })}
+            onFocus={() => setFocusedField('emergencyName')}
+            onBlur={() => setFocusedField(null)}
+            placeholder="Who should we call"
+            placeholderTextColor={colors.faint}
+            style={styles.input}
+            autoCapitalize="words"
+          />
+        </FieldRow>
+
+        <FieldRow
+          label="Emergency contact number"
+          hint={draft.emergencyName.trim() === '' ? '(Optional)' : '(needed with the name)'}
+          icon="phone-call"
+          focused={focusedField === 'emergencyNumber'}
+        >
+          <View style={styles.phoneRow}>
+            <Text style={styles.diallingCode}>{INDIA_DIALLING_CODE}</Text>
+            <TextInput
+              value={draft.emergencyNumber}
+              onChangeText={(value) => patch({ emergencyNumber: normaliseInput(value) })}
+              onFocus={() => setFocusedField('emergencyNumber')}
+              onBlur={() => setFocusedField(null)}
+              placeholder="98765 43210"
+              placeholderTextColor={colors.faint}
+              keyboardType="phone-pad"
+              maxLength={10}
+              style={[styles.input, styles.flex]}
+              accessibilityLabel="Emergency contact number"
+            />
+          </View>
+        </FieldRow>
+
+        {/*
+          Self-declared, and it gates nothing on its own. Hill dispatch reads
+          `can_drive_hill_verified`, which only an admin can set (docs/LLD/user.md). Saying so
+          here stops a driver assuming they will start getting hill trips the moment they tick
+          the box.
+        */}
+        <Pressable
+          onPress={() => patch({ canDriveHill: !draft.canDriveHill })}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: draft.canDriveHill }}
+          style={styles.toggleRow}
+        >
+          <View style={[styles.checkbox, draft.canDriveHill && styles.checkboxOn]}>
+            {draft.canDriveHill ? <Feather name="check" size={15} color={colors.onFg} /> : null}
+          </View>
+          <View style={styles.toggleText}>
+            <Text style={styles.toggleLabel}>I can drive hill routes</Text>
+            <Text style={styles.toggleHint}>An admin confirms this before hill trips are offered.</Text>
+          </View>
+        </Pressable>
+
+        {saveError !== null ? (
+          <Text style={styles.saveError} accessibilityLiveRegion="polite">
+            {saveError}
+          </Text>
+        ) : null}
+
+        <View style={styles.actions}>
+          <PrimaryButton label="Save details" onPress={handleSave} loading={save.isPending} showArrow={false} />
+        </View>
+      </KeyboardAwareScrollView>
 
       {showDatePicker ? (
         <DateTimePicker

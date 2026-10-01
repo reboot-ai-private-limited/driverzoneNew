@@ -41,6 +41,8 @@ export function buildCustomerRouter(handlers: CustomerControllers): Router {
 export interface AdminControllers {
   /** `GET /admin/quotes/explain` — which product a trip resolves to, and why. */
   explainTrip: RequestHandler;
+  /** `POST /admin/quotes` — a real quote, for a customer the admin is booking on behalf of. */
+  createQuote: RequestHandler;
 }
 
 /**
@@ -55,6 +57,7 @@ export function buildAdminRouter(handlers: AdminControllers): Router {
 
   router.use(requireAuth('ADMIN'));
   router.get('/explain', handlers.explainTrip);
+  router.post('/', handlers.createQuote);
 
   return router;
 }

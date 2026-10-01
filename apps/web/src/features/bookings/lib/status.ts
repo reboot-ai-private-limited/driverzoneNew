@@ -136,18 +136,14 @@ export function serviceTypeTone(serviceType: ServiceType): BadgeTone {
 }
 
 /**
- * Whether the fare has actually been collected, DERIVED from real invariants rather than a field
- * that exists on the wire — there is no `payment_status` in `BookingDto`, and this is not a guess
- * standing in for one.
+ * Whether the fare has actually been collected.
  *
- * The derivation:
- *   - `PENDING_PAYMENT` — the one status where an UPI booking genuinely has not been paid for
- *     yet; a CASH booking never sits here (docs/LLD carries the same "UPI is prepaid" invariant
- *     `bookings.controller.ts` documents on `PaymentMode`).
- *   - Any LATER status on a UPI booking — the booking could not have left `PENDING_PAYMENT`
- *     without Razorpay confirming the charge, so every one of them has been paid.
- *   - CASH is collected AT THE END, so it reads as due until `COMPLETED`, uncollected if the trip
- *     was cancelled first, and paid once it finished.
+ * EVERY BOOKING IS PAY-AT-END. The method is chosen after the trip starts — cash to the driver, or
+ * online through Razorpay — so until then `payment_mode` is null and nothing is owed yet:
+ *   - `payment_status: 'PAID'` from the server is the only thing that says "Paid" for online.
+ *   - no method yet → "Not chosen yet", or "Not collected" if the trip never happened.
+ *   - CASH reads as due until `COMPLETED`, uncollected if the trip was cancelled first.
+ *   - UPI chosen but not captured reads as pending until it is.
  */
 export function paymentStatusLabel(
   status: BookingStatus,
@@ -203,9 +199,15 @@ export function paymentStatusTone(
  * "Ongoing, Ongoing, Ongoing, Ongoing, Completed", the same word four times over four real,
  * different events.
  */
+/*
+ * `CONFIRMED` IS NOT A PAYMENT. Every booking is pay-at-end — cash to the driver or online once
+ * the trip has started — and `createBooking` moves PENDING_PAYMENT → CONFIRMED in the same request
+ * with nothing paid. "Payment Confirmed" was left over from when UPI was prepaid, and it told ops a
+ * customer had paid who had not.
+ */
 const TRANSITION_LABELS: Record<BookingStatus, string> = {
-  PENDING_PAYMENT: 'Awaiting Payment',
-  CONFIRMED: 'Payment Confirmed',
+  PENDING_PAYMENT: 'Booking Received',
+  CONFIRMED: 'Booking Confirmed',
   SEARCHING: 'Searching for Driver',
   WAITING_DRIVER: 'Waiting for a Driver',
   ASSIGNED: 'Driver Assigned',
@@ -217,7 +219,7 @@ const TRANSITION_LABELS: Record<BookingStatus, string> = {
   CANCELLED_BY_DRIVER: 'Cancelled by Driver',
   CANCELLED_BY_ADMIN: 'Cancelled by Admin',
   NO_DRIVER_FOUND: 'No Driver Found',
-  EXPIRED: 'Payment Window Expired',
+  EXPIRED: 'Expired',
 };
 
 export function transitionLabel(status: BookingStatus): string {

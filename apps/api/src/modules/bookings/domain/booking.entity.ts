@@ -4,6 +4,7 @@ import type {
   BookingStatus,
   CarCategory,
   Direction,
+  DispatchMode,
   PaymentMode,
   ServiceType,
   Terrain,
@@ -220,6 +221,16 @@ export interface Booking {
    * asked for it.
    */
   preferFavouriteDrivers: boolean;
+
+  /**
+   * `MANUAL` — booked by an admin from the panel on the customer's behalf, and NOBODY IS RUNG for
+   * it. The admin assigns a driver by hand (`TransferBookingUseCase`). Both doors into automatic
+   * dispatch are shut for it: the sweeper's `findDueForDispatch` skips it, and `RunWaveUseCase`
+   * refuses it — the second guard covers a job enqueued before the mode was set.
+   *
+   * `AUTO` on every customer booking, and on every row written before this field existed.
+   */
+  dispatchMode: DispatchMode;
 
   /**
    * What the customer's wallet did to this trip's price, frozen at creation.

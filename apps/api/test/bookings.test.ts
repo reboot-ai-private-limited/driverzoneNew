@@ -56,6 +56,7 @@ import {
 } from '../src/modules/bookings/application/useCases/verifyPayment.usecase.js';
 import {
   CollectExtrasInCashUseCase,
+  DriverPaymentOverrideUseCase,
   DriverSwitchToCashUseCase,
 } from '../src/modules/bookings/application/useCases/driverSwitchToCash.usecase.js';
 import { PayTripExtrasUseCase } from '../src/modules/bookings/application/useCases/payExtras.usecase.js';
@@ -171,6 +172,8 @@ function fakeRepo(seed: Booking, otp = '4821') {
     findByQuoteId: vi.fn(async () => current),
     findByPaymentId: vi.fn(async () => current),
     listForCustomer: vi.fn(async () => [current]),
+    pageForCustomer: vi.fn(async () => ({ bookings: [current], nextCursor: null })),
+    customerHistorySummary: vi.fn(async () => ({ totalTrips: 1, totalSpentPaise: 0 })),
     readStartOtp: vi.fn(async () => otp),
     incrementOtpAttempts: vi.fn(async () => {
       current = { ...current, otpAttempts: current.otpAttempts + 1 };
@@ -191,6 +194,36 @@ function fakeRepo(seed: Booking, otp = '4821') {
         current = { ...current, paymentStatus: status };
       }
     }),
+    overridePaymentToCash: vi.fn(
+      async (input: {
+        bookingId: string;
+        driverId: string;
+        reason: string;
+        metadata: Record<string, unknown>;
+      }) => {
+        if (
+          input.bookingId !== current.id ||
+          current.driverId !== input.driverId ||
+          current.status !== 'STARTED' ||
+          current.paymentStatus === 'PAID'
+        ) {
+          return null;
+        }
+        current = { ...current, paymentMode: 'CASH', paymentStatus: 'CASH' };
+        events.push({
+          id: `evt_${String(events.length + 1)}`,
+          bookingId: current.id,
+          fromStatus: 'STARTED',
+          toStatus: 'STARTED',
+          actorType: 'DRIVER',
+          actorId: input.driverId,
+          reason: input.reason,
+          metadata: { paymentOverride: true, ...input.metadata },
+          createdAt: new Date(),
+        });
+        return current;
+      },
+    ),
     setPaidExtensionPaise: vi.fn(async (id: string, amountPaise: number) => {
       if (id === current.id) {
         current = { ...current, paidExtensionPaise: amountPaise };
@@ -2593,6 +2626,149 @@ describe('DriverSwitchToCashUseCase', () => {
     const { useCase } = build(stuckOnline({ driverId: 'drv_other' }));
 
     await expect(useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' })).rejects.toThrow();
+  });
+});
+
+describe('DriverPaymentOverrideUseCase', () => {
+  const started = (over: Partial<Booking> = {}) =>
+    booking({ status: 'STARTED', paymentMode: null, paymentStatus: 'NOT_SELECTED', ...over });
+
+  function build(seed: Booking) {
+    const repo = fakeRepo(seed);
+    const notifications = fakeNotifications();
+    return { repo, notifications, useCase: new DriverPaymentOverrideUseCase(repo, notifications) };
+  }
+
+  const run = (
+    useCase: DriverPaymentOverrideUseCase,
+    over: Partial<Parameters<DriverPaymentOverrideUseCase['execute']>[0]> = {},
+  ) =>
+    useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      reason: 'CUSTOMER_PHONE_UNAVAILABLE',
+      ...over,
+    });
+
+  /* The case that had no way through: a web booking, or a phone dead before a method was chosen. */
+  it('ends the payment step when the customer never chose a method', async () => {
+    const { repo, notifications, useCase } = build(started());
+
+    const result = await run(useCase, { reason: 'WEB_BOOKING' });
+
+    expect(result.paymentMode).toBe('CASH');
+    expect(result.paymentStatus).toBe('CASH');
+    expect(repo.events()).toEqual([
+      expect.objectContaining({
+        actorType: 'DRIVER',
+        actorId: 'drv_1',
+        reason: 'WEB_BOOKING',
+        metadata: expect.objectContaining({ paymentOverride: true, previousPaymentMode: null }),
+      }),
+    ]);
+    expect(notifications.sendBookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'CUSTOMER' }),
+      expect.objectContaining({ message: expect.stringContaining('cash') }),
+    );
+  });
+
+  it('ends a stuck online payment too', async () => {
+    const { useCase } = build(started({ paymentMode: 'UPI', paymentStatus: 'AWAITING_PAYMENT' }));
+
+    const result = await run(useCase, { reason: 'ONLINE_PAYMENT_FAILING' });
+
+    expect(result.paymentMode).toBe('CASH');
+  });
+
+  /* Decision: the old fee is collected in the same cash, not left blocking the trip. */
+  it('goes through when the customer owes an old cancellation fee, and records it', async () => {
+    const { repo, useCase } = build(started({ walletDebtPaise: 40_000 }));
+
+    const result = await run(useCase);
+
+    expect(result.paymentMode).toBe('CASH');
+    expect(repo.events()[0]?.metadata).toEqual(expect.objectContaining({ oldFeePaise: 40_000 }));
+  });
+
+  it('needs a note when the reason is OTHER', async () => {
+    const { repo, useCase } = build(started());
+
+    await expect(run(useCase, { reason: 'OTHER', note: '  ' })).rejects.toThrow('Tell us briefly');
+    expect(repo.overridePaymentToCash).not.toHaveBeenCalled();
+
+    const result = await run(useCase, { reason: 'OTHER', note: 'Customer has no smartphone' });
+    expect(result.paymentMode).toBe('CASH');
+    expect(repo.events()[0]?.metadata).toEqual(
+      expect.objectContaining({ note: 'Customer has no smartphone' }),
+    );
+  });
+
+  it('refuses before the trip is under way', async () => {
+    const { useCase } = build(started({ status: 'ARRIVED' }));
+    await expect(run(useCase)).rejects.toThrow('You can only do this while the trip is under way.');
+  });
+
+  it('refuses once the customer has already paid online', async () => {
+    const { useCase } = build(started({ paymentMode: 'UPI', paymentStatus: 'PAID' }));
+    await expect(run(useCase)).rejects.toThrow('This trip has already been paid for online.');
+  });
+
+  it('refuses a booking belonging to another driver', async () => {
+    const { repo, useCase } = build(started({ driverId: 'drv_other' }));
+    await expect(run(useCase)).rejects.toThrow();
+    expect(repo.overridePaymentToCash).not.toHaveBeenCalled();
+  });
+
+  it('says so when the online payment captured in the same instant', async () => {
+    const { repo, useCase } = build(
+      started({ paymentMode: 'UPI', paymentStatus: 'AWAITING_PAYMENT' }),
+    );
+    vi.mocked(repo.overridePaymentToCash).mockImplementationOnce(async () => {
+      await repo.setPaymentStatus('bkg_1', 'PAID');
+      return null;
+    });
+
+    await expect(run(useCase)).rejects.toThrow('has just gone through');
+  });
+});
+
+describe('CompleteTripUseCase — an old cancellation fee taken in cash', () => {
+  it('expects the fee in the cash, books it to the driver, and marks it collected', async () => {
+    const repo = fakeRepo(
+      booking({
+        status: 'STARTED',
+        paymentMode: 'CASH',
+        paymentStatus: 'CASH',
+        paymentId: null,
+        walletDebtPaise: 40_000,
+        arrivedAt: new Date('2026-08-31T09:00:00Z'),
+        startedAt: new Date('2026-08-31T09:05:00Z'),
+      }),
+    );
+    const ledger = fakeLedger();
+    const wallet = fakeWallet();
+    const useCase = new CompleteTripUseCase(
+      repo,
+      fakeCharges(),
+      settings,
+      ledger,
+      fakePayments(),
+      fakeNotifications(),
+      fakeExtensions(),
+      undefined,
+      wallet,
+    );
+
+    // No figure reported, so the expected one is used: the fare plus the old fee.
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'k1' });
+
+    const fare = repo.current().fareSnapshot.fare.totalPaise;
+    expect(ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED')?.amountPaise).toBe(
+      -(fare + 40_000),
+    );
+    expect(wallet.rows()).toEqual([
+      expect.objectContaining({ entryType: 'DEBT_COLLECTED', amountPaise: 40_000 }),
+    ]);
   });
 });
 

@@ -31,6 +31,7 @@ import {
 import { PayTripExtrasUseCase } from './application/useCases/payExtras.usecase.js';
 import {
   CollectExtrasInCashUseCase,
+  DriverPaymentOverrideUseCase,
   DriverSwitchToCashUseCase,
 } from './application/useCases/driverSwitchToCash.usecase.js';
 import {
@@ -133,6 +134,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
   const payExtras = new PayTripExtrasUseCase(repo, deps.payments, extensions);
   const verifyExtrasPayment = new VerifyExtrasPaymentUseCase(repo, deps.payments);
   const switchToCash = new DriverSwitchToCashUseCase(repo, deps.notifications);
+  const paymentOverride = new DriverPaymentOverrideUseCase(repo, deps.notifications);
   const collectExtrasInCash = new CollectExtrasInCashUseCase(repo, extensions);
   const confirm = new ConfirmBookingPaymentUseCase(
     repo,
@@ -177,6 +179,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     deps.notifications,
     extensions,
     deps.identity,
+    deps.wallet,
   );
   const reportPin = new ReportPickupPinUseCase(repo, charges);
 
@@ -445,6 +448,7 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         acceptExtension: controllers.makeRespondToExtensionController(respondToExtension, true),
         declineExtension: controllers.makeRespondToExtensionController(respondToExtension, false),
         switchToCash: controllers.makeDriverSwitchToCashController(switchToCash),
+        paymentOverride: controllers.makeDriverPaymentOverrideController(paymentOverride),
         collectExtrasInCash: controllers.makeCollectExtrasInCashController(collectExtrasInCash),
       }),
 

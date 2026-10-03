@@ -9,12 +9,16 @@ import type { ReactElement, ReactNode } from 'react';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
+  type SharedValue,
   interpolate,
   interpolateColor,
+  useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
+import { MOTION_EASING, motion } from '@/theme/motion';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /**
@@ -45,13 +49,23 @@ const ICON_SIZE = 22;
 /** The badge is a fixed square around the glyph — not the pressable's full width. */
 const BADGE_SIZE = 40;
 
-/** Slightly under-damped — the pill settles with a hint of overshoot rather than easing flat. */
-const SELECT_SPRING = { damping: 16, stiffness: 200, mass: 0.55 } as const;
+/**
+ * Selection eases rather than springs: a calm, quick fade-and-settle with no overshoot. The old
+ * under-damped spring added a wobble to every tab change, which read as bouncy rather than smooth.
+ */
+const SELECT_TIMING = { duration: motion.layout, easing: MOTION_EASING } as const;
 /** Stiffer: touch-down feedback has to land inside the same gesture, not after it. */
 const PRESS_SPRING = { damping: 20, stiffness: 420, mass: 0.4 } as const;
 
 interface TabItemProps {
   focused: boolean;
+  /** This tab's position, compared against `selected` on the UI thread. */
+  index: number;
+  /**
+   * The tab that LOOKS selected — set the instant a tab is tapped, ahead of the navigation. See
+   * `TabBar` for why the highlight cannot wait for `focused`.
+   */
+  selected: SharedValue<number>;
   label: string;
   /** `options.tabBarIcon`, called once per `focused` value so the two can be cross-faded. */
   renderIcon: (focused: boolean, color: string) => ReactNode;
@@ -63,6 +77,8 @@ interface TabItemProps {
 
 function TabItem({
   focused,
+  index,
+  selected,
   label,
   renderIcon,
   onPress,
@@ -73,9 +89,14 @@ function TabItem({
   const progress = useSharedValue(focused ? 1 : 0);
   const press = useSharedValue(0);
 
-  useEffect(() => {
-    progress.value = withSpring(focused ? 1 : 0, SELECT_SPRING);
-  }, [focused, progress]);
+  // Entirely on the UI thread: the highlight moves the frame after the tap, however busy the JS
+  // thread is with mounting the screen being switched to.
+  useAnimatedReaction(
+    () => selected.value === index,
+    (isSelected, wasSelected) => {
+      if (isSelected !== wasSelected) progress.value = withTiming(isSelected ? 1 : 0, SELECT_TIMING);
+    },
+  );
 
   // The pressed tint for an UNSELECTED tab. Faded out by `progress` so it never greys the yellow.
   const tintStyle = useAnimatedStyle(() => ({
@@ -140,6 +161,19 @@ function TabItem({
 }
 
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps): ReactElement {
+  /*
+   * THE HIGHLIGHT LEADS, THE NAVIGATION FOLLOWS. `focused` only changes once the navigator has
+   * committed the new route and this bar has re-rendered — on the device that wait was the "tab
+   * press feels delayed" lag, because the JS thread is busy mounting the incoming screen at exactly
+   * that moment. `selected` is set on the tap itself and the tab items animate from it on the UI
+   * thread. It is re-synced from `state.index` whenever the route changes any other way (back,
+   * a deep link, `router.replace`).
+   */
+  const selected = useSharedValue(state.index);
+  useEffect(() => {
+    selected.value = state.index;
+  }, [state.index, selected]);
+
   return (
     /*
      * NO `insets.bottom` HERE — the root layout has already applied it.
@@ -166,6 +200,8 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps): R
           <TabItem
             key={route.key}
             focused={focused}
+            index={index}
+            selected={selected}
             label={label}
             renderIcon={(iconFocused, color) =>
               options.tabBarIcon?.({ focused: iconFocused, color, size: ICON_SIZE }) ?? null
@@ -181,6 +217,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps): R
               // Re-tapping the active tab must NOT re-navigate — that would reset the screen's
               // own state (a half-filled booking form) under someone who only missed their aim.
               if (!focused && !event.defaultPrevented) {
+                selected.value = index;
                 navigation.navigate(route.name, route.params);
               }
             }}

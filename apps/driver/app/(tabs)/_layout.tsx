@@ -1,7 +1,30 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
-import type { ReactElement } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Tabs, router } from 'expo-router';
+import type { BottomTabNavigationOptions } from 'expo-router/build/react-navigation/bottom-tabs';
+import { type ReactElement, useEffect } from 'react';
 import { TabBar } from '@/components/TabBar';
+import { DEFAULT_TRIPS_VIEW, tripHistoryQuery } from '@/features/trips/historyQuery';
+
+/** How long after the duty screen settles before the other tabs are built in the background. */
+const PRELOAD_DELAY_MS = 1200;
+
+/**
+ * Every tab switch: INSTANT and SILENT, with hidden tabs frozen.
+ *
+ *   - `animation: 'none'` — the screen swaps on the frame the tab is tapped; the tab bar's own
+ *     highlight is what animates. A cross-fade leaves both screens half-visible, and Android draws
+ *     the elevation shadows of a fading screen as grey boxes. Tabs are peers; switching them
+ *     instantly is what the large apps do.
+ *   - `freezeOnBlur` — a tab that is not on screen stops re-rendering, so the lists behind the
+ *     one in use are not competing with it.
+ *   - Silent: the tab bar plays no haptic tick — see `TabBar`.
+ */
+const TAB_SCREEN_OPTIONS: BottomTabNavigationOptions = {
+  headerShown: false,
+  animation: 'none',
+  freezeOnBlur: true,
+};
 
 /**
  * The approved-driver shell.
@@ -21,6 +44,37 @@ import { TabBar } from '@/components/TabBar';
  * back to it.
  */
 export default function TabsLayout(): ReactElement {
+  const queryClient = useQueryClient();
+
+  /*
+   * The first page of the Trips list is fetched as soon as the shell mounts, so it is in the cache
+   * before the tab is tapped. Same key and fetcher as the screen, so the screen finds it; a request
+   * already in flight is simply joined.
+   */
+  useEffect(() => {
+    void queryClient.prefetchInfiniteQuery(tripHistoryQuery(DEFAULT_TRIPS_VIEW));
+  }, [queryClient]);
+
+  /*
+   * THE OTHER TABS ARE BUILT BEFORE THEY ARE TAPPED. Tabs mount lazily, so the first visit to a tab
+   * built its whole screen at tap time — a held-up switch. `prefetch` renders the screen in the
+   * background once the duty screen has finished its own start-up work.
+   */
+  useEffect(() => {
+    let idle: number | null = null;
+    const timer = setTimeout(() => {
+      idle = requestIdleCallback(() => {
+        router.prefetch('/trips');
+        router.prefetch('/earnings');
+        router.prefetch('/account');
+      });
+    }, PRELOAD_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      if (idle !== null) cancelIdleCallback(idle);
+    };
+  }, []);
+
   return (
     <Tabs
       // `tabBar` replaces the stock bar entirely — the same component the customer app uses, so
@@ -28,12 +82,15 @@ export default function TabsLayout(): ReactElement {
       // option is set here any more. The icons below are still read from these options: `TabBar`
       // calls each `tabBarIcon` twice, once per `focused` value, and cross-fades the two.
       tabBar={(props) => <TabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={TAB_SCREEN_OPTIONS}
     >
       <Tabs.Screen
         name="home"
         options={{
           title: 'Duty',
+          // NOT FROZEN: the duty screen keeps live queries and a location watch, and frozen it would
+          // render everything it missed in one frame on every return.
+          freezeOnBlur: false,
           // A steering wheel rather than a car: DriverZone sends a driver to the customer's own
           // vehicle (docs/LLD/open-questions.md Q5), and a car icon would promise the wrong
           // product. One fixed glyph rather than a filled/outline pair — "steering" has no filled

@@ -11,6 +11,7 @@ import type { BookingEvent } from '../domain/bookingRepository.port.js';
 import type { FareAdjustment } from '../domain/chargeRepository.port.js';
 import type { BookingExtension } from '../domain/bookingExtension.entity.js';
 import { totalExtension } from '../domain/bookingExtension.entity.js';
+import { netPayablePaise } from '../domain/payable.js';
 import {
   extensionRefusal,
   extensionRefusalMessage,
@@ -338,10 +339,13 @@ function toPayableBlock(view: BookingView): BookingDto['payable'] {
   const extrasPaise = extensionPaise(view);
   const waitingPaise = booking.waitingChargePaise ?? 0;
 
-  const totalPaise = Math.max(
-    0,
-    farePaise + extrasPaise + waitingPaise - booking.walletCreditPaise + booking.walletDebtPaise,
-  );
+  const totalPaise = netPayablePaise({
+    farePaise,
+    extrasPaise,
+    waitingPaise,
+    walletCreditPaise: booking.walletCreditPaise,
+    walletDebtPaise: booking.walletDebtPaise,
+  });
 
   /*
    * ONLY THE EXTENSION CAN BE OUTSTANDING — on a UPI trip, and only WHILE IT IS STILL RUNNING.

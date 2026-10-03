@@ -1,5 +1,11 @@
 import type { Request, RequestHandler } from 'express';
-import type { BookingStatus } from '@driverzone/contracts';
+import type {
+  BookingStatus,
+  DriverTripsSummary,
+  ListBookingsResponse,
+  ListDriverTripsResponse,
+  RideHistorySummary,
+} from '@driverzone/contracts';
 import { asyncHandler } from '../../../shared/http/asyncHandler.js';
 import { sendSuccess } from '../../../shared/http/response.util.js';
 import { AppError } from '../../../shared/errors/AppError.js';
@@ -47,6 +53,7 @@ import type {
 import type { PayTripExtrasUseCase } from '../application/useCases/payExtras.usecase.js';
 import type {
   CollectExtrasInCashUseCase,
+  DriverPaymentOverrideUseCase,
   DriverSwitchToCashUseCase,
 } from '../application/useCases/driverSwitchToCash.usecase.js';
 import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
@@ -58,7 +65,11 @@ import {
   cancelBookingSchema,
   completeTripSchema,
   createBookingSchema,
+  customerHistoryQuerySchema,
   driverArrivedSchema,
+  driverHistoryQuerySchema,
+  paymentOverrideSchema,
+  encodeHistoryCursor,
   forceArriveSchema,
   reportPinSchema,
   selectPaymentMethodSchema,
@@ -68,12 +79,8 @@ import {
 } from './bookings.validation.js';
 
 /**
- * How far back the history endpoint reaches.
- *
- * A cap rather than pagination, because the screen reading this filters and searches CLIENT-side
- * over whatever it is given — paging under a client-side filter would silently hide matches on
- * page two. When history outgrows one response, the filters move to the server in the same change
- * that adds the cursor, not before.
+ * How far back the UNPAGED history read reaches — the one older app builds make, with no `limit`.
+ * They filter client-side over this single response; paged callers never hit it.
  */
 const HISTORY_LIMIT = 100;
 
@@ -370,6 +377,33 @@ export function makeDriverSwitchToCashController(
 }
 
 /**
+ * `POST /driver/bookings/:id/payment-override` — the driver takes the payment in cash because the
+ * customer cannot finish it in their app. See `DriverPaymentOverrideUseCase`.
+ */
+export function makeDriverPaymentOverrideController(
+  useCase: DriverPaymentOverrideUseCase,
+): RequestHandler {
+  return asyncHandler(async (req, res) => {
+    const { id } = bookingIdParamSchema.parse(req.params);
+    const body = paymentOverrideSchema.parse(req.body);
+
+    const booking = await useCase.execute({
+      bookingId: id,
+      driverId: principalOf(req),
+      reason: body.reason,
+      note: body.note,
+    });
+
+    sendSuccess(
+      req,
+      res,
+      { booking: toBookingDto({ booking, adjustments: [] }) },
+      'Payment set to cash — collect it from the customer, then end the trip',
+    );
+  });
+}
+
+/**
  * `POST /driver/bookings/:id/extras/cash` — the extra day was handed over in cash.
  *
  * The narrow sibling of the one above, for a trip whose FARE was already paid online and which
@@ -495,17 +529,57 @@ export function makeGetCustomerBookingController(
  * with `start_otp: null` — the single-booking read is the one place that code is handed out, and
  * a list would put every code a customer has ever had into one response.
  *
- * Adjustments are fetched per booking rather than in one query, which is `HISTORY_LIMIT` round
- * trips. That is fine at a customer's own history size and is the honest thing to fix with a
- * batched `listAdjustmentsFor(bookingIds)` on the port the day a customer has hundreds.
+ * PAGED WHEN ASKED. With `limit`, this is a keyset page, filtered, searched and sorted in the
+ * database (`customerHistoryQuerySchema`), with `next_cursor` and, on the first page, the
+ * whole-history `summary`. Without `limit` it is the old capped list, so app builds already on
+ * phones, which filter client-side over one response, are unchanged.
+ *
+ * Adjustments are fetched per booking rather than in one query — one page's worth of round trips.
  */
 export function makeListCustomerBookingsController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
-  directory: DriverCardContract,
+  directory: DriverCardContract & AccountDirectoryContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const bookings = await repo.listForCustomer(principalOf(req), HISTORY_LIMIT);
+    const customerId = principalOf(req);
+    const query = customerHistoryQuerySchema.parse(req.query);
+
+    let bookings: Booking[];
+    let nextCursor: string | null = null;
+    let summary: RideHistorySummary | null = null;
+
+    if (query.limit === undefined) {
+      bookings = await repo.listForCustomer(customerId, HISTORY_LIMIT);
+    } else {
+      const search = query.q === undefined || query.q === '' ? undefined : query.q;
+      const [page, totals] = await Promise.all([
+        (async () =>
+          repo.pageForCustomer({
+            customerId,
+            limit: query.limit as number,
+            now: new Date(),
+            cursor: query.cursor,
+            group: query.group,
+            from: query.from,
+            before: query.before,
+            search,
+            // A driver's NAME is identity's to match; this module only ever sees the ids.
+            driverIds:
+              search === undefined
+                ? undefined
+                : await directory.idsMatching('DRIVER', search, SEARCH_ACCOUNT_LIMIT),
+            sort: query.sort,
+          }))(),
+        query.cursor === undefined ? repo.customerHistorySummary(customerId) : null,
+      ]);
+      bookings = page.bookings;
+      nextCursor = page.nextCursor === null ? null : encodeHistoryCursor(page.nextCursor);
+      summary =
+        totals === null
+          ? null
+          : { total_trips: totals.totalTrips, total_spent: toMoney(totals.totalSpentPaise) };
+    }
 
     /*
      * ONE LOOKUP FOR THE WHOLE PAGE, deduped — a customer with forty rides from the same regular
@@ -527,7 +601,12 @@ export function makeListCustomerBookingsController(
       ),
     );
 
-    sendSuccess(req, res, { bookings: dtos }, 'Your rides');
+    sendSuccess(
+      req,
+      res,
+      { bookings: dtos, next_cursor: nextCursor, summary } satisfies ListBookingsResponse,
+      'Your rides',
+    );
   });
 }
 
@@ -595,7 +674,47 @@ export function makeListDriverTripsController(
   directory: AccountDirectoryContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
-    const bookings = await repo.listForDriver(principalOf(req), HISTORY_LIMIT);
+    const driverId = principalOf(req);
+    const query = driverHistoryQuerySchema.parse(req.query);
+
+    let bookings: Booking[];
+    let nextCursor: string | null = null;
+    let summary: DriverTripsSummary | null = null;
+
+    if (query.limit === undefined) {
+      bookings = await repo.listForDriver(driverId, HISTORY_LIMIT);
+    } else {
+      const limit = query.limit;
+      const search = query.q === undefined || query.q === '' ? undefined : query.q;
+      const [page, totals] = await Promise.all([
+        (async () =>
+          repo.pageForDriver({
+            driverId,
+            limit,
+            cursor: query.cursor,
+            group: query.group,
+            from: query.from,
+            before: query.before,
+            search,
+            // A customer's NAME is identity's to match; this module only ever sees the ids.
+            customerIds:
+              search === undefined
+                ? undefined
+                : await directory.idsMatching('CUSTOMER', search, SEARCH_ACCOUNT_LIMIT),
+          }))(),
+        query.cursor === undefined ? repo.driverHistorySummary(driverId) : null,
+      ]);
+      bookings = page.bookings;
+      nextCursor = page.nextCursor === null ? null : encodeHistoryCursor(page.nextCursor);
+      summary =
+        totals === null
+          ? null
+          : {
+              total_trips: totals.totalTrips,
+              completed_trips: totals.completedTrips,
+              fares: toMoney(totals.faresPaise),
+            };
+    }
 
     const names = await directory.namesByIds(
       'CUSTOMER',
@@ -613,7 +732,12 @@ export function makeListDriverTripsController(
       ),
     );
 
-    sendSuccess(req, res, { bookings: dtos }, 'Your trips');
+    sendSuccess(
+      req,
+      res,
+      { bookings: dtos, next_cursor: nextCursor, summary } satisfies ListDriverTripsResponse,
+      'Your trips',
+    );
   });
 }
 

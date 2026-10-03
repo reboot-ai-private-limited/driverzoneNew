@@ -6,7 +6,6 @@ import * as Haptics from 'expo-haptics';
 import { type ComponentProps, type ReactElement, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Keyboard,
   Linking,
   Platform,
   Pressable,
@@ -29,6 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { AppIcon, type AppIconName } from '@/components/AppIcon';
 import { CancelTripSheet } from '@/components/CancelTripSheet';
+import { PaymentOverrideSheet } from '@/components/PaymentOverrideSheet';
 import { ExtensionRequestCard } from '@/components/ExtensionRequestCard';
 import { OtpInput } from '@/components/OtpInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -46,9 +46,9 @@ import {
   markArrived,
   reportPickupPin,
   startTrip,
-  switchToCash,
 } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
+import { MOTION_EASING, motion } from '@/theme/motion';
 import { colors, radius, shadow, space, text } from '@/theme/theme';
 
 type FeatherName = ComponentProps<typeof Feather>['name'];
@@ -76,6 +76,9 @@ type FeatherName = ComponentProps<typeof Feather>['name'];
  */
 
 /** Alive statuses poll; terminal ones stop. Kept as a set so the check reads as one idea. */
+/** Space kept between the OTP cells and the keyboard — enough for the line under them. */
+const OTP_KEYBOARD_GAP = 72;
+
 const TERMINAL: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
   'COMPLETED',
   'CANCELLED_BY_CUSTOMER',
@@ -119,30 +122,16 @@ export default function TripScreen(): ReactElement {
   const [cancelling, setCancelling] = useState(false);
 
   /**
-   * THE OTP CELLS MUST NOT SIT BEHIND THE KEYBOARD, and neither the ScrollView nor the platform
-   * gets them out of the way on its own.
+   * THE OTP CELLS MUST NOT SIT BEHIND THE KEYBOARD — and they must get out of its way in ONE
+   * movement. `KeyboardAwareScrollView` alone does it, in step with the keyboard, using
+   * `bottomOffset` below to keep the line under the cells ("Checking the code…") in view too.
    *
-   * The code block is the LAST thing in the scroll on an ARRIVED trip, so it is exactly where the
-   * keyboard lands. `KeyboardAwareScrollView` brings the focused cell into view; this goes one
-   * step further and scrolls to the END, so the Start button under the code is visible too —
-   * the driver should not have to dismiss the keyboard to find it while a customer waits.
-   *
-   * Gated on ARRIVED so that focusing anything else on this screen does not yank the page down.
+   * There used to be a second mover: a `keyboardDidShow` listener calling `scrollToEnd` once the
+   * keyboard had finished opening. The end of the content includes the keyboard padding this view
+   * adds, so it overshot upwards and the view then pulled the cells back down to its own offset —
+   * the box jumped up and settled back on every tap.
    */
   const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
-
-  useEffect(() => {
-    if (status !== 'ARRIVED') return undefined;
-
-    const event = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const show = Keyboard.addListener(event, () => {
-      // A frame later: on Android the resize has not been laid out yet when this fires, so
-      // scrolling immediately measures the pre-keyboard content height and stops short.
-      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-    });
-
-    return () => show.remove();
-  }, [status]);
 
   /**
    * The penalty figures, so the cancel sheet can state what dropping this trip costs BEFORE the
@@ -237,12 +226,12 @@ export default function TripScreen(): ReactElement {
     onError: (cause) => fail(cause, 'Could not complete the trip.'),
   });
 
-  const takeCash = useMutation({
-    mutationFn: () => switchToCash(id),
-    onMutate: () => setError(null),
-    onSuccess: (result) => adopt(result.booking),
-    onError: (cause) => fail(cause, 'Could not switch this trip to cash.'),
-  });
+  /*
+   * THE PAYMENT OVERRIDE SHEET — the way through the payment gate when the customer cannot finish
+   * it in their app. Opened from both stuck states below: no method chosen yet (a web booking, a
+   * phone that died first) and an online payment that will not go through.
+   */
+  const [overriding, setOverriding] = useState(false);
 
   const takeExtrasCash = useMutation({
     mutationFn: () => collectExtrasInCash(id),
@@ -317,7 +306,8 @@ export default function TripScreen(): ReactElement {
       */}
       <KeyboardAwareScrollView
         style={styles.flex}
-        bottomOffset={24}
+        // Room for the "Checking the code…" line under the OTP cells, so nothing has to scroll again.
+        bottomOffset={OTP_KEYBOARD_GAP}
         ref={scrollRef}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
@@ -327,7 +317,7 @@ export default function TripScreen(): ReactElement {
       >
         <Stepper status={booking.status} />
 
-        <Animated.View layout={LinearTransition.springify().damping(18)}>
+        <Animated.View layout={LinearTransition.duration(motion.layout).easing(MOTION_EASING)}>
           <StatusHeadline status={booking.status} />
         </Animated.View>
 
@@ -404,11 +394,22 @@ export default function TripScreen(): ReactElement {
             - If cash: driver is reminded to collect cash at destination.
         */}
         {booking.status === 'STARTED' && booking.payment_mode === null ? (
-          <Animated.View entering={FadeIn} style={styles.paymentWarning}>
-            <Feather name="alert-circle" size={16} color="#B45309" />
-            <Text style={styles.paymentWarningText}>
-              Waiting for rider to choose payment method. Ask the customer to select Cash or Online in their app before ending the trip.
-            </Text>
+          <Animated.View entering={FadeIn} style={styles.paymentWarningColumn}>
+            <View style={styles.paymentWarningRow}>
+              <Feather name="alert-circle" size={16} color="#B45309" />
+              <Text style={styles.paymentWarningText}>
+                Waiting for rider to choose payment method. Ask the customer to select Cash or Online in their app before ending the trip.
+              </Text>
+            </View>
+            {/* The way out for a web booking or a dead phone — before this there was none. */}
+            <Pressable
+              onPress={() => setOverriding(true)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.takeCashBtn, pressed && styles.takeCashBtnPressed]}
+            >
+              <AppIcon name="rupee" size={15} color="#92400E" />
+              <Text style={styles.takeCashBtnText}>Customer can’t pay in the app? Collect cash</Text>
+            </Pressable>
           </Animated.View>
         ) : null}
 
@@ -423,17 +424,12 @@ export default function TripScreen(): ReactElement {
               </Text>
             </View>
             {/* The way through when their phone is dead, out of signal, or their card keeps
-                failing and they hand over cash instead. Refused server-side if they carry wallet
-                debt, which cash cannot clear. */}
+                failing and they hand over cash instead — the same override sheet, so the reason is
+                recorded and any old cancellation fee is collected with the fare. */}
             <Pressable
-              onPress={() => takeCash.mutate()}
-              disabled={takeCash.isPending}
+              onPress={() => setOverriding(true)}
               accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.takeCashBtn,
-                pressed && styles.takeCashBtnPressed,
-                takeCash.isPending && styles.takeCashBtnDisabled,
-              ]}
+              style={({ pressed }) => [styles.takeCashBtn, pressed && styles.takeCashBtnPressed]}
             >
               <AppIcon name="rupee" size={15} color="#92400E" />
               <Text style={styles.takeCashBtnText}>Customer paid me cash instead</Text>
@@ -698,6 +694,18 @@ export default function TripScreen(): ReactElement {
           </Animated.View>
         ) : null}
       </KeyboardAwareScrollView>
+
+      <PaymentOverrideSheet
+        visible={overriding}
+        booking={booking}
+        onClose={() => setOverriding(false)}
+        onDone={(next) => {
+          setOverriding(false);
+          adopt(next);
+          // The override's response carries no adjustments; re-read so the amounts are complete.
+          void queryClient.invalidateQueries({ queryKey: keys.trip.detail(id) });
+        }}
+      />
 
       <CancelTripSheet
         visible={cancelling}

@@ -6,6 +6,7 @@ import type { LedgerWriteContract, NewLedgerEntry } from '../../../ledger/ledger
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import { isCaptured, type PaymentsContract } from '../../../payments/payments.public.js';
 import type { DriverStatsContract } from '../../../identity/identity.public.js';
+import type { WalletPublicContract } from '../../../wallet/wallet.public.js';
 import type { Booking } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
 import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js';
@@ -52,6 +53,8 @@ export class CompleteTripUseCase {
     /** Extra days the customer bought mid-trip and the driver agreed to. Settled here, not then. */
     private readonly extensions: ExtensionRepositoryPort,
     private readonly driverStats?: DriverStatsContract,
+    /** The CUSTOMER wallet, where an old cancellation fee taken in cash is marked collected. */
+    private readonly wallet?: WalletPublicContract,
   ) {}
 
   async execute(input: CompleteTripInput): Promise<CompletedTrip> {
@@ -323,6 +326,32 @@ export class CompleteTripUseCase {
       logger.error({ err: error, bookingId: booking.id }, 'could not write the trip ledger entries');
     }
 
+    /*
+     * AN OLD CANCELLATION FEE TAKEN IN CASH. Only reachable through the driver's payment override —
+     * a customer choosing cash themselves is refused while they owe a fee. The driver took the fee
+     * with the fare (it is in `expectedCashPaise` and in the `CASH_COLLECTED` row above), so the
+     * debt is now collected: the same `DEBT_COLLECTED` row an online capture writes, and
+     * once-per-booking in the wallet, so a retried completion cannot clear it twice.
+     */
+    if (booking.paymentMode === 'CASH' && booking.walletDebtPaise > 0 && this.wallet) {
+      try {
+        await this.wallet.append([
+          {
+            customerId: booking.customerId,
+            bookingId: booking.id,
+            entryType: 'DEBT_COLLECTED',
+            amountPaise: booking.walletDebtPaise,
+            note: `Collected in cash with trip ${booking.reference}`,
+          },
+        ]);
+      } catch (error) {
+        logger.error(
+          { err: error, bookingId: booking.id, debtPaise: booking.walletDebtPaise },
+          'old cancellation fee was collected in cash but NOT marked collected on the wallet',
+        );
+      }
+    }
+
     if (this.driverStats) {
       try {
         await this.driverStats.recordCompletedRide(input.driverId, now);
@@ -379,6 +408,10 @@ export class CompleteTripUseCase {
 function expectedCashPaise(booking: Booking, extrasPaise: number): number {
   return Math.max(
     0,
-    booking.fareSnapshot.fare.totalPaise + extrasPaise - booking.walletCreditPaise,
+    booking.fareSnapshot.fare.totalPaise +
+      extrasPaise -
+      booking.walletCreditPaise +
+      // An old cancellation fee, collected at the door — only on a driver's payment override.
+      booking.walletDebtPaise,
   );
 }

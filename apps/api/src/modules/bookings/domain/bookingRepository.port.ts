@@ -1,4 +1,9 @@
-import type { BookingStatus } from '@driverzone/contracts';
+import type {
+  BookingStatus,
+  DriverTripGroup,
+  RideHistoryGroup,
+  RideHistorySort,
+} from '@driverzone/contracts';
 import type { Actor, Booking, FareSnapshot, GeoPoint } from './booking.entity.js';
 
 export interface NewBooking {
@@ -84,6 +89,61 @@ export interface AdminBookingFilter {
   before?: Date | undefined;
 }
 
+/**
+ * One page of a customer's ride history. Everything but `customerId`, `limit` and `now` optional.
+ *
+ * KEYSET, NOT OFFSET. A history grows at the top while the customer is scrolling it — a trip
+ * finishing mid-scroll — and `skip(20)` would then hand back a row they already saw. The cursor is
+ * the last row's sort key plus its id, so the next page starts strictly after it whatever was
+ * added above.
+ */
+export interface CustomerHistoryQuery {
+  customerId: string;
+  limit: number;
+  /** `now` from the caller, so "is this scheduled trip still in the future" is testable. */
+  now: Date;
+  cursor?: CustomerHistoryCursor | undefined;
+  group?: RideHistoryGroup | undefined;
+  /** Inclusive lower bound on when the ride happened (completed, else cancelled, else scheduled). */
+  from?: Date | undefined;
+  /** EXCLUSIVE upper bound, same field. */
+  before?: Date | undefined;
+  /** Matched against the reference and both addresses; driver names arrive as `driverIds`. */
+  search?: string | undefined;
+  /** Drivers `identity` matched to `search`. Empty means "matched nobody", not "no filter". */
+  driverIds?: readonly string[] | undefined;
+  sort: RideHistorySort;
+}
+
+/**
+ * The driver's trip list. Newest first by when the trip HAPPENED (completed, else cancelled, else
+ * scheduled) — the same key the customer's history sorts on, so a cursor means the same thing.
+ */
+export interface DriverHistoryQuery {
+  driverId: string;
+  limit: number;
+  cursor?: CustomerHistoryCursor | undefined;
+  group?: DriverTripGroup | undefined;
+  /** Inclusive lower bound on when the trip happened. */
+  from?: Date | undefined;
+  /** EXCLUSIVE upper bound, same field. */
+  before?: Date | undefined;
+  /** Matched against the reference and both addresses; customer names arrive as `customerIds`. */
+  search?: string | undefined;
+  /** Customers `identity` matched to `search`. Empty means "matched nobody", not "no filter". */
+  customerIds?: readonly string[] | undefined;
+}
+
+/**
+ * Where the previous page stopped. `key` is the sort value of its last row — epoch ms for NEWEST,
+ * paise for AMOUNT_DESC — and `id` breaks ties, so two rides at the same minute are never split
+ * across a page boundary and dropped.
+ */
+export interface CustomerHistoryCursor {
+  key: number;
+  id: string;
+}
+
 export interface BookingRepositoryPort {
   create(data: NewBooking): Promise<Booking>;
 
@@ -91,6 +151,20 @@ export interface BookingRepositoryPort {
   findByQuoteId(quoteId: string): Promise<Booking | null>;
   findByPaymentId(paymentId: string): Promise<Booking | null>;
   listForCustomer(customerId: string, limit: number): Promise<Booking[]>;
+
+  /**
+   * A page of the customer's history, filtered and sorted in the database. `nextCursor` is null
+   * when this page reached the end. See `CustomerHistoryQuery`.
+   */
+  pageForCustomer(
+    query: CustomerHistoryQuery,
+  ): Promise<{ bookings: Booking[]; nextCursor: CustomerHistoryCursor | null }>;
+
+  /**
+   * The two whole-history tiles: every booking counted, and what the COMPLETED ones cost net of
+   * wallet credit — the same `payable.total` each row shows, summed.
+   */
+  customerHistorySummary(customerId: string): Promise<{ totalTrips: number; totalSpentPaise: number }>;
 
   /**
    * Every booking this driver was assigned, newest first — their trip history.
@@ -101,6 +175,19 @@ export interface BookingRepositoryPort {
    * cancelled after they accepted it correctly does.
    */
   listForDriver(driverId: string, limit: number): Promise<Booking[]>;
+
+  /**
+   * A page of the driver's trips, newest first, filtered in the database. `nextCursor` is null
+   * when this page reached the end. See `DriverHistoryQuery`.
+   */
+  pageForDriver(
+    query: DriverHistoryQuery,
+  ): Promise<{ bookings: Booking[]; nextCursor: CustomerHistoryCursor | null }>;
+
+  /** The whole-history tiles: every trip counted, and what the COMPLETED ones came to (paise). */
+  driverHistorySummary(
+    driverId: string,
+  ): Promise<{ totalTrips: number; completedTrips: number; faresPaise: number }>;
 
   /**
    * The admin booking table: every booking, newest first, filtered and PAGED.
@@ -147,6 +234,18 @@ export interface BookingRepositoryPort {
    * Updates the payment status on the booking (e.g. when an online payment captures).
    */
   setPaymentStatus(id: string, status: Booking['paymentStatus']): Promise<Booking | null>;
+
+  /**
+   * The driver's payment override: CASH, atomically with its event row (STARTED → STARTED, the
+   * driver as actor, the reason on it). Only while the trip is under way, only for this driver, and
+   * never over an online payment that has already captured. Null when any of those no longer hold.
+   */
+  overridePaymentToCash(input: {
+    bookingId: string;
+    driverId: string;
+    reason: string;
+    metadata: Record<string, unknown>;
+  }): Promise<Booking | null>;
 
   /**
    * Records how much of an already-accepted day extension rode along in the UPI order created at

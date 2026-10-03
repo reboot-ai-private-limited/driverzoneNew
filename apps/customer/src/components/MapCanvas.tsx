@@ -153,7 +153,8 @@ const ROUTE_ARC = 0.14;
  * The padding passed before the map is ready. A module-level constant so its IDENTITY never
  * changes — see the crash note on `mapPadding` in the component.
  */
-const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 } as const;
+type MapPadding = { top: number; right: number; bottom: number; left: number };
+const NO_PADDING: MapPadding = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /**
  * How long after a new pickup/drop pair appears a sheet resize may still correct the framing.
@@ -726,12 +727,20 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
    * OFF WHILE A ROUTE IS BEING FRAMED: the frame reaches the visible strip by arithmetic against
    * the view's true centre; padding on top would push the route up until the far pin clipped.
    */
-  const paddingProps = useAnimatedProps(() => ({
-    mapPadding:
-      mapReadyShared.value && paddingAllowed.value
+  const paddingProps = useAnimatedProps((): { mapPadding?: MapPadding } => {
+    /*
+     * NOTHING AT ALL before the map is ready — not even `NO_PADDING`. A stable value is not enough:
+     * Reanimated re-sends animated props every time this worklet re-runs (the sheet reporting its
+     * height does that), and once the view is laid out each send reaches `GoogleMap.setPadding`
+     * on a map that does not exist yet. The release build crashed on open exactly there.
+     */
+    if (!mapReadyShared.value) return {};
+    return {
+      mapPadding: paddingAllowed.value
         ? { top: 0, right: 0, bottom: inset.value, left: 0 }
         : NO_PADDING,
-  }));
+    };
+  });
 
   const centrePinStyle = useAnimatedStyle(() => ({ bottom: inset.value }));
 

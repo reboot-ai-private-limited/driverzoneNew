@@ -6,6 +6,7 @@ import type {
   CreateBookingRequest,
   CreateBookingResponse,
   CurrentCustomerBookingResponse,
+  ListBookingsQuery,
   ListBookingsResponse,
   PaymentMode,
   PayTripExtrasResponse,
@@ -48,15 +49,18 @@ export function createBooking(
 }
 
 /**
- * `GET /customer/bookings` — this customer's own ride history, newest first, capped server-side.
+ * `GET /customer/bookings` — one PAGE of this customer's own ride history, filtered, searched and
+ * sorted by the server. Pass the previous page's `next_cursor` as `cursor` for the next one; the
+ * first page (no cursor) also carries the whole-history `summary`.
  *
  * Scoped by the access token alone; there is no id to pass and therefore no way to ask for
  * anybody else's. Rows carry `start_otp: null` by design — the code only ever comes back from the
  * single-booking read below.
  */
-export function listBookings(): Promise<ListBookingsResponse> {
+export function listBookings(query: ListBookingsQuery): Promise<ListBookingsResponse> {
   return request<ListBookingsResponse>(`${ROLE_PREFIX}/bookings`, {
     token: getAccessToken() ?? undefined,
+    query: { ...query },
   });
 }
 

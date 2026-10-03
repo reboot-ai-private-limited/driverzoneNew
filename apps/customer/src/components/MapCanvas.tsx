@@ -10,13 +10,31 @@ import {
   useState,
 } from 'react';
 import { StyleSheet, View } from 'react-native';
+import Animated, {
+  type SharedValue,
+  useAnimatedProps,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+} from 'react-native-reanimated';
 import MapView, {
   Marker,
   Polyline,
   PROVIDER_GOOGLE,
   type Region,
 } from 'react-native-maps';
+import { motion } from '@/theme/motion';
 import { colors, radius } from '@/theme/theme';
+
+// Rasterised from the glyphs this file used to draw as React views — see the note above the markers.
+import PICKUP_ICON from '../../assets/map/map-pickup.png';
+import DROP_ICON from '../../assets/map/map-drop.png';
+
+/**
+ * The map, as a Reanimated component, so its padding can be driven from the UI thread — see
+ * `paddingProps`. Refs still reach the `MapView` instance (`animateToRegion`, `fitToCoordinates`).
+ */
+const AnimatedMapView = Animated.createAnimatedComponent(MapView);
 
 /**
  * THE MAP IS A LEAF, AND THIS FILE IS THE ONLY THING THAT KNOWS WHAT DRAWS IT.
@@ -44,6 +62,13 @@ export interface MapCanvasHandle {
    * reads this to decide whether its "already centred" latch may close; see `hasCentred` there.
    */
   moveTo: (lat: number, lng: number, zoom?: MapZoom) => boolean;
+
+  /**
+   * "The sheet is about to change height" — call it BEFORE the state change that resizes it, then
+   * `moveTo`. The move waits for the resize instead of flying straight away and being knocked off
+   * course by the padding glide, so the camera makes one clean flight rather than two.
+   */
+  expectInsetChange: () => void;
 }
 
 export type MapZoom = 'street' | 'city';
@@ -54,6 +79,11 @@ export interface MapMarker {
   lng: number;
   kind: 'pickup' | 'drop';
   title: string;
+  /**
+   * Faded out but kept on the map — see `FadingMarker` for why hiding is never unmounting. A hidden
+   * marker draws no route and is left out of the camera framing.
+   */
+  hidden?: boolean;
 }
 
 interface MapCanvasProps {
@@ -85,7 +115,7 @@ interface MapCanvasProps {
   showCentrePin?: boolean;
   /** Whether the centre pin is picking pickup or drop/destination. */
   centrePinKind?: 'pickup' | 'drop';
-  /** The customer's own position, when known. Drawn as the familiar blue dot. */
+  /** The customer's own position, when known. Drawn as the same yellow ring as the pickup. */
   userLocation?: { lat: number; lng: number } | null;
   /**
    * How many points at the bottom of the map are COVERED by the sheet.
@@ -95,6 +125,12 @@ interface MapCanvasProps {
    * report. Without it the reported coordinate is the one behind the sheet.
    */
   bottomInset?: number;
+  /**
+   * The sheet's height AS IT ANIMATES, on the UI thread. When given, the map padding and the
+   * crosshair follow it every frame — in lockstep with the sheet, with no React render. Without it
+   * they follow `bottomInset`, which suits a screen whose card does not animate.
+   */
+  liveInset?: SharedValue<number> | undefined;
   /**
    * `| undefined` is not noise: the app compiles with `exactOptionalPropertyTypes`, under which
    * `?: T` refuses an explicitly-passed `undefined`. The screen turns this handler off by
@@ -266,6 +302,20 @@ const MOVE_CHECK_MS = CAMERA_FLY_MS + 350;
 /** How many times one move is re-issued before giving up. Bounded so a stuck map cannot loop. */
 const MAX_MOVE_ATTEMPTS = 3;
 
+/** Two camera targets this close (degrees, ~1 m) are the same place. */
+const SAME_POINT_DEGREES = 0.00001;
+
+/**
+ * How long the padding keeps moving after the sheet reports a new height — the sheet's own resize
+ * time (`RESIZE_MS` in `DraggableSheet`). The padding itself follows the sheet frame by frame on the
+ * UI thread (see `paddingProps`); this only tells camera moves how long to wait, since on Android a
+ * `setPadding` cancels a camera animation in flight.
+ */
+const INSET_GLIDE_MS = motion.sheet;
+
+/** Allowance for an announced resize to reach `bottomInset` — a commit plus a layout pass. */
+const INSET_CHANGE_LEAD_MS = 80;
+
 /**
  * Point the camera somewhere, and mark the window in which the map's own settle reports are
  * this component's doing rather than the customer's.
@@ -278,6 +328,7 @@ function driveCamera(
   suppressUntil: MutableRefObject<number>,
   from: Region,
   to: Region,
+  reduceMotion: boolean,
 ): void {
   /*
    * A JUMP ACROSS THE COUNTRY IS CUT TO — see `LONG_JUMP_DEGREES`. Measured on the larger of the
@@ -287,7 +338,8 @@ function driveCamera(
     Math.abs(to.latitude - from.latitude),
     Math.abs(to.longitude - from.longitude),
   );
-  const duration = jump > LONG_JUMP_DEGREES ? CAMERA_CUT_MS : CAMERA_FLY_MS;
+  // The phone's "remove animations" setting cuts every move — a flight is exactly the motion it asks to be spared.
+  const duration = reduceMotion || jump > LONG_JUMP_DEGREES ? CAMERA_CUT_MS : CAMERA_FLY_MS;
 
   // Marked BEFORE the call: on a cut the settle report can come back almost immediately.
   suppressUntil.current = Date.now() + duration + SETTLE_SUPPRESSION_TAIL_MS;
@@ -305,6 +357,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     centrePinKind = 'pickup',
     userLocation = null,
     bottomInset = 0,
+    liveInset,
     onRegionSettled,
   },
   ref,
@@ -389,15 +442,85 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
   );
   const moveCheck = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * THE MAP'S BOTTOM PADDING, ON THE UI THREAD.
+   *
+   * `liveInset` is the sheet's own animated height, frame by frame. The padding and the crosshair
+   * read it directly through Reanimated, so they move in lockstep with the sheet without a single
+   * React render — the previous JS-driven glide re-rendered this component ~16 times per sheet
+   * change, and on the device that was the map stuttering while the screen switched.
+   *
+   * A screen with a plain, non-animated card (the search screen) passes no `liveInset`; then the
+   * value simply follows `bottomInset`.
+   */
+  const ownInset = useSharedValue(bottomInset);
+  useEffect(() => {
+    if (liveInset === undefined) ownInset.value = bottomInset;
+  }, [bottomInset, liveInset, ownInset]);
+  const inset = liveInset ?? ownInset;
+
+  /** Mirrors `mapReady` and "no route is being framed" for the padding worklet — see the prop. */
+  const mapReadyShared = useSharedValue(false);
+  const paddingAllowed = useSharedValue(true);
+
+  /** Where the last move of ours was seen to land — so a repeat of it can be skipped. */
+  const landedAt = useRef<{ lat: number; lng: number; delta: number } | null>(null);
+  /** The phone's reduce-motion setting, read by the camera helpers outside render. */
+  const reducedMotion = useReducedMotion();
+  const reduceMotion = useRef(reducedMotion);
+  reduceMotion.current = reducedMotion;
+
+  /** Until when the sheet (and so the padding) is still moving. Camera moves wait for it. */
+  const insetGlideUntil = useRef(0);
+  /** A camera move held back until the glide ends. A newer move replaces it. */
+  const deferredMove = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const applyMove = (lat: number, lng: number, zoom?: MapZoom, attempt = 1): void => {
+    /*
+     * WAIT OUT A PADDING GLIDE. On Android every `setPadding` cancels a camera animation in
+     * flight, so a move issued while the sheets swap — tapping Pickup does exactly that — was cut
+     * short partway and the map stuttered. Issued after the glide, it runs uninterrupted.
+     */
+    const waitMs = insetGlideUntil.current - Date.now();
+    if (deferredMove.current !== null) clearTimeout(deferredMove.current);
+    deferredMove.current = null;
+    if (waitMs > 0) {
+      deferredMove.current = setTimeout(() => {
+        deferredMove.current = null;
+        applyMove(lat, lng, zoom, attempt);
+      }, waitMs + 16);
+      return;
+    }
+
     const delta = zoom === undefined ? region.current.latitudeDelta : ZOOM_DELTA[zoom];
+
+    /*
+     * ALREADY THERE: nothing to do. Re-flying to where the camera has just landed looks like
+     * nothing, but it is not free — it opens a settle-suppression window, and for the best part of
+     * a second the customer's own pan is ignored. Cancelling the picker over an unmoved pickup did
+     * exactly that.
+     */
+    const landed = landedAt.current;
+    if (
+      attempt === 1 &&
+      landed !== null &&
+      Math.abs(landed.lat - lat) < SAME_POINT_DEGREES &&
+      Math.abs(landed.lng - lng) < SAME_POINT_DEGREES &&
+      Math.abs(landed.delta - delta) < SAME_POINT_DEGREES
+    ) {
+      intendedMove.current = null;
+      return;
+    }
+    landedAt.current = null;
+
     intendedMove.current = zoom === undefined ? { lat, lng, attempt } : { lat, lng, zoom, attempt };
-    driveCamera(map, suppressSettleUntil, region.current, {
-      latitude: lat,
-      longitude: lng,
-      latitudeDelta: delta,
-      longitudeDelta: delta,
-    });
+    driveCamera(
+      map,
+      suppressSettleUntil,
+      region.current,
+      { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
+      reduceMotion.current,
+    );
 
     if (moveCheck.current !== null) clearTimeout(moveCheck.current);
     moveCheck.current = setTimeout(() => {
@@ -421,6 +544,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         applyMove(wanted.lat, wanted.lng, wanted.zoom, wanted.attempt + 1);
         return;
       }
+      if (off <= span) landedAt.current = { lat: wanted.lat, lng: wanted.lng, delta: span };
       intendedMove.current = null;
     }, MOVE_CHECK_MS);
   };
@@ -428,9 +552,47 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
   useEffect(
     () => () => {
       if (moveCheck.current !== null) clearTimeout(moveCheck.current);
+      if (deferredMove.current !== null) clearTimeout(deferredMove.current);
     },
     [],
   );
+
+  /*
+   * `bottomInset` is the sheet's TARGET height, reported once per change. It no longer drives the
+   * padding (the shared value does, every frame); it marks the window in which the padding is
+   * moving, so camera moves wait it out and the settle reports it causes are not taken for the
+   * customer panning.
+   */
+  const lastInset = useRef(bottomInset);
+  useEffect(() => {
+    if (lastInset.current === bottomInset) return;
+    lastInset.current = bottomInset;
+    if (!mapReady) return;
+
+    const startedAt = Date.now();
+    insetGlideUntil.current = startedAt + INSET_GLIDE_MS;
+    suppressSettleUntil.current = Math.max(
+      suppressSettleUntil.current,
+      startedAt + INSET_GLIDE_MS + SETTLE_SUPPRESSION_TAIL_MS,
+    );
+
+    /*
+     * A MOVE ALREADY IN FLIGHT IS RE-ISSUED AFTER THE GLIDE. The deferral in `applyMove` only
+     * covers a move asked for once the sheet has started resizing — but the usual order is the
+     * reverse: picking a search result moves the camera and, in the same tap, swaps the sheet to
+     * the pin bar, whose new height arrives a frame or two LATER. The padding glide then cancelled
+     * the flight a few pixels in, and the landed check (generous by one span, for padding) passed
+     * a short search as arrived — the "pin moves 1mm and sticks" glitch. Re-sending the same target
+     * once the padding is still lets it land every time; it replaces nothing the customer did,
+     * because a pan of theirs clears `intendedMove`.
+     */
+    // New padding moves where "the centre" is on screen, so the last landing no longer counts.
+    landedAt.current = null;
+    const wanted = intendedMove.current;
+    if (wanted !== null) applyMove(wanted.lat, wanted.lng, wanted.zoom, wanted.attempt);
+    // `applyMove` closes only over refs, so it needs no dependency of its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bottomInset, mapReady]);
 
   useImperativeHandle(ref, () => ({
     moveTo: (lat, lng, zoom) => {
@@ -449,6 +611,18 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       pendingMove.current = null;
       applyMove(lat, lng, zoom);
       return true;
+    },
+    expectInsetChange: () => {
+      /*
+       * The new height reaches `bottomInset` only after the next commit and layout — a frame or two
+       * — and then glides for `INSET_GLIDE_MS`. Holding moves for both covers the gap; the
+       * `bottomInset` effect then extends the hold to the glide's real end, and `applyMove`
+       * re-checks it when the held move fires.
+       */
+      insetGlideUntil.current = Math.max(
+        insetGlideUntil.current,
+        Date.now() + INSET_GLIDE_MS + INSET_CHANGE_LEAD_MS,
+      );
     },
   }));
 
@@ -490,8 +664,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady]);
 
-  const pickup = markers.find((m) => m.kind === 'pickup');
-  const drop = markers.find((m) => m.kind === 'drop');
+  // Hidden markers are fading out — they are no longer part of the trip on screen.
+  const pickup = markers.find((m) => m.kind === 'pickup' && m.hidden !== true);
+  const drop = markers.find((m) => m.kind === 'drop' && m.hidden !== true);
 
   const route = useMemo(
     () => (pickup !== undefined && drop !== undefined ? curvedPath(pickup, drop) : null),
@@ -501,21 +676,15 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     [pickup?.lat, pickup?.lng, drop?.lat, drop?.lng],
   );
 
-  /**
-   * `<Marker>` with a custom child renders BLANK on Android if `tracksViewChanges` is false from
-   * the first frame — the native view needs at least one snapshot pass. So it starts true and is
-   * switched off a moment later, once the pins have rasterised. From then on the markers are
-   * static bitmaps and cost nothing on pan/zoom.
+  /*
+   * MARKERS ARE IMAGES, NOT REACT VIEWS. A `<Marker>` with React children is turned into a bitmap by
+   * snapshotting the view, and on Android that snapshot came out blank whenever the timing was off:
+   * the location dot mounts late (it waits for a GPS fix), and after a tab switch every custom
+   * marker came back empty even when re-created — on the device the dot was simply gone. An
+   * `image` marker hands Google Maps a ready-made bitmap, so there is nothing to snapshot and
+   * nothing to come back blank. The PNGs in `assets/map/` are rasterised from the same shapes the
+   * old views drew (1x/2x/3x), so nothing changes visually.
    */
-  const [tracksChanges, setTracksChanges] = useState(true);
-  // A signature of the current marker set — changes when a pin is added/removed or the user dot
-  // appears/disappears, which is when a fresh snapshot pass is needed.
-  const markerSignature = `${markers.length}:${userLocation === null ? 'no-user' : 'user'}`;
-  useEffect(() => {
-    setTracksChanges(true);
-    const t = setTimeout(() => setTracksChanges(false), 1200);
-    return () => clearTimeout(t);
-  }, [markerSignature]);
 
   /** When the current pair was first framed — see the settle window in the effect below. */
   const framedAt = useRef(0);
@@ -538,6 +707,33 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     frameRoute && pickup !== undefined && drop !== undefined
       ? `${pickup.lat},${pickup.lng}|${drop.lat},${drop.lng}`
       : null;
+
+  useEffect(() => {
+    paddingAllowed.value = routeKey === null;
+  }, [routeKey, paddingAllowed]);
+
+  /**
+   * The bottom strip the sheet covers — makes the map's centre the middle of what is actually
+   * visible, so the crosshair and the reported coordinate agree. Recomputed on the UI thread every
+   * frame the sheet moves.
+   *
+   * WITHHELD UNTIL `onMapReady`, and that is a crash fix, not caution. `applyBaseMapPadding`
+   * guards on the VIEW being laid out but not on the `GoogleMap` existing, and under the new
+   * architecture those are different moments — a padding CHANGE in that window is
+   * `NullPointerException: GoogleMap.setPadding(...) on a null object reference`. `NO_PADDING` is a
+   * module constant, so before the map is ready nothing changes.
+   *
+   * OFF WHILE A ROUTE IS BEING FRAMED: the frame reaches the visible strip by arithmetic against
+   * the view's true centre; padding on top would push the route up until the far pin clipped.
+   */
+  const paddingProps = useAnimatedProps(() => ({
+    mapPadding:
+      mapReadyShared.value && paddingAllowed.value
+        ? { top: 0, right: 0, bottom: inset.value, left: 0 }
+        : NO_PADDING,
+  }));
+
+  const centrePinStyle = useAnimatedStyle(() => ({ bottom: inset.value }));
 
   /**
    * The latest pair and inset, mirrored into a ref so the effect below can read them at the
@@ -639,12 +835,19 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       const bandCentreFromTop = (stripTop + stripBottom) / 2;
       const offsetDeg = ((viewHeight / 2 - bandCentreFromTop) / viewHeight) * latitudeDelta;
 
-      driveCamera(map, suppressSettleUntil, region.current, {
-        latitude: (p.lat + d.lat) / 2 - offsetDeg,
-        longitude: (p.lng + d.lng) / 2,
-        latitudeDelta,
-        longitudeDelta,
-      });
+      landedAt.current = null;
+      driveCamera(
+        map,
+        suppressSettleUntil,
+        region.current,
+        {
+          latitude: (p.lat + d.lat) / 2 - offsetDeg,
+          longitude: (p.lng + d.lng) / 2,
+          latitudeDelta,
+          longitudeDelta,
+        },
+        reduceMotion.current,
+      );
     }, 80);
     return () => clearTimeout(t);
     // `bottomInset` IS a dependency now — that is what lets the sheet's arriving height correct a
@@ -659,12 +862,15 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         size.current = { width, height: measured };
       }}
     >
-      <MapView
+      <AnimatedMapView
         ref={map}
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={initialRegion}
-        onMapReady={() => setMapReady(true)}
+        onMapReady={() => {
+          mapReadyShared.value = true;
+          setMapReady(true);
+        }}
         /**
          * The bottom strip the sheet covers — makes the map's centre the middle of what is
          * actually visible, so the crosshair and the reported coordinate agree.
@@ -697,11 +903,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
          * edge — which is exactly what it did. `routeKey` is null whenever no frame is coming,
          * including when a screen has opted out through `frameRoute`, so this follows it.
          */
-        mapPadding={
-          mapReady && routeKey === null
-            ? { top: 0, right: 0, bottom: bottomInset, left: 0 }
-            : NO_PADDING
-        }
+        // Applied from the UI thread — see `paddingProps`. Passed ONLY there: a `mapPadding` prop
+        // here as well would be re-sent on every React render and overwrite the animated value.
+        animatedProps={paddingProps}
         // Only the SETTLED region is needed — for `onRegionSettled` and for `moveTo` to keep the
         // current span when no zoom is passed. The intermediate `onRegionChange` stream is noise.
         onRegionChangeComplete={(next) => {
@@ -713,6 +917,26 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
           region.current = next;
 
           /*
+           * A pan inside our own settle window is never reported as the customer's, so it would not
+           * clear `landedAt` below — and the locate button would then think it was already there.
+           * Any settle well away from the landing, or at a clearly different zoom, clears it here.
+           * Half a span is past what padding alone shifts the reported centre by.
+           */
+          const landed = landedAt.current;
+          if (
+            landed !== null &&
+            (Math.max(
+              Math.abs(next.latitude - landed.lat),
+              Math.abs(next.longitude - landed.lng),
+            ) >
+              landed.delta / 2 ||
+              // ...or a pinch: same centre, a different zoom.
+              Math.abs(next.latitudeDelta - landed.delta) > landed.delta / 2)
+          ) {
+            landedAt.current = null;
+          }
+
+          /*
            * THE CUSTOMER'S CHOICE IS NOT. Android reports a settle partway through our OWN
            * animations, and the screen treats that report as "they panned here" and re-pins to
            * it. Inside the window the move is ours, so nothing is passed on and the pin stays
@@ -721,9 +945,13 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
           if (Date.now() < suppressSettleUntil.current) return;
           // The customer has taken the map: a pending move check must not pull it back.
           intendedMove.current = null;
+          landedAt.current = null;
           onRegionSettled?.(next.latitude, next.longitude);
         }}
         showsCompass={false}
+        // A tapped marker must not pan the map: while picking, the faded pickup still sits under the
+        // customer's finger, and the camera jumping to it would move the pin they are placing.
+        moveOnMarkerPress={false}
         showsMyLocationButton={false}
         toolbarEnabled={false}
         // Pan and zoom are the customer's; tilt and rotation are nobody's — a rotated map on a
@@ -767,43 +995,46 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
           </>
         ) : null}
 
-        {markers.map((m) => (
-          <Marker
-            key={m.id}
-            identifier={m.id}
-            coordinate={{ latitude: m.lat, longitude: m.lng }}
-            title={m.title}
-            anchor={m.kind === 'drop' ? { x: 0.5, y: 1 } : { x: 0.5, y: 0.5 }}
-            tracksViewChanges={tracksChanges}
-          >
-            {m.kind === 'pickup' ? <PickupGlyph /> : <DropGlyph />}
-          </Marker>
-        ))}
-
+        {/*
+          THE LOCATION DOT IS RENDERED FIRST, before the pickup/drop markers, and that order is a
+          fix. Rendered after them, it vanished the moment the pickup marker was removed — which is
+          what entering the pick screen does — and stayed gone across tab switches. Removing a
+          marker that sat BEFORE it took the dot's native marker with it. First in the list, no
+          removal of a later sibling can reach it. Verified on the device: home, home → pick, and a
+          tab switch from the pick screen all keep the dot.
+        */}
         {userLocation !== null ? (
           <Marker
+            key="user"
             coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={tracksChanges}
-            // Behind the pickup/drop markers — it is context, not the point being chosen.
-            zIndex={0}
-          >
-            <UserDotGlyph />
-          </Marker>
+            /*
+             * THE SAME DOT AS THE HOME SCREEN. There, the pickup defaults to where the customer is,
+             * so the yellow ring IS their location as far as they can tell; the pick screens used
+             * to show a Google-blue dot for the same place, which read as two different things.
+             */
+            image={PICKUP_ICON}
+            tracksViewChanges={false}
+            identifier="user"
+            // Behind the pickup/drop markers (they are 2) — context, not the point being chosen.
+            zIndex={1}
+          />
         ) : null}
-      </MapView>
+
+        {markers.map((m) => (
+          <FadingMarker key={m.id} marker={m} reduceMotion={reducedMotion} />
+        ))}
+      </AnimatedMapView>
 
       {showCentrePin ? (
         // OUTSIDE the map, inset from the bottom by the sheet's height so it lands in the middle
         // of what the customer can SEE. The pin stays still and the map moves under it — dragging
         // a marker instead means fighting the pan gesture for the same finger.
         // `PIN_TIP_LIFT` raises the stack so the SPIKE, not the stack's middle, is what sits on
-        // the map's centre — the coordinate this pin claims to be pointing at.
-        <View
-          style={[
-            styles.centrePin,
-            { bottom: bottomInset, transform: [{ translateY: -PIN_TIP_LIFT }] },
-          ]}
+        // the map's centre — the coordinate this pin claims to be pointing at. Its inset comes
+        // from the same shared value as the padding, so pin and map can never drift apart.
+        <Animated.View
+          style={[styles.centrePin, centrePinStyle, { transform: [{ translateY: -PIN_TIP_LIFT }] }]}
           pointerEvents="none"
         >
           <View
@@ -811,51 +1042,71 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
           />
           <View style={styles.centrePinStem} />
           <View style={styles.centrePinShadow} />
-        </View>
+        </Animated.View>
       ) : null}
     </View>
   );
 });
 
-/**
- * PICKUP — an ink dot inside a soft brand halo. "This is where you are" reads at a glance and
- * needs no label. Static rather than pulsing: an infinite animation inside a native map marker
- * forces `tracksViewChanges` on, which re-rasterises the marker every frame and is a known
- * Android jank source. The halo carries the "live" feel without the cost.
- */
-function PickupGlyph(): ReactElement {
-  return (
-    <View style={styles.pickupWrap}>
-      <View style={styles.pickupHalo} />
-      <View style={styles.pickupCore} />
-    </View>
-  );
-}
 
 /**
- * DESTINATION — a flat, branded teardrop: ink body, a yellow core, one white hairline for
- * contrast against any map colour. Not the stock red Google pin, and no gradient — brand yellow
- * is a flat surface everywhere else in this app.
+ * A pickup or drop marker that FADES in and out instead of popping.
+ *
+ * NEVER UNMOUNTED TO HIDE. Entering the pick screen used to remove these markers, and removing a
+ * map child is what knocked out the location dot's native marker before (see the dot's note):
+ * react-native-maps tracks children by index. A hidden marker now stays in the tree at opacity 0 —
+ * `opacity` is the native `setAlpha`, which does not re-render the marker's image, so this cannot
+ * produce the blank-bitmap glitch either.
+ *
+ * Only this small component re-renders per frame, not the map around it.
  */
-function DropGlyph(): ReactElement {
-  return (
-    <View style={styles.dropWrap}>
-      <View style={styles.dropBody}>
-        <View style={styles.dropCore} />
-      </View>
-      <View style={styles.dropTip} />
-      <View style={styles.dropShadow} />
-    </View>
-  );
-}
+function FadingMarker({
+  marker,
+  reduceMotion,
+}: {
+  marker: MapMarker;
+  reduceMotion: boolean;
+}): ReactElement {
+  const target = marker.hidden === true ? 0 : 1;
+  const [opacity, setOpacity] = useState(target);
+  const current = useRef(target);
 
-/** The customer's own position — the familiar Google blue dot with a soft accuracy ring. */
-function UserDotGlyph(): ReactElement {
+  useEffect(() => {
+    const from = current.current;
+    if (from === target) return undefined;
+    if (reduceMotion) {
+      current.current = target;
+      setOpacity(target);
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    let frame = 0;
+    const step = (): void => {
+      const t = Math.min(1, (Date.now() - startedAt) / motion.enter);
+      // Ease-out, matching `MOTION_EASING`'s feel: quick to answer, gentle to settle.
+      const eased = 1 - (1 - t) * (1 - t);
+      current.current = from + (target - from) * eased;
+      setOpacity(current.current);
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, reduceMotion]);
+
   return (
-    <View style={styles.userWrap}>
-      <View style={styles.userRing} />
-      <View style={styles.userDot} />
-    </View>
+    <Marker
+      identifier={marker.id}
+      coordinate={{ latitude: marker.lat, longitude: marker.lng }}
+      // No title while hidden: an alpha-0 marker still takes taps, and would open an info window
+      // for a pin the customer cannot see.
+      {...(marker.hidden === true ? {} : { title: marker.title })}
+      anchor={marker.kind === 'drop' ? { x: 0.5, y: 1 } : { x: 0.5, y: 0.5 }}
+      image={marker.kind === 'pickup' ? PICKUP_ICON : DROP_ICON}
+      tracksViewChanges={false}
+      opacity={opacity}
+      zIndex={2}
+    />
   );
 }
 
@@ -921,69 +1172,6 @@ const styles = StyleSheet.create({
   // longer expose (`absoluteFill` is a registered style ID, not a spreadable object).
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   map: { flex: 1, backgroundColor: colors.bgSunken },
-
-  // ── Pickup ──────────────────────────────────────────────────────────────────────────────────
-  pickupWrap: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  pickupHalo: {
-    position: 'absolute',
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: withAlpha(colors.brand, 0.35),
-  },
-  pickupCore: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.fg,
-    borderWidth: 2.5,
-    borderColor: colors.brand,
-  },
-
-  // ── Destination ─────────────────────────────────────────────────────────────────────────────
-  dropWrap: { width: 30, height: 40, alignItems: 'center' },
-  dropBody: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.fg,
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dropCore: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.brand },
-  dropTip: {
-    width: 2,
-    height: 12,
-    marginTop: -2,
-    backgroundColor: colors.fg,
-  },
-  dropShadow: {
-    width: 10,
-    height: 3,
-    borderRadius: 5,
-    backgroundColor: 'rgba(0,0,0,0.22)',
-    marginTop: 1,
-  },
-
-  // ── User dot ────────────────────────────────────────────────────────────────────────────────
-  userWrap: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
-  userRing: {
-    position: 'absolute',
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(26,115,232,0.18)',
-  },
-  userDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#1A73E8',
-    borderWidth: 2.5,
-    borderColor: '#FFFFFF',
-  },
 
   // ── Centre crosshair (overlay, not on the map) ─────────────────────────────────────────────
   centrePin: {

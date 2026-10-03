@@ -54,6 +54,8 @@ export const keys = {
      * `trip.all()` and refresh both the trip itself and the list it has just joined.
      */
     list: () => ['trip', 'list'] as const,
+    /** One filtered, paged view of the history. Under `list`, so the same invalidation reaches it. */
+    history: (view: unknown) => ['trip', 'list', 'history', view] as const,
   },
   earnings: {
     all: () => ['earnings'] as const,

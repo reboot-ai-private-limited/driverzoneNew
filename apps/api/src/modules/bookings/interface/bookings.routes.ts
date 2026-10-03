@@ -37,6 +37,8 @@ export interface DriverControllers {
   declineExtension: RequestHandler;
   /** `POST /driver/bookings/:id/switch-to-cash` — the fallback when the customer cannot pay online. */
   switchToCash: RequestHandler;
+  /** `POST /driver/bookings/:id/payment-override` — the driver takes the payment in cash, with a reason. */
+  paymentOverride: RequestHandler;
   /** `POST /driver/bookings/:id/extras/cash` — the extra day was handed over in cash. */
   collectExtrasInCash: RequestHandler;
 }
@@ -112,6 +114,7 @@ export function buildDriverRouter(handlers: DriverControllers): Router {
   /* The way out of the payment gate when the customer's own app cannot get there — a dead phone,
      no signal — and they pay the driver in cash instead. */
   router.post('/:id/switch-to-cash', handlers.switchToCash);
+  router.post('/:id/payment-override', handlers.paymentOverride);
   /* The narrow version of the line above, for a trip whose FARE was already paid online and so
      cannot be switched wholesale — only the extra day moves. See `CollectExtrasInCashUseCase`. */
   router.post('/:id/extras/cash', handlers.collectExtrasInCash);

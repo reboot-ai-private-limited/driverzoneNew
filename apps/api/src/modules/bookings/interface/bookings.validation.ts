@@ -3,6 +3,10 @@ import {
   BOOKING_STATUSES,
   CAR_CATEGORIES,
   PAYMENT_MODES,
+  DRIVER_TRIP_GROUPS,
+  PAYMENT_OVERRIDE_REASONS,
+  RIDE_HISTORY_GROUPS,
+  RIDE_HISTORY_SORTS,
   VEHICLE_TYPE_PREFERENCES,
 } from '@driverzone/contracts';
 
@@ -47,6 +51,14 @@ export const adminCreateBookingSchema = z
     drop_address: z.string().trim().min(1).max(500),
     car_category: z.enum(CAR_CATEGORIES),
     vehicle_type: z.enum(VEHICLE_TYPE_PREFERENCES),
+  })
+  .strict();
+
+/** The driver's payment override. The reason is required; a note is required for `OTHER` (use case). */
+export const paymentOverrideSchema = z
+  .object({
+    reason: z.enum(PAYMENT_OVERRIDE_REASONS),
+    note: z.string().trim().max(300).optional(),
   })
   .strict();
 
@@ -175,6 +187,73 @@ export const adminBookingListQuerySchema = z.object({
   from: isoDay.optional(),
   to: isoDay.optional(),
 });
+
+/**
+ * `GET /customer/bookings`. With NO `limit` this is the old unpaged read — the newest
+ * `HISTORY_LIMIT` rows, no cursor — so app builds already on phones keep working unchanged.
+ *
+ * The cursor is opaque to the app: base64url JSON of `{ k, i }` (sort key, booking id). A cursor
+ * that does not decode is a 400 rather than "start again from the top", which would silently
+ * repeat a page the customer has already scrolled past.
+ */
+const historyCursor = z
+  .string()
+  .max(200)
+  .transform((value, ctx) => {
+    try {
+      const parsed: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        typeof (parsed as { k?: unknown }).k === 'number' &&
+        Number.isFinite((parsed as { k: number }).k) &&
+        typeof (parsed as { i?: unknown }).i === 'string'
+      ) {
+        return { key: (parsed as { k: number }).k, id: (parsed as { i: string }).i };
+      }
+    } catch {
+      // Falls through to the issue below.
+    }
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid cursor' });
+    return z.NEVER;
+  });
+
+const isoInstant = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value));
+
+export const customerHistoryQuerySchema = z.object({
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : undefined))
+    .refine((n) => n === undefined || (!Number.isNaN(n) && n >= 1 && n <= 50), 'Limit must be between 1 and 50'),
+  cursor: historyCursor.optional(),
+  group: z.enum(RIDE_HISTORY_GROUPS).optional(),
+  from: isoInstant.optional(),
+  before: isoInstant.optional(),
+  q: z.string().trim().max(120).optional(),
+  sort: z.enum(RIDE_HISTORY_SORTS).default('NEWEST'),
+});
+
+/**
+ * `GET /driver/bookings`. Same contract as the customer's: with NO `limit` it is the old capped
+ * list, so driver builds already on phones keep working unchanged.
+ */
+export const driverHistoryQuerySchema = z.object({
+  limit: customerHistoryQuerySchema.shape.limit,
+  cursor: historyCursor.optional(),
+  group: z.enum(DRIVER_TRIP_GROUPS).optional(),
+  from: isoInstant.optional(),
+  before: isoInstant.optional(),
+  q: z.string().trim().max(120).optional(),
+});
+
+/** The inverse of `historyCursor`, for the response. */
+export function encodeHistoryCursor(cursor: { key: number; id: string }): string {
+  return Buffer.from(JSON.stringify({ k: cursor.key, i: cursor.id }), 'utf8').toString('base64url');
+}
 
 export type CreateBookingBody = z.input<typeof createBookingSchema>;
 export type CancelBookingBody = z.input<typeof cancelBookingSchema>;

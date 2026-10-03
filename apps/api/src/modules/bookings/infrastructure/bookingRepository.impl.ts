@@ -1,5 +1,9 @@
-import mongoose, { type FilterQuery } from 'mongoose';
-import type { BookingStatus } from '@driverzone/contracts';
+import mongoose, { type FilterQuery, type PipelineStage } from 'mongoose';
+import {
+  RIDE_HISTORY_CANCELLED_STATUSES,
+  RIDE_HISTORY_PRE_DISPATCH_STATUSES,
+  type BookingStatus,
+} from '@driverzone/contracts';
 import { logger } from '../../../shared/logging/logger.js';
 import type { Actor, Booking, FareSnapshot } from '../domain/booking.entity.js';
 import { TRANSITIONS } from '../domain/booking.entity.js';
@@ -7,6 +11,9 @@ import type {
   AdminBookingFilter,
   BookingEvent,
   BookingRepositoryPort,
+  CustomerHistoryCursor,
+  CustomerHistoryQuery,
+  DriverHistoryQuery,
   NewBooking,
   TransitionPatch,
 } from '../domain/bookingRepository.port.js';
@@ -16,6 +23,8 @@ import {
   type BookingDoc,
   type BookingEventDoc,
 } from './booking.model.js';
+import { FareAdjustmentModel } from './charge.model.js';
+import { netPayablePaise } from '../domain/payable.js';
 
 /**
  * Every status a booking can still leave. Typed against `BookingStatus` so a status added to the
@@ -174,6 +183,215 @@ export class MongoBookingRepository implements BookingRepositoryPort {
   }
 
   /**
+   * One page of ride history, in ONE aggregation. See the port for the cursor.
+   *
+   * AN AGGREGATION, NOT A FIND, because both sort keys are computed: "when it happened" is the
+   * first of completed/cancelled/scheduled that is set, and "amount" adds the waiting charge and
+   * any extra day (an adjustment row in another collection) to the quoted fare. Everything runs
+   * after the `customerId` match, which the `{ customerId, createdAt }` index serves, so the work
+   * is bounded by one customer's history rather than the collection.
+   *
+   * `startOtp` IS PROJECTED OUT BY HAND. `select: false` on the schema only guards `find`; an
+   * aggregation returns every stored field, and a history page is exactly the response that must
+   * never carry trip codes.
+   */
+  async pageForCustomer(
+    q: CustomerHistoryQuery,
+  ): Promise<{ bookings: Booking[]; nextCursor: CustomerHistoryCursor | null }> {
+    if (!mongoose.isValidObjectId(q.customerId)) return { bookings: [], nextCursor: null };
+
+    // Aggregations do not cast — every id in a `$match` must already be an ObjectId.
+    const match: Record<string, unknown> = { customerId: new mongoose.Types.ObjectId(q.customerId) };
+    const and: Record<string, unknown>[] = [];
+
+    const stillLater = {
+      isScheduled: true,
+      status: { $in: RIDE_HISTORY_PRE_DISPATCH_STATUSES },
+      scheduledAt: { $gt: q.now },
+    };
+    switch (q.group) {
+      case 'COMPLETED':
+        match.status = 'COMPLETED';
+        break;
+      case 'CANCELLED':
+        match.status = { $in: RIDE_HISTORY_CANCELLED_STATUSES };
+        break;
+      case 'SCHEDULED':
+        Object.assign(match, stillLater);
+        break;
+      case 'RUNNING':
+        match.status = { $nin: ['COMPLETED', ...RIDE_HISTORY_CANCELLED_STATUSES] };
+        and.push({ $nor: [stillLater] });
+        break;
+      case undefined:
+        break;
+    }
+
+    /*
+     * Contains, not prefix — the app's search always matched anywhere in a reference or address,
+     * and a customer types "salt lake", not the start of a street line. Escaped, so `(` from the
+     * keyboard is a bracket and not a regex group.
+     */
+    if (q.search !== undefined && q.search.trim() !== '') {
+      const term = new RegExp(q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const driverIds = (q.driverIds ?? [])
+        .filter((id) => mongoose.isValidObjectId(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      and.push({
+        $or: [
+          { reference: term },
+          { pickupAddress: term },
+          { dropAddress: term },
+          ...(driverIds.length === 0 ? [] : [{ driverId: { $in: driverIds } }]),
+        ],
+      });
+    }
+    if (and.length > 0) match.$and = and;
+
+    const pipeline: PipelineStage[] = [
+      { $match: match },
+      { $project: { startOtp: 0 } },
+      {
+        $addFields: {
+          happenedAt: { $ifNull: ['$completedAt', { $ifNull: ['$cancelledAt', '$scheduledAt'] }] },
+        },
+      },
+    ];
+
+    if (q.from !== undefined || q.before !== undefined) {
+      pipeline.push({
+        $match: {
+          happenedAt: {
+            ...(q.from === undefined ? {} : { $gte: q.from }),
+            ...(q.before === undefined ? {} : { $lt: q.before }),
+          },
+        },
+      });
+    }
+
+    if (q.sort === 'AMOUNT_DESC') {
+      /*
+       * The TRIP's cost, pre-wallet — what the row shows and what "high to low" ranks on. The
+       * extra day lives on the `DAY_EXTENSION` adjustment written at completion, the same source
+       * the mapper reads for a history row.
+       */
+      pipeline.push(
+        {
+          $lookup: {
+            from: FareAdjustmentModel.collection.name,
+            let: { bookingId: '$_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [{ $eq: ['$bookingId', '$$bookingId'] }, { $eq: ['$type', 'DAY_EXTENSION'] }],
+                  },
+                },
+              },
+              { $project: { _id: 0, amountPaise: 1 } },
+            ],
+            as: 'extensionRows',
+          },
+        },
+        {
+          $addFields: {
+            sortKey: {
+              $add: [
+                { $ifNull: ['$fareSnapshot.fare.totalPaise', 0] },
+                { $ifNull: ['$waitingChargePaise', 0] },
+                { $sum: '$extensionRows.amountPaise' },
+              ],
+            },
+          },
+        },
+      );
+    } else {
+      pipeline.push({ $addFields: { sortKey: { $toLong: '$happenedAt' } } });
+    }
+
+    if (q.cursor !== undefined && mongoose.isValidObjectId(q.cursor.id)) {
+      const afterId = new mongoose.Types.ObjectId(q.cursor.id);
+      pipeline.push({
+        $match: {
+          $or: [{ sortKey: { $lt: q.cursor.key } }, { sortKey: q.cursor.key, _id: { $lt: afterId } }],
+        },
+      });
+    }
+
+    // One extra row answers "is there another page" without a count.
+    pipeline.push({ $sort: { sortKey: -1, _id: -1 } }, { $limit: q.limit + 1 });
+
+    const docs = await BookingModel.aggregate<BookingDoc & { sortKey: number }>(pipeline).exec();
+    const page = docs.slice(0, q.limit);
+    const last = page[page.length - 1];
+
+    return {
+      bookings: page.map((doc) => toEntity(doc)),
+      nextCursor:
+        docs.length > q.limit && last !== undefined
+          ? { key: Number(last.sortKey), id: String(last._id) }
+          : null,
+    };
+  }
+
+  /**
+   * Counted over EVERY booking; spend over the completed ones only, each at the same net figure
+   * its row shows (`netPayablePaise`, with the extra day from its adjustment row). Two lean
+   * reads and the sum in code, rather than the payable arithmetic written a second time in
+   * aggregation operators.
+   */
+  async customerHistorySummary(
+    customerId: string,
+  ): Promise<{ totalTrips: number; totalSpentPaise: number }> {
+    if (!mongoose.isValidObjectId(customerId)) return { totalTrips: 0, totalSpentPaise: 0 };
+
+    const [totalTrips, completed] = await Promise.all([
+      BookingModel.countDocuments({ customerId }).exec(),
+      BookingModel.find({ customerId, status: 'COMPLETED' })
+        .select({
+          'fareSnapshot.fare.totalPaise': 1,
+          waitingChargePaise: 1,
+          walletCreditPaise: 1,
+          walletDebtPaise: 1,
+        })
+        .lean<
+          Array<
+            Pick<BookingDoc, '_id' | 'waitingChargePaise' | 'walletCreditPaise' | 'walletDebtPaise'> & {
+              fareSnapshot?: { fare?: { totalPaise?: number } };
+            }
+          >
+        >()
+        .exec(),
+    ]);
+
+    if (completed.length === 0) return { totalTrips, totalSpentPaise: 0 };
+
+    const extensions = await FareAdjustmentModel.find({
+      bookingId: { $in: completed.map((doc) => doc._id) },
+      type: 'DAY_EXTENSION',
+    })
+      .select({ bookingId: 1, amountPaise: 1 })
+      .lean()
+      .exec();
+    const extensionByBooking = new Map(extensions.map((row) => [String(row.bookingId), row.amountPaise]));
+
+    const totalSpentPaise = completed.reduce(
+      (sum, doc) =>
+        sum +
+        netPayablePaise({
+          farePaise: doc.fareSnapshot?.fare?.totalPaise ?? 0,
+          extrasPaise: extensionByBooking.get(String(doc._id)) ?? 0,
+          waitingPaise: doc.waitingChargePaise ?? 0,
+          walletCreditPaise: doc.walletCreditPaise ?? 0,
+          walletDebtPaise: doc.walletDebtPaise ?? 0,
+        }),
+      0,
+    );
+
+    return { totalTrips, totalSpentPaise };
+  }
+
+  /**
    * `favourites` asking whether these two have really been on a trip together.
    *
    * `.exists()` rather than a find: the answer is a boolean, and Mongo can stop at the first
@@ -203,6 +421,145 @@ export class MongoBookingRepository implements BookingRepositoryPort {
     if (!mongoose.isValidObjectId(driverId)) return [];
     const docs = await BookingModel.find({ driverId }).sort({ createdAt: -1 }).limit(limit);
     return docs.map((doc) => toEntity(doc.toObject() as BookingDoc));
+  }
+
+  /**
+   * One keyset page of the driver's trips. Same shape as `pageForCustomer` — an aggregation so the
+   * sort key can be `happenedAt`, which is derived — minus the amount sort and the scheduled
+   * bucket, neither of which the driver's list has.
+   *
+   * `startOtp` IS PROJECTED OUT BY HAND for the reason `pageForCustomer` gives: `select: false`
+   * only guards `find`.
+   */
+  async pageForDriver(
+    q: DriverHistoryQuery,
+  ): Promise<{ bookings: Booking[]; nextCursor: CustomerHistoryCursor | null }> {
+    if (!mongoose.isValidObjectId(q.driverId)) return { bookings: [], nextCursor: null };
+
+    const match: Record<string, unknown> = { driverId: new mongoose.Types.ObjectId(q.driverId) };
+
+    switch (q.group) {
+      case 'COMPLETED':
+        match.status = 'COMPLETED';
+        break;
+      case 'CANCELLED':
+        match.status = { $in: RIDE_HISTORY_CANCELLED_STATUSES };
+        break;
+      case 'RUNNING':
+        match.status = { $nin: ['COMPLETED', ...RIDE_HISTORY_CANCELLED_STATUSES] };
+        break;
+      case undefined:
+        break;
+    }
+
+    if (q.search !== undefined && q.search.trim() !== '') {
+      const term = new RegExp(q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const customerIds = (q.customerIds ?? [])
+        .filter((id) => mongoose.isValidObjectId(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      match.$or = [
+        { reference: term },
+        { pickupAddress: term },
+        { dropAddress: term },
+        ...(customerIds.length === 0 ? [] : [{ customerId: { $in: customerIds } }]),
+      ];
+    }
+
+    const pipeline: PipelineStage[] = [
+      { $match: match },
+      { $project: { startOtp: 0 } },
+      {
+        $addFields: {
+          happenedAt: { $ifNull: ['$completedAt', { $ifNull: ['$cancelledAt', '$scheduledAt'] }] },
+        },
+      },
+    ];
+
+    if (q.from !== undefined || q.before !== undefined) {
+      pipeline.push({
+        $match: {
+          happenedAt: {
+            ...(q.from === undefined ? {} : { $gte: q.from }),
+            ...(q.before === undefined ? {} : { $lt: q.before }),
+          },
+        },
+      });
+    }
+
+    pipeline.push({ $addFields: { sortKey: { $toLong: '$happenedAt' } } });
+
+    if (q.cursor !== undefined && mongoose.isValidObjectId(q.cursor.id)) {
+      const afterId = new mongoose.Types.ObjectId(q.cursor.id);
+      pipeline.push({
+        $match: {
+          $or: [{ sortKey: { $lt: q.cursor.key } }, { sortKey: q.cursor.key, _id: { $lt: afterId } }],
+        },
+      });
+    }
+
+    // One extra row answers "is there another page" without a count.
+    pipeline.push({ $sort: { sortKey: -1, _id: -1 } }, { $limit: q.limit + 1 });
+
+    const docs = await BookingModel.aggregate<BookingDoc & { sortKey: number }>(pipeline).exec();
+    const page = docs.slice(0, q.limit);
+    const last = page[page.length - 1];
+
+    return {
+      bookings: page.map((doc) => toEntity(doc)),
+      nextCursor:
+        docs.length > q.limit && last !== undefined
+          ? { key: Number(last.sortKey), id: String(last._id) }
+          : null,
+    };
+  }
+
+  /**
+   * Counted over EVERY trip; fares over the completed ones — what a row shows as its total (fare
+   * plus the extra day from its adjustment row plus waiting), not the driver's commission share,
+   * which is the ledger's to say.
+   */
+  async driverHistorySummary(
+    driverId: string,
+  ): Promise<{ totalTrips: number; completedTrips: number; faresPaise: number }> {
+    if (!mongoose.isValidObjectId(driverId)) {
+      return { totalTrips: 0, completedTrips: 0, faresPaise: 0 };
+    }
+
+    const [totalTrips, completed] = await Promise.all([
+      BookingModel.countDocuments({ driverId }).exec(),
+      BookingModel.find({ driverId, status: 'COMPLETED' })
+        .select({ 'fareSnapshot.fare.totalPaise': 1, waitingChargePaise: 1 })
+        .lean<
+          Array<
+            Pick<BookingDoc, '_id' | 'waitingChargePaise'> & {
+              fareSnapshot?: { fare?: { totalPaise?: number } };
+            }
+          >
+        >()
+        .exec(),
+    ]);
+
+    if (completed.length === 0) return { totalTrips, completedTrips: 0, faresPaise: 0 };
+
+    const extensions = await FareAdjustmentModel.find({
+      bookingId: { $in: completed.map((doc) => doc._id) },
+      type: 'DAY_EXTENSION',
+    })
+      .select({ bookingId: 1, amountPaise: 1 })
+      .lean()
+      .exec();
+    const extensionByBooking = new Map(extensions.map((row) => [String(row.bookingId), row.amountPaise]));
+
+    const faresPaise = completed.reduce(
+      (sum, doc) =>
+        sum +
+        (doc.fareSnapshot?.fare?.totalPaise ?? 0) +
+        (extensionByBooking.get(String(doc._id)) ?? 0) +
+        (doc.waitingChargePaise ?? 0),
+      0,
+    );
+
+    return { totalTrips, completedTrips: completed.length, faresPaise };
   }
 
   /**
@@ -358,6 +715,66 @@ export class MongoBookingRepository implements BookingRepositoryPort {
       { new: true },
     );
     return doc ? toEntity(doc.toObject() as BookingDoc) : null;
+  }
+
+  /**
+   * One transaction, like `transition`: the switch to cash and the event that explains it land
+   * together or not at all. The filter re-checks everything the use case checked, so an online
+   * payment that captures in the same instant wins and this returns null.
+   */
+  async overridePaymentToCash(input: {
+    bookingId: string;
+    driverId: string;
+    reason: string;
+    metadata: Record<string, unknown>;
+  }): Promise<Booking | null> {
+    if (!mongoose.isValidObjectId(input.bookingId) || !mongoose.isValidObjectId(input.driverId)) {
+      return null;
+    }
+
+    const session = await mongoose.startSession();
+    try {
+      let updated: Booking | null = null;
+
+      await session.withTransaction(async () => {
+        const doc = await BookingModel.findOneAndUpdate(
+          {
+            _id: input.bookingId,
+            driverId: input.driverId,
+            status: 'STARTED',
+            paymentStatus: { $ne: 'PAID' },
+          },
+          { $set: { paymentMode: 'CASH', paymentStatus: 'CASH' } },
+          { new: true, session },
+        );
+
+        if (doc === null) {
+          updated = null;
+          return;
+        }
+
+        await BookingEventModel.create(
+          [
+            {
+              bookingId: doc._id,
+              fromStatus: 'STARTED',
+              toStatus: 'STARTED',
+              actorType: 'DRIVER',
+              actorId: new mongoose.Types.ObjectId(input.driverId),
+              reason: input.reason,
+              metadata: { paymentOverride: true, ...input.metadata },
+            },
+          ],
+          { session },
+        );
+
+        updated = toEntity(doc.toObject() as BookingDoc);
+      });
+
+      return updated;
+    } finally {
+      await session.endSession();
+    }
   }
 
   async setPaymentStatus(id: string, status: Booking['paymentStatus']): Promise<Booking | null> {

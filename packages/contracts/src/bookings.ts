@@ -185,6 +185,31 @@ export interface SwitchToCashResponse {
   booking: BookingDto;
 }
 
+/**
+ * Why the driver ended the payment step themselves. REQUIRED: every override is on the booking's
+ * event log with its reason, so support can tell a dead phone from a habit.
+ */
+export const PAYMENT_OVERRIDE_REASONS = [
+  'CUSTOMER_PHONE_UNAVAILABLE',
+  'WEB_BOOKING',
+  'ONLINE_PAYMENT_FAILING',
+  'OTHER',
+] as const;
+export type PaymentOverrideReason = (typeof PAYMENT_OVERRIDE_REASONS)[number];
+
+/**
+ * `POST /driver/bookings/:id/payment-override` — the customer cannot finish the payment step in
+ * their app (web booking, dead phone, payment failing), so the driver takes the whole amount in
+ * cash. Works whether or not a method was chosen, and collects any old cancellation fee with it.
+ */
+export interface PaymentOverrideRequest {
+  reason: PaymentOverrideReason;
+  /** Free text, required when `reason` is `OTHER`. */
+  note?: string;
+}
+
+export type PaymentOverrideResponse = SwitchToCashResponse;
+
 /** One day-extension request, as `POST .../extend` and the driver's accept/decline answer with. */
 export interface BookingExtensionDto {
   id: string;
@@ -510,6 +535,77 @@ export interface BookingDto {
  */
 export interface ListBookingsResponse {
   bookings: BookingDto[];
+  /**
+   * Pass back as `cursor` for the next page; `null` once this page was the last. Always `null` on
+   * an unpaged request (no `limit`), which is how older app builds still read one capped list.
+   */
+  next_cursor: string | null;
+  /**
+   * Whole-history figures, filters ignored. Sent with the FIRST page only (no `cursor`) — later
+   * pages would repeat the same two numbers — and `null` on every page after it.
+   */
+  summary: RideHistorySummary | null;
+}
+
+/**
+ * The two tiles above the history list. OVER EVERY BOOKING, never the filtered view: "Total Trips"
+ * dropping to 2 because a chip is on would be a different statistic under the same label.
+ */
+export interface RideHistorySummary {
+  total_trips: number;
+  /** COMPLETED trips only, net of wallet credit — money that actually left the customer. */
+  total_spent: Money;
+}
+
+/**
+ * How the history screen groups statuses. A customer thinks in four buckets, not twelve statuses,
+ * and the server and the app must agree on which bucket each booking falls in or a filtered page
+ * would disagree with the badge on its own rows.
+ */
+export const RIDE_HISTORY_GROUPS = ['COMPLETED', 'CANCELLED', 'RUNNING', 'SCHEDULED'] as const;
+export type RideHistoryGroup = (typeof RIDE_HISTORY_GROUPS)[number];
+
+/**
+ * Statuses a customer reads as "Cancelled". A trip that never found a driver and one that expired
+ * unpaid did not complete and are not running, so this is the only bucket that is true of them.
+ */
+export const RIDE_HISTORY_CANCELLED_STATUSES: readonly BookingStatus[] = [
+  'CANCELLED_BY_CUSTOMER',
+  'CANCELLED_BY_DRIVER',
+  'CANCELLED_BY_ADMIN',
+  'NO_DRIVER_FOUND',
+  'EXPIRED',
+];
+
+/**
+ * Statuses that are still "for later" while their pickup time is in the future. A scheduled
+ * booking past its hour is RUNNING even before a driver starts it.
+ */
+export const RIDE_HISTORY_PRE_DISPATCH_STATUSES: readonly BookingStatus[] = [
+  'CONFIRMED',
+  'SEARCHING',
+  'ASSIGNED',
+];
+
+export const RIDE_HISTORY_SORTS = ['NEWEST', 'AMOUNT_DESC'] as const;
+export type RideHistorySort = (typeof RIDE_HISTORY_SORTS)[number];
+
+/**
+ * `GET /customer/bookings` query. Every field optional; strings because it is a query string.
+ *
+ * `from`/`before` are full ISO instants computed ON THE DEVICE: "Today" is the customer's day, in
+ * their timezone, which the server does not know. Both bound when the ride HAPPENED — completed,
+ * else cancelled, else its scheduled pickup — not when it was booked.
+ */
+export interface ListBookingsQuery {
+  limit?: number;
+  cursor?: string;
+  group?: RideHistoryGroup;
+  from?: string;
+  before?: string;
+  /** Booking reference, driver name, or either address. */
+  q?: string;
+  sort?: RideHistorySort;
 }
 
 /**
@@ -525,6 +621,43 @@ export interface ListBookingsResponse {
  */
 export interface ListDriverTripsResponse {
   bookings: BookingDto[];
+  /**
+   * Pass back as `cursor` for the next page; `null` once this page was the last. Always `null` on
+   * an unpaged request (no `limit`), which is how older app builds still read one capped list.
+   */
+  next_cursor: string | null;
+  /** Whole-history tiles. Sent with the FIRST page only (no `cursor`); `null` on every other. */
+  summary: DriverTripsSummary | null;
+}
+
+/**
+ * The two tiles above the driver's trip list. OVER EVERY TRIP, filters ignored — "Completed"
+ * dropping to 2 because a chip is on would be a different statistic under the same label.
+ */
+export interface DriverTripsSummary {
+  total_trips: number;
+  completed_trips: number;
+  /** COMPLETED trips only: fare plus extra days plus waiting, the meter figure a row shows. */
+  fares: Money;
+}
+
+/** How the driver's trip list groups statuses — the same buckets the app's chips use. */
+export const DRIVER_TRIP_GROUPS = ['COMPLETED', 'CANCELLED', 'RUNNING'] as const;
+export type DriverTripGroup = (typeof DRIVER_TRIP_GROUPS)[number];
+
+/**
+ * `GET /driver/bookings` query. Every field optional. `from`/`before` are ISO instants computed on
+ * the device ("Today" is the driver's day) and bound when the trip HAPPENED — completed, else
+ * cancelled, else its scheduled pickup.
+ */
+export interface ListDriverTripsQuery {
+  limit?: number;
+  cursor?: string;
+  group?: DriverTripGroup;
+  from?: string;
+  before?: string;
+  /** Booking reference, customer name, or either address. */
+  q?: string;
 }
 
 /**

@@ -1,10 +1,31 @@
 import { FontAwesome5, MaterialCommunityIcons, Octicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { Tabs } from 'expo-router';
+import { Tabs, router } from 'expo-router';
+import type { BottomTabNavigationOptions } from 'expo-router/build/react-navigation/bottom-tabs';
 import { type ReactElement, useEffect } from 'react';
 import { TabBar } from '@/components/TabBar';
-import { listBookings } from '@/lib/api/endpoints/bookings';
-import { keys } from '@/lib/query/keys';
+import { DEFAULT_HISTORY_VIEW, rideHistoryQuery } from '@/features/rides/historyQuery';
+
+/** How long after the home screen settles before the other tabs are built in the background. */
+const PRELOAD_DELAY_MS = 1200;
+
+/**
+ * Every tab switch: INSTANT, with hidden tabs frozen.
+ *
+ *   - `animation: 'none'` — the screen swaps on the frame the tab is tapped; the tab bar's own
+ *     highlight is what animates. A 180ms cross-fade was tried and measured on the device: for those
+ *     frames both screens were half-visible, and Android draws the elevation shadows of a fading
+ *     screen as grey boxes — the Profile cards "blinked" through Rides on every switch. Tabs are
+ *     peers, and the large apps switch them instantly for the same reason.
+ *   - `freezeOnBlur` — a tab that is not on screen stops re-rendering. The home screen keeps a map,
+ *     a location watch and live booking queries; without this they kept re-rendering behind Rides
+ *     and Profile, competing with the screen actually being used.
+ */
+const TAB_SCREEN_OPTIONS: BottomTabNavigationOptions = {
+  headerShown: false,
+  animation: 'none',
+  freezeOnBlur: true,
+};
 
 /**
  * The signed-in shell.
@@ -26,10 +47,32 @@ export default function TabsLayout(): ReactElement {
    * tapped. The tabs mount lazily, so without this the first visit after every app start showed a
    * spinner over an empty list for however long the request took. Same key and fetcher as the
    * screen, so the screen finds it in the cache; a request already in flight is simply joined.
+   * Only the FIRST page of the unfiltered view — what the screen opens on.
    */
   useEffect(() => {
-    void queryClient.prefetchQuery({ queryKey: keys.bookings.list(), queryFn: listBookings });
+    void queryClient.prefetchInfiniteQuery(rideHistoryQuery(DEFAULT_HISTORY_VIEW));
   }, [queryClient]);
+
+  /*
+   * THE OTHER TABS ARE BUILT BEFORE THEY ARE TAPPED. Tabs mount lazily, so the first visit to
+   * Rides built its whole screen at tap time — on the device that was a held-up tab switch.
+   * `prefetch` renders the screen in the background instead, once the home screen has finished
+   * its own start-up work, so the first tap only has to reveal it.
+   */
+  useEffect(() => {
+    // `requestIdleCallback`, not `InteractionManager` — deprecated in this React Native version.
+    let idle: number | null = null;
+    const timer = setTimeout(() => {
+      idle = requestIdleCallback(() => {
+        router.prefetch('/rides');
+        router.prefetch('/account');
+      });
+    }, PRELOAD_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      if (idle !== null) cancelIdleCallback(idle);
+    };
+  }, []);
 
   return (
     <Tabs
@@ -45,12 +88,19 @@ export default function TabsLayout(): ReactElement {
       // room, which is a tab bar's whole job. Every name below was checked against its set's
       // shipped glyph map — a missing one renders as a blank box, silently.
       tabBar={(props) => <TabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={TAB_SCREEN_OPTIONS}
     >
       <Tabs.Screen
         name="home"
         options={{
           title: 'Home',
+          /*
+           * NOT FROZEN, unlike the other tabs. Frozen, every update Home missed while hidden (map,
+           * location, live booking) was rendered in one go the moment it came back — a single
+           * ~150ms frame on every return to Home, measured on the device. Kept live, it absorbs
+           * those updates as they happen and returns with nothing to catch up on.
+           */
+          freezeOnBlur: false,
           tabBarIcon: ({ color, size, focused }) => (
             <Octicons name={focused ? 'home-fill' : 'home'} size={size} color={color} />
           ),

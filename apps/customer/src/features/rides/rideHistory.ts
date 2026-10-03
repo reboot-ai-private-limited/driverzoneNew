@@ -1,4 +1,9 @@
-import type { BookingDto, BookingStatus } from '@driverzone/contracts';
+import {
+  RIDE_HISTORY_CANCELLED_STATUSES,
+  RIDE_HISTORY_PRE_DISPATCH_STATUSES,
+  type BookingDto,
+  type BookingStatus,
+} from '@driverzone/contracts';
 import type { TripPoint } from '@/features/booking/tripPoint';
 import { formatPaise } from '@/lib/money';
 
@@ -67,19 +72,14 @@ export interface RideHistoryRow {
   totalDisplay: string;
 }
 
-const CANCELLED_STATUSES = new Set<BookingStatus>([
-  'CANCELLED_BY_CUSTOMER',
-  'CANCELLED_BY_DRIVER',
-  'CANCELLED_BY_ADMIN',
-  /*
-   * A trip that never found a driver, and one that expired unpaid, are CANCELLED to a customer
-   * reading their history. Neither completed, and neither is still running — "Cancelled" is the
-   * only one of the three filters that is true of them, and inventing a fourth for two edge
-   * statuses would put a filter chip on the screen that matches almost nothing.
-   */
-  'NO_DRIVER_FOUND',
-  'EXPIRED',
-]);
+/**
+ * The statuses a customer reads as "Cancelled" — shared with the server through the contracts
+ * package, so a filtered page from `GET /customer/bookings?group=CANCELLED` and the badge on each
+ * of its rows cannot disagree. See `RIDE_HISTORY_CANCELLED_STATUSES` for why a trip that never
+ * found a driver, or expired unpaid, belongs here.
+ */
+const CANCELLED_STATUSES = new Set<BookingStatus>(RIDE_HISTORY_CANCELLED_STATUSES);
+const PRE_DISPATCH_STATUSES = new Set<BookingStatus>(RIDE_HISTORY_PRE_DISPATCH_STATUSES);
 
 /**
  * TAKES THE BOOKING, NOT THE STATUS, because the status alone cannot answer this.
@@ -98,8 +98,7 @@ export function toRideStatus(booking: Pick<BookingDto, 'status' | 'is_scheduled'
   if (booking.status === 'COMPLETED') return 'COMPLETED';
   if (CANCELLED_STATUSES.has(booking.status)) return 'CANCELLED';
 
-  const notYetDispatched =
-    booking.status === 'CONFIRMED' || booking.status === 'SEARCHING' || booking.status === 'ASSIGNED';
+  const notYetDispatched = PRE_DISPATCH_STATUSES.has(booking.status);
 
   if (booking.is_scheduled && notYetDispatched && Date.parse(booking.scheduled_at) > Date.now()) {
     return 'SCHEDULED';
@@ -185,3 +184,23 @@ export function toRideHistoryRow(booking: BookingDto): RideHistoryRow {
   };
 }
 
+
+/**
+ * "Today" and "This Month" as the instants the server filters on — the start of the customer's
+ * local day or month and the start of the next one. Computed here because the server does not
+ * know the phone's timezone, and an IST customer's "today" begins at 18:30 UTC the evening before.
+ */
+export function periodWindow(
+  period: 'TODAY' | 'THIS_MONTH',
+  now: Date = new Date(),
+): { from: string; before: string } {
+  const from =
+    period === 'TODAY'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      : new Date(now.getFullYear(), now.getMonth(), 1);
+  const before =
+    period === 'TODAY'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      : new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return { from: from.toISOString(), before: before.toISOString() };
+}

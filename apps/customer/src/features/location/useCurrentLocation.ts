@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TripPoint } from '@/features/booking/tripPoint';
 import { reverseGeocode } from './geocoding';
+import { readLastLocation, writeLastLocation } from './lastLocation';
 import { readLocationDecision, writeLocationDecision } from './locationConsent';
 
 /**
@@ -32,7 +33,7 @@ export type LocationStatus = 'locating' | 'ready' | 'denied' | 'failed' | 'needs
  * optional. Without it a single wedged native promise leaves the screen saying "Locating…" until
  * the app is killed, with no error, no timer and nothing the customer can press.
  */
-const LOCATION_TIMEOUT_MS = 12_000;
+const LOCATION_TIMEOUT_MS = 8_000;
 
 /** Distinct from `null`, which is a real answer from `getLastKnownPositionAsync`. */
 const TIMED_OUT = Symbol('location-timeout');
@@ -46,7 +47,10 @@ function withTimeout<T>(work: Promise<T>): Promise<T | typeof TIMED_OUT> {
 
 interface CurrentLocation {
   status: LocationStatus;
-  /** Never null: the fallback stands in until (and if) a real fix arrives. */
+  /**
+   * Never null. Until a real fix arrives this is the last position remembered from a previous
+   * launch, or the pilot-city fallback on a first launch — a camera starting point, not a pickup.
+   */
   point: TripPoint;
   /** True once a real fix has been used, so the screen knows the pin is the customer's own. */
   isReal: boolean;
@@ -71,7 +75,7 @@ interface CurrentLocation {
  */
 export function useCurrentLocation(): CurrentLocation {
   const [status, setStatus] = useState<LocationStatus>('locating');
-  const [point, setPoint] = useState<TripPoint>(FALLBACK_CENTRE);
+  const [point, setPoint] = useState<TripPoint>(() => readLastLocation() ?? FALLBACK_CENTRE);
   const [isReal, setIsReal] = useState(false);
   const [nonce, setNonce] = useState(0);
 
@@ -173,6 +177,8 @@ export function useCurrentLocation(): CurrentLocation {
       setPoint({ lat, lng, address: '' });
       setIsReal(true);
       const address = await reverseGeocode(lat, lng);
+      // Remembered for the next launch's first frame — see `lastLocation.ts`.
+      writeLastLocation({ lat, lng, address });
       if (alive.current) setPoint({ lat, lng, address });
     }
 

@@ -4,7 +4,10 @@ import type {
   CancelBookingResponse,
   CompleteTripResponse,
   CurrentDriverTripResponse,
+  ListDriverTripsQuery,
   ListDriverTripsResponse,
+  PaymentOverrideRequest,
+  PaymentOverrideResponse,
   RateTripRequest,
   RateTripResponse,
   SwitchToCashResponse,
@@ -37,15 +40,18 @@ export function getTrip(bookingId: string, signal?: AbortSignal): Promise<Bookin
 /**
  * `GET /driver/bookings` — every trip this driver has been assigned, newest first.
  *
- * SERVER-CAPPED, NOT PAGED (`HISTORY_LIMIT` on the API side), which is what lets the Trips screen
- * filter and search over the whole list client-side. Paging under a client-side filter would
- * silently hide matches on page two — the same trade the customer app's ride history makes, and
- * the same note applies: filters move server-side in the change that adds a cursor, not before.
+ * UNPAGED, capped server-side, when called with no query — the read Home uses to find the driver's
+ * upcoming scheduled trips. The Trips tab asks for a PAGE (`limit`, `cursor`) with its filters and
+ * search applied in the database, so nothing it shows depends on how much has been loaded.
  */
-export function listTrips(signal?: AbortSignal): Promise<ListDriverTripsResponse> {
+export function listTrips(
+  signal?: AbortSignal,
+  query?: ListDriverTripsQuery,
+): Promise<ListDriverTripsResponse> {
   return request<ListDriverTripsResponse>(`${ROLE_PREFIX}/bookings`, {
     token: getAccessToken() ?? undefined,
     signal,
+    ...(query === undefined ? {} : { query: { ...query } }),
   });
 }
 
@@ -115,6 +121,23 @@ export function completeTrip(bookingId: string): Promise<CompleteTripResponse> {
     method: 'POST',
     body: {},
     idempotencyKey: `complete-${bookingId}`,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `POST /driver/bookings/:id/payment-override` — the customer cannot finish paying in their app (a
+ * web booking, a dead phone, a payment that keeps failing), so the driver takes the whole amount in
+ * cash. Works whether or not a method was chosen, and takes any old cancellation fee with it. The
+ * reason is required and lands on the booking's event log.
+ */
+export function overridePayment(
+  bookingId: string,
+  body: PaymentOverrideRequest,
+): Promise<PaymentOverrideResponse> {
+  return request<PaymentOverrideResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/payment-override`, {
+    method: 'POST',
+    body,
     token: getAccessToken() ?? undefined,
   });
 }

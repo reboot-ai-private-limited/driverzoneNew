@@ -1,3 +1,5 @@
+import type { RideHistoryView } from '@/features/rides/historyQuery';
+
 /**
  * Query keys as a factory, never string literals at call sites. A mutation invalidates
  * `keys.profile.all()` and every dependent screen updates; with literals scattered around, one
@@ -78,6 +80,11 @@ export const keys = {
      * does not drop the whole list and make the history screen flash a spinner after a cancel.
      */
     list: () => ['bookings', 'list'] as const,
+    /**
+     * One filtered view of the history, paged. Under `list()`, so invalidating the list drops
+     * every view of it at once.
+     */
+    history: (view: RideHistoryView) => ['bookings', 'list', view] as const,
     detail: (id: string) => ['bookings', id] as const,
     /** "Am I in the middle of a booking?" — asked on launch, and on Home regaining focus. */
     current: () => ['bookings', 'current'] as const,

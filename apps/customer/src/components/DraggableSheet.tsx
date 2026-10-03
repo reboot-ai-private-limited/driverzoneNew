@@ -2,20 +2,49 @@ import { type ReactElement, type ReactNode, useEffect, useRef, useState } from '
 import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  FadeIn,
   FadeInDown,
   FadeOut,
   runOnJS,
+  type SharedValue,
+  useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
+import { MOTION_EASING, motion } from '@/theme/motion';
 import { colors, radius, shadow, space } from '@/theme/theme';
+
+/**
+ * How long the sheet takes to grow or shrink to new content. Matches `INSET_GLIDE_MS` in
+ * `MapCanvas`, so the map's padding and the sheet's top edge move together.
+ */
+const RESIZE_MS = motion.sheet;
+const RESIZE_EASING = MOTION_EASING;
+
+/** The grabber strip's fixed height — see `styles.grabberArea`. */
+const GRABBER_HEIGHT = space.sm + 4 + space.md;
 
 /** The two rest positions. */
 export type SheetDetent = 'small' | 'large';
 
 interface DraggableSheetProps {
   children: ReactNode;
+  /**
+   * Which content the sheet is showing — home, the pick list, the pin bar.
+   *
+   * ONE SHEET, MANY CONTENTS. Changing this does not swap sheets: the same white surface stays
+   * on screen, eases to the new content's height, and the old content fades out as the new fades
+   * in. Separate sheets per mode used to leave and arrive — overlapping, then sliding out and
+   * back — which on a device read as the whole bottom of the screen bouncing.
+   */
+  contentKey?: string;
+  /**
+   * False for content with nothing under the fold (the pin bar). The handle is hidden — its strip
+   * keeps its height, so the content does not jump — and the sheet cannot be dragged.
+   */
+  draggable?: boolean;
   /**
    * SMALL: how much of the sheet stays on screen at its lower rest position. Enough for the
    * grabber, the pickup line and the destination field — a rest position that hid the primary
@@ -47,6 +76,13 @@ interface DraggableSheetProps {
    * pickup/drop pair had almost no room left to put them in.
    */
   onHeightChange?: (visibleHeight: number) => void;
+  /**
+   * The same "how much of the screen is covered", but LIVE: written on the UI thread on every frame
+   * the sheet resizes or is dragged. The map reads it for its padding and crosshair, so they move
+   * exactly with the sheet. `onHeightChange` still reports the resting value once per change, for
+   * the logic that only needs that.
+   */
+  visibleHeight?: SharedValue<number>;
 }
 
 /**
@@ -65,13 +101,23 @@ interface DraggableSheetProps {
  */
 export function DraggableSheet({
   children,
+  contentKey = 'content',
+  draggable = true,
   peekHeight = 210,
   initialDetent = 'large',
   detent,
   onDetentChange,
   onHeightChange,
+  visibleHeight,
 }: DraggableSheetProps): ReactElement {
+  /** The sheet's full height at rest: grabber + content + bottom padding. */
   const [height, setHeight] = useState(0);
+  /**
+   * The visible height of the content area. Eased toward the measured content height, so the
+   * sheet grows and shrinks rather than snapping. -1 until the first measurement.
+   */
+  const contentHeight = useSharedValue(-1);
+  const [measured, setMeasured] = useState(false);
 
   /** Current offset in points: 0 is fully expanded (LARGE), `maxOffset` is the peek (SMALL). */
   const offset = useSharedValue(0);
@@ -111,7 +157,54 @@ export function DraggableSheet({
     reportVisible(height, next);
   }, [detent]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /*
+   * NEW CONTENT OPENS FULLY. A sheet dragged down to its peek on the home screen must not open
+   * the pick list half-hidden; the new height arrives with the content's own layout below.
+   */
+  const firstContent = useRef(true);
+  useEffect(() => {
+    if (firstContent.current) {
+      firstContent.current = false;
+      return;
+    }
+    offset.value = withTiming(0, { duration: RESIZE_MS, easing: RESIZE_EASING });
+  }, [contentKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * The content's natural height changed — new content, or a notice appearing inside it. Eases
+   * the visible area to it and re-reports the sheet's size to the caller (the map pads from it).
+   */
+  function onContentLayout(natural: number): void {
+    if (natural <= 0) return;
+
+    if (contentHeight.value < 0) {
+      // First measurement: no motion — the entering animation is already covering this frame.
+      contentHeight.value = natural;
+      setMeasured(true);
+    } else {
+      contentHeight.value = withTiming(natural, { duration: RESIZE_MS, easing: RESIZE_EASING });
+    }
+
+    const total = GRABBER_HEIGHT + natural + SHEET_PADDING_BOTTOM;
+    setHeight(total);
+
+    const max = draggable ? Math.max(0, total - peekHeight) : 0;
+    maxOffset.value = max;
+
+    if (!settled.current) {
+      settled.current = true;
+      offset.value = offsetFor(initialDetent);
+    } else if (offset.value > max) {
+      offset.value = max;
+    }
+
+    // The TARGET size, reported at once: the map's padding glides there on its own, over the
+    // same duration, so the two arrive together.
+    reportVisible(total, Math.min(offset.value, max));
+  }
+
   const pan = Gesture.Pan()
+    .enabled(draggable)
     // Vertical only, and only past a few points: a horizontal swipe or a tap on a row inside
     // the sheet must not become a drag.
     .activeOffsetY([-6, 6])
@@ -149,6 +242,21 @@ export function DraggableSheet({
     transform: [{ translateY: offset.value }],
   }));
 
+  const contentAreaStyle = useAnimatedStyle(() => ({
+    height: Math.max(0, contentHeight.value),
+  }));
+
+  // Publishes the live covered height — see `visibleHeight`. Runs on the UI thread only.
+  useAnimatedReaction(
+    () =>
+      contentHeight.value < 0
+        ? 0
+        : Math.max(0, GRABBER_HEIGHT + contentHeight.value + SHEET_PADDING_BOTTOM - offset.value),
+    (covered) => {
+      if (visibleHeight !== undefined) visibleHeight.value = covered;
+    },
+  );
+
   return (
     /*
       TWO VIEWS, ONE SHEET, AND THEY CANNOT BE MERGED.
@@ -163,37 +271,11 @@ export function DraggableSheet({
       its own, so it adds a node to the tree and nothing to the layout.
     */
     <Animated.View
-      // When one sheet swaps for another (idle ⇄ picking) the incoming one rises into place
-      // instead of the content blinking over. The outgoing one only fades — an opacity-only
-      // exit keeps its layout box from shoving the controls above it around while it leaves.
-      entering={FadeInDown.springify().damping(22).stiffness(170).mass(0.9)}
-      exiting={FadeOut.duration(140)}
+      // Only the sheet's FIRST appearance animates here. It stays mounted after that — a change of
+      // content is handled inside it (see `contentKey`), never by a new sheet arriving.
+      entering={FadeInDown.duration(RESIZE_MS).easing(RESIZE_EASING)}
     >
-      <Animated.View
-        style={[styles.sheet, animatedStyle]}
-        onLayout={(event) => {
-          const measured = event.nativeEvent.layout.height;
-          if (measured <= 0) return;
-          setHeight(measured);
-
-          const max = Math.max(0, measured - peekHeight);
-          maxOffset.value = max;
-
-          if (!settled.current) {
-            // First measurement: drop straight onto the default detent, no motion — the entering
-            // animation above is already covering this frame.
-            settled.current = true;
-            offset.value = offsetFor(initialDetent);
-          } else if (offset.value > max) {
-            // A later relayout shrank the sheet below where it was dragged; close the gap.
-            offset.value = max;
-          }
-
-          // AFTER the offset is decided, never before: a report taken above would describe the
-          // previous position, and on the very first layout there is no previous position at all.
-          reportVisible(measured, offset.value);
-        }}
-      >
+      <Animated.View style={[styles.sheet, animatedStyle]}>
         {/*
         THE DRAG HANDLE IS THE GRABBER, NOT THE WHOLE SHEET, and that is a fix rather than a
         preference. A pan gesture covering the sheet swallowed every vertical drag inside it —
@@ -203,11 +285,37 @@ export function DraggableSheet({
       */}
         <GestureDetector gesture={pan}>
           <View style={styles.grabberArea}>
-            <View style={styles.grabber} />
+            <View style={[styles.grabber, !draggable && styles.grabberHidden]} />
           </View>
         </GestureDetector>
 
-        {children}
+        {/*
+          THE CONTENT AREA: a clip whose height eases to the content's, around a measuring view
+          laid out at the content's natural height. The sheet's own height (and its rounded top
+          edge) follows the clip, so it grows and shrinks smoothly instead of snapping.
+
+          Before the first measurement the clip has no height of its own, so the content renders
+          naturally on the very first frame rather than starting collapsed.
+        */}
+        <Animated.View style={[styles.contentClip, measured && contentAreaStyle]}>
+          <View
+            style={styles.contentGutter}
+            onLayout={(event) => onContentLayout(event.nativeEvent.layout.height)}
+          >
+            {/*
+              KEYED BY `contentKey`: new content fades in a beat after the old fades out, inside
+              the same surface. The old one is gone almost before the new is visible, so the two
+              never read as one block of text printed over another.
+            */}
+            <Animated.View
+              key={contentKey}
+              entering={FadeIn.delay(70).duration(motion.layout).easing(RESIZE_EASING)}
+              exiting={FadeOut.duration(90)}
+            >
+              {children}
+            </Animated.View>
+          </View>
+        </Animated.View>
 
         {/*
           Fills whatever the sheet exposes below itself once dragged down. Without it the sheet's
@@ -231,18 +339,32 @@ const SPRING = {
   restSpeedThreshold: 0.1,
 } as const;
 
+/**
+ * `sm`: the root `SafeAreaView` in `app/_layout.tsx` already insets the whole navigator above the
+ * gesture bar, so this is purely the breathing room below the last line — a tight gap is all it
+ * needs, anything more was the single largest empty stretch in the sheet.
+ */
+const SHEET_PADDING_BOTTOM = space.sm;
+
 const styles = StyleSheet.create({
   sheet: {
     backgroundColor: colors.bg,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    paddingHorizontal: space.lg,
-    // `sm`: the root `SafeAreaView` in `app/_layout.tsx` already insets the whole navigator
-    // above the gesture bar, so this is purely the breathing room below the last line — a tight
-    // gap is all it needs, anything more was the single largest empty stretch in the sheet.
-    paddingBottom: space.sm,
+    paddingBottom: SHEET_PADDING_BOTTOM,
     ...shadow.card,
   },
+  // Clips content that is taller than the area while it eases open; the measuring view inside
+  // keeps the content's natural height regardless.
+  contentClip: { overflow: 'hidden' },
+  /*
+   * THE SIDE GUTTER LIVES INSIDE THE CLIP, not on the sheet. With it on the sheet the clip was
+   * exactly as wide as the cards, so every card shadow (the Destination box most visibly) was
+   * sliced off flat at its left and right edges. Inside, the clip spans the full sheet and the
+   * gutter is room for those shadows to draw in.
+   */
+  contentGutter: { paddingHorizontal: space.lg },
+  grabberHidden: { opacity: 0 },
   // Taller than the bar it contains: it is the only drag target now, so it needs a real height.
   grabberArea: { paddingTop: space.sm, paddingBottom: space.md, alignItems: 'center' },
   grabber: {

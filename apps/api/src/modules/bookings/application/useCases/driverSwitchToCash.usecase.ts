@@ -1,3 +1,4 @@
+import type { PaymentOverrideReason } from '@driverzone/contracts';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
@@ -127,5 +128,100 @@ export class CollectExtrasInCashUseCase {
     );
 
     return updated ?? booking;
+  }
+}
+
+export interface DriverPaymentOverrideInput {
+  bookingId: string;
+  driverId: string;
+  reason: PaymentOverrideReason;
+  note?: string | undefined;
+}
+
+/**
+ * THE DRIVER ENDS THE PAYMENT STEP THEMSELVES — the way through `CompleteTripUseCase`'s payment
+ * gate when the customer cannot get through it in their app: a booking made on the web by someone
+ * with no app, a phone that died before they chose how to pay, an online payment that keeps
+ * failing. `DriverSwitchToCashUseCase` above covers only the last of those in the driver app, and
+ * refuses anyone carrying an old cancellation fee — which left the driver with no way to end the
+ * trip at all.
+ *
+ * THE OLD FEE IS COLLECTED IN THE SAME CASH. The booking already carries it in `walletDebtPaise`
+ * and `payable.total` already includes it, so the driver is shown one figure and takes it.
+ * `CompleteTripUseCase` books all of it as cash the driver holds and marks the debt collected on
+ * the customer's wallet — the same two moves an online payment makes.
+ *
+ * THE REASON IS REQUIRED and written to the booking's event log with the driver as actor, so every
+ * override can be answered for later. The customer is told by push.
+ *
+ * An online payment that captures AFTER this is refunded by `ConfirmLatePaymentUseCase`, which
+ * sees the booking is no longer `UPI` — the customer is never charged twice.
+ */
+export class DriverPaymentOverrideUseCase {
+  constructor(
+    private readonly repo: BookingRepositoryPort,
+    private readonly notifications: NotificationsContract,
+  ) {}
+
+  async execute(input: DriverPaymentOverrideInput): Promise<Booking> {
+    const booking = await loadForDriver(this.repo, input.bookingId, input.driverId);
+
+    if (booking.status !== 'STARTED') {
+      throw AppError.conflict('You can only do this while the trip is under way.');
+    }
+    if (booking.paymentStatus === 'PAID') {
+      throw AppError.conflict('This trip has already been paid for online.');
+    }
+    const note = input.note?.trim() ?? '';
+    if (input.reason === 'OTHER' && note === '') {
+      throw AppError.badRequest('Tell us briefly why the customer could not pay in the app.');
+    }
+
+    const updated = await this.repo.overridePaymentToCash({
+      bookingId: booking.id,
+      driverId: input.driverId,
+      reason: input.reason,
+      metadata: {
+        previousPaymentMode: booking.paymentMode,
+        oldFeePaise: booking.walletDebtPaise,
+        ...(note === '' ? {} : { note }),
+      },
+    });
+
+    if (updated === null) {
+      // Lost a race: the payment captured, or the trip moved on, between the read and the write.
+      const now = await this.repo.findById(booking.id);
+      if (now?.paymentStatus === 'PAID') {
+        throw AppError.conflict('The online payment has just gone through — you can end the trip.');
+      }
+      throw AppError.conflict('This trip changed while you were doing that. Please try again.');
+    }
+
+    logger.info(
+      {
+        bookingId: booking.id,
+        reference: booking.reference,
+        driverId: input.driverId,
+        reason: input.reason,
+        oldFeePaise: booking.walletDebtPaise,
+      },
+      'driver overrode the payment step to cash',
+    );
+
+    try {
+      await this.notifications.sendBookingUpdate(
+        { role: 'CUSTOMER', id: booking.customerId },
+        {
+          bookingId: booking.id,
+          reference: booking.reference,
+          status: booking.status,
+          message: 'Your driver is collecting the payment for this trip in cash.',
+        },
+      );
+    } catch (error) {
+      logger.warn({ err: error, bookingId: booking.id }, 'could not notify the customer of a payment override');
+    }
+
+    return updated;
   }
 }

@@ -1,17 +1,17 @@
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { router, useFocusEffect } from 'expo-router';
 import {
   type ComponentProps,
   type ReactElement,
-  type ReactNode,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import {
-  ActivityIndicator,
+  FlatList,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -20,17 +20,30 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeInDown,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { BottomSheet } from '@/components/BottomSheet';
+import {
+  rideHistoryQuery,
+  type RideHistoryFilter,
+  type RideHistorySortOrder,
+  type RideHistoryView,
+} from '@/features/rides/historyQuery';
 import {
   toRideHistoryRow,
   type RideHistoryRow,
   type RideStatus,
 } from '@/features/rides/rideHistory';
 import { rebookParamsForPoints } from '@/features/booking/rebook';
-import { listBookings } from '@/lib/api/endpoints/bookings';
 import { formatPaise } from '@/lib/money';
-import { keys } from '@/lib/query/keys';
+import { motion } from '@/theme/motion';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 type FeatherName = ComponentProps<typeof Feather>['name'];
@@ -43,15 +56,12 @@ type FeatherName = ComponentProps<typeof Feather>['name'];
  * list endpoint shipped, so the badge, the fixture and every invented field are gone — see
  * `rideHistory.ts` on which fields had no honest source and were dropped rather than faked.
  *
- * FILTERS, SEARCH AND SORT STAY CLIENT-SIDE, over the (server-capped) history. They were always
- * real logic applied to fake rows; now they are real logic applied to real ones. Moving them to
- * the server is the same change that adds pagination, and neither is worth doing before a
- * customer's history outgrows one response.
+ * PAGED, WITH FILTERS, SEARCH AND SORT ON THE SERVER. The list loads `HISTORY_PAGE_SIZE` rows at a
+ * time and asks for the next page as the customer nears the end. The filters had to move with it:
+ * a client-side filter over paged data silently hides every match that is not on a loaded page.
  */
 
-type Filter = 'TODAY' | 'THIS_MONTH' | RideStatus;
-
-const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
+const FILTERS: ReadonlyArray<{ value: RideHistoryFilter; label: string }> = [
   { value: 'TODAY', label: 'Today' },
   { value: 'THIS_MONTH', label: 'This Month' },
   { value: 'COMPLETED', label: 'Completed' },
@@ -60,37 +70,92 @@ const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
   { value: 'SCHEDULED', label: 'Scheduled' },
 ];
 
-type SortOrder = 'NEWEST' | 'AMOUNT_DESC';
+/** Coming back to this tab refreshes the history only if it is at least this old. */
+const FOCUS_REFRESH_AFTER_MS = 30_000;
+
+/** Typing pauses this long before the search goes to the server — one request per word, not per key. */
+const SEARCH_DEBOUNCE_MS = 300;
+
+/**
+ * Only the cards visible on first paint rise in — about one screenful. Animating all of a long
+ * history (55 cards on the test account, each delayed 50ms more than the last) meant dozens of
+ * entering animations per visit, the last starting ~2.8s late, and every filter tap repeated them.
+ */
+const ANIMATED_ROWS = 6;
 
 export default function RidesScreen(): ReactElement {
-  const [filter, setFilter] = useState<Filter | null>(null);
+  const [filter, setFilter] = useState<RideHistoryFilter | null>(null);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
   const [sortSheet, setSortSheet] = useState(false);
-  const [sort, setSort] = useState<SortOrder>('NEWEST');
+  const [sort, setSort] = useState<RideHistorySortOrder>('NEWEST');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const view = useMemo<RideHistoryView>(() => ({ filter, search, sort }), [filter, search, sort]);
 
   /*
    * REFETCHED ON FOCUS, not polled. History changes only when the customer does something —
    * finishes a trip, cancels one — and both of those happen on another screen in this same app,
    * so coming back to this tab is exactly when it can be stale and the only time it can be.
+   *
+   * `keepPreviousData`: a chip tap or a new search keeps the old rows on screen, dimmed, until the
+   * new first page lands — instead of blanking the list to a skeleton for one round trip.
    */
-  const history = useQuery({
-    queryKey: keys.bookings.list(),
-    queryFn: listBookings,
-    select: (response) => response.bookings.map(toRideHistoryRow),
+  const history = useInfiniteQuery({
+    ...rideHistoryQuery(view),
+    placeholderData: keepPreviousData,
+    select: (data) => ({
+      rows: data.pages.flatMap((page) => page.bookings.map(toRideHistoryRow)),
+      summary: data.pages[0]?.summary ?? null,
+    }),
   });
+
+  // A different view starts at its top, not wherever the previous one was scrolled to.
+  const listRef = useRef<FlatList<RideHistoryRow>>(null);
+  useEffect(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [view]);
+
+  const loadMore = useCallback(() => {
+    // Not after a failed page — scrolling would otherwise re-fire it in a loop; the footer retries.
+    if (
+      history.hasNextPage &&
+      !history.isFetchingNextPage &&
+      !history.isFetchNextPageError &&
+      !history.isPlaceholderData
+    ) {
+      void history.fetchNextPage();
+    }
+  }, [history]);
 
   /*
    * The FIRST focus is skipped: the query is already fetching because the screen just mounted,
    * and refetching on top of it was a second identical request on every first visit.
    */
   const focusedBefore = useRef(false);
+  /*
+   * Read through a ref, not the closure: the focus callback is created once, and `dataUpdatedAt`
+   * changes with every fetch.
+   */
+  const lastFetchedAt = useRef(0);
+  lastFetchedAt.current = history.dataUpdatedAt;
   useFocusEffect(
     useCallback(() => {
       if (!focusedBefore.current) {
         focusedBefore.current = true;
         return;
       }
+      /*
+       * SILENT, AND ONLY WHEN IT COULD HAVE CHANGED. Flicking between tabs used to refetch every
+       * time, and each response re-rendered the whole list mid-transition. History older than
+       * `FOCUS_REFRESH_AFTER_MS` is refreshed in the background; anything fresher is left alone.
+       */
+      if (Date.now() - lastFetchedAt.current < FOCUS_REFRESH_AFTER_MS) return;
       void history.refetch();
       // `refetch` is stable for a given query key; depending on the whole query object would
       // re-run this on every status change it makes, including the refetch's own.
@@ -110,74 +175,25 @@ export default function RidesScreen(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const all = useMemo(() => history.data ?? [], [history.data]);
-
-  const rides = useMemo(() => {
-    let list = [...all];
-
-    if (
-      filter === 'COMPLETED' ||
-      filter === 'CANCELLED' ||
-      filter === 'RUNNING' ||
-      filter === 'SCHEDULED'
-    ) {
-      list = list.filter((ride) => ride.status === filter);
-    }
-    // Both read `at` — when the trip actually happened, not when it was booked. See
-    // `rideHappenedAt`: a trip completed at 9pm belongs under today even if it was scheduled
-    // yesterday, and a still-searching one falls back to its scheduled time.
-    if (filter === 'TODAY' || filter === 'THIS_MONTH') {
-      const now = new Date();
-      list = list.filter((ride) => {
-        const at = new Date(ride.at);
-        if (filter === 'TODAY') {
-          return (
-            at.getFullYear() === now.getFullYear() &&
-            at.getMonth() === now.getMonth() &&
-            at.getDate() === now.getDate()
-          );
-        }
-        return at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth();
-      });
-    }
-
-    const needle = query.trim().toLowerCase();
-    if (needle.length > 0) {
-      // `reference` is what the customer can actually read off a row; the booking id is a Mongo
-      // ObjectId they have never seen and could not type.
-      list = list.filter(
-        (ride) =>
-          ride.reference.toLowerCase().includes(needle) ||
-          (ride.driverName?.toLowerCase().includes(needle) ?? false) ||
-          ride.pickup.toLowerCase().includes(needle) ||
-          ride.drop.toLowerCase().includes(needle),
-      );
-    }
-
-    list.sort((a, b) =>
-      sort === 'NEWEST' ? Date.parse(b.at) - Date.parse(a.at) : b.totalPaise - a.totalPaise,
-    );
-
-    return list;
-  }, [all, filter, query, sort]);
+  const rides = history.data?.rows ?? NO_RIDES;
+  /*
+   * OVER THE WHOLE HISTORY, never the filtered view — the server sends it with the first page, so
+   * the tiles no longer depend on how much of the history happens to be loaded. See
+   * `RideHistorySummary` for why spend counts completed trips only, net of wallet credit.
+   */
+  const summary = history.data?.summary ?? null;
 
   /*
-   * OVER THE WHOLE HISTORY, never the filtered view. "Total Trips" that dropped to 2 because a
-   * filter chip is on would be a different statistic wearing the same label.
-   *
-   * Spend counts COMPLETED trips only: a cancelled ride may still have cost a fee, but that fee
-   * is a charge row, not this trip's fare, and adding fares for trips that never happened would
-   * overstate what the customer has spent.
+   * THE ENTRANCE PLAYS ONCE PER VISIT TO THE SCREEN'S FIRST ROWS, then switches off — so filters,
+   * sorts, search, later pages and background refreshes swap rows in place instead of replaying it.
    */
-  const stats = useMemo(() => {
-    // `paidPaise`, not `totalPaise` — money that left the customer, so a trip wallet credit
-    // reduced counts for what they actually handed over.
-    const totalSpent = all
-      .filter((ride) => ride.status === 'COMPLETED')
-      .reduce((sum, ride) => sum + ride.paidPaise, 0);
-
-    return { total: all.length, totalSpent };
-  }, [all]);
+  const [entranceDone, setEntranceDone] = useState(false);
+  const hasRows = rides.length > 0;
+  useEffect(() => {
+    if (entranceDone || !hasRows) return undefined;
+    const timer = setTimeout(() => setEntranceDone(true), 600);
+    return () => clearTimeout(timer);
+  }, [entranceDone, hasRows]);
 
   return (
     <View style={styles.root}>
@@ -206,7 +222,7 @@ export default function RidesScreen(): ReactElement {
       </View>
 
       {searching ? (
-        <Animated.View entering={FadeInDown.duration(180)} style={styles.searchBox}>
+        <Animated.View entering={FadeInDown.duration(motion.enter)} style={styles.searchBox}>
           <Feather name="search" size={16} color={colors.faint} />
           <TextInput
             value={query}
@@ -225,10 +241,45 @@ export default function RidesScreen(): ReactElement {
         </Animated.View>
       ) : null}
 
-      <ScrollView
-        style={styles.flex}
+      {/*
+        A VIRTUALISED LIST, not a ScrollView over `.map()`. Only the cards near the screen are
+        rendered, so a long history scrolls and switches tabs as smoothly as a short one — the
+        ScrollView built every card on every visit and every filter change.
+      */}
+      <FlatList
+        ref={listRef}
+        // Dimmed while a new filter or search is loading over the previous one's rows.
+        style={[styles.flex, history.isPlaceholderData && styles.stale]}
+        // Rows whenever there are any — a failed background refresh keeps what was already shown.
+        data={rides}
+        keyExtractor={rideKey}
+        renderItem={({ item, index }) => (
+          <RideItem ride={item} index={index} animate={!entranceDone && index < ANIMATED_ROWS} />
+        )}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        // Infinite scroll: the next page is asked for while about half a screen is still left.
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.6}
+        ListFooterComponent={
+          history.isFetchingNextPage ? (
+            <RideListSkeleton rows={2} />
+          ) : history.isFetchNextPageError ? (
+            <Pressable
+              onPress={() => void history.fetchNextPage()}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.retry, styles.footerRetry, pressed && styles.retryPressed]}
+            >
+              <Feather name="refresh-cw" size={14} color={colors.fg} />
+              <Text style={styles.retryLabel}>Couldn’t load more. Try again</Text>
+            </Pressable>
+          ) : null
+        }
         // Pull-to-refresh, because this is a list a customer will reach for after a trip ends and
         // "did my last ride land?" deserves an answer they can ask for directly.
         refreshControl={
@@ -238,54 +289,60 @@ export default function RidesScreen(): ReactElement {
             tintColor={colors.muted}
           />
         }
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsRow}
-        >
-          {FILTERS.map((option) => {
-            const active = filter === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => setFilter(active ? null : option.value)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                style={[styles.chip, active && styles.chipActive]}
-              >
-                <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        ListHeaderComponent={
+          <>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsRow}
+            >
+              {FILTERS.map((option) => {
+                const active = filter === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setFilter(active ? null : option.value)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
 
-        <View style={styles.statsGrid}>
-          {/*
-            Plain Views, NOT `Stagger`. The entering animation on the first tile (no delay) froze
-            part-way on Android and left "Total Trips" pushed down over the first ride card for
-            good. These are the screen's static header, already in place the moment it opens —
-            there is nothing for them to animate into.
-          */}
-          <View style={styles.statTileWrap}>
-            <StatTile icon="headphones" label="Total Trips" value={String(stats.total)} />
-          </View>
-          <View style={styles.statTileWrap}>
-            <StatTile
-              icon="credit-card"
-              label="Total Spent"
-              value={formatPaise(stats.totalSpent)}
-            />
-          </View>
-        </View>
-
-        {history.isPending ? (
-          <View style={styles.empty}>
-            <ActivityIndicator color={colors.muted} />
-          </View>
-        ) : history.isError ? (
+            <View style={styles.statsGrid}>
+              {/*
+                Plain Views, NOT an entering animation. One on the first tile froze part-way on
+                Android and left "Total Trips" pushed down over the first ride card for good. These
+                are the screen's static header, already in place the moment it opens.
+              */}
+              <View style={styles.statTileWrap}>
+                <StatTile
+                  icon="headphones"
+                  label="Total Trips"
+                  value={String(summary?.total_trips ?? 0)}
+                  loading={history.isPending}
+                />
+              </View>
+              <View style={styles.statTileWrap}>
+                <StatTile
+                  icon="credit-card"
+                  label="Total Spent"
+                  value={summary?.total_spent.amount_display ?? formatPaise(0)}
+                  loading={history.isPending}
+                />
+              </View>
+            </View>
+          </>
+        }
+        ListEmptyComponent={
+          history.isPending ? (
+            <RideListSkeleton />
+          ) : history.isError && !hasRows ? (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <Feather name="wifi-off" size={22} color={colors.muted} />
@@ -304,7 +361,8 @@ export default function RidesScreen(): ReactElement {
               <Text style={styles.retryLabel}>Try again</Text>
             </Pressable>
           </View>
-        ) : rides.length === 0 ? (
+        ) : (
+          // `ListEmptyComponent` only renders when there are no rows to show.
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <Feather name="inbox" size={22} color={colors.muted} />
@@ -315,19 +373,14 @@ export default function RidesScreen(): ReactElement {
               would point them at a control that is not the problem.
             */}
             <Text style={styles.emptyText}>
-              {all.length === 0
+              {summary?.total_trips === 0
                 ? 'No rides yet. Your trips will show up here.'
                 : 'No rides match this filter.'}
             </Text>
           </View>
-        ) : (
-          rides.map((ride, index) => (
-            <Stagger key={ride.id} index={index + 2}>
-              <RideRow ride={ride} />
-            </Stagger>
-          ))
-        )}
-      </ScrollView>
+          )
+        }
+      />
 
       <BottomSheet visible={sortSheet} onClose={() => setSortSheet(false)}>
         <Text style={styles.sheetTitle}>Sort by</Text>
@@ -353,19 +406,66 @@ export default function RidesScreen(): ReactElement {
   );
 }
 
-/** A staggered rise on first paint, top to bottom — the stat row, then each ride card in turn. */
-function Stagger({
+const NO_RIDES: RideHistoryRow[] = [];
+
+function rideKey(ride: RideHistoryRow): string {
+  return ride.id;
+}
+
+/**
+ * One ride card in the list. The first screenful rises in on the screen's first paint, staggered
+ * top to bottom; every other card — further down, or after a filter or refresh — appears in place.
+ */
+function RideItem({
+  ride,
   index,
-  style,
-  children,
+  animate,
 }: {
+  ride: RideHistoryRow;
   index: number;
-  style?: object;
-  children: ReactNode;
+  animate: boolean;
 }): ReactElement {
+  // Spread rather than `entering={cond ? x : undefined}`: with `exactOptionalPropertyTypes` an
+  // explicit `undefined` is not the same as leaving the prop out.
   return (
-    <Animated.View entering={FadeInDown.delay(index * 50).duration(200)} style={style}>
-      {children}
+    <Animated.View {...(animate ? { entering: FadeInDown.delay(index * motion.stagger).duration(motion.emphasis) } : {})}>
+      <RideRow ride={ride} />
+    </Animated.View>
+  );
+}
+
+/**
+ * THE LOADING STATE IS THE LIST'S OWN SHAPE, not a spinner. Cards with grey bars where the text
+ * will be, so the screen reads as "your rides, arriving" and does not jump when they land. One
+ * shared opacity pulse drives every block — a single animated value on the UI thread.
+ */
+/** `rows` placeholder cards — a screenful on first load, two under the list while a page loads. */
+function RideListSkeleton({ rows = 4 }: { rows?: number }): ReactElement {
+  const pulse = useSharedValue(0.5);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 750, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true,
+    );
+    return () => cancelAnimation(pulse);
+  }, [pulse]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <Animated.View style={pulseStyle} accessibilityLabel="Loading your rides">
+      {Array.from({ length: rows }, (_, key) => (
+        <View key={key} style={styles.rideCard}>
+          <View style={[styles.rideIcon, styles.skeletonFill]} />
+          <View style={styles.flex}>
+            <View style={[styles.skeletonBar, styles.skeletonTitle]} />
+            <View style={[styles.skeletonBar, styles.skeletonShort]} />
+            <View style={[styles.skeletonBar, styles.skeletonLine]} />
+            <View style={[styles.skeletonBar, styles.skeletonLine]} />
+          </View>
+          <View style={[styles.skeletonBar, styles.skeletonPrice]} />
+        </View>
+      ))}
     </Animated.View>
   );
 }
@@ -375,11 +475,14 @@ function StatTile({
   label,
   value,
   tone = 'default',
+  loading = false,
 }: {
   icon: FeatherName;
   label: string;
   value: string;
   tone?: 'default' | 'good' | 'bad';
+  /** A grey bar in place of the figure — a "0" while loading would be a wrong number, not a blank. */
+  loading?: boolean;
 }): ReactElement {
   return (
     <View style={styles.statTile}>
@@ -397,7 +500,11 @@ function StatTile({
             color={tone === 'good' ? colors.success : tone === 'bad' ? colors.danger : colors.fg}
           />
         </View>
-        <Text style={styles.statValue}>{value}</Text>
+        {loading ? (
+          <View style={[styles.skeletonBar, styles.skeletonStat]} />
+        ) : (
+          <Text style={styles.statValue}>{value}</Text>
+        )}
       </View>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -531,6 +638,8 @@ function formatClock(at: Date): string {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
+  stale: { opacity: 0.55 },
+  footerRetry: { alignSelf: 'center', marginBottom: space.lg },
 
   header: {
     flexDirection: 'row',
@@ -689,6 +798,15 @@ const styles = StyleSheet.create({
   },
   rebookChipPressed: { backgroundColor: colors.brandSoft, borderColor: colors.borderStrong },
   rebookChipLabel: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
+
+  // ── Loading skeleton ───────────────────────────────────────────────────────────────────────
+  skeletonFill: { backgroundColor: colors.bgSunken },
+  skeletonBar: { height: 10, borderRadius: radius.pill, backgroundColor: colors.bgSunken },
+  skeletonTitle: { width: '55%', height: 12 },
+  skeletonShort: { width: '35%', marginTop: space.sm },
+  skeletonLine: { width: '80%', marginTop: space.sm },
+  skeletonPrice: { width: 48, height: 12, marginLeft: space.sm },
+  skeletonStat: { width: 56, height: 20 },
 
   sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.sm },
   sortOption: {

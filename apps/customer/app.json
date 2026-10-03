@@ -6,6 +6,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "driverzone",
+    "experiments": {
+      "reactCompiler": true
+    },
     "backgroundColor": "#F2F200",
     "icon": "./assets/icon.png",
     "plugins": [

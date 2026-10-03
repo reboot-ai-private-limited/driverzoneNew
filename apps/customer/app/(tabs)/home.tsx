@@ -14,13 +14,13 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Animated, {
   FadeIn,
   FadeInDown,
   FadeInUp,
   FadeOut,
   LinearTransition,
+  useSharedValue,
 } from 'react-native-reanimated';
 import type { AddressLabel, Direction, SavedAddressDto } from '@driverzone/contracts';
 import { Logo } from '@/components/Logo';
@@ -59,6 +59,7 @@ import { checkCoverage } from '@/lib/api/endpoints/coverage';
 import { addAddress, getProfile, removeAddress } from '@/lib/api/endpoints/customer';
 import { getCurrentBooking } from '@/lib/api/endpoints/bookings';
 import { keys } from '@/lib/query/keys';
+import { motion } from '@/theme/motion';
 import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
 
 /**
@@ -175,6 +176,12 @@ export default function HomeScreen(): ReactElement {
    * and a collapsed sheet covers only its peek.
    */
   const [sheetHeight, setSheetHeight] = useState(0);
+  /**
+   * The sheet's covered height LIVE, frame by frame, on the UI thread — the map's padding and
+   * crosshair read it so they move exactly with the sheet. `sheetHeight` above is the resting value,
+   * for the logic that only needs that.
+   */
+  const sheetCovered = useSharedValue(0);
   /**
    * The strip of map left above whatever sheet is showing — what decides whether the recentre
    * button has anywhere to sit. See `RECENTRE_MIN_MAP`.
@@ -651,6 +658,7 @@ export default function HomeScreen(): ReactElement {
     const seed =
       next === 'pick-pickup' ? (pickup ?? location.point) : (drop ?? pickup ?? location.point);
 
+    map.current?.expectInsetChange();
     setMode(next);
     setMapPick(false);
     searchedPoint.current = null;
@@ -668,6 +676,7 @@ export default function HomeScreen(): ReactElement {
       return;
     }
 
+    map.current?.expectInsetChange();
     setMode('idle');
     setDraft(null);
     setDraftAddress(null);
@@ -719,6 +728,7 @@ export default function HomeScreen(): ReactElement {
     const point = fromSavedAddress(saved);
     adopt(point, mode === 'pick-pickup' ? 'pick-pickup' : 'pick-drop');
 
+    map.current?.expectInsetChange();
     setMode('idle');
     setMapPick(false);
     setDraft(null);
@@ -741,6 +751,8 @@ export default function HomeScreen(): ReactElement {
    */
   function focusFound(point: TripPoint): void {
     setSearchMissed(false);
+    // The list sheet becomes the shorter pin bar: the camera flies once that resize is done.
+    if (!mapPick) map.current?.expectInsetChange();
     setMapPick(true);
     // Their own words on screen immediately, ahead of the reverse geocode that will confirm them.
     setDraftAddress(point.address);
@@ -839,20 +851,29 @@ export default function HomeScreen(): ReactElement {
   const picking = mode !== 'idle';
   const savedAddresses = profile.data?.saved_addresses ?? [];
 
-  // No markers while picking: the centre pin IS the point being chosen, and a second pin for the
-  // same end of the trip reads as two different answers.
+  // HIDDEN while picking: the centre pin IS the point being chosen, and a second pin for the
+  // same end of the trip reads as two different answers. Hidden, not left out — the markers fade
+  // and stay mounted; see `FadingMarker` in MapCanvas.
   const markers: MapMarker[] = [];
-  if (!picking && pickup !== null) {
+  if (pickup !== null) {
     markers.push({
       id: 'pickup',
       lat: pickup.lat,
       lng: pickup.lng,
       kind: 'pickup',
       title: 'Pickup',
+      hidden: picking,
     });
   }
-  if (!picking && drop !== null) {
-    markers.push({ id: 'drop', lat: drop.lat, lng: drop.lng, kind: 'drop', title: 'Drop' });
+  if (drop !== null) {
+    markers.push({
+      id: 'drop',
+      lat: drop.lat,
+      lng: drop.lng,
+      kind: 'drop',
+      title: 'Drop',
+      hidden: picking,
+    });
   }
 
   return (
@@ -865,6 +886,7 @@ export default function HomeScreen(): ReactElement {
         centrePinKind={mode === 'pick-drop' ? 'drop' : 'pickup'}
         userLocation={location.isReal ? { lat: location.point.lat, lng: location.point.lng } : null}
         bottomInset={sheetHeight}
+        liveInset={sheetCovered}
         onRegionSettled={picking && mapPick ? handleRegionSettled : undefined}
       />
 
@@ -873,8 +895,10 @@ export default function HomeScreen(): ReactElement {
           <Animated.View
             key="search"
             style={styles.searchRow}
-            entering={FadeInUp.duration(220)}
-            exiting={FadeOut.duration(140)}
+            // Starts as the logo row finishes leaving, so the two cross in the same spot rather
+            // than sitting on top of each other at half opacity.
+            entering={FadeInUp.delay(motion.handoff).duration(motion.emphasis)}
+            exiting={FadeOut.duration(motion.exit)}
           >
             {/* The back control is its own circle rather than an icon crammed inside the field.
                 Two different actions — leave, and type — should not share one surface. */}
@@ -947,9 +971,9 @@ export default function HomeScreen(): ReactElement {
         {picking && suggestOpen && (places.suggestions.length > 0 || places.empty) ? (
           <Animated.View
             style={styles.suggestRow}
-            entering={FadeInDown.duration(180)}
-            exiting={FadeOut.duration(120)}
-            layout={LinearTransition.duration(200)}
+            entering={FadeInDown.duration(motion.enter)}
+            exiting={FadeOut.duration(motion.exit)}
+            layout={LinearTransition.duration(motion.layout)}
           >
             <View style={styles.suggestSpacer} />
             <GlassPanel rounded="card" liquid style={styles.suggestGlass}>
@@ -1002,8 +1026,8 @@ export default function HomeScreen(): ReactElement {
           <Animated.View
             key="header"
             style={styles.headerRow}
-            entering={FadeIn.duration(240)}
-            exiting={FadeOut.duration(140)}
+            entering={FadeIn.delay(motion.handoff).duration(motion.emphasis)}
+            exiting={FadeOut.duration(motion.exit)}
           >
             {/* The logo keeps its solid brand fill — it is the one thing on screen that must
                 never take its colour from whatever tile happens to be behind it. */}
@@ -1027,8 +1051,8 @@ export default function HomeScreen(): ReactElement {
           <Animated.Text
             style={styles.pill}
             entering={FadeIn.duration(160)}
-            exiting={FadeOut.duration(120)}
-            layout={LinearTransition.duration(200)}
+            exiting={FadeOut.duration(motion.exit)}
+            layout={LinearTransition.duration(motion.layout)}
           >
             No match for that search.
           </Animated.Text>
@@ -1038,8 +1062,8 @@ export default function HomeScreen(): ReactElement {
             style={styles.pill}
             accessibilityLiveRegion="polite"
             entering={FadeIn.duration(160)}
-            exiting={FadeOut.duration(120)}
-            layout={LinearTransition.duration(200)}
+            exiting={FadeOut.duration(motion.exit)}
+            layout={LinearTransition.duration(motion.layout)}
           >
             {savedNotice}
           </Animated.Text>
@@ -1055,9 +1079,9 @@ export default function HomeScreen(): ReactElement {
         */}
         {live !== null && !picking ? (
           <Animated.View
-            entering={FadeInDown.duration(220)}
+            entering={FadeInDown.duration(motion.emphasis)}
             exiting={FadeOut.duration(140)}
-            layout={LinearTransition.duration(200)}
+            layout={LinearTransition.duration(motion.layout)}
           >
             <GlassPanel rounded="card" style={styles.resumeBanner}>
               <Pressable
@@ -1087,16 +1111,13 @@ export default function HomeScreen(): ReactElement {
       </View>
 
       {/*
-        `react-native-keyboard-controller`'s KeyboardAvoidingView, `padding` on BOTH platforms. The
-        sheet is anchored to the bottom edge, so the search box in it is exactly where the keyboard
-        lands. React Native's own version relied on Android's `adjustResize`, which edge-to-edge
-        (Android 15+) no longer applies — the search field sat behind the keys on Android.
+        THE KEYBOARD DOES NOT MOVE THE SHEET. The only text field on this screen is the search box
+        in the TOP bar, so nothing down here needs to clear the keys. It used to sit in a
+        KeyboardAvoidingView, which lifted the whole "Set your pickup point" sheet over the middle
+        of the map whenever the customer typed — hiding the pin and the place being searched for.
+        The keyboard now simply covers the bottom of the sheet while it is up.
       */}
-      <KeyboardAvoidingView
-        style={styles.sheetLayer}
-        pointerEvents="box-none"
-        behavior="padding"
-      >
+      <View style={styles.sheetLayer} pointerEvents="box-none">
         {/*
           THE RECENTRE BUTTON RIDES THE SHEET, so it has to know when to get off.
 
@@ -1123,6 +1144,21 @@ export default function HomeScreen(): ReactElement {
           </GlassPanel>
         ) : null}
 
+        {/*
+          ONE SHEET FOR THE WHOLE SCREEN. Home, the pick list and the pin bar are three CONTENTS
+          of the same sheet, not three sheets: switching between them eases the sheet's height and
+          crossfades what is inside it, while the white surface itself never leaves. Three sheets
+          used to swap in and out, and on a device that read as the bottom of the screen
+          overlapping itself and then bouncing.
+        */}
+        <DraggableSheet
+          contentKey={!picking ? 'home' : mapPick ? 'pin' : 'pick-list'}
+          // The pin bar has nothing under the fold to drag down to.
+          draggable={!(picking && mapPick)}
+          peekHeight={picking ? PICK_PEEK : HOME_PEEK}
+          onHeightChange={setSheetHeight}
+          visibleHeight={sheetCovered}
+        >
         {picking ? (
           /*
             Draggable, exactly like the home sheet, and for the same reason: a customer
@@ -1142,13 +1178,7 @@ export default function HomeScreen(): ReactElement {
 
               Short and fixed rather than draggable: there is nothing under the fold to reach.
             */
-            <Animated.View
-              key="pickbar"
-              style={styles.pickBar}
-              entering={FadeInDown.duration(240)}
-              exiting={FadeOut.duration(140)}
-              onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}
-            >
+            <View style={styles.pickBarBody}>
               <View style={styles.draftRow}>
                 <Feather name="map-pin" size={16} color={colors.muted} />
                 <Text style={styles.draftAddress} numberOfLines={2}>
@@ -1182,7 +1212,7 @@ export default function HomeScreen(): ReactElement {
                 disabled={draft === null}
                 showArrow={false}
               />
-            </Animated.View>
+            </View>
           ) : (
             /*
               LIST MODE: the ways to answer without touching the map — a saved place, or the
@@ -1190,7 +1220,7 @@ export default function HomeScreen(): ReactElement {
               yet; offering to confirm would be asking the customer to commit to a place the
               screen has not shown them.
             */
-            <DraggableSheet key="pick-list" peekHeight={PICK_PEEK} onHeightChange={setSheetHeight}>
+            <>
               <Text style={styles.sheetTitle}>
                 {mode === 'pick-pickup' ? 'Set your pickup point' : 'Set your destination'}
               </Text>
@@ -1233,12 +1263,12 @@ export default function HomeScreen(): ReactElement {
                   ))}
                 </View>
               ) : null}
-            </DraggableSheet>
+            </>
           )
         ) : (
           // Two detents — LARGE (all of it, the default) and SMALL (`HOME_PEEK`, more map
           // showing). Opens fully so the whole trip is in reach; drag down for more map.
-          <DraggableSheet key="home" peekHeight={HOME_PEEK} onHeightChange={setSheetHeight}>
+          <>
             {/*
               THE FIELD SWAPS, THE LIST STAYS. Before a destination exists the sheet asks a
               question with a search field; once one is set, that field gives way to the trip
@@ -1328,8 +1358,8 @@ export default function HomeScreen(): ReactElement {
             */}
             {noPackage && trip.unavailable !== null ? (
               <Animated.View
-                entering={FadeIn.duration(180)}
-                exiting={FadeOut.duration(120)}
+                entering={FadeIn.duration(motion.enter)}
+                exiting={FadeOut.duration(motion.exit)}
                 style={[styles.notice, styles.tone_bad]}
                 accessibilityLiveRegion="polite"
               >
@@ -1353,8 +1383,8 @@ export default function HomeScreen(): ReactElement {
                 thing left. */}
             {missingTimeOnly ? (
               <Animated.View
-                entering={FadeIn.duration(180)}
-                exiting={FadeOut.duration(120)}
+                entering={FadeIn.duration(motion.enter)}
+                exiting={FadeOut.duration(motion.exit)}
                 style={[styles.notice, styles.tone_warn]}
                 accessibilityLiveRegion="polite"
               >
@@ -1388,9 +1418,10 @@ export default function HomeScreen(): ReactElement {
               disabled={!canContinue}
               loading={pricing}
             />
-          </DraggableSheet>
+          </>
         )}
-      </KeyboardAvoidingView>
+        </DraggableSheet>
+      </View>
 
       {/*
         BEFORE ANDROID'S LOCATION PROMPT, once. Closing the sheet counts as "Not now": the
@@ -1732,15 +1763,9 @@ const styles = StyleSheet.create({
   savedLabel: { ...text.label, color: colors.muted, marginBottom: space.sm },
   // Shorter than the idle sheet's list: this sheet also carries a title, the pinned address, the
   // save link and a confirm button, and the confirm button must never be pushed off screen.
-  pickBar: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    paddingHorizontal: space.lg,
-    paddingTop: space.lg,
-    paddingBottom: space.lg,
-    ...shadow.card,
-  },
+  // Inside the shared sheet, which supplies the surface, the side padding and the top strip; this
+  // only adds back the extra room below the button the standalone bar used to have.
+  pickBarBody: { paddingBottom: space.sm },
   mapPickRow: {
     flexDirection: 'row',
     alignItems: 'center',

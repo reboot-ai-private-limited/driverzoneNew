@@ -19,6 +19,7 @@ export interface NewBooking {
   distanceKm: number | null;
   carCategory: Booking['carCategory'];
   vehicleType: Booking['vehicleType'];
+  plateNumber: Booking['plateNumber'];
   preferFavouriteDrivers: boolean;
   dispatchMode: Booking['dispatchMode'];
   /**
@@ -30,6 +31,9 @@ export interface NewBooking {
   walletDebtPaise: number;
   fareSnapshot: FareSnapshot;
   paymentMode: Booking['paymentMode'];
+  /** Omitted means the default — `NOT_SELECTED`. An admin booking sets `CASH` or `PAID`. */
+  paymentStatus?: Booking['paymentStatus'] | undefined;
+  paymentReference?: string | null | undefined;
   isScheduled: boolean;
   scheduledAt: Date;
   dispatchAt: Date;
@@ -64,6 +68,7 @@ export interface TransitionPatch {
   waitingChargePaise?: number;
   driverLateMinutes?: number;
   paymentId?: string;
+  extrasCollection?: Booking['extrasCollection'];
 }
 
 /**

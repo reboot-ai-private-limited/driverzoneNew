@@ -245,12 +245,20 @@ export default function TripReceiptScreen(): ReactElement {
               </View>
               <View style={styles.flex}>
                 <Text style={styles.payBannerTitle}>
-                  {cash ? 'Cash' : booking.payment_mode === 'UPI' ? 'Online (UPI)' : 'Pay at end of trip'}
+                  {cash
+                    ? 'Cash'
+                    : booking.payment_mode === 'PREPAID'
+                      ? 'Prepaid'
+                      : booking.payment_mode === 'UPI'
+                        ? 'Online (UPI)'
+                        : 'Pay at end of trip'}
                 </Text>
                 <Text style={styles.payBannerBody}>
                   {cash
                     ? 'Collected from the customer at the end of the trip.'
-                    : booking.payment_mode === 'UPI'
+                    : booking.payment_mode === 'PREPAID'
+                      ? 'Paid to DriverZone before the trip. Nothing to collect for the fare.'
+                      : booking.payment_mode === 'UPI'
                       ? booking.payment_status === 'PAID'
                         ? 'Paid online to DriverZone. Nothing to collect.'
                         : 'The customer pays online to DriverZone. Nothing to collect.'

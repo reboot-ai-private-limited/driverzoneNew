@@ -105,7 +105,9 @@ function fakeRepo() {
   return repo as unknown as BookingRepositoryPort & typeof repo;
 }
 
-function build() {
+type SavedCar = { id: string; plateNumber: string; isDefault: boolean };
+
+function build(options: { cars?: SavedCar[]; requirePlate?: boolean } = {}) {
   const repo = fakeRepo();
   const quotes: QuoteConsumptionContract = {
     findById: vi.fn(async () => quote()),
@@ -119,11 +121,24 @@ function build() {
     append: vi.fn(async () => []),
   } as unknown as WalletPublicContract;
   const scheduleDispatch = vi.fn(async () => undefined);
+  const vehicles = {
+    vehiclesForBooking: vi.fn(async () => options.cars ?? []),
+    upsertVehicleFromBooking: vi.fn(async () => 'veh_new'),
+  };
 
   return {
     repo,
     scheduleDispatch,
-    useCase: new CreateBookingUseCase(repo, quotes, settings, wallet, scheduleDispatch),
+    vehicles,
+    useCase: new CreateBookingUseCase(
+      repo,
+      quotes,
+      settings,
+      wallet,
+      scheduleDispatch,
+      vehicles,
+      options.requirePlate ?? false,
+    ),
   };
 }
 
@@ -199,6 +214,105 @@ describe('CreateBookingUseCase — admin booking (manual dispatch)', () => {
     expect(scheduleDispatch).toHaveBeenCalledTimes(1);
     expect(repo.created()[0]?.createdBy).toEqual({ type: 'CUSTOMER', id: 'cus_1' });
     expect(repo.transitions()[0]?.actor).toEqual({ type: 'SYSTEM', id: null });
+  });
+});
+
+describe('CreateBookingUseCase — the admin sets the payment mode', () => {
+  const admin = { dispatchMode: 'MANUAL' as const, createdBy: { type: 'ADMIN' as const, id: 'adm_1' } };
+
+  it('a PREPAID booking starts paid, with its reference, and leaves the wallet alone', async () => {
+    const { useCase, repo } = build();
+    const wallet = (useCase as unknown as { wallet: WalletPublicContract }).wallet;
+
+    await useCase.execute({
+      ...input,
+      ...admin,
+      presetPayment: { mode: 'PREPAID', reference: 'UTR 4455' },
+    });
+
+    expect(repo.created()[0]).toMatchObject({
+      paymentMode: 'PREPAID',
+      paymentStatus: 'PAID',
+      paymentReference: 'UTR 4455',
+      walletCreditPaise: 0,
+      walletDebtPaise: 0,
+    });
+    expect(wallet.planFor).not.toHaveBeenCalled();
+  });
+
+  it('a CASH booking starts as cash', async () => {
+    const { useCase, repo } = build();
+
+    await useCase.execute({ ...input, ...admin, presetPayment: { mode: 'CASH', reference: null } });
+
+    expect(repo.created()[0]).toMatchObject({ paymentMode: 'CASH', paymentStatus: 'CASH' });
+  });
+
+  it('a customer booking still leaves the mode for later', async () => {
+    const { useCase, repo } = build();
+
+    await useCase.execute(input);
+
+    expect(repo.created()[0]?.paymentMode).toBeNull();
+    expect(repo.created()[0]?.paymentStatus).toBeUndefined();
+  });
+});
+
+describe('CreateBookingUseCase — the car number on the booking', () => {
+  const cars: SavedCar[] = [
+    { id: 'veh_1', plateNumber: 'WB74AB1234', isDefault: false },
+    { id: 'veh_2', plateNumber: 'WB74CD5678', isDefault: true },
+  ];
+
+  it('copies the chosen saved car onto the booking', async () => {
+    const { useCase, repo } = build({ cars });
+    await useCase.execute({ ...input, vehicleId: 'veh_1' });
+    expect(repo.created()[0]?.plateNumber).toBe('WB74AB1234');
+  });
+
+  it('refuses a car id that is not on the customer’s profile', async () => {
+    const { useCase } = build({ cars });
+    await expect(useCase.execute({ ...input, vehicleId: 'veh_other' })).rejects.toThrow(
+      /not saved on your profile/,
+    );
+  });
+
+  it('records a typed plate, uppercased, and saves it to the profile', async () => {
+    const { useCase, repo, vehicles } = build();
+    await useCase.execute({ ...input, plateNumber: ' wb74ef9012 ' });
+    expect(repo.created()[0]?.plateNumber).toBe('WB74EF9012');
+    expect(vehicles.upsertVehicleFromBooking).toHaveBeenCalledWith('cus_1', {
+      category: 'SEDAN',
+      plateNumber: 'WB74EF9012',
+    });
+  });
+
+  it('falls back to the default car when none is named — the older app’s path', async () => {
+    const { useCase, repo } = build({ cars });
+    await useCase.execute(input);
+    expect(repo.created()[0]?.plateNumber).toBe('WB74CD5678');
+  });
+
+  it('books with no plate while the rule is off', async () => {
+    const { useCase, repo } = build();
+    await useCase.execute(input);
+    expect(repo.created()[0]?.plateNumber).toBeNull();
+  });
+
+  it('refuses a customer with no car once the rule is on', async () => {
+    const { useCase, repo } = build({ requirePlate: true });
+    await expect(useCase.execute(input)).rejects.toMatchObject({ code: 'VEHICLE_REQUIRED' });
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('never refuses an admin booking for a missing car, even with the rule on', async () => {
+    const { useCase, repo } = build({ requirePlate: true });
+    await useCase.execute({
+      ...input,
+      dispatchMode: 'MANUAL',
+      createdBy: { type: 'ADMIN', id: 'adm_1' },
+    });
+    expect(repo.created()[0]?.plateNumber).toBeNull();
   });
 });
 

@@ -1,10 +1,13 @@
 import type {
   CreateAddressRequest,
+  CreateVehicleRequest,
   CustomerProfileDto,
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   SavedAddressDto,
   UpdateCustomerProfileRequest,
+  UpdateVehicleRequest,
+  VehicleDto,
 } from '@driverzone/contracts';
 import { ROLE_PREFIX } from '../../config';
 import { request } from '../client';
@@ -53,6 +56,36 @@ export function addAddress(body: CreateAddressRequest): Promise<SavedAddressDto>
  */
 export function removeAddress(id: string): Promise<void> {
   return request<void>(`${ROLE_PREFIX}/addresses/${id}`, {
+    method: 'DELETE',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `/customer/vehicles` — the customer's own cars (the driver drives the customer's car, so the
+ * plate is how they find it). The list itself comes back on `getProfile().vehicles`.
+ *
+ * The first car saved becomes the default; setting `is_default` on another moves the default to
+ * it (the server keeps at most one). A plate already saved is refused with 409.
+ */
+export function addVehicle(body: CreateVehicleRequest): Promise<VehicleDto> {
+  return request<VehicleDto>(`${ROLE_PREFIX}/vehicles`, {
+    method: 'POST',
+    body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+export function updateVehicle(id: string, body: UpdateVehicleRequest): Promise<VehicleDto> {
+  return request<VehicleDto>(`${ROLE_PREFIX}/vehicles/${id}`, {
+    method: 'PATCH',
+    body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+export function removeVehicle(id: string): Promise<void> {
+  return request<void>(`${ROLE_PREFIX}/vehicles/${id}`, {
     method: 'DELETE',
     token: getAccessToken() ?? undefined,
   });

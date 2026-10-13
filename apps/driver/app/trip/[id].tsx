@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BookingDto, BookingStatus } from '@driverzone/contracts';
+import type { BookingDto, BookingStatus, ExtrasCollection } from '@driverzone/contracts';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { type ComponentProps, type ReactElement, useEffect, useRef, useState } from 'react';
@@ -28,6 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { AppIcon, type AppIconName } from '@/components/AppIcon';
 import { CancelTripSheet } from '@/components/CancelTripSheet';
+import { EndTripExtrasSheet, extrasOwedPaise } from '@/components/EndTripExtrasSheet';
 import { PaymentOverrideSheet } from '@/components/PaymentOverrideSheet';
 import { ExtensionRequestCard } from '@/components/ExtensionRequestCard';
 import { OtpInput } from '@/components/OtpInput';
@@ -36,6 +37,7 @@ import { RateCustomer } from '@/components/RateCustomer';
 import { SlideToConfirm } from '@/components/SlideToConfirm';
 import { currentFix } from '@/duty/locationPings';
 import { isDriverCancellable } from '@/features/trip/cancellation';
+import { formatWhen } from '@/features/trips/scheduledWhen';
 import { ApiError } from '@/lib/api/ApiError';
 import { getDriverSettings } from '@/lib/api/endpoints/driver';
 import {
@@ -213,17 +215,35 @@ export default function TripScreen(): ReactElement {
     },
   });
 
+  /*
+   * THE EXTRAS SHEET — opened instead of completing straight away when a UPI or prepaid trip still
+   * has waiting time or an extra day to settle. The driver says how it was paid; the server books
+   * the money accordingly. Its own error line, because the screen's one sits behind the sheet.
+   */
+  const [settlingExtras, setSettlingExtras] = useState(false);
+  const [extrasError, setExtrasError] = useState<string | null>(null);
+
   const finish = useMutation({
-    mutationFn: () => completeTrip(id),
-    onMutate: () => setError(null),
+    mutationFn: (extrasCollection?: ExtrasCollection) => completeTrip(id, extrasCollection),
+    onMutate: () => {
+      setError(null);
+      setExtrasError(null);
+    },
     onSuccess: (result) => {
+      setSettlingExtras(false);
       adopt(result.booking);
       void queryClient.invalidateQueries({ queryKey: keys.earnings.all() });
       // The trip has just joined the history. Without this the Trips tab still shows it as live
       // until its next focus refetch, which is the one moment a driver is most likely to look.
       void queryClient.invalidateQueries({ queryKey: keys.trip.list() });
     },
-    onError: (cause) => fail(cause, 'Could not complete the trip.'),
+    onError: (cause, extrasCollection) => {
+      if (extrasCollection !== undefined) {
+        setExtrasError(cause instanceof Error ? cause.message : 'Could not complete the trip.');
+        return;
+      }
+      fail(cause, 'Could not complete the trip.');
+    },
   });
 
   /*
@@ -277,10 +297,22 @@ export default function TripScreen(): ReactElement {
   }
 
   const cash = booking.payment_mode === 'CASH';
+  const prepaid = booking.payment_mode === 'PREPAID';
   const paymentPending =
     booking.payment_mode === null ||
     (booking.payment_mode === 'UPI' && booking.payment_status !== 'PAID');
   const canEndTrip = !paymentPending;
+  const owedExtras = extrasOwedPaise(booking);
+
+  /** Ending the trip: straight through, unless there are extras the driver must account for. */
+  const endTrip = (): void => {
+    if (owedExtras > 0) {
+      setExtrasError(null);
+      setSettlingExtras(true);
+      return;
+    }
+    finish.mutate(undefined);
+  };
 
   return (
     <View style={styles.root}>
@@ -350,9 +382,51 @@ export default function TripScreen(): ReactElement {
             icon={cash ? 'rupee' : 'credit-card'}
             label="Payment"
             value={
-              cash ? 'Cash' : booking.payment_mode === 'UPI' ? 'Online' : 'Pay at end'
+              cash
+                ? 'Cash'
+                : prepaid
+                  ? 'Prepaid'
+                  : booking.payment_mode === 'UPI'
+                    ? 'Online'
+                    : 'Pay at end'
             }
           />
+        </View>
+
+        {/*
+          THE CAR TO LOOK FOR. The driver drives the customer's own car, so the plate is how they
+          find it at the kerb. Copied onto the booking when it was made; absent on older bookings.
+        */}
+        {booking.car_plate !== null ? (
+          <View style={styles.metaRow}>
+            <Meta icon="truck" label="Customer's car" value={booking.car_plate} />
+          </View>
+        ) : null}
+
+        {/*
+          WHEN — the pickup time until the trip starts, then the time it started and how long it
+          has been running (or took). The same three times the customer and the admin panel show.
+        */}
+        <View style={styles.metaRow}>
+          <Meta
+            icon="calendar"
+            label={booking.timestamps.started_at === null ? 'Pickup time' : 'Started at'}
+            value={
+              booking.timestamps.started_at === null
+                ? formatWhen(booking.scheduled_at)
+                : clockTime(booking.timestamps.started_at)
+            }
+          />
+          {booking.timestamps.started_at === null ? null : (
+            <Meta
+              icon="clock"
+              label={booking.timestamps.completed_at === null ? 'Running for' : 'Duration'}
+              value={durationText(
+                booking.timestamps.started_at,
+                booking.timestamps.completed_at ?? new Date().toISOString(),
+              )}
+            />
+          )}
         </View>
 
         {/*
@@ -420,7 +494,7 @@ export default function TripScreen(): ReactElement {
             <View style={styles.paymentWarningRow}>
               <Feather name="clock" size={16} color="#B45309" />
               <Text style={styles.paymentWarningText}>
-                Waiting for customer online payment ({booking.payable.total.amount_display}). The ride cannot be ended until payment is received.
+                Waiting for customer online payment ({booking.payable.total.amount_display}). If they pay you in cash instead, tap below.
               </Text>
             </View>
             {/* The way through when their phone is dead, out of signal, or their card keeps
@@ -456,13 +530,29 @@ export default function TripScreen(): ReactElement {
           Separate from the "waiting for online payment" notice above it: that one is the FARE, and
           on a trip in this state the fare has usually been paid for hours.
         */}
+        {/*
+          PREPAID: the customer paid the company before the trip. Said plainly, because a driver
+          used to collecting at the end would otherwise ask for money that is already paid.
+        */}
+        {booking.status === 'STARTED' && prepaid ? (
+          <Animated.View entering={FadeIn} style={styles.paymentSuccess}>
+            <Feather name="check-circle" size={16} color="#166534" />
+            <Text style={styles.paymentSuccessText}>
+              Prepaid — the customer has already paid the fare. Do not collect it.
+              {owedExtras > 0
+                ? ' Only the extra charges are still due; you will settle them when you end the trip.'
+                : ''}
+            </Text>
+          </Animated.View>
+        ) : null}
+
         {booking.status === 'STARTED' && booking.payable.outstanding.amount_paise > 0 ? (
           <Animated.View entering={FadeIn} style={styles.paymentWarningColumn}>
             <View style={styles.paymentWarningRow}>
               <Feather name="clock" size={16} color="#B45309" />
               <Text style={styles.paymentWarningText}>
                 Your customer still has to pay {booking.payable.outstanding.amount_display} for the
-                extra day. The trip cannot be ended until it comes through.
+                extra day — online in their app, or in cash to you.
               </Text>
             </View>
             {/*
@@ -603,8 +693,8 @@ export default function TripScreen(): ReactElement {
             <SlideToConfirm
               label={canEndTrip ? 'Slide to end trip' : 'Payment pending…'}
               disabled={!canEndTrip}
-              onConfirm={() => finish.mutate()}
-              loading={finish.isPending}
+              onConfirm={endTrip}
+              loading={finish.isPending && !settlingExtras}
             />
           </Animated.View>
         ) : null}
@@ -618,7 +708,9 @@ export default function TripScreen(): ReactElement {
             <Text style={styles.doneBody}>
               {cash
                 ? `You collected ${booking.payable.total.amount_display}. Your share is in your earnings.`
-                : 'Your share has been added to your earnings.'}
+                : booking.extras_collection === 'CASH'
+                  ? 'You collected the extra charges in cash. Your share has been added to your earnings.'
+                  : 'Your share has been added to your earnings.'}
             </Text>
 
             {/*
@@ -705,6 +797,15 @@ export default function TripScreen(): ReactElement {
           // The override's response carries no adjustments; re-read so the amounts are complete.
           void queryClient.invalidateQueries({ queryKey: keys.trip.detail(id) });
         }}
+      />
+
+      <EndTripExtrasSheet
+        visible={settlingExtras}
+        booking={booking}
+        loading={finish.isPending}
+        error={extrasError}
+        onClose={() => setSettlingExtras(false)}
+        onConfirm={(collection) => finish.mutate(collection)}
       />
 
       <CancelTripSheet
@@ -895,6 +996,20 @@ function openMaps(lat: number, lng: number, label: string): void {
   void Linking.openURL(url).catch(() => {
     void Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
   });
+}
+
+/** `6:05 pm` — the same `en-IN` rendering `formatWhen` uses, so the two times on screen match. */
+function clockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+}
+
+/** `1h 20m`, `45m`, `3h` between two instants. Not a ticking timer — it moves with the poll. */
+function durationText(fromIso: string, toIso: string): string {
+  const minutes = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${String(rest)}m`;
+  return rest === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(rest)}m`;
 }
 
 /** Metres under a kilometre, then one decimal. "1200 m" is harder to judge than "1.2 km". */

@@ -54,6 +54,11 @@ export interface NewWalletEntry {
  *
  * `CREDIT_GRANT`, `FINE` and `ADJUSTMENT` are deliberately absent — an admin may legitimately
  * fine the same booking twice, or correct it more than once.
+ *
+ * `UNPAID_TRIP_CHARGE` is absent too, but for a different reason: this list IS the unique
+ * index's partial filter, and changing it means rebuilding that index on a live collection. Its
+ * one writer runs after the COMPLETED transition, which a retry cannot pass a second time, so the
+ * transition is the guard instead.
  */
 export const ONCE_PER_BOOKING_WALLET_TYPES = [
   'CANCELLATION_FEE',
@@ -75,6 +80,7 @@ const REQUIRED_SIGN: Record<WalletEntryType, 'POSITIVE' | 'NEGATIVE' | null> = {
   // The exact reversal of the line above, so it can only ever be positive.
   RELEASED_FROM_RIDE: 'POSITIVE',
   DEBT_COLLECTED: 'POSITIVE',
+  UNPAID_TRIP_CHARGE: 'NEGATIVE',
   ADJUSTMENT: null,
 };
 

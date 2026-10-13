@@ -135,6 +135,8 @@ describe('buildCreateBookingRequest', () => {
         drop,
         carCategory: 'SEDAN',
         vehicleType: 'MANUAL',
+        paymentMode: 'CASH',
+        paymentReference: '',
       }),
     ).toEqual({
       customer_id: 'cus_1',
@@ -143,7 +145,35 @@ describe('buildCreateBookingRequest', () => {
       drop_address: 'Sevoke Road, Siliguri',
       car_category: 'SEDAN',
       vehicle_type: 'MANUAL',
+      payment_mode: 'CASH',
     });
+  });
+
+  const base = {
+    customerId: 'cus_1',
+    quoteId: 'qot_1',
+    pickup,
+    drop,
+    carCategory: 'SEDAN' as const,
+    vehicleType: 'MANUAL' as const,
+  };
+
+  it('sends a prepaid booking with its reference, trimmed', () => {
+    const request = buildCreateBookingRequest({
+      ...base,
+      paymentMode: 'PREPAID',
+      paymentReference: '  UTR 4455 ',
+    });
+    expect(request).toMatchObject({ payment_mode: 'PREPAID', payment_reference: 'UTR 4455' });
+  });
+
+  it('drops a reference typed against a cash booking', () => {
+    const request = buildCreateBookingRequest({
+      ...base,
+      paymentMode: 'CASH',
+      paymentReference: 'UTR 4455',
+    });
+    expect(request).not.toHaveProperty('payment_reference');
   });
 });
 

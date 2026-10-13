@@ -225,6 +225,19 @@ export function formatTime(at: Date): string {
 }
 
 /**
+ * How long something took — `1h 20m`, `45m`, `3h`. Minutes rounded, never negative.
+ *
+ * Shared by the live trip screen and the ride receipt, so "Duration" reads the same on both.
+ */
+export function formatDuration(from: Date, to: Date): string {
+  const minutes = Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${String(rest)}m`;
+  return rest === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(rest)}m`;
+}
+
+/**
  * Whole CALENDAR days apart, not elapsed 24-hour periods — the difference decides whether a time
  * reads as "Tomorrow". 11pm tonight to 1am tomorrow is two hours and one calendar day, and
  * calling it "Today" would be wrong on the only axis the customer cares about.

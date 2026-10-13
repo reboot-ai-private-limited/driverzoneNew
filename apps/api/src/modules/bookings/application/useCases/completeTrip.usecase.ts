@@ -1,3 +1,4 @@
+import type { BookingPaymentMode, ExtrasCollection } from '@driverzone/contracts';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
 import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
@@ -20,7 +21,28 @@ export interface CompleteTripInput {
   actualDistanceM?: number | undefined;
   /** Cash the driver actually took, on a CASH booking. Ignored on a prepaid one. */
   cashCollectedPaise?: number | undefined;
+  /**
+   * How the driver settled the extras. Omitted (an older driver app) means what each mode always
+   * meant — see `defaultExtrasCollection`.
+   */
+  extrasCollection?: ExtrasCollection | undefined;
   idempotencyKey: string;
+}
+
+/**
+ * What an omitted `extrasCollection` means, per payment mode — the behaviour an older driver app
+ * has always had, so it keeps working unchanged:
+ *
+ *   - UPI: charged online at the end (the original settlement).
+ *   - CASH: taken at the door with the fare.
+ *   - PREPAID: UNPAID. An older driver app does not know a trip can be prepaid, so "collected in
+ *     cash" would be a guess — and guessing wrong books the driver as holding money they never
+ *     took. Left as the customer's dues, a wrong guess is visible and cheap to correct.
+ */
+function defaultExtrasCollection(mode: BookingPaymentMode): ExtrasCollection {
+  if (mode === 'UPI') return 'ONLINE';
+  if (mode === 'CASH') return 'CASH';
+  return 'UNPAID';
 }
 
 export interface CompletedTrip {
@@ -75,18 +97,34 @@ export class CompleteTripUseCase {
       }
     }
 
+    const collection = input.extrasCollection ?? defaultExtrasCollection(booking.paymentMode);
+
     /*
-     * THE SAME GATE THE FARE HAS, for the extra days.
-     *
-     * Read BEFORE the transition, unlike the sum used for settlement below — this has to refuse
-     * the completion, and a check that runs after the status has already moved to COMPLETED can
-     * only complain about it. Safe to read twice: a trip cannot gain an extension between here and
-     * the transition a few lines down, because `RequestBookingExtensionUseCase` requires STARTED.
-     *
-     * Without it, a customer who paid for the trip and then bought a day simply never paid for the
-     * day: the driver ended the trip, and the extra became a receivable nobody chased.
+     * ONLINE MEANS THE GATEWAY, which only a UPI trip has an order with. On a cash or prepaid trip
+     * there is nothing to charge the extras to at the end — the customer pays an extra day online
+     * from their app while the trip runs (`PayTripExtrasUseCase`), and anything still owed at the
+     * end is cash or dues.
      */
-    if (booking.paymentMode === 'UPI') {
+    if (collection === 'ONLINE' && booking.paymentMode !== 'UPI') {
+      throw AppError.badRequest(
+        'Online settlement is only for trips paid online. Choose cash, or mark it unpaid.',
+      );
+    }
+
+    /*
+     * THE SAME GATE THE FARE HAS, for the extra days — but only for an OLDER driver app, which
+     * sends no `extrasCollection` and has no other way to say what happened to the money.
+     *
+     * A driver app that sends one has answered the question this gate was asking: the extra day
+     * was taken in cash, or is left as the customer's dues. Both end the trip with the money
+     * accounted for, which is what the gate existed to guarantee — so cash is never refused
+     * (2026-10-13). Without the gate on the old path, a customer who paid for the trip and then
+     * bought a day simply never paid for the day.
+     *
+     * Read BEFORE the transition: this has to refuse the completion, and a check after the status
+     * has moved to COMPLETED can only complain about it.
+     */
+    if (input.extrasCollection === undefined && booking.paymentMode === 'UPI') {
       const agreed = totalExtension(await this.extensions.listForBooking(booking.id));
       if (agreed.amountPaise - booking.paidExtensionPaise > 0) {
         throw AppError.conflict(
@@ -114,6 +152,28 @@ export class CompleteTripUseCase {
           })
         : { waitedMinutes: 0, chargeableMinutes: 0, amountPaise: 0, capped: false };
 
+    /*
+     * Every extra day the driver actually agreed to. DECLINED and EXPIRED requests are excluded by
+     * `totalExtension`, so a customer who asked three times and was told yes once pays for one.
+     *
+     * Read BEFORE the transition, so that how the extras were settled can be written in the same
+     * update that completes the trip. It cannot move between here and there: an extension needs a
+     * STARTED trip and the driver's own acceptance, and the driver is the one ending it.
+     */
+    const extras = totalExtension(await this.extensions.listForBooking(booking.id));
+
+    /*
+     * WHAT IS STILL OWED for the extras at the door.
+     *
+     * `paidExtensionPaise` is the extra day already collected — folded into the UPI order at
+     * payment selection, paid online through the extras order, or taken in cash mid-trip
+     * (`CollectExtrasInCashUseCase` bumps it too). Not on a CASH trip, where the driver takes the
+     * whole extension with the fare at the end and `expectedCashPaise` already counts all of it.
+     */
+    const collectedExtrasPaise = booking.paymentMode === 'CASH' ? 0 : booking.paidExtensionPaise;
+    const uncollectedExtrasPaise = Math.max(0, extras.amountPaise - collectedExtrasPaise);
+    const owedPaise = waiting.amountPaise + uncollectedExtrasPaise;
+
     const completed = await this.repo.transition({
       bookingId: booking.id,
       from: 'STARTED',
@@ -122,34 +182,22 @@ export class CompleteTripUseCase {
       metadata: {
         ...(input.actualDistanceM === undefined ? {} : { actualDistanceM: input.actualDistanceM }),
         waitedMinutes: waiting.waitedMinutes,
+        ...(owedPaise > 0 ? { extrasCollection: collection, extrasOwedPaise: owedPaise } : {}),
       },
       patch: {
         completedAt: now,
         waitingMinutes: waiting.waitedMinutes,
         waitingChargePaise: waiting.amountPaise,
+        // Recorded only when there was something to settle — "collected in cash" on a trip with
+        // no extras would be a claim about money that never existed.
+        ...(owedPaise > 0 ? { extrasCollection: collection } : {}),
       },
     });
 
     if (completed === null) return explainLostTransition(this.repo, booking, 'COMPLETED');
 
-    /*
-     * Every extra day the driver actually agreed to. DECLINED and EXPIRED requests are excluded by
-     * `totalExtension`, so a customer who asked three times and was told yes once pays for one.
-     *
-     * Read AFTER the transition, like the waiting charge: by this point the trip is over and no
-     * further extension can be accepted, so the sum cannot move underneath the settlement.
-     */
-    const extras = totalExtension(await this.extensions.listForBooking(booking.id));
-
     // ── Settle the extras ───────────────────────────────────────────────────────────────────
     let settledPaise = 0;
-
-    /*
-     * A cash trip settles its extras in cash too — the driver takes fare plus waiting at the end —
-     * so there is no second Razorpay charge. The adjustment row is still written, because a
-     * receipt has to explain the extra either way.
-     */
-    const settleThroughGateway = booking.paymentMode === 'UPI';
 
     if (waiting.amountPaise > 0) {
       await this.charges.recordAdjustment({
@@ -175,34 +223,21 @@ export class CompleteTripUseCase {
     }
 
     /*
-     * ONE SETTLEMENT FOR BOTH, and it has to be one. `settle-${booking.id}` is derived from the
-     * booking precisely so a retried completion cannot charge twice — which means two separate
-     * charges under that key would silently collect only the first. Waiting and extensions are
-     * summed and taken together.
+     * THREE WAYS TO SETTLE what is still owed (`owedPaise`, worked out above):
      *
-     * `paidExtensionPaise` is whatever `SelectPaymentMethodUseCase` already folded into the
-     * booking-confirmation order for an extension accepted before the customer paid — billing it
-     * again here would double-charge exactly that portion. The adjustment row above still records
-     * the FULL extension amount; only the amount actually collected now is reduced.
+     *   ONLINE — one gateway charge for waiting and extensions together. `settle-${booking.id}` is
+     *     derived from the booking so a retried completion cannot charge twice, which is also why
+     *     it must be ONE charge: two under that key would silently collect only the first.
+     *   CASH — the driver took it at the door. On a cash trip it is part of the fare's cash; on a
+     *     UPI or prepaid trip it is its own `CASH_COLLECTED` row in the ledger below.
+     *   UNPAID — the trip ends anyway and the amount becomes the customer's dues
+     *     (`UNPAID_TRIP_CHARGE`), added to their next trip. A trip can always be ended.
      *
-     * ONLY WHILE THE BOOKING IS STILL `UPI`. That order is the only thing that collected it, and
-     * a booking that has since switched to cash — the customer's own choice, or
-     * `DriverSwitchToCashUseCase` — never paid it. The payment gate at the top of this method has
-     * already established that a `UPI` booking's charge captured, so this needs no second check.
+     * The adjustment rows above record the FULL extension either way — a receipt has to explain
+     * the charge whoever collected it.
      */
-    /*
-     * ON A UPI TRIP THIS NOW ALWAYS CLEARS THE EXTRAS, because the gate at the top of this method
-     * refuses the completion until it does — so in practice `owedPaise` here is the waiting charge
-     * alone. The subtraction stays rather than being replaced by a zero: it is what MAKES that
-     * true, and a cash trip switched to UPI mid-way, or a future path that collects extras some
-     * other way, must still not be billed twice.
-     */
-    const prepaidExtrasPaise = booking.paymentMode === 'UPI' ? booking.paidExtensionPaise : 0;
-    const uncollectedExtrasPaise = Math.max(0, extras.amountPaise - prepaidExtrasPaise);
-    const owedPaise = waiting.amountPaise + uncollectedExtrasPaise;
-
     if (owedPaise > 0) {
-      if (settleThroughGateway) {
+      if (collection === 'ONLINE') {
         try {
           const { payment } = await this.payments.charge({
             bookingId: booking.id,
@@ -226,9 +261,26 @@ export class CompleteTripUseCase {
             'could not collect the trip extras — recorded as owed',
           );
         }
-      } else {
-        // Cash: the driver took it at the door along with the fare, so it is already collected.
+      } else if (collection === 'CASH') {
+        // The driver took it at the door, so it is already collected.
         settledPaise = owedPaise;
+      } else if (this.wallet) {
+        try {
+          await this.wallet.append([
+            {
+              customerId: booking.customerId,
+              bookingId: booking.id,
+              entryType: 'UNPAID_TRIP_CHARGE',
+              amountPaise: -owedPaise,
+              note: `Unpaid extras on trip ${booking.reference}`,
+            },
+          ]);
+        } catch (error) {
+          logger.error(
+            { err: error, bookingId: booking.id, amountPaise: owedPaise },
+            'trip extras were left unpaid but could NOT be recorded as customer dues',
+          );
+        }
       }
     }
 
@@ -290,9 +342,9 @@ export class CompleteTripUseCase {
      * the gap, rather than quietly booking a number nobody handed over.
      */
     if (booking.paymentMode === 'CASH') {
-      const collected =
-        input.cashCollectedPaise ??
-        expectedCashPaise(booking, waiting.amountPaise + extras.amountPaise);
+      // Extras left UNPAID were not taken at the door, so the expected cash is the fare alone.
+      const extrasInCash = collection === 'UNPAID' ? 0 : waiting.amountPaise + extras.amountPaise;
+      const collected = input.cashCollectedPaise ?? expectedCashPaise(booking, extrasInCash);
 
       entries.push({
         driverId: input.driverId,
@@ -320,6 +372,23 @@ export class CompleteTripUseCase {
       });
     }
 
+    /*
+     * EXTRAS TAKEN IN CASH AT THE END of a UPI or prepaid trip — waiting, and any extra day still
+     * owed. The fare reached the company another way; this money is in the driver's pocket, so it
+     * is the company's and comes back as a negative row, like a cash fare. Separate from the
+     * mid-trip `cashExtensionPaise` row above, which `owedPaise` already excludes, so nothing is
+     * counted twice.
+     */
+    if (booking.paymentMode !== 'CASH' && collection === 'CASH' && owedPaise > 0) {
+      entries.push({
+        driverId: input.driverId,
+        bookingId: booking.id,
+        entryType: 'CASH_COLLECTED',
+        amountPaise: -owedPaise,
+        note: `Extras collected in cash for ${booking.reference}`,
+      });
+    }
+
     try {
       await this.ledger.append(entries);
     } catch (error) {
@@ -327,8 +396,8 @@ export class CompleteTripUseCase {
     }
 
     /*
-     * AN OLD CANCELLATION FEE TAKEN IN CASH. Only reachable through the driver's payment override —
-     * a customer choosing cash themselves is refused while they owe a fee. The driver took the fee
+     * AN OLD CANCELLATION FEE TAKEN IN CASH — a customer choosing cash while they owe one (allowed
+     * since 2026-10-13), or the driver's payment override. The driver took the fee
      * with the fare (it is in `expectedCashPaise` and in the `CASH_COLLECTED` row above), so the
      * debt is now collected: the same `DEBT_COLLECTED` row an online capture writes, and
      * once-per-booking in the wallet, so a retried completion cannot clear it twice.
@@ -375,11 +444,11 @@ export class CompleteTripUseCase {
       waitingChargePaise: waiting.amountPaise,
       /*
        * What the customer has ACTUALLY paid — `settledPaise` stays 0 when the settlement charge
-       * failed and the extras became a receivable, and that must keep showing through here.
-       * `paidExtensionPaise` is added because that money moved earlier, at payment selection, so
-       * it is neither in the frozen fare nor in this settlement.
+       * failed or the extras were left unpaid, and that must keep showing through here.
+       * `collectedExtrasPaise` is added because that money moved earlier (payment selection, the
+       * extras order, or cash mid-trip), so it is neither in the frozen fare nor in this settlement.
        */
-      totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise + prepaidExtrasPaise,
+      totalPaise: booking.fareSnapshot.fare.totalPaise + settledPaise + collectedExtrasPaise,
     };
   }
 }

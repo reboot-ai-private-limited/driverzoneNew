@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
 import type {
+  AdminPaymentMode,
   CarCategory,
   DispatchMode,
   PaymentMode,
@@ -9,6 +10,7 @@ import type {
 } from '@driverzone/contracts';
 import type { DispatchScheduler } from './confirmBookingPayment.usecase.js';
 import type { QuoteConsumptionContract } from '../../../quotes/quotes.public.js';
+import type { CustomerBookingProfileContract } from '../../../identity/identity.public.js';
 import type { SettingsReadContract } from '../../../settings/settings.public.js';
 import type { WalletPublicContract } from '../../../wallet/wallet.public.js';
 import {
@@ -32,6 +34,10 @@ export interface CreateBookingInput {
    */
   carCategory: CarCategory;
   vehicleType: VehicleTypePreference;
+  /** One of the customer's saved cars. Takes precedence over `plateNumber`. */
+  vehicleId?: string | undefined;
+  /** A car number typed at booking — saved to the customer's profile as well. */
+  plateNumber?: string | undefined;
   /**
    * Ring this customer's favourites first. Frozen onto the booking, not consulted here — `bookings`
    * sits below `favourites` and below `dispatch`, and neither the list nor the wave is its
@@ -51,6 +57,16 @@ export interface CreateBookingInput {
    * booking on their behalf passes `{ type: 'ADMIN', id }`.
    */
   createdBy?: Actor | undefined;
+  /**
+   * The admin's payment choice, set up front. Omitted — every customer booking — leaves the mode
+   * null until the customer picks one after the trip starts.
+   *
+   * `PREPAID`: the customer already paid the company. The booking starts `PAID`, and the wallet is
+   * NOT applied to it — the admin collected a fixed figure offline, so spending the customer's
+   * credit or adding their old fee here would make the trip disagree with what they actually paid.
+   * An old fee stays on the wallet as dues for a later trip.
+   */
+  presetPayment?: { mode: AdminPaymentMode; reference: string | null } | undefined;
 }
 
 export interface CreatedBooking {
@@ -77,7 +93,55 @@ export class CreateBookingUseCase {
     /** The customer's balance: what it takes off this fare, and what it adds to it. */
     private readonly wallet: WalletPublicContract,
     private readonly scheduleDispatch: DispatchScheduler,
+    /** The customer's saved cars — read to pick the plate, written when a new one is typed. */
+    private readonly vehicles: Pick<
+      CustomerBookingProfileContract,
+      'vehiclesForBooking' | 'upsertVehicleFromBooking'
+    >,
+    /** `BOOKING_REQUIRE_PLATE`: refuse a booking that cannot name a car. Off until the app asks. */
+    private readonly requirePlate: boolean,
   ) {}
+
+  /**
+   * WHICH CAR THIS TRIP IS FOR, as a plate to copy onto the booking.
+   *
+   *   1. `vehicleId` — one of their saved cars. An id that is not theirs is refused, not ignored:
+   *      silently falling back to the default would send the driver to look for the wrong car.
+   *   2. `plateNumber` — typed now. Saved to the profile (an upsert keyed on the plate, so a
+   *      repeat is not a duplicate) so the next booking can pick it.
+   *   3. Neither — their default car, else their first. This is the admin panel's path too.
+   *
+   * Null when the customer has no car on file and sent none. Whether that is allowed is
+   * `requirePlate`'s call, made by the caller.
+   */
+  private async resolvePlate(input: CreateBookingInput): Promise<string | null> {
+    if (input.vehicleId !== undefined) {
+      const saved = await this.vehicles.vehiclesForBooking(input.customerId);
+      const chosen = saved.find((v) => v.id === input.vehicleId);
+      if (chosen === undefined) {
+        throw AppError.badRequest('That car is not saved on your profile. Please choose again.');
+      }
+      return chosen.plateNumber;
+    }
+
+    if (input.plateNumber !== undefined) {
+      const plate = input.plateNumber.trim().toUpperCase();
+      try {
+        await this.vehicles.upsertVehicleFromBooking(input.customerId, {
+          category: input.carCategory,
+          plateNumber: plate,
+        });
+      } catch (error) {
+        // Saving it for next time is a convenience. The booking still records the plate, so a
+        // failure here costs the customer one re-type, never the trip.
+        logger.warn({ err: error, customerId: input.customerId }, 'could not save a typed plate');
+      }
+      return plate;
+    }
+
+    const saved = await this.vehicles.vehiclesForBooking(input.customerId);
+    return (saved.find((v) => v.isDefault) ?? saved[0])?.plateNumber ?? null;
+  }
 
   async execute(input: CreateBookingInput): Promise<CreatedBooking> {
     const quote = await this.quotes.findById(input.quoteId);
@@ -114,7 +178,26 @@ export class CreateBookingUseCase {
      * the next trip rather than as lost money. The fix is a reservation on the balance, which is
      * only worth building when a customer can plausibly have two checkouts open at once.
      */
-    const plan = await this.wallet.planFor(input.customerId, quote.fare.totalPaise);
+    /*
+     * Enforced on the CUSTOMER's own booking only. An admin booking from the panel has no plate
+     * field to fill (yet) and is often for a customer who has never opened the app, so refusing it
+     * would only stop ops from doing their job; it uses the saved car when there is one.
+     */
+    const plateNumber = await this.resolvePlate(input);
+    const bookedByCustomer = (input.createdBy?.type ?? 'CUSTOMER') === 'CUSTOMER';
+    if (plateNumber === null && this.requirePlate && bookedByCustomer) {
+      throw new AppError({
+        statusCode: 422,
+        code: 'VEHICLE_REQUIRED',
+        message: 'Please add your car number to book a driver.',
+        isExpected: true,
+      });
+    }
+
+    const prepaid = input.presetPayment?.mode === 'PREPAID';
+    const plan = prepaid
+      ? { creditAppliedPaise: 0, debtAddedPaise: 0 }
+      : await this.wallet.planFor(input.customerId, quote.fare.totalPaise);
 
     const dispatchMode: DispatchMode = input.dispatchMode ?? 'AUTO';
     const createdBy: Actor = input.createdBy ?? { type: 'CUSTOMER', id: input.customerId };
@@ -156,13 +239,20 @@ export class CreateBookingUseCase {
       distanceKm: quote.distanceKm,
       carCategory: input.carCategory,
       vehicleType: input.vehicleType,
+      plateNumber,
       preferFavouriteDrivers: input.preferFavouriteDrivers,
       dispatchMode,
       createdBy,
       walletCreditPaise: plan.creditAppliedPaise,
       walletDebtPaise: plan.debtAddedPaise,
       fareSnapshot,
-      paymentMode: null,
+      paymentMode: input.presetPayment?.mode ?? null,
+      ...(input.presetPayment === undefined
+        ? {}
+        : {
+            paymentStatus: prepaid ? 'PAID' : 'CASH',
+            paymentReference: input.presetPayment.reference,
+          }),
       isScheduled,
       scheduledAt: quote.scheduledAt,
       dispatchAt,
@@ -199,6 +289,16 @@ export class CreateBookingUseCase {
       metadata: {
         via: createdBy.type === 'ADMIN' ? 'admin_booking' : 'booking_creation',
         dispatchMode,
+        // The admin's payment choice is on the event log, so "who said this was prepaid" has an
+        // answer beyond the booking row itself.
+        ...(input.presetPayment === undefined
+          ? {}
+          : {
+              paymentMode: input.presetPayment.mode,
+              ...(input.presetPayment.reference === null
+                ? {}
+                : { paymentReference: input.presetPayment.reference }),
+            }),
       },
     });
 

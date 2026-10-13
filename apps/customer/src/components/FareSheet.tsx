@@ -21,6 +21,12 @@ import type {
 } from '@driverzone/contracts';
 import { BottomSheet } from '@/components/BottomSheet';
 import { CarChoice } from '@/components/CarChoice';
+import {
+  CarNumberChoice,
+  initialCarNumber,
+  isCarNumberReady,
+  type CarNumberSelection,
+} from '@/components/CarNumberChoice';
 import { Checkbox } from '@/components/Checkbox';
 import { FareOptionCard } from '@/components/FareOptionCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -36,6 +42,7 @@ import type { TripPoint } from '@/features/booking/tripPoint';
 import type { TripQuote } from '@/features/booking/useTripQuote';
 import { ApiError } from '@/lib/api/ApiError';
 import { createBooking } from '@/lib/api/endpoints/bookings';
+import { getProfile } from '@/lib/api/endpoints/customer';
 import { getWallet } from '@/lib/api/endpoints/wallet';
 import { formatPaise } from '@/lib/money';
 import { keys } from '@/lib/query/keys';
@@ -161,7 +168,25 @@ export function FareSheet({
    */
   const [preferFavouriteDrivers, setPreferFavouriteDrivers] = useState(false);
   const favourites = useFavouriteDrivers();
-  const carChosen = carCategory !== null && vehicleType !== null;
+
+  /*
+   * THE CAR NUMBER (2026-10-13) — required, so the driver can find the car. Read from the profile
+   * the home screen has usually already loaded. Null until the profile arrives; then it starts on
+   * the customer's default car, or an empty field on their first booking. Survives a re-quote for
+   * the same reason the car type does.
+   */
+  const profile = useQuery({ queryKey: keys.profile.me(), queryFn: getProfile });
+  const savedCars = profile.data?.vehicles ?? [];
+  const [carNumber, setCarNumber] = useState<CarNumberSelection | null>(null);
+  useEffect(() => {
+    if (carNumber !== null) return;
+    if (profile.data !== undefined) setCarNumber(initialCarNumber(profile.data.vehicles));
+    // A profile that will not load must not block the booking: the customer can still type it.
+    else if (profile.isError) setCarNumber({ kind: 'new', plate: '' });
+  }, [carNumber, profile.data, profile.isError]);
+  const carNumberReady = isCarNumberReady(carNumber);
+
+  const carChosen = carCategory !== null && vehicleType !== null && carNumberReady;
 
   /**
    * The wallet, read only to SHOW what it will do — the server applies it, this never sends it.
@@ -242,6 +267,11 @@ export function FareSheet({
           dropAddress: drop.address,
           carCategory,
           vehicleType,
+          ...(carNumber?.kind === 'saved'
+            ? { vehicleId: carNumber.id }
+            : carNumber?.kind === 'new'
+              ? { plateNumber: carNumber.plate.trim() }
+              : {}),
           preferFavouriteDrivers,
         },
         idempotencyKey.current,
@@ -251,6 +281,8 @@ export function FareSheet({
       // The booking just spent credit (or collected a debt), so the cached balance is now a lie —
       // and the wallet screen is two taps away.
       void queryClient.invalidateQueries({ queryKey: keys.wallet.me() });
+      // A typed car number was saved to the profile with the booking; the next booking offers it.
+      if (carNumber?.kind === 'new') void queryClient.invalidateQueries({ queryKey: keys.profile.all() });
       onClose();
       /*
        * THE SEARCHING SCREEN, FOR EVERY BOOKING. Dispatch has not run at this instant (cash
@@ -483,7 +515,9 @@ export function FareSheet({
                 {owedPaise > 0 ? (
                   <View style={styles.walletRow}>
                     <Feather name="alert-circle" size={14} color={colors.danger} />
-                    <Text style={styles.walletLabel}>Unpaid cancellation fee</Text>
+                    {/* A cancellation fee, or extras left unpaid on an earlier trip — both are owed
+                        the same way and paid with this fare, in cash or online. */}
+                    <Text style={styles.walletLabel}>Unpaid from earlier trips</Text>
                     <Text style={styles.walletBad}>
                       +{wallet.data?.amount_owed.amount_display ?? ''}
                     </Text>
@@ -498,6 +532,10 @@ export function FareSheet({
               onCategory={setCarCategory}
               onVehicleType={setVehicleType}
             />
+
+            {carNumber === null ? null : (
+              <CarNumberChoice vehicles={savedCars} selection={carNumber} onChange={setCarNumber} />
+            )}
 
             {/*
               OFFERED ONLY TO A CUSTOMER WHO HAS FAVOURITES. A switch that can do nothing is worse
@@ -671,7 +709,9 @@ export function FareSheet({
                   ? confirmBooking.error.message
                   : 'Could not confirm your booking.'
                 : !carChosen
-                  ? 'Tell us your car above, so we only ring drivers who can drive it.'
+                  ? carCategory !== null && vehicleType !== null
+                    ? 'Add your car number above, so your driver can find your car.'
+                    : 'Tell us your car above, so we only ring drivers who can drive it.'
                   : needsAgreement && !agreed
                     ? 'Agree to the note above to confirm.'
                     : 'Pay the driver in cash at the end of your trip.'}

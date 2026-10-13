@@ -116,7 +116,13 @@ export function toTripHistoryRow(booking: BookingDto): TripHistoryRow {
     drop: booking.drop.address,
     isCash: booking.payment_mode === 'CASH',
     paymentLabel:
-      booking.payment_mode === 'CASH' ? 'Cash' : booking.payment_mode === 'UPI' ? 'Online' : 'Pay at end',
+      booking.payment_mode === 'CASH'
+        ? 'Cash'
+        : booking.payment_mode === 'PREPAID'
+          ? 'Prepaid'
+          : booking.payment_mode === 'UPI'
+            ? 'Online'
+            : 'Pay at end',
     totalPaise,
     /*
      * The server's string whenever one describes this figure — which is whenever nothing has been

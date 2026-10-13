@@ -94,6 +94,34 @@ export type ServiceType = (typeof SERVICE_TYPES)[number];
 export const PAYMENT_MODES = ['UPI', 'CASH'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
+/**
+ * Every mode a BOOKING can carry — what a customer can choose (`PAYMENT_MODES`) plus `PREPAID`.
+ *
+ * `PREPAID` is set by an ADMIN when booking from the panel, never chosen by a customer: the
+ * customer has already paid the fare to the company outside the app (bank or UPI transfer), so the
+ * booking starts `PAID` and the driver collects nothing for the fare. Anything that accrues during
+ * the trip — waiting, an extra day — is still owed, and is settled at the end like any trip's
+ * extras (cash to the driver, online, or left as dues). Kept OUT of `PAYMENT_MODES` so the
+ * customer's own "how will you pay" request can never ask for it.
+ */
+export const BOOKING_PAYMENT_MODES = ['UPI', 'CASH', 'PREPAID'] as const;
+export type BookingPaymentMode = (typeof BOOKING_PAYMENT_MODES)[number];
+
+/** What an admin chooses when booking from the panel. */
+export const ADMIN_PAYMENT_MODES = ['CASH', 'PREPAID'] as const;
+export type AdminPaymentMode = (typeof ADMIN_PAYMENT_MODES)[number];
+
+/**
+ * How the trip's EXTRAS — waiting charge and any extra day not already paid — were settled when
+ * the driver ended the trip.
+ *
+ * CASH IS ALWAYS ALLOWED (product rule, 2026-10-13): no charge is online-only. `ONLINE` charges
+ * the customer through the gateway (UPI trips only). `UNPAID` ends the trip anyway and records the
+ * amount as the customer's dues, collected on a later trip — so a trip can always be ended.
+ */
+export const EXTRAS_COLLECTIONS = ['CASH', 'ONLINE', 'UNPAID'] as const;
+export type ExtrasCollection = (typeof EXTRAS_COLLECTIONS)[number];
+
 export const BOOKING_PAYMENT_STATUSES = [
   'NOT_SELECTED',
   'CASH',
@@ -119,6 +147,16 @@ export interface CreateBookingRequest {
    */
   carCategory: CarCategory;
   vehicleType: VehicleTypePreference;
+  /**
+   * WHICH CAR — the number plate the driver will look for at the kerb.
+   *
+   * Send `vehicleId` to pick one of the customer's saved cars, or `plateNumber` to type a new one
+   * (it is saved to their profile). Send neither and the customer's default car is used. A
+   * customer with no saved car who sends neither is refused with `422 VEHICLE_REQUIRED` once the
+   * server enforces it — so the app must ask for the number on a first booking.
+   */
+  vehicleId?: string | undefined;
+  plateNumber?: string | undefined;
   /**
    * Ring this customer's favourite drivers before anyone else.
    *
@@ -247,7 +285,9 @@ export interface CreateBookingResponse {
  *   - the response's `booking.start_otp` is filled in, so the admin can pass the code on to a
  *     customer who may not have the app at all.
  *
- * Payment is unchanged — chosen after the ride starts, cash to the driver or online.
+ * PAYMENT IS DECIDED HERE, by the admin (2026-10-13): `CASH` (the driver collects at the end) or
+ * `PREPAID` (the customer already paid the company offline — the booking starts `PAID`). The
+ * customer cannot change a prepaid booking's mode; a cash one they may still switch to online.
  * `Idempotency-Key` is required, exactly as on the customer's own create.
  */
 export interface AdminCreateBookingRequest {
@@ -257,6 +297,9 @@ export interface AdminCreateBookingRequest {
   drop_address: string;
   car_category: CarCategory;
   vehicle_type: VehicleTypePreference;
+  payment_mode: AdminPaymentMode;
+  /** How the customer paid, for a `PREPAID` booking — a UTR, a transfer reference, a note. */
+  payment_reference?: string | undefined;
 }
 
 export interface AdminCreateBookingResponse {
@@ -269,8 +312,15 @@ export interface BookingDto {
   reference: string;
   status: BookingStatus;
   service_type: ServiceType;
-  payment_mode: PaymentMode | null;
+  payment_mode: BookingPaymentMode | null;
   payment_status: BookingPaymentStatus;
+  /** The admin's note of how a `PREPAID` booking was paid. Null on every other booking. */
+  payment_reference: string | null;
+  /**
+   * How the extras were settled when the trip ended — see `EXTRAS_COLLECTIONS`. Null until the
+   * trip is complete, and on a trip that had no extras to settle.
+   */
+  extras_collection: ExtrasCollection | null;
 
   pickup: { lat: number; lng: number; address: string };
   drop: { lat: number; lng: number; address: string };
@@ -309,6 +359,13 @@ export interface BookingDto {
    */
   car_category: CarCategory | null;
   vehicle_type: VehicleTypePreference | null;
+
+  /**
+   * The number plate of the customer's car for this trip, copied onto the booking when it was
+   * made — so a car the customer later edits or deletes does not rewrite which car a past trip
+   * was in. Null on bookings made before 2026-10-13 and for a customer with no car on file.
+   */
+  car_plate: string | null;
 
   /**
    * Whether this booking asked for the customer's favourite drivers to be rung first.
@@ -387,9 +444,11 @@ export interface BookingDto {
    * turning this into something a driver is charged against would make a convenience for the
    * customer into a penalty computed from an approximation.
    *
-   * **NULL MEANS "NO USEFUL ANSWER", and the app says nothing rather than guessing.** Four cases
-   * produce it: no driver is assigned yet; the driver has already ARRIVED or the trip is under
-   * way, so the question is moot; the driver's last fix is too old to be evidence of where they
+   * **NULL MEANS "NO USEFUL ANSWER", and the app says nothing rather than guessing.** Only a
+   * `DRIVER_EN_ROUTE` booking ever carries a figure. Every other case is null: no driver is
+   * assigned yet; one is ASSIGNED but has not tapped "On the way", so where they are says nothing
+   * about when they will set off; the driver has already ARRIVED or the trip is under way, so the
+   * question is moot; the driver's last fix is too old to be evidence of where they
    * are now; or the two points are implausibly far apart, which is bad data rather than a long
    * drive. A screen that showed "0 min" or a stale figure in any of those would be worse than a
    * screen that showed nothing.
@@ -779,6 +838,13 @@ export interface CurrentCustomerBookingResponse {
 
 export interface CompleteTripRequest {
   actualDistanceM?: number | undefined;
+  /**
+   * How the driver settled the trip's extras (waiting, an unpaid extra day). Optional so an older
+   * driver app still completes: omitted means `ONLINE` on a UPI trip (the old behaviour), `CASH` on
+   * a cash trip, and `UNPAID` on a prepaid one — never assume cash changed hands on a prepaid trip
+   * when the driver did not say so.
+   */
+  extrasCollection?: ExtrasCollection | undefined;
 }
 
 export interface CompleteTripResponse {
@@ -796,7 +862,10 @@ export interface CompleteTripResponse {
  */
 export interface CustomerDuesResponse {
   outstanding: Money;
-  /** `CASH` disappears while dues are unpaid: a cash trip has no payment leg to clear them on. */
+  /**
+   * ALWAYS BOTH, since 2026-10-13 — cash is always allowed. Dues are added to the next trip and the
+   * driver collects them with the fare. Kept as a list so older apps that read it still work.
+   */
   payment_modes: PaymentMode[];
 }
 

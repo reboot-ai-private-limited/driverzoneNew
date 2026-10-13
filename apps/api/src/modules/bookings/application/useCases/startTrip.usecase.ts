@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { logger } from '../../../../shared/logging/logger.js';
-import type { SettingsReadContract } from '../../../settings/settings.public.js';
+import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
+import { computeWaitingCharge } from '../../../pricing/pricing.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import { MAX_OTP_ATTEMPTS, type Booking, type GeoPoint } from '../../domain/booking.entity.js';
 import { InvalidOtpError, OtpLockedError } from '../../domain/booking.errors.js';
@@ -71,13 +72,33 @@ export class StartTripUseCase {
       }
     }
 
+    /*
+     * THE WAITING CHARGE IS KNOWN THE MOMENT THE TRIP STARTS — the clock is ARRIVED to STARTED, and
+     * both ends are fixed now. Recorded here rather than only at completion so that, for the whole
+     * trip, `payable.waiting_total` already says what it is: the driver can be told "collect ₹60
+     * for waiting" before they end the trip, and the customer sees it on their bill in advance.
+     * `CompleteTripUseCase` recomputes from the same two instants, so the figure cannot move.
+     */
+    const waiting =
+      booking.arrivedAt === null
+        ? { waitedMinutes: 0, amountPaise: 0 }
+        : computeWaitingCharge(booking.arrivedAt, now, {
+            freeMinutes: snapshot['waiting.free_minutes'],
+            chargePerMinutePaise: rupeesToPaise(snapshot['waiting.charge_per_minute']),
+            maxChargePaise: rupeesToPaise(snapshot['waiting.max_charge']),
+          });
+
     const started = await this.repo.transition({
       bookingId: booking.id,
       from: 'ARRIVED',
       to: 'STARTED',
       actor: { type: 'DRIVER', id: input.driverId },
       metadata,
-      patch: { startedAt: now },
+      patch: {
+        startedAt: now,
+        waitingMinutes: waiting.waitedMinutes,
+        waitingChargePaise: waiting.amountPaise,
+      },
     });
 
     if (started === null) return explainLostTransition(this.repo, booking, 'STARTED');

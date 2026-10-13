@@ -138,6 +138,17 @@ const schema = z.object({
     .optional(),
 
   /**
+   * Refuse a booking from a customer who has no car number on file and sent none (`422
+   * VEHICLE_REQUIRED`).
+   *
+   * OFF BY DEFAULT, and it has to stay off until the customer app that asks for the number is the
+   * one people have installed: an older build never sends a plate, so turning this on early
+   * stops every new customer on that build from booking at all. Plates are recorded on every
+   * booking either way — this only decides whether a missing one is refused.
+   */
+  BOOKING_REQUIRE_PLATE: booleanFlag('false'),
+
+  /**
    * Cloudinary credentials for media storage (driver documents, profile pictures).
    */
   /**

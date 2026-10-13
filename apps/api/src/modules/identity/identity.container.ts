@@ -593,6 +593,14 @@ export function buildIdentityContainer(): IdentityContainer {
           lng: address.lng,
           isPreferredPickup: address.isPreferredPickup,
         }),
+      vehiclesForBooking: async (customerId) => {
+        const profile = await customers.findById(customerId);
+        return (profile?.vehicles ?? []).map((v) => ({
+          id: v.id,
+          plateNumber: v.plateNumber,
+          isDefault: v.isDefault,
+        }));
+      },
       upsertVehicleFromBooking: (customerId, vehicle) =>
         upsertFromBooking.upsertVehicle(customerId, {
           category: vehicle.category,

@@ -54,10 +54,6 @@ describe('estimatePickupEtaMinutes', () => {
     expect(eta({})).toBe(11);
   });
 
-  it('answers the moment a driver is assigned, before they set off', () => {
-    expect(eta({ status: 'ASSIGNED' })).toBe(11);
-  });
-
   it('grows with the distance', () => {
     const near = eta({ driverAt: northOf(1000) });
     const far = eta({ driverAt: northOf(8000) });
@@ -77,6 +73,15 @@ describe('estimatePickupEtaMinutes', () => {
   describe('says nothing rather than guessing', () => {
     it('when no driver is assigned', () => {
       expect(eta({ status: 'SEARCHING', driverAt: null })).toBeNull();
+    });
+
+    /*
+     * An assigned driver may not have set off — a scheduled pickup can be assigned hours ahead —
+     * so the distance to them says nothing about when they will be here. The estimate starts when
+     * the driver taps "On the way".
+     */
+    it('while the driver is assigned but has not set off', () => {
+      expect(eta({ status: 'ASSIGNED' })).toBeNull();
     });
 
     /*

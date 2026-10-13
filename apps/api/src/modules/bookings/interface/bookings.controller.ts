@@ -121,6 +121,8 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       paymentMode: body.paymentMode,
       carCategory: body.carCategory,
       vehicleType: body.vehicleType,
+      vehicleId: body.vehicleId,
+      plateNumber: body.plateNumber,
       preferFavouriteDrivers: body.preferFavouriteDrivers,
       idempotencyKey: idempotencyKeyOf(req),
     });
@@ -176,6 +178,14 @@ export function makeAdminCreateBookingController(
       idempotencyKey: idempotencyKeyOf(req),
       dispatchMode: 'MANUAL',
       createdBy: { type: 'ADMIN', id: principalOf(req) },
+      presetPayment: {
+        mode: body.payment_mode,
+        // A reference only means something on a prepaid booking; on cash it is dropped, not kept.
+        reference:
+          body.payment_mode === 'PREPAID' && body.payment_reference !== undefined && body.payment_reference !== ''
+            ? body.payment_reference
+            : null,
+      },
     });
 
     const startOtp = await repo.readStartOtp(result.booking.id);
@@ -997,6 +1007,7 @@ export function makeCompleteTripController(
       ...(body.cashCollectedPaise === undefined
         ? {}
         : { cashCollectedPaise: body.cashCollectedPaise }),
+      ...(body.extrasCollection === undefined ? {} : { extrasCollection: body.extrasCollection }),
       idempotencyKey: idempotencyKeyOf(req),
     });
 
@@ -1040,8 +1051,9 @@ export function makeGetDuesController(wallet: WalletReadContract): RequestHandle
         outstanding: toMoney(outstandingPaise),
         /** Credit, where there is any — the same figure the fare sheet takes off the total. */
         credit: toMoney(Math.max(0, balancePaise)),
-        // Cash cannot clear a debt, so it is withheld until there is none.
-        payment_modes: outstandingPaise > 0 ? ['UPI'] : ['UPI', 'CASH'],
+        // Cash is always allowed (2026-10-13): dues ride on the next trip and the driver collects
+        // them with the fare, so neither mode is withheld any more.
+        payment_modes: ['UPI', 'CASH'],
       },
       outstandingPaise > 0
         ? 'You have an unpaid cancellation fee, which will be added to your next trip.'

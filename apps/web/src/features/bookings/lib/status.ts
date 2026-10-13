@@ -1,9 +1,10 @@
 import type { BadgeTone } from '@driverzone/design-system';
 import {
   BOOKING_STATUSES,
+  type BookingPaymentMode,
   type BookingPaymentStatus,
   type BookingStatus,
-  type PaymentMode,
+  type ExtrasCollection,
   type ServiceType,
 } from '@driverzone/contracts';
 
@@ -147,9 +148,12 @@ export function serviceTypeTone(serviceType: ServiceType): BadgeTone {
  */
 export function paymentStatusLabel(
   status: BookingStatus,
-  paymentMode: PaymentMode | null,
+  paymentMode: BookingPaymentMode | null,
   paymentStatus?: BookingPaymentStatus,
 ): string {
+  // Before the generic "Paid": a prepaid booking was paid OFFLINE, and ops reading "Paid" on a
+  // trip that has not even started would go looking for an online payment that does not exist.
+  if (paymentMode === 'PREPAID') return 'Prepaid';
   if (paymentStatus === 'PAID') return 'Paid';
   if (paymentMode === null) {
     if (groupOf(status) === 'CANCELLED' || status === 'NO_DRIVER_FOUND' || status === 'EXPIRED') {
@@ -182,14 +186,29 @@ export function paymentStatusLabel(
 
 export function paymentStatusTone(
   status: BookingStatus,
-  paymentMode: PaymentMode | null,
+  paymentMode: BookingPaymentMode | null,
   paymentStatus?: BookingPaymentStatus,
 ): BadgeTone {
   const label = paymentStatusLabel(status, paymentMode, paymentStatus);
-  if (label === 'Paid') return 'success';
+  if (label === 'Paid' || label === 'Prepaid') return 'success';
   if (label === 'Pending' || label === 'Due at trip end' || label === 'Not chosen yet') return 'warning';
   return 'neutral';
 }
+
+/** How the payment method reads on the booking page. */
+export function paymentModeLabel(mode: BookingPaymentMode | null): string {
+  if (mode === 'PREPAID') return 'Prepaid (paid offline)';
+  if (mode === 'UPI') return 'Online (UPI)';
+  if (mode === 'CASH') return 'Cash';
+  return 'Not selected';
+}
+
+/** How the trip's extras were settled at the end, as the driver reported it. */
+export const EXTRAS_COLLECTION_LABELS: Record<ExtrasCollection, string> = {
+  CASH: 'Collected in cash by the driver',
+  ONLINE: 'Charged online',
+  UNPAID: 'Not paid — added to the customer’s dues',
+};
 
 /**
  * One distinct label per raw `BookingStatus`, for a TIMELINE — where the whole point is telling

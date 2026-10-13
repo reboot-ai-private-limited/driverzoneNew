@@ -20,6 +20,7 @@ import {
   VEHICLE_TYPE_LABELS,
   VEHICLE_TYPE_PREFERENCES,
   type AdminCustomerListItemDto,
+  type AdminPaymentMode,
   type CarCategory,
   type CreateQuoteResponse,
   type Direction,
@@ -71,8 +72,9 @@ const EMPTY_TRIP: TripDraft = {
  *     booking's own page, where this screen sends them.
  *   - THE TRIP CODE IS SHOWN. The customer may not have the app, so the admin passes it on.
  *
- * Payment is not asked about: like every booking, it is chosen after the ride starts — cash to the
- * driver, or online.
+ * PAYMENT IS THE ADMIN'S CALL (2026-10-13): Cash — the driver collects at the end — or Prepaid —
+ * the customer already paid the company, so the driver collects nothing for the fare. Extras that
+ * build up during the trip (waiting, an extra day) are still settled at the end either way.
  */
 export function NewBookingScreen() {
   const router = useRouter();
@@ -84,6 +86,13 @@ export function NewBookingScreen() {
   const [optionId, setOptionId] = useState<string | null>(null);
   const [carCategory, setCarCategory] = useState<CarCategory | ''>('');
   const [vehicleType, setVehicleType] = useState<VehicleTypePreference | ''>('');
+  /*
+   * NO DEFAULT. "Prepaid" means the driver collects nothing, so a pre-selected answer the admin
+   * never looked at would either have a driver ask for money already paid or not collect money
+   * that is owed. The server requires it for the same reason.
+   */
+  const [paymentMode, setPaymentMode] = useState<AdminPaymentMode | ''>('');
+  const [paymentReference, setPaymentReference] = useState('');
 
   /** Which end the map is setting. Moves to the destination once the pickup is first placed. */
   const [active, setActive] = useState<PointKind>('pickup');
@@ -149,11 +158,12 @@ export function NewBookingScreen() {
     trip.drop !== null &&
     carCategory !== '' &&
     vehicleType !== '' &&
+    paymentMode !== '' &&
     !create.isPending;
 
   const book = () => {
     if (customer === null || chosen === null || trip.pickup === null || trip.drop === null) return;
-    if (carCategory === '' || vehicleType === '' || create.isPending) return;
+    if (carCategory === '' || vehicleType === '' || paymentMode === '' || create.isPending) return;
     create.mutate(
       buildCreateBookingRequest({
         customerId: customer.id,
@@ -162,6 +172,8 @@ export function NewBookingScreen() {
         drop: trip.drop,
         carCategory,
         vehicleType,
+        paymentMode,
+        paymentReference,
       }),
       {
         onSuccess: (result) => router.push(`/bookings/${result.booking.id}`),
@@ -279,6 +291,51 @@ export function NewBookingScreen() {
             </div>
           </Panel>
 
+          <Panel title="Payment" icon={<IndianRupee aria-hidden className="size-4" />}>
+            <div className="flex flex-col gap-3">
+              {/*
+                TWO BOXES, side by side — each says what it means, so the admin reads the
+                consequence before choosing. "Postpaid" is the `CASH` mode on the wire: the fare
+                is collected at the end, in cash (or online, if the customer pays in the app).
+              */}
+              <div role="radiogroup" aria-label="How is the fare paid" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <PaymentOption
+                  selected={paymentMode === 'PREPAID'}
+                  onSelect={() => setPaymentMode('PREPAID')}
+                  title="Prepaid"
+                  description="The customer has already paid the company. The driver collects nothing for the fare."
+                />
+                <PaymentOption
+                  selected={paymentMode === 'CASH'}
+                  onSelect={() => setPaymentMode('CASH')}
+                  title="Postpaid"
+                  description="The customer pays at the end of the trip — cash to the driver, or online in the app."
+                />
+              </div>
+              {paymentMode === '' && (
+                <p className="text-xs text-text-subtle">Choose how the fare is paid.</p>
+              )}
+              {paymentMode === 'PREPAID' && (
+                <p className="text-xs text-text-subtle">
+                  Waiting time or an extra day, if any, is still collected at the end.
+                </p>
+              )}
+              {paymentMode === 'PREPAID' && (
+                <FormField label="Payment reference" hint="UTR or transfer reference, for the record.">
+                  {({ id }) => (
+                    <Input
+                      id={id}
+                      value={paymentReference}
+                      maxLength={200}
+                      onChange={(e) => setPaymentReference(e.target.value)}
+                      placeholder="e.g. UTR 412345678901"
+                    />
+                  )}
+                </FormField>
+              )}
+            </div>
+          </Panel>
+
           <Panel title="Summary">
             <div className="flex flex-col gap-3">
               <DefinitionList>
@@ -288,7 +345,13 @@ export function NewBookingScreen() {
                 <FieldRow label="Pickup">{trip.pickup?.address ?? '—'}</FieldRow>
                 <FieldRow label="Drop">{trip.drop?.address ?? '—'}</FieldRow>
                 <FieldRow label="Fare">{chosen?.fare.total.amount_display ?? '—'}</FieldRow>
-                <FieldRow label="Payment">Pay at end — cash or online</FieldRow>
+                <FieldRow label="Payment">
+                  {paymentMode === 'PREPAID'
+                    ? 'Prepaid — nothing to collect for the fare'
+                    : paymentMode === 'CASH'
+                      ? 'Postpaid — paid at the end of the trip'
+                      : '—'}
+                </FieldRow>
                 <FieldRow label="Driver">Assigned by you, after booking</FieldRow>
               </DefinitionList>
 
@@ -297,14 +360,59 @@ export function NewBookingScreen() {
               </Button>
               <p className="text-xs text-text-subtle">
                 No driver is rung automatically. You will assign one on the next screen, where the
-                customer&apos;s trip code (OTP) is also shown. Any wallet credit or dues on the
-                customer&apos;s account are applied to the total.
+                customer&apos;s trip code (OTP) is also shown.{' '}
+                {paymentMode === 'PREPAID'
+                  ? 'Wallet credit and dues are not applied to a prepaid trip — they stay on the customer’s account.'
+                  : 'Any wallet credit or dues on the customer’s account are applied to the total.'}
               </p>
             </div>
           </Panel>
         </div>
       </div>
     </>
+  );
+}
+
+// ─── Payment ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One of the two payment boxes. A radio in a box rather than a toggle, styled like the fare
+ * options above it, so "which one is chosen" reads the same way everywhere on this screen.
+ */
+function PaymentOption({
+  selected,
+  onSelect,
+  title,
+  description,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  title: string;
+  description: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className={`flex flex-col items-start gap-1 rounded-md border p-3 text-left ${
+        selected ? 'border-interactive bg-interactive/10' : 'border-border hover:bg-surface-muted'
+      }`}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        <span
+          aria-hidden
+          className={`flex size-4 items-center justify-center rounded-full border ${
+            selected ? 'border-interactive' : 'border-border'
+          }`}
+        >
+          {selected && <span className="size-2 rounded-full bg-interactive" />}
+        </span>
+        {title}
+      </span>
+      <span className="text-xs text-text-subtle">{description}</span>
+    </button>
   );
 }
 

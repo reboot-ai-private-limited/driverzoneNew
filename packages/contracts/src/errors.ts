@@ -34,6 +34,11 @@ export const FAULT_CODES = [
   'AMBIGUOUS_ZONE_MATCH',
   'QUOTE_EXPIRED',
   'QUOTE_ALREADY_CONSUMED',
+  /**
+   * 422 on `POST /customer/bookings`: the customer has no car number on file and sent none. The
+   * app shows its car-number field. Only raised while `BOOKING_REQUIRE_PLATE` is on.
+   */
+  'VEHICLE_REQUIRED',
   'INVALID_COORDINATE',
   'VALIDATION_FAILED',
   'UNAUTHENTICATED',

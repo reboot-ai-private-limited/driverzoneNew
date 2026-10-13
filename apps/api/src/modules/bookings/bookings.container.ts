@@ -1,4 +1,5 @@
 import type { Router } from 'express';
+import { env } from '../../config/env.js';
 import { logger } from '../../shared/logging/logger.js';
 import type { LedgerWriteContract } from '../ledger/ledger.public.js';
 import type { WalletPublicContract } from '../wallet/wallet.public.js';
@@ -127,6 +128,8 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
     deps.settings,
     deps.wallet,
     deps.scheduleDispatch,
+    deps.identity,
+    env.BOOKING_REQUIRE_PLATE,
   );
   const selectPaymentMethod = new SelectPaymentMethodUseCase(repo, deps.payments, extensions);
   const confirmLate = new ConfirmLatePaymentUseCase(repo, deps.notifications, deps.wallet, deps.payments);

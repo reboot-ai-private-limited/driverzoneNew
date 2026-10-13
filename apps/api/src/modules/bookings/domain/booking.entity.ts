@@ -4,8 +4,9 @@ import type {
   BookingStatus,
   CarCategory,
   Direction,
+  BookingPaymentMode,
   DispatchMode,
-  PaymentMode,
+  ExtrasCollection,
   ServiceType,
   Terrain,
   VehicleTypePreference,
@@ -206,6 +207,13 @@ export interface Booking {
   vehicleType: VehicleTypePreference | null;
 
   /**
+   * The customer's number plate for this trip, copied from their profile when the booking was
+   * made. A copy, not a reference: editing or deleting the car later must not change which car a
+   * past trip was in. Null on bookings made before plates were recorded (2026-10-13).
+   */
+  plateNumber: string | null;
+
+  /**
    * The customer asked for their favourite drivers to be rung before anybody else.
    *
    * A PREFERENCE, NOT A RESTRICTION, and the distinction is the whole design: dispatch rings the
@@ -250,11 +258,19 @@ export interface Booking {
   fareSnapshot: FareSnapshot;
   /**
    * How this trip is paid for. Null from booking creation until the customer selects a payment
-   * method after the trip has STARTED.
+   * method after the trip has STARTED — except on an admin booking, where the admin sets `CASH` or
+   * `PREPAID` up front.
    */
-  paymentMode: PaymentMode | null;
+  paymentMode: BookingPaymentMode | null;
   paymentStatus: BookingPaymentStatus;
   paymentId: string | null;
+  /** How a `PREPAID` booking was paid, as the admin noted it. Null on every other booking. */
+  paymentReference: string | null;
+  /**
+   * How the trip's extras were settled when the driver ended it — cash, online, or left unpaid as
+   * the customer's dues. Null until completion, and when there was nothing extra to settle.
+   */
+  extrasCollection: ExtrasCollection | null;
   /**
    * How much of an already-accepted day extension was folded into the UPI order at payment
    * selection time — zero for a cash booking, or a UPI one selected before any extension was

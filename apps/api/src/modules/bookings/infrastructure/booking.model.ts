@@ -5,8 +5,9 @@ import {
   BOOKING_STATUSES,
   CAR_CATEGORIES,
   DIRECTIONS,
+  BOOKING_PAYMENT_MODES,
   DISPATCH_MODES,
-  PAYMENT_MODES,
+  EXTRAS_COLLECTIONS,
   SERVICE_TYPES,
   VEHICLE_TYPE_PREFERENCES,
 } from '@driverzone/contracts';
@@ -30,6 +31,7 @@ export interface BookingDoc {
   distanceKm?: number | null;
   carCategory?: string | null;
   vehicleType?: string | null;
+  plateNumber?: string | null;
   preferFavouriteDrivers?: boolean;
   dispatchMode?: string;
   walletCreditPaise?: number;
@@ -39,6 +41,8 @@ export interface BookingDoc {
   paymentMode?: string | null;
   paymentStatus?: string | null;
   paymentId?: mongoose.Types.ObjectId | null;
+  paymentReference?: string | null;
+  extrasCollection?: string | null;
   paidExtensionPaise?: number;
   cashExtensionPaise?: number;
   isScheduled: boolean;
@@ -92,6 +96,13 @@ const bookingSchema = new Schema<BookingDoc>(
     vehicleType: { type: String, enum: [...VEHICLE_TYPE_PREFERENCES, null], default: null },
 
     /*
+     * The customer's number plate, copied from their profile at booking time. Null on rows made
+     * before 2026-10-13 — no backfill, because which car an old trip was in was never recorded and
+     * the customer's CURRENT default car is not evidence of it.
+     */
+    plateNumber: { type: String, default: null },
+
+    /*
      * Ring this customer's favourites first (dispatch's wave 0).
      *
      * DEFAULTS TO FALSE, NOT NULL, unlike the two above. Those are nullable because "never asked"
@@ -125,7 +136,11 @@ const bookingSchema = new Schema<BookingDoc>(
      * The real protection is that nothing in the module has a reason to write it twice.
      */
     fareSnapshot: { type: Schema.Types.Mixed, required: true, immutable: true },
-    paymentMode: { type: String, enum: [...PAYMENT_MODES, null], default: null },
+    paymentMode: { type: String, enum: [...BOOKING_PAYMENT_MODES, null], default: null },
+    /** The admin's note of how a PREPAID booking was paid (a UTR, a transfer reference). */
+    paymentReference: { type: String, default: null },
+    /** How the extras were settled at completion — CASH, ONLINE or UNPAID. */
+    extrasCollection: { type: String, enum: [...EXTRAS_COLLECTIONS, null], default: null },
     paymentStatus: {
       type: String,
       enum: [...BOOKING_PAYMENT_STATUSES, null],

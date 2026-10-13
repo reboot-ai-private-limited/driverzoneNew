@@ -27,8 +27,12 @@ export interface SelectedPaymentMethod {
  * Enforces:
  *   - The ride must be actively underway (status STARTED).
  *   - The customer must own the booking.
- *   - Debt cannot be paid in cash (the moved rule from creation).
- *   - A mode cannot be changed mid-trip to a different mode once selected (idempotent for retries).
+ *   - A PREPAID booking (set by an admin) cannot be changed — the fare is already paid.
+ *   - Retries of the same choice are idempotent.
+ *
+ * CASH IS ALWAYS ALLOWED (2026-10-13), including for a customer carrying an old cancellation fee:
+ * the fee is already on this booking (`walletDebtPaise`), the driver collects it with the fare,
+ * and `CompleteTripUseCase` marks it collected on the wallet. It used to be refused here.
  *
  * A UPI order raised here also includes any day extension already accepted by this point — see
  * `paidExtensionPaise` on `Booking`.
@@ -49,6 +53,10 @@ export class SelectPaymentMethodUseCase {
 
     if (booking.status !== 'STARTED') {
       throw AppError.badRequest('You can choose how to pay once your driver has started the trip.');
+    }
+
+    if (booking.paymentMode === 'PREPAID') {
+      throw AppError.conflict('This trip is already paid for. There is nothing to choose.');
     }
 
     // Idempotent retry: same mode already selected
@@ -88,13 +96,6 @@ export class SelectPaymentMethodUseCase {
     }
 
     if (input.paymentMode === 'CASH') {
-      if (booking.walletDebtPaise > 0) {
-        throw AppError.badRequest(
-          'You have an unpaid cancellation fee. Please pay for this trip by UPI to clear it.',
-          { outstanding_dues_paise: booking.walletDebtPaise },
-        );
-      }
-
       const updated = await this.repo.setPaymentMode(booking.id, 'CASH', 'CASH');
       logger.info(
         { bookingId: booking.id, reference: booking.reference },

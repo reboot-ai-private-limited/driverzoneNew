@@ -92,7 +92,7 @@ export class CancelBookingByCustomerUseCase {
       to: 'CANCELLED_BY_CUSTOMER',
       actor: { type: 'CUSTOMER', id: input.actorId },
       reason,
-      metadata: { feePaise, atStatus: booking.status },
+      metadata: { feePaise, atStatus: booking.status, ...manualRefund(booking, feePaise) },
       patch: { cancelledAt: now, cancellationReason: reason },
     });
 
@@ -111,7 +111,14 @@ export class CancelBookingByCustomerUseCase {
     const refundedPaise = await this.refund(booking, feePaise);
 
     if (feePaise > 0) {
-      const collectedNow = booking.paymentMode === 'UPI' && booking.paymentId !== null;
+      /*
+       * PREPAID counts as collected: the company already holds the customer's money, so the fee
+       * comes out of the manual refund (`manualRefundPaise` on the event) rather than becoming a
+       * debt on top of a fare they have already paid.
+       */
+      const collectedNow =
+        (booking.paymentMode === 'UPI' && booking.paymentId !== null) ||
+        booking.paymentMode === 'PREPAID';
 
       await this.charges.recordCancellationCharge({
         bookingId: booking.id,
@@ -176,6 +183,17 @@ export class CancelBookingByCustomerUseCase {
   private async refund(booking: Booking, feePaise: number): Promise<number> {
     return refundLessFee(this.payments, booking, feePaise);
   }
+}
+
+/**
+ * A PREPAID booking's refund, for the event log. The customer paid the company OUTSIDE the app, so
+ * there is no gateway payment to refund — an admin has to send the money back by hand. Recording
+ * the amount on the cancellation event is what lets the admin panel say "refund ₹X offline"
+ * instead of leaving someone to work it out. Empty for every other mode.
+ */
+function manualRefund(booking: Booking, feePaise: number): { manualRefundPaise?: number } {
+  if (booking.paymentMode !== 'PREPAID') return {};
+  return { manualRefundPaise: Math.max(0, booking.fareSnapshot.fare.totalPaise - feePaise) };
 }
 
 /**
@@ -255,7 +273,7 @@ export class CancelBookingByDriverUseCase {
       to: 'CANCELLED_BY_DRIVER',
       actor: { type: 'DRIVER', id: input.actorId },
       reason,
-      metadata: { penaltyPaise, atStatus: booking.status },
+      metadata: { penaltyPaise, atStatus: booking.status, ...manualRefund(booking, 0) },
       patch: { cancelledAt: now, cancellationReason: reason },
     });
 
@@ -365,7 +383,7 @@ export class CancelBookingByAdminUseCase {
        * "was I charged for this" eight weeks later, and an absent field reads as "nobody wrote it
        * down" — which is the same shape as a bug that forgot to.
        */
-      metadata: { feePaise: 0, atStatus: booking.status },
+      metadata: { feePaise: 0, atStatus: booking.status, ...manualRefund(booking, 0) },
       patch: { cancelledAt: now, cancellationReason: reason },
     });
 

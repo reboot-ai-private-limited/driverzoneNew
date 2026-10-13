@@ -78,7 +78,7 @@ export default function WalletScreen(): ReactElement {
             </Text>
             <Text style={styles.balanceNote}>
               {owes
-                ? 'This is added to your next trip, which must be paid by UPI.'
+                ? 'This is added to your next trip. Pay it with the fare, in cash or online.'
                 : 'This comes off your next trip automatically.'}
             </Text>
           </Animated.View>
@@ -120,6 +120,7 @@ const ENTRY_ICONS: Record<WalletEntryType, FeatherName> = {
   SPENT_ON_RIDE: 'navigation',
   RELEASED_FROM_RIDE: 'corner-up-left',
   DEBT_COLLECTED: 'check-circle',
+  UNPAID_TRIP_CHARGE: 'clock',
   ADJUSTMENT: 'edit-3',
 };
 

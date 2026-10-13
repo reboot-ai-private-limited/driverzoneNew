@@ -36,8 +36,9 @@ import { AppIcon } from '@/components/AppIcon';
 import { CancelRide } from '@/components/CancelRide';
 import { DriverCard } from '@/components/DriverCard';
 import { ExtendDayCard } from '@/components/ExtendDayCard';
+import { FareBreakdown } from '@/components/FareBreakdown';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { formatTime, formatWhen } from '@/features/booking/schedule';
+import { formatDuration, formatTime, formatWhen } from '@/features/booking/schedule';
 import {
   hasDriverAssigned,
   isCustomerCancellable,
@@ -395,7 +396,58 @@ export default function TripScreen(): ReactElement {
                   value={data.fare.lines[0]?.label ?? data.service_type}
                 />
                 <DetailRow icon="map-pin" label="Pickup" value={data.pickup.address} />
-                <DetailRow icon="flag" label="Destination" value={data.drop.address} last />
+                <DetailRow
+                  icon="flag"
+                  label="Destination"
+                  value={data.drop.address}
+                  last={data.car_plate === null}
+                />
+                {data.car_plate === null ? null : (
+                  <DetailRow icon="truck" label="Your car" value={data.car_plate} last />
+                )}
+              </View>
+            </Stagger>
+
+            {/*
+              WHEN — booked for, started, ended, and how long it took. Each row appears once it
+              has happened; a running trip shows how long it has been going so far.
+            */}
+            <Stagger index={4}>
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Trip time</Text>
+                <DetailRow
+                  icon="calendar"
+                  label="Pickup time"
+                  value={formatWhen(new Date(data.scheduled_at))}
+                  last={data.timestamps.started_at === null}
+                />
+                {data.timestamps.started_at === null ? null : (
+                  <DetailRow
+                    icon="play"
+                    label="Started"
+                    value={formatWhen(new Date(data.timestamps.started_at))}
+                  />
+                )}
+                {data.timestamps.completed_at === null ? null : (
+                  <DetailRow
+                    icon="square"
+                    label="Ended"
+                    value={formatWhen(new Date(data.timestamps.completed_at))}
+                  />
+                )}
+                {data.timestamps.started_at === null ? null : (
+                  <DetailRow
+                    icon="clock"
+                    label={data.timestamps.completed_at === null ? 'So far' : 'Duration'}
+                    value={formatDuration(
+                      new Date(data.timestamps.started_at),
+                      data.timestamps.completed_at === null
+                        ? new Date()
+                        : new Date(data.timestamps.completed_at),
+                    )}
+                    last
+                  />
+                )}
               </View>
             </Stagger>
 
@@ -408,70 +460,22 @@ export default function TripScreen(): ReactElement {
 
             <Stagger index={6}>
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Fare</Text>
-                {data.fare.lines.map((line) => (
-                  <DetailRow
-                    key={line.code}
-                    label={line.label}
-                    value={line.amount.amount_display}
-                    plain
-                  />
-                ))}
-                {data.adjustments.map((adjustment, index) => (
-                  <DetailRow
-                    key={`${adjustment.type}_${String(index)}`}
-                    label={adjustment.label}
-                    value={adjustment.amount.amount_display}
-                    plain
-                  />
-                ))}
-                {/*
-                  THE EXTRA DAYS, WHILE THE TRIP IS STILL RUNNING. Once it ends the same money
-                  arrives as a `DAY_EXTENSION` adjustment above and this goes quiet — rendering
-                  both would show the customer one extension twice. `payable.extension_total` is
-                  the server's figure either way; this row only decides whether it has a line of
-                  its own yet.
-                */}
-                {data.payable.extension_total.amount_paise > 0 &&
-                !data.adjustments.some((a) => a.type === 'DAY_EXTENSION') ? (
-                  <DetailRow
-                    label={`Extra ${data.extension?.extra_days === 1 ? 'day' : 'days'}`}
-                    value={data.payable.extension_total.amount_display}
-                    plain
-                  />
-                ) : null}
-                {data.payable.wallet_credit.amount_paise > 0 ? (
-                  <DetailRow
-                    label="Wallet credit"
-                    value={`−${data.payable.wallet_credit.amount_display}`}
-                    plain
-                  />
-                ) : null}
-                <View style={styles.rule} />
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total</Text>
-                  {/*
-                    `payable.total`, NOT `fare.total`. The fare is frozen at booking time and says
-                    nothing about the extra day the driver agreed to, the waiting charge or the
-                    wallet — so it was showing a customer with an extension a total smaller than
-                    the lines printed directly above it.
-                  */}
-                  <Text style={styles.totalValue}>{data.payable.total.amount_display}</Text>
-                </View>
+                <Text style={styles.cardTitle}>Fare breakdown</Text>
+                {/* The same breakdown the ride receipt shows — one component, so they agree. */}
+                <FareBreakdown booking={data} />
 
                 {/*
                   THE EXTRA DAY'S OWN CHECKOUT. `outstanding` is non-zero only when the driver has
-                  accepted a day that the trip's own order did not cover — and the server will not
-                  let the driver end the trip until this clears, so it belongs here as an action
-                  rather than on the receipt afterwards.
+                  accepted a day that the trip's own order did not cover. Online is one way to pay
+                  it; cash to the driver is always the other (2026-10-13), so this never blocks.
                 */}
                 {data.payable.outstanding.amount_paise > 0 ? (
                   <View style={styles.paymentBox}>
                     <View style={styles.rule} />
                     <Text style={styles.paymentHeading}>Pay for your extra day</Text>
                     <Text style={styles.paymentSubtext}>
-                      Your driver agreed to stay on. Your trip cannot be completed until this is
-                      paid.
+                      Your driver agreed to stay on. Pay online now, or pay your driver in cash at
+                      the end of the trip.
                     </Text>
                     {paymentError !== null ? (
                       <Text style={styles.paymentError}>{paymentError}</Text>
@@ -537,6 +541,23 @@ export default function TripScreen(): ReactElement {
                   <Text style={styles.cashNote}>
                     You can choose how to pay once the driver starts the trip.
                   </Text>
+                ) : null}
+
+                {/*
+                  PREPAID — booked and paid through our team. Nothing to choose and nothing to pay
+                  for the fare; only extras that build up during the trip are still due.
+                */}
+                {data.payment_mode === 'PREPAID' ? (
+                  <View style={styles.paymentBadgeSuccess}>
+                    <Feather name="check-circle" size={16} color="#16a34a" />
+                    <View style={styles.flex}>
+                      <Text style={styles.paymentSuccessTitle}>Prepaid</Text>
+                      <Text style={styles.paymentSuccessBody}>
+                        Your fare is already paid. Any waiting time or extra day is paid to your
+                        driver in cash, or online, at the end.
+                      </Text>
+                    </View>
+                  </View>
                 ) : null}
 
                 {data.payment_mode === 'CASH' ? (
@@ -1143,9 +1164,6 @@ const styles = StyleSheet.create({
   timelineReason: { ...text.caption, color: colors.muted, marginTop: 2 },
 
   rule: { height: 1, backgroundColor: colors.border, marginVertical: space.sm },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  totalLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
-  totalValue: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
   cashNote: { ...text.caption, color: colors.faint, textAlign: 'center', marginTop: space.md },
 
   paymentBox: { marginTop: space.sm },

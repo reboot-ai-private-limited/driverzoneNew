@@ -159,7 +159,11 @@ export function toBookingDto(view: BookingView): BookingDto {
         ? 'NOT_SELECTED'
         : booking.paymentMode === 'CASH'
           ? 'CASH'
-          : 'AWAITING_PAYMENT'),
+          : booking.paymentMode === 'PREPAID'
+            ? 'PAID'
+            : 'AWAITING_PAYMENT'),
+    payment_reference: booking.paymentReference,
+    extras_collection: booking.extrasCollection,
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },
     drop: { ...booking.drop, address: booking.dropAddress },
@@ -172,6 +176,7 @@ export function toBookingDto(view: BookingView): BookingDto {
 
     car_category: booking.carCategory,
     vehicle_type: booking.vehicleType,
+    car_plate: booking.plateNumber,
     prefer_favourite_drivers: booking.preferFavouriteDrivers,
     dispatch_mode: booking.dispatchMode,
 
@@ -368,8 +373,15 @@ function toPayableBlock(view: BookingView): BookingDto['payable'] {
    * extras order afterwards. On a cash trip it is nothing, because the driver takes the lot at the
    * door.
    */
+  /*
+   * PREPAID TOO (2026-10-13): the fare was paid offline, but an extra day bought mid-trip was not,
+   * and a customer with the app can pay it online like on a UPI trip. Never on CASH — that driver
+   * takes everything at the door — and the customer is never forced online: the driver can always
+   * take it in cash instead (`CollectExtrasInCashUseCase`, or the end-of-trip settlement).
+   */
   const outstandingPaise =
-    booking.paymentMode === 'UPI' && booking.status === 'STARTED'
+    (booking.paymentMode === 'UPI' || booking.paymentMode === 'PREPAID') &&
+    booking.status === 'STARTED'
       ? Math.max(0, extrasPaise - booking.paidExtensionPaise)
       : 0;
 

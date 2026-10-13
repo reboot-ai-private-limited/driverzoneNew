@@ -1,5 +1,6 @@
 import type {
   AdminCreateBookingRequest,
+  AdminPaymentMode,
   AdminCreateQuoteRequest,
   CarCategory,
   Direction,
@@ -126,7 +127,10 @@ export function buildCreateBookingRequest(input: {
   drop: TripPoint;
   carCategory: CarCategory;
   vehicleType: VehicleTypePreference;
+  paymentMode: AdminPaymentMode;
+  paymentReference: string;
 }): AdminCreateBookingRequest {
+  const reference = input.paymentReference.trim();
   return {
     customer_id: input.customerId,
     quote_id: input.quoteId,
@@ -134,6 +138,9 @@ export function buildCreateBookingRequest(input: {
     drop_address: input.drop.address.trim(),
     car_category: input.carCategory,
     vehicle_type: input.vehicleType,
+    payment_mode: input.paymentMode,
+    // Only a prepaid booking carries a reference — on cash there is nothing it would refer to.
+    ...(input.paymentMode === 'PREPAID' && reference !== '' ? { payment_reference: reference } : {}),
   };
 }
 

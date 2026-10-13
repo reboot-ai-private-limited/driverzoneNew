@@ -123,6 +123,9 @@ export default function AccountScreen(): ReactElement {
             label="Saved Addresses"
             onPress={() => router.push('/saved-addresses')}
           />
+          {/* The cars the booking sheet offers under "Car number" — the driver drives the
+              customer's own car, and the plate is how they find it. */}
+          <MenuRow icon="truck" label="My Cars" onPress={() => router.push('/my-cars')} />
           {/* Beside the saved places rather than off with the informational rows below: both are
               lists the customer built themselves and both change what happens when they book. */}
           <MenuRow

@@ -29,6 +29,14 @@ export function ProgressRing({
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - clamped / 100);
 
+  /*
+   * THE LABEL SCALES WITH THE RING. Its sizes were fixed for the 96pt default, so the 72pt ring on
+   * the profile screen pushed "Complete" out past the circle. Scaled from that default, and held
+   * to the ring's inner width so a large system font shrinks the word rather than overflowing.
+   */
+  const scale = size / 96;
+  const innerWidth = size - strokeWidth * 2 - 4;
+
   return (
     <View
       style={{ width: size, height: size }}
@@ -62,10 +70,17 @@ export function ProgressRing({
 
       <View style={styles.label} pointerEvents="none">
         <View style={styles.valueRow}>
-          <Text style={styles.value}>{clamped}</Text>
-          <Text style={styles.unit}>%</Text>
+          <Text style={[styles.value, { fontSize: Math.round(22 * scale) }]}>{clamped}</Text>
+          <Text style={[styles.unit, { fontSize: Math.round(13 * scale) }]}>%</Text>
         </View>
-        <Text style={styles.caption}>Complete</Text>
+        <Text
+          style={[styles.caption, { fontSize: Math.max(8, Math.round(11 * scale)), maxWidth: innerWidth }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+        >
+          Complete
+        </Text>
       </View>
     </View>
   );

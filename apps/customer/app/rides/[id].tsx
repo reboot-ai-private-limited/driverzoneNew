@@ -12,23 +12,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import {
-  CAR_CATEGORY_LABELS,
-  VEHICLE_TYPE_LABELS,
-  type BookingDto,
-  type Money,
-} from '@driverzone/contracts';
-import {
-  rideHappenedAt,
-  rideTotalPaise,
-  toRideStatus,
-  type RideStatus,
-} from '@/features/rides/rideHistory';
+import { CAR_CATEGORY_LABELS, VEHICLE_TYPE_LABELS, type BookingDto } from '@driverzone/contracts';
+import { rideHappenedAt, toRideStatus, type RideStatus } from '@/features/rides/rideHistory';
 import { DriverCard } from '@/components/DriverCard';
+import { FareBreakdown, fareBreakdownRows, paidViaLabel } from '@/components/FareBreakdown';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { formatDuration } from '@/features/booking/schedule';
 import { rebookParamsFor } from '@/features/booking/rebook';
 import { getBooking } from '@/lib/api/endpoints/bookings';
-import { formatPaise } from '@/lib/money';
 import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
@@ -91,7 +82,6 @@ export default function RideDetailScreen(): ReactElement {
 
   const status = toRideStatus(ride);
   const when = new Date(rideHappenedAt(ride));
-  const totalPaise = rideTotalPaise(ride);
   const steps = timelineOf(ride);
   const paidAt = ride.timestamps.completed_at;
 
@@ -108,7 +98,30 @@ export default function RideDetailScreen(): ReactElement {
             value={STATUS_LABEL[status]}
             valueColor={STATUS_COLOR[status]}
           />
+          {/* When the trip actually ran, beside when it was booked for — each once it happened. */}
+          {ride.timestamps.started_at === null ? null : (
+            <SummaryRow
+              label="Start time"
+              value={formatDateTime(new Date(ride.timestamps.started_at))}
+            />
+          )}
+          {ride.timestamps.completed_at === null ? null : (
+            <SummaryRow
+              label="End time"
+              value={formatDateTime(new Date(ride.timestamps.completed_at))}
+            />
+          )}
+          {ride.timestamps.started_at === null || ride.timestamps.completed_at === null ? null : (
+            <SummaryRow
+              label="Trip duration"
+              value={formatDuration(
+                new Date(ride.timestamps.started_at),
+                new Date(ride.timestamps.completed_at),
+              )}
+            />
+          )}
           <SummaryRow label="Trip Type" value={SERVICE_LABEL[ride.service_type]} />
+          {ride.car_plate === null ? null : <SummaryRow label="Car number" value={ride.car_plate} />}
           {/* Only on bookings placed since the car choice existed — older rows have no answer,
               and a dash there would read as "no car" rather than "never asked". */}
           {ride.car_category === null ? null : (
@@ -169,52 +182,13 @@ export default function RideDetailScreen(): ReactElement {
         )}
 
         <View style={styles.twoCol}>
-          <SectionCard title="Invoice summary" style={styles.colCard}>
-            {ride.fare.lines.map((line) => (
-              <InvoiceRow key={line.code} label={line.label} amount={line.amount} />
-            ))}
+          <SectionCard title="Fare breakdown" style={styles.colCard}>
             {/*
-              ADJUSTMENTS ARE LISTED, NOT FOLDED IN. Waiting time and a late fine are decided
-              after the quote and never edit the fare (invariant B-1) — a customer looking at a
-              bill bigger than the price they agreed to is owed the line that explains it.
+              THE SAME BREAKDOWN AS THE LIVE TRIP SCREEN — one component, so the receipt and the
+              trip cannot disagree: fare lines, subtotal and GST, waiting and extra days, the
+              wallet, and the server's own `payable.total`.
             */}
-            {ride.adjustments.map((adjustment) => (
-              <InvoiceRow
-                key={adjustment.type}
-                label={adjustment.label}
-                amount={adjustment.amount}
-              />
-            ))}
-            {/*
-              WHAT THE WALLET DID, as its own lines below the fare. Neither edits `fare.total` —
-              the credit came off what was payable and the debt was an older fee collected with
-              this trip — so folding them into the total would make the receipt disagree with the
-              fare the customer agreed to.
-            */}
-            {ride.wallet_credit.amount_paise > 0 ? (
-              <InvoiceRow label="Wallet credit" amount={negated(ride.wallet_credit)} />
-            ) : null}
-            {ride.wallet_debt.amount_paise > 0 ? (
-              <InvoiceRow label="Earlier cancellation fee" amount={ride.wallet_debt} />
-            ) : null}
-
-            <View style={styles.rule} />
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total Amount</Text>
-              <Text style={styles.totalValue}>{formatPaise(totalPaise)}</Text>
-            </View>
-            {/*
-              THE SERVER'S OWN FIGURE AND ITS OWN STRING. `payable.total` is precisely "the fare
-              plus what was added, less the credit, plus the carried debt" — doing that subtraction
-              here again was a second copy that could drift from the receipt above it, and the
-              client-side format is the one `toMoney` exists to avoid (Hermes ships a reduced ICU on
-              Android and drops the lakh grouping).
-            */}
-            {ride.wallet_credit.amount_paise > 0 || ride.wallet_debt.amount_paise > 0 ? (
-              <Text style={styles.paidNote}>
-                You paid {ride.payable.total.amount_display} for this trip.
-              </Text>
-            ) : null}
+            <FareBreakdown booking={ride} />
           </SectionCard>
 
           <SectionCard title="Payment status" style={styles.colCard}>
@@ -235,7 +209,7 @@ export default function RideDetailScreen(): ReactElement {
                   </View>
                 )}
                 <Text style={styles.paymentLabel}>Payment method</Text>
-                <Text style={styles.paymentValue}>{ride.payment_mode}</Text>
+                <Text style={styles.paymentValue}>{paidViaLabel(ride) ?? 'Not chosen'}</Text>
                 {paidAt === null ? null : (
                   <>
                     <Text style={styles.paymentLabel}>Paid on</Text>
@@ -374,40 +348,6 @@ function SectionCard({
   );
 }
 
-/**
- * Renders the server's own `amount_display` rather than reformatting the paise — the API is the
- * one place fare formatting is decided, so all four clients show a line identically. A negative
- * line (a discount, if one ever ships) keeps the green treatment.
- */
-function InvoiceRow({ label, amount }: { label: string; amount: Money }): ReactElement {
-  const negative = amount.amount_paise < 0;
-
-  return (
-    <View style={styles.invoiceRow}>
-      <Text style={styles.invoiceLabel} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text style={[styles.invoiceValue, negative && styles.invoiceValueGood]}>
-        {amount.amount_display}
-      </Text>
-    </View>
-  );
-}
-
-/**
- * Flips a Money's sign for display, keeping the server's formatting.
- *
- * Wallet credit comes down as a POSITIVE figure — it is credit, and the wallet screen reads it
- * that way — but on an invoice it is a deduction, so it has to render with a minus without this
- * screen reformatting the rupees itself.
- */
-function negated(amount: Money): Money {
-  return {
-    amount_paise: -amount.amount_paise,
-    amount_display: `-${amount.amount_display}`,
-  };
-}
-
 const STATUS_LABEL: Record<RideStatus, string> = {
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
@@ -461,10 +401,11 @@ async function shareInvoice(ride: BookingDto): Promise<void> {
     `From: ${ride.pickup.address}`,
     `To: ${ride.drop.address}`,
     '',
-    ...ride.fare.lines.map((line) => `${line.label}: ${line.amount.amount_display}`),
-    ...ride.adjustments.map((a) => `${a.label}: ${a.amount.amount_display}`),
+    // The same rows the screen shows, so the shared invoice and the receipt agree line for line.
+    ...fareBreakdownRows(ride).map((row) => `${row.label}: ${row.value}`),
     '',
-    `Total: ${formatPaise(rideTotalPaise(ride))}`,
+    `Total: ${ride.payable.total.amount_display}`,
+    ...(paidViaLabel(ride) === null ? [] : [`Paid via: ${paidViaLabel(ride) ?? ''}`]),
   ];
 
   try {
@@ -549,23 +490,8 @@ const styles = StyleSheet.create({
   // and `space.lg` on each edge was crowding out the numbers it was supposed to be framing.
   colCard: { flex: 1, padding: space.sm },
 
-  invoiceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  invoiceLabel: { ...text.caption, color: colors.muted, flex: 1, marginRight: space.xs },
-  invoiceValue: { ...text.caption, color: colors.fg },
-  invoiceValueGood: { color: colors.success },
-  rule: { height: 1, backgroundColor: colors.border, marginVertical: space.sm },
-
   rebook: { marginTop: space.lg, gap: space.sm },
   rebookHint: { ...text.caption, color: colors.muted, textAlign: 'center' },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  totalLabel: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 13 },
-  totalValue: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 13 },
-  paidNote: { ...text.caption, color: colors.muted, marginTop: space.xs },
 
   paidChip: {
     alignSelf: 'flex-start',

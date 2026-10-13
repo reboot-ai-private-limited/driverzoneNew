@@ -118,6 +118,15 @@ export interface CustomerContactContract {
  * nothing new to do.
  */
 export interface CustomerBookingProfileContract {
+  /**
+   * The customer's saved cars, for `bookings` to resolve which plate a trip is for. Empty for a
+   * customer with none — and for one whose profile cannot be found, since a booking that cannot
+   * name a car is decided by the caller's own rule, not by an error from here.
+   */
+  vehiclesForBooking(
+    customerId: string,
+  ): Promise<Array<{ id: string; plateNumber: string; isDefault: boolean }>>;
+
   upsertVehicleFromBooking(
     customerId: string,
     vehicle: { category: string; plateNumber: string; fuelType?: string | undefined },

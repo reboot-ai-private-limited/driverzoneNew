@@ -19,8 +19,8 @@ export interface DriverSwitchToCashInput {
  * `CompleteTripUseCase`'s payment gate with no way through: the customer's app is the only thing
  * that can otherwise change `paymentMode`, and by definition it is unavailable here.
  *
- * SAME DEBT GUARD AS `SelectPaymentMethodUseCase`'s cash branch — a customer carrying wallet debt
- * cannot pay it off in cash, driver-initiated or not.
+ * AN OLD CANCELLATION FEE NO LONGER BLOCKS IT (2026-10-13 — cash is always allowed). The fee is
+ * on the booking already; the driver collects it with the fare and completion marks it collected.
  *
  * DOES NOT CANCEL ANY OPEN RAZORPAY ORDER — Razorpay has no such call, and the order simply goes
  * unpaid. If it is paid anyway after this runs (the customer's connectivity returns and they
@@ -40,12 +40,10 @@ export class DriverSwitchToCashUseCase {
       throw AppError.conflict('You can only do this while the trip is under way.');
     }
     if (booking.paymentStatus === 'PAID') {
-      throw AppError.conflict('This trip has already been paid for online.');
-    }
-    if (booking.walletDebtPaise > 0) {
-      throw AppError.badRequest(
-        'This customer has an unpaid cancellation fee that can only be cleared online. Ask them to pay by UPI.',
-        { outstanding_dues_paise: booking.walletDebtPaise },
+      throw AppError.conflict(
+        booking.paymentMode === 'PREPAID'
+          ? 'This trip is prepaid — there is no fare to collect.'
+          : 'This trip has already been paid for online.',
       );
     }
 

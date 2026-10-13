@@ -46,6 +46,8 @@ import {
   tripDurationText,
 } from '../lib/format';
 import {
+  EXTRAS_COLLECTION_LABELS,
+  paymentModeLabel,
   paymentStatusLabel,
   paymentStatusTone,
   serviceTypeLabel,
@@ -209,8 +211,31 @@ function BookingSummary({ booking }: { booking: BookingDto }) {
           </span>
         </SummaryStat>
 
-        <SummaryStat icon={<Calendar aria-hidden className="size-4" />} label="Booking Date & Time">
+        <SummaryStat icon={<Calendar aria-hidden className="size-4" />} label="Pickup Date & Time">
           {formatBookingDate(booking.scheduled_at)}, {formatTime(booking.scheduled_at)}
+        </SummaryStat>
+
+        {/*
+          WHEN THE TRIP ACTUALLY RAN, beside when it was booked for. The timeline below has the
+          same instants, but as one step among eight; these are the two support is asked about
+          ("what time did the driver start?"), so they sit where the eye lands first. Each appears
+          only once it has happened — a blank "Trip Ended" on a running trip says nothing useful.
+        */}
+        {booking.timestamps.started_at !== null && (
+          <SummaryStat icon={<Clock aria-hidden className="size-4" />} label="Trip Started">
+            {formatBookingDate(booking.timestamps.started_at)}, {formatTime(booking.timestamps.started_at)}
+          </SummaryStat>
+        )}
+
+        {booking.timestamps.completed_at !== null && (
+          <SummaryStat icon={<Clock aria-hidden className="size-4" />} label="Trip Ended">
+            {formatBookingDate(booking.timestamps.completed_at)},{' '}
+            {formatTime(booking.timestamps.completed_at)}
+          </SummaryStat>
+        )}
+
+        <SummaryStat icon={<Clock aria-hidden className="size-4" />} label="Duration">
+          {tripDurationText(booking)}
         </SummaryStat>
 
         <SummaryStat icon={<Car aria-hidden className="size-4" />} label="Trip Type">
@@ -411,10 +436,22 @@ function CustomerCard({ booking }: { booking: BookingDto }) {
                 formatBookingMobile(booking.customer.phone)
               )}
             </ContactLine>
-            {vehicle !== undefined && (
+            {/*
+              THE CAR THIS TRIP WAS BOOKED FOR, from the booking itself, when it carries one. The
+              profile's default car is only the fallback for bookings made before plates were
+              recorded — it is the customer's car TODAY, not necessarily the one on this trip.
+            */}
+            {booking.car_plate !== null ? (
               <ContactLine icon={<Car aria-hidden className="size-3.5" />}>
-                {vehicle.plate_number} · {vehicle.category}
+                {booking.car_plate}
+                {booking.car_category === null ? '' : ` · ${booking.car_category}`}
               </ContactLine>
+            ) : (
+              vehicle !== undefined && (
+                <ContactLine icon={<Car aria-hidden className="size-3.5" />}>
+                  {vehicle.plate_number} · {vehicle.category}
+                </ContactLine>
+              )
             )}
             <ContactLine icon={<MapPin aria-hidden className="size-3.5" />}>
               {booking.pickup.address}
@@ -666,6 +703,16 @@ function FareBreakdownCard({ booking }: { booking: BookingDto }) {
               {line.amount.amount_display}
             </FieldRow>
           ))}
+          {/*
+            SUBTOTAL AND TAX, which the fare lines alone never added up to: `pricing` sums the
+            lines into the subtotal and adds tax on top, rounded to the rupee, so a card that went
+            straight from the lines to the total left a gap nobody could explain to a customer.
+            Tax is the server's own figure (rounding remainder included), never re-derived here.
+          */}
+          <FieldRow label="Subtotal">{fare.subtotal.amount_display}</FieldRow>
+          {fare.tax.amount_paise > 0 && (
+            <FieldRow label="Tax (GST)">{fare.tax.amount_display}</FieldRow>
+          )}
           {adjustments.map((adjustment) => (
             <FieldRow key={adjustment.type} label={adjustment.label}>
               {adjustment.amount.amount_display}
@@ -724,12 +771,19 @@ function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
    * is the moment the booking was made, when nothing had been paid at all. No event records the
    * capture itself, so a paid-online trip still running shows no time rather than a wrong one.
    */
-  const paidAt = booking.status === 'COMPLETED' ? booking.timestamps.completed_at : null;
+  // A prepaid fare was paid before the trip, offline — "Paid At: trip end" would be wrong for it.
+  const paidAt =
+    booking.status === 'COMPLETED' && booking.payment_mode !== 'PREPAID'
+      ? booking.timestamps.completed_at
+      : null;
 
   return (
     <Panel title="Payment Details" icon={<CreditCard aria-hidden className="size-4" />} className={CARD}>
       <DefinitionList>
-        <FieldRow label="Payment Method">{booking.payment_mode ?? 'Not selected'}</FieldRow>
+        <FieldRow label="Payment Method">{paymentModeLabel(booking.payment_mode)}</FieldRow>
+        {booking.payment_reference !== null && (
+          <FieldRow label="Payment Reference">{booking.payment_reference}</FieldRow>
+        )}
         <FieldRow label="Payment Status">
           <Badge tone={paymentStatusTone(booking.status, booking.payment_mode, booking.payment_status)}>
             {paymentStatusLabel(booking.status, booking.payment_mode, booking.payment_status)}
@@ -740,9 +794,41 @@ function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
             {formatBookingDate(paidAt)}, {formatTime(paidAt)}
           </FieldRow>
         )}
+        {/*
+          WHAT HAPPENED TO THE EXTRAS — waiting, an extra day — when the driver ended the trip.
+          Cash is always allowed, and a trip can end with them unpaid, so ops needs to see which.
+        */}
+        {booking.extras_collection !== null && (
+          <FieldRow label="Extras">{EXTRAS_COLLECTION_LABELS[booking.extras_collection]}</FieldRow>
+        )}
         <FieldRow label="Amount">{booking.payable.total.amount_display}</FieldRow>
       </DefinitionList>
+      <PrepaidRefundNotice booking={booking} />
     </Panel>
+  );
+}
+
+/**
+ * A CANCELLED PREPAID BOOKING NEEDS A HUMAN. The customer paid the company outside the app, so
+ * there is no gateway payment for the system to refund — an admin has to send it back by hand.
+ * The server records the amount (fare less any cancellation fee) on the cancellation event; this
+ * puts it where the admin will see it.
+ */
+function PrepaidRefundNotice({ booking }: { booking: BookingDto }) {
+  const events = useBookingEvents(booking.id);
+  if (booking.payment_mode !== 'PREPAID' || booking.timestamps.cancelled_at === null) return null;
+
+  const cancellation = events.data?.events.find(
+    (e) => typeof e.metadata['manualRefundPaise'] === 'number',
+  );
+  const refundPaise = cancellation?.metadata['manualRefundPaise'];
+  if (typeof refundPaise !== 'number' || refundPaise <= 0) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+      <strong>Refund ₹{(refundPaise / 100).toLocaleString('en-IN')} to the customer offline.</strong>{' '}
+      This booking was prepaid and then cancelled — nothing is refunded automatically.
+    </div>
   );
 }
 

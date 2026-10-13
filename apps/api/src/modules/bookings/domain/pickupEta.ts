@@ -63,7 +63,12 @@ const MAX_FIX_AGE_MS = 3 * 60_000;
 const MAX_PLAUSIBLE_METRES = 60_000;
 
 /**
- * The statuses in which a customer is waiting for a driver to turn up.
+ * The statuses in which a driver is actually coming to the pickup.
+ *
+ * ONLY `DRIVER_EN_ROUTE`. An `ASSIGNED` driver has accepted but not set off — a scheduled pickup
+ * can be assigned hours ahead — so the distance to them says nothing about when they will be
+ * here, and "~8 min" from a driver still at home is a promise the next poll breaks. The estimate
+ * starts when the driver taps "On the way" (product decision, 2026-10-13).
  *
  * ARRIVED IS ABSENT, and that is the one worth stating: the driver is there, the question has
  * been answered by events, and "~1 min" beside "Driver has arrived" is the screen contradicting
@@ -73,7 +78,6 @@ const MAX_PLAUSIBLE_METRES = 60_000;
  * deliberate decision about this line, not something a negation quietly absorbs.
  */
 const AWAITING_PICKUP_STATUSES: ReadonlySet<BookingStatus> = new Set<BookingStatus>([
-  'ASSIGNED',
   'DRIVER_EN_ROUTE',
 ]);
 

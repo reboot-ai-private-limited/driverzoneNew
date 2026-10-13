@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import {
+  ADMIN_PAYMENT_MODES,
   BOOKING_STATUSES,
   CAR_CATEGORIES,
+  EXTRAS_COLLECTIONS,
   PAYMENT_MODES,
   DRIVER_TRIP_GROUPS,
   PAYMENT_OVERRIDE_REASONS,
@@ -30,6 +32,13 @@ export const createBookingSchema = z
     carCategory: z.enum(CAR_CATEGORIES),
     vehicleType: z.enum(VEHICLE_TYPE_PREFERENCES),
     /*
+     * WHICH CAR. Both optional — older app builds send neither, and the customer's default car is
+     * used. The plate rule matches the profile's own (`identity.validation.ts`): lenient, because
+     * rejecting a real plate in an odd format is far worse than accepting one.
+     */
+    vehicleId: z.string().min(1).max(64).optional(),
+    plateNumber: z.string().trim().min(4).max(16).optional(),
+    /*
      * OPTIONAL WITH A DEFAULT, unlike the two above, and for the opposite reason. A missing car
      * category is a question nobody answered; a missing favourites flag is an answer — the app
      * that did not send it is one that predates the feature, and it wants the dispatch behaviour
@@ -41,7 +50,11 @@ export const createBookingSchema = z
 
 /**
  * `POST /admin/bookings` — an admin booking ON A CUSTOMER'S BEHALF. Snake_case like the rest of
- * the admin surface. No `payment_mode`: payment is chosen after the ride starts, as always.
+ * the admin surface.
+ *
+ * `payment_mode` IS REQUIRED, with no default: "prepaid" means the driver collects nothing, so a
+ * booking that silently defaulted the wrong way would either have a driver demand money already
+ * paid, or not collect money that is owed. The admin says which.
  */
 export const adminCreateBookingSchema = z
   .object({
@@ -51,6 +64,8 @@ export const adminCreateBookingSchema = z
     drop_address: z.string().trim().min(1).max(500),
     car_category: z.enum(CAR_CATEGORIES),
     vehicle_type: z.enum(VEHICLE_TYPE_PREFERENCES),
+    payment_mode: z.enum(ADMIN_PAYMENT_MODES),
+    payment_reference: z.string().trim().max(200).optional(),
   })
   .strict();
 
@@ -124,6 +139,8 @@ export const completeTripSchema = z
     actualDistanceM: z.number().int().min(0).optional(),
     /** What the driver actually took, on a cash trip. Absent falls back to the expected total. */
     cashCollectedPaise: z.number().int().min(0).optional(),
+    /** How the extras were settled. Optional: an older driver app sends nothing (see the use case). */
+    extrasCollection: z.enum(EXTRAS_COLLECTIONS).optional(),
   })
   .strict();
 

@@ -4,6 +4,7 @@ import type {
   CancelBookingResponse,
   CompleteTripResponse,
   CurrentDriverTripResponse,
+  ExtrasCollection,
   ListDriverTripsQuery,
   ListDriverTripsResponse,
   PaymentOverrideRequest,
@@ -115,11 +116,17 @@ export function startTrip(
  * `cashCollectedPaise` is deliberately not sent. The server falls back to the expected total when
  * it is absent, which is what a driver who collected the fare as quoted actually did — inventing
  * a figure here would be the app asserting something it never asked anybody.
+ *
+ * `extrasCollection` is what the driver said happened to the extras (waiting, an unpaid extra day)
+ * on a UPI or prepaid trip — cash, online, or not paid. Omitted when there were none to settle.
  */
-export function completeTrip(bookingId: string): Promise<CompleteTripResponse> {
+export function completeTrip(
+  bookingId: string,
+  extrasCollection?: ExtrasCollection,
+): Promise<CompleteTripResponse> {
   return request<CompleteTripResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/complete`, {
     method: 'POST',
-    body: {},
+    body: extrasCollection === undefined ? {} : { extrasCollection },
     idempotencyKey: `complete-${bookingId}`,
     token: getAccessToken() ?? undefined,
   });

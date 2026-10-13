@@ -41,6 +41,12 @@ export const WALLET_ENTRY_TYPES = [
   'RELEASED_FROM_RIDE',
   /** A debt collected as part of a booking's payment, bringing the balance back toward zero. */
   'DEBT_COLLECTED',
+  /**
+   * A trip's extras — waiting time, an extra day — that the customer did not pay when the trip
+   * ended, so the driver marked them unpaid. Owed like a cancellation fee: added to the next trip
+   * and collected with its fare, by cash or online.
+   */
+  'UNPAID_TRIP_CHARGE',
   /** An admin correction, either direction. Requires a note. */
   'ADJUSTMENT',
 ] as const;
@@ -54,6 +60,7 @@ export const WALLET_ENTRY_LABELS: Record<WalletEntryType, string> = {
   SPENT_ON_RIDE: 'Used on a trip',
   RELEASED_FROM_RIDE: 'Returned — trip did not happen',
   DEBT_COLLECTED: 'Outstanding amount paid',
+  UNPAID_TRIP_CHARGE: 'Unpaid trip charges',
   ADJUSTMENT: 'Adjustment',
 };
 

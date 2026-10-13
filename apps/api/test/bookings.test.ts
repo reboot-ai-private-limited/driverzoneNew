@@ -137,6 +137,13 @@ function booking(over: Partial<Booking> = {}): Booking {
     paymentMode: 'UPI',
     paymentStatus: 'PAID',
     paymentId: 'pay_1',
+    paymentReference: null,
+    extrasCollection: null,
+    plateNumber: null,
+    carCategory: null,
+    vehicleType: null,
+    preferFavouriteDrivers: false,
+    dispatchMode: 'AUTO',
     paidExtensionPaise: 0,
     cashExtensionPaise: 0,
     isScheduled: false,
@@ -2138,7 +2145,11 @@ describe('SelectPaymentMethodUseCase', () => {
     ).rejects.toThrow('You can choose how to pay once your driver has started the trip.');
   });
 
-  it('refuses CASH when the customer carries unpaid wallet debt', async () => {
+  /*
+   * CASH IS ALWAYS ALLOWED (2026-10-13). The old fee is already on this booking; the driver
+   * collects it with the fare and completion marks it collected on the wallet.
+   */
+  it('allows CASH even when the customer carries an old cancellation fee', async () => {
     const repo = fakeRepo(
       booking({
         status: 'STARTED',
@@ -2150,14 +2161,31 @@ describe('SelectPaymentMethodUseCase', () => {
     const payments = fakePayments();
     const useCase = new SelectPaymentMethodUseCase(repo, payments, fakeExtensions());
 
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      customerId: 'cus_1',
+      paymentMode: 'CASH',
+      idempotencyKey: 'idem_1',
+    });
+
+    expect(result.booking.paymentMode).toBe('CASH');
+    expect(result.clientToken).toBeNull();
+  });
+
+  it('refuses to change a PREPAID booking — the fare is already paid', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: 'PREPAID', paymentStatus: 'PAID' }),
+    );
+    const useCase = new SelectPaymentMethodUseCase(repo, fakePayments(), fakeExtensions());
+
     await expect(
       useCase.execute({
         bookingId: 'bkg_1',
         customerId: 'cus_1',
-        paymentMode: 'CASH',
+        paymentMode: 'UPI',
         idempotencyKey: 'idem_1',
       }),
-    ).rejects.toThrow('You have an unpaid cancellation fee.');
+    ).rejects.toThrow('already paid for');
   });
 
   it('sets paymentMode and paymentStatus to CASH on valid cash selection', async () => {
@@ -2611,15 +2639,13 @@ describe('DriverSwitchToCashUseCase', () => {
     );
   });
 
-  /* Cash cannot clear a wallet debt — the same rule the customer's own cash branch enforces. */
-  it('refuses while the customer carries wallet debt', async () => {
+  /* Cash is always allowed (2026-10-13) — an old fee is collected with the fare, not a blocker. */
+  it('switches to cash even while the customer carries an old fee', async () => {
     const { repo, useCase } = build(stuckOnline({ walletDebtPaise: 40_000 }));
 
-    await expect(useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' })).rejects.toThrow(
-      'unpaid cancellation fee',
-    );
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' });
 
-    expect(repo.setPaymentMode).not.toHaveBeenCalled();
+    expect(repo.setPaymentMode).toHaveBeenCalledWith('bkg_1', 'CASH', 'CASH');
   });
 
   it('refuses a booking belonging to another driver', async () => {
@@ -2978,5 +3004,184 @@ describe('CollectExtrasInCashUseCase', () => {
     await expect(
       useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1' }),
     ).rejects.toThrow('nothing outstanding');
+  });
+});
+
+/*
+ * PREPAID AND "CASH IS ALWAYS ALLOWED" (2026-10-13).
+ *
+ * A prepaid booking's fare reached the company offline, so the driver collects nothing for it —
+ * but waiting and an extra day were never part of what was prepaid. At the end the driver says how
+ * those were settled: cash, online (UPI trips only), or left unpaid as the customer's dues. Every
+ * one of those ends the trip.
+ */
+describe('CompleteTripUseCase — settling the extras (cash / online / unpaid)', () => {
+  // Arrived 09:00, started 09:40 — well past the free window, so there is a waiting charge.
+  const waited = {
+    arrivedAt: new Date('2026-08-31T09:00:00Z'),
+    startedAt: new Date('2026-08-31T09:40:00Z'),
+  };
+
+  function build(seed: Booking, extensions: BookingExtension[] = []) {
+    const repo = fakeRepo(seed);
+    const ledger = fakeLedger();
+    const wallet = fakeWallet();
+    const payments = fakePayments();
+    return {
+      repo,
+      ledger,
+      wallet,
+      payments,
+      useCase: new CompleteTripUseCase(
+        repo,
+        fakeCharges(),
+        settings,
+        ledger,
+        payments,
+        fakeNotifications(),
+        fakeExtensions(extensions),
+        undefined,
+        wallet,
+      ),
+    };
+  }
+
+  const prepaid = (over: Partial<Booking> = {}) =>
+    booking({
+      status: 'STARTED',
+      paymentMode: 'PREPAID',
+      paymentStatus: 'PAID',
+      paymentId: null,
+      ...waited,
+      ...over,
+    });
+
+  it('prepaid, extras in cash: the driver holds only the extras, nothing for the fare', async () => {
+    const { useCase, ledger, payments, repo } = build(prepaid());
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      extrasCollection: 'CASH',
+      idempotencyKey: 'k1',
+    });
+
+    expect(result.waitingChargePaise).toBeGreaterThan(0);
+    const cash = ledger.entries().filter((e) => e.entryType === 'CASH_COLLECTED');
+    expect(cash).toEqual([expect.objectContaining({ amountPaise: -result.waitingChargePaise })]);
+    expect(ledger.entries().some((e) => e.entryType === 'TRIP_EARNING')).toBe(true);
+    expect(payments.charge).not.toHaveBeenCalled();
+    expect(repo.current().extrasCollection).toBe('CASH');
+  });
+
+  it('prepaid, nothing said (older driver app): extras become the customer’s dues', async () => {
+    const { useCase, ledger, wallet } = build(prepaid());
+
+    const result = await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'k1' });
+
+    expect(ledger.entries().some((e) => e.entryType === 'CASH_COLLECTED')).toBe(false);
+    expect(wallet.rows()).toEqual([
+      expect.objectContaining({
+        entryType: 'UNPAID_TRIP_CHARGE',
+        amountPaise: -result.waitingChargePaise,
+      }),
+    ]);
+  });
+
+  it('prepaid with no extras: ends cleanly and records no settlement', async () => {
+    const { useCase, ledger, wallet, repo } = build(
+      prepaid({ arrivedAt: new Date('2026-08-31T09:00:00Z'), startedAt: new Date('2026-08-31T09:02:00Z') }),
+    );
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'k1' });
+
+    expect(repo.current().status).toBe('COMPLETED');
+    expect(repo.current().extrasCollection).toBeNull();
+    expect(ledger.entries().some((e) => e.entryType === 'CASH_COLLECTED')).toBe(false);
+    expect(wallet.rows()).toHaveLength(0);
+  });
+
+  it('refuses ONLINE settlement on a trip that has no online order', async () => {
+    const { useCase } = build(prepaid());
+
+    await expect(
+      useCase.execute({
+        bookingId: 'bkg_1',
+        driverId: 'drv_1',
+        extrasCollection: 'ONLINE',
+        idempotencyKey: 'k1',
+      }),
+    ).rejects.toThrow('only for trips paid online');
+  });
+
+  it('UPI trip with an unpaid extra day: cash is accepted instead of blocking the trip', async () => {
+    const { useCase, ledger, payments, repo } = build(
+      runningOutstation({ arrivedAt: new Date('2026-08-31T09:00:00Z'), startedAt: new Date('2026-08-31T09:02:00Z') }),
+      [acceptedExtension()],
+    );
+
+    await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      extrasCollection: 'CASH',
+      idempotencyKey: 'k1',
+    });
+
+    expect(repo.current().status).toBe('COMPLETED');
+    expect(payments.charge).not.toHaveBeenCalled();
+    expect(ledger.entries().filter((e) => e.entryType === 'CASH_COLLECTED')).toEqual([
+      expect.objectContaining({ amountPaise: -300_000 }),
+    ]);
+  });
+
+  it('cash trip with the extras left unpaid: the driver is booked for the fare only', async () => {
+    const { useCase, ledger, wallet, repo } = build(
+      booking({ status: 'STARTED', paymentMode: 'CASH', paymentStatus: 'CASH', paymentId: null, ...waited }),
+    );
+
+    const result = await useCase.execute({
+      bookingId: 'bkg_1',
+      driverId: 'drv_1',
+      extrasCollection: 'UNPAID',
+      idempotencyKey: 'k1',
+    });
+
+    const fare = repo.current().fareSnapshot.fare.totalPaise;
+    expect(ledger.entries().find((e) => e.entryType === 'CASH_COLLECTED')?.amountPaise).toBe(-fare);
+    expect(wallet.rows()).toEqual([
+      expect.objectContaining({ entryType: 'UNPAID_TRIP_CHARGE', amountPaise: -result.waitingChargePaise }),
+    ]);
+  });
+});
+
+describe('StartTripUseCase — the waiting charge is known from the start', () => {
+  it('records the waiting charge on the booking when the trip starts', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'ARRIVED', arrivedAt: new Date(Date.now() - 60 * 60_000) }),
+    );
+    const useCase = new StartTripUseCase(repo, settings, fakeNotifications());
+
+    await useCase.execute({ bookingId: 'bkg_1', driverId: 'drv_1', otp: '4821' });
+
+    expect(repo.current().waitingChargePaise).toBeGreaterThan(0);
+    expect(repo.current().waitingMinutes).toBeGreaterThanOrEqual(59);
+  });
+});
+
+describe('Cancelling a PREPAID booking', () => {
+  it('records the offline refund an admin has to send', async () => {
+    const repo = fakeRepo(
+      booking({ status: 'ASSIGNED', paymentMode: 'PREPAID', paymentStatus: 'PAID', paymentId: null }),
+    );
+    const payments = fakePayments();
+    const useCase = new CancelBookingByAdminUseCase(repo, payments, fakeNotifications());
+
+    const result = await useCase.execute({ bookingId: 'bkg_1', actorId: 'adm_1', reason: 'Customer called to cancel' });
+
+    expect(result.refundedPaise).toBe(0);
+    expect(payments.refund).not.toHaveBeenCalled();
+    expect(repo.events().at(-1)?.metadata).toEqual(
+      expect.objectContaining({ manualRefundPaise: repo.current().fareSnapshot.fare.totalPaise }),
+    );
   });
 });

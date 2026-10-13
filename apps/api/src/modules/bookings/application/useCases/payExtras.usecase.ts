@@ -54,8 +54,11 @@ export class PayTripExtrasUseCase {
      * CASH IS NOT A FAILURE HERE, it is a different settlement: the driver takes fare plus extras
      * at the door, and `expectedCashPaise` already says so. Refused rather than silently opening a
      * gateway order, which would collect the extra twice.
+     *
+     * A PREPAID trip may pay its extra day online here: the prepaid fare never covered it, and
+     * paying it bumps `paidExtensionPaise`, which the completion settlement subtracts.
      */
-    if (booking.paymentMode !== 'UPI') {
+    if (booking.paymentMode !== 'UPI' && booking.paymentMode !== 'PREPAID') {
       throw AppError.badRequest(
         'This trip is being paid in cash — hand the extra to your driver at the end.',
       );

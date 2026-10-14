@@ -3,6 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "main": "index.js",
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "expo-blur",
+        "expo-crypto",
+        "expo-linear-gradient"
+      ]
+    }
+  },
   "scripts": {
     "dev": "expo start",
     "start": "expo start",

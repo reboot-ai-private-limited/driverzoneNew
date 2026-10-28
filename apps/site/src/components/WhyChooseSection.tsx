@@ -138,10 +138,10 @@ export function WhyChooseSection(): ReactElement {
                   aria-controls={`why-panel-${feature.id}`}
                   onClick={() => setActiveId(feature.id)}
                   className={[
-                    'inline-flex flex-none items-center gap-2 rounded-pill px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-all duration-200',
+                    'inline-flex flex-none items-center gap-2 rounded-pill border px-4 py-2.5 text-sm font-medium whitespace-nowrap outline-none transition-all duration-200 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2',
                     isActive
-                      ? 'bg-brand text-fg shadow-md'
-                      : 'bg-gray-200 text-fg hover:border-border-strong hover:bg-bg-sunken',
+                      ? 'border-brand bg-brand text-fg shadow-md'
+                      : 'border-transparent bg-gray-200 text-fg hover:border-border hover:bg-bg-sunken',
                   ].join(' ')}
                 >
                   <Icon size={15} aria-hidden />
@@ -167,6 +167,7 @@ export function WhyChooseSection(): ReactElement {
                 alt={active.imageAlt}
                 fill
                 sizes="(min-width: 768px) 42vw, 100vw"
+                quality={90}
                 className="object-cover"
               />
             </div>

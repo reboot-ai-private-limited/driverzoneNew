@@ -3397,3 +3397,27 @@ describe('CompleteTripUseCase — a trip paid by the driver’s QR', () => {
     await expect(useCase.execute(complete)).rejects.toThrow(/online payment to go through/);
   });
 });
+
+describe('toBookingDto — how the online payment was made', () => {
+  it('is null unless the caller resolved it — every list and the apps\' own reads', () => {
+    expect(toBookingDto({ booking: booking({ paymentMode: 'UPI' }), adjustments: [] }).online_payment).toBeNull();
+  });
+
+  it('says a QR payment was a QR, with the provider\'s payment id', () => {
+    const dto = toBookingDto({
+      booking: booking({ paymentMode: 'UPI' }),
+      adjustments: [],
+      onlinePayment: { channel: 'QR', providerPaymentId: 'pay_ABC123' },
+    });
+    expect(dto.online_payment).toEqual({ channel: 'QR', provider_payment_id: 'pay_ABC123' });
+  });
+
+  it('says an ordinary checkout was an order', () => {
+    const dto = toBookingDto({
+      booking: booking({ paymentMode: 'UPI' }),
+      adjustments: [],
+      onlinePayment: { channel: 'ORDER', providerPaymentId: null },
+    });
+    expect(dto.online_payment).toEqual({ channel: 'ORDER', provider_payment_id: null });
+  });
+});

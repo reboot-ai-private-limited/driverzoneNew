@@ -60,6 +60,7 @@ import type {
   DriverPaymentQrUseCase,
   PaymentQrResult,
 } from '../application/useCases/driverPaymentQr.usecase.js';
+import { isCaptured, type PaymentsContract } from '../../payments/payments.public.js';
 import { toBookingDto, toBookingEventDto, toPaymentQrDto } from './bookings.mapper.js';
 import type { Booking } from '../domain/booking.entity.js';
 import {
@@ -1297,6 +1298,7 @@ export function makeGetAdminBookingController(
   charges: ChargeRepositoryPort,
   directory: CustomerContactContract & DriverCardContract,
   extensions: ExtensionRepositoryPort,
+  payments: PaymentsContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -1320,7 +1322,7 @@ export function makeGetAdminBookingController(
      * customer must give the driver at pickup. Support also gets asked for it by a customer whose
      * phone has died. A page of every code in the city stays off the list read.
      */
-    const [contacts, cards, adjustments, extensionRows, startOtp] = await Promise.all([
+    const [contacts, cards, adjustments, extensionRows, startOtp, paymentRows] = await Promise.all([
       directory.customerContactsByIds([booking.customerId]),
       booking.driverId === null
         ? Promise.resolve(new Map<string, DriverCard>())
@@ -1328,7 +1330,14 @@ export function makeGetAdminBookingController(
       charges.listAdjustments(booking.id),
       extensions.listForBooking(booking.id),
       repo.readStartOtp(booking.id),
+      payments.listForBooking(booking.id),
     ]);
+
+    /*
+     * HOW IT WAS PAID: the fare's captured payment. The newest, if (against the odds) there were
+     * two — a duplicate is refunded, so it is no longer captured and is not in this list.
+     */
+    const paid = paymentRows.filter((p) => p.kind === 'BOOKING' && isCaptured(p.status)).at(-1);
 
     sendSuccess(
       req,
@@ -1339,6 +1348,8 @@ export function makeGetAdminBookingController(
         extensions: extensionRows,
         startOtp,
         revealPhones: true,
+        onlinePayment:
+          paid === undefined ? null : { channel: paid.channel, providerPaymentId: paid.providerPaymentId },
         customerCard: contacts.get(booking.customerId) ?? null,
         driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
       }),

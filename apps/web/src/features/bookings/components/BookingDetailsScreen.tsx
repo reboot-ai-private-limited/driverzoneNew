@@ -796,7 +796,15 @@ function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
   return (
     <Panel title="Payment Details" icon={<CreditCard aria-hidden className="size-4" />} className={CARD}>
       <DefinitionList>
-        <FieldRow label="Payment Method">{paymentModeLabel(booking.payment_mode)}</FieldRow>
+        <FieldRow label="Payment Method">
+          {paymentModeLabel(booking.payment_mode, booking.online_payment)}
+        </FieldRow>
+        {/* The provider's id — what support quotes to Razorpay to trace a payment. */}
+        {booking.online_payment?.provider_payment_id != null && (
+          <FieldRow label="Razorpay Payment ID">
+            <span className="font-mono text-xs">{booking.online_payment.provider_payment_id}</span>
+          </FieldRow>
+        )}
         {booking.payment_reference !== null && (
           <FieldRow label="Payment Reference">{booking.payment_reference}</FieldRow>
         )}

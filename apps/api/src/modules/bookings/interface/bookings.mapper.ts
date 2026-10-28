@@ -144,6 +144,11 @@ export interface BookingView {
    */
   revealPhones?: boolean | undefined;
   /**
+   * How the online payment was made. ADMIN SINGLE READ ONLY — resolving it is a payments lookup,
+   * which no list should pay per row. Absent renders as null.
+   */
+  onlinePayment?: { channel: 'ORDER' | 'QR'; providerPaymentId: string | null } | null | undefined;
+  /**
    * Puts the driver's own cut of a pending day extension on the response. DRIVER READS ONLY.
    *
    * The same rule as `revealPhones` above, aimed at the other party: a driver deciding whether to
@@ -207,6 +212,10 @@ export function toBookingDto(view: BookingView): BookingDto {
             ? 'PAID'
             : 'AWAITING_PAYMENT'),
     payment_reference: booking.paymentReference,
+    online_payment:
+      view.onlinePayment === null || view.onlinePayment === undefined
+        ? null
+        : { channel: view.onlinePayment.channel, provider_payment_id: view.onlinePayment.providerPaymentId },
     extras_collection: booking.extrasCollection,
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },

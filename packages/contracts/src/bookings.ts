@@ -349,6 +349,17 @@ export interface PaymentQrLineDto {
   amount: Money;
 }
 
+/**
+ * HOW AN ONLINE PAYMENT WAS MADE — the customer's own checkout (`ORDER`) or the driver's QR (`QR`),
+ * and the provider's payment id, which is what support quotes to the payment provider.
+ *
+ * ADMIN SINGLE-BOOKING READ ONLY; null everywhere else, and null when nothing has been captured.
+ */
+export interface OnlinePaymentDto {
+  channel: 'ORDER' | 'QR';
+  provider_payment_id: string | null;
+}
+
 export interface DriverPaymentQrDto {
   state: PaymentQrState;
   /** What the QR collects, in full. Null only when `state` is `NONE`. */
@@ -387,6 +398,8 @@ export interface BookingDto {
   payment_status: BookingPaymentStatus;
   /** The admin's note of how a `PREPAID` booking was paid. Null on every other booking. */
   payment_reference: string | null;
+  /** How the online payment was made, once one has been captured. Admin single read only. */
+  online_payment: OnlinePaymentDto | null;
   /**
    * How the extras were settled when the trip ended — see `EXTRAS_COLLECTIONS`. Null until the
    * trip is complete, and on a trip that had no extras to settle.

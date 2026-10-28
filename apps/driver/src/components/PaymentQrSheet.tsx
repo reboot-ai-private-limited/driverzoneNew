@@ -21,6 +21,21 @@ import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 /** How often the screen asks the server whether the money has arrived. */
 const POLL_MS = 2_000;
 
+/**
+ * Razorpay's hosted QR image is a poster: blank band, logo, the QR, payment-app logos, the merchant
+ * name, blank band. These are how much of its height to cut from the top and bottom so the QR sits
+ * near the middle of what is shown — measured on a live QR (674 × 1644). If Razorpay ever changes the
+ * poster the worst case is a little extra or missing margin, never a distorted QR.
+ */
+const POSTER_CROP_TOP = 0.17;
+const POSTER_CROP_BOTTOM = 0.1;
+/** And off each side, which zooms the QR up: the poster's card is only about 70% of its width. */
+const POSTER_CROP_SIDE = 0.09;
+/** Used until the image has loaded and reported its real size. */
+const POSTER_RATIO_GUESS = 1644 / 674;
+/** The card's padding when it holds the poster rather than a drawn QR. */
+const POSTER_PADDING = space.sm;
+
 /** How long the green "received" screen stays before closing itself. */
 const PAID_LINGER_MS = 1_600;
 
@@ -60,11 +75,18 @@ export function PaymentQrSheet({
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const qrSize = Math.min(width - space.lg * 2 - space.xl * 2, 300);
+  /** The hosted poster fills the card edge to edge — its own margins are already generous. */
+  const posterWidth = width - space.lg * 2 - POSTER_PADDING * 2;
+  /** The whole image, drawn wider than what is shown so its side margins fall outside the card. */
+  const posterImageWidth = posterWidth / (1 - POSTER_CROP_SIDE * 2);
+  const posterImageHeight = posterImageWidth * posterRatio;
 
   const [qr, setQr] = useState<DriverPaymentQrDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  /** The hosted poster's height ÷ width, once the image has loaded and said what it is. */
+  const [posterRatio, setPosterRatio] = useState<number>(POSTER_RATIO_GUESS);
 
   // Held in refs so the polling loop never reads a stale copy of a callback the parent re-created.
   const onBookingRef = useRef(onBooking);
@@ -190,11 +212,44 @@ export function PaymentQrSheet({
               <Text style={styles.amountLabel}>Customer pays</Text>
               <Text style={styles.amount}>{amount}</Text>
 
-              <View style={[styles.qrCard, expired && styles.qrCardDead]}>
+              <View
+                style={[
+                  styles.qrCard,
+                  qr.upi_uri === null && qr.image_url !== null && styles.qrCardPoster,
+                  expired && styles.qrCardDead,
+                ]}
+              >
                 {qr.upi_uri !== null ? (
                   <QRCode value={qr.upi_uri} size={qrSize} backgroundColor="#FFFFFF" color="#000000" ecl="M" />
                 ) : qr.image_url !== null ? (
-                  <Image source={{ uri: qr.image_url }} style={{ width: qrSize, height: qrSize }} resizeMode="contain" />
+                  /*
+                    RAZORPAY'S OWN IMAGE, which is a tall POSTER (about 2.4 times as tall as it is wide: its logo,
+                    the QR, then GPay / PhonePe / Paytm), not a square QR. Squeezed into a square — as this
+                    first did — the QR shrank to a thumbnail. So it is drawn at its real proportions, full
+                    width, with the empty bands above and below cropped off; the QR is the middle of it.
+                  */
+                  <View
+                    style={{
+                      width: posterWidth,
+                      height: posterImageHeight * (1 - POSTER_CROP_TOP - POSTER_CROP_BOTTOM),
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <Image
+                      source={{ uri: qr.image_url }}
+                      onLoad={(event) => {
+                        const { width: w, height: h } = event.nativeEvent.source;
+                        if (w > 0 && h > 0) setPosterRatio(h / w);
+                      }}
+                      style={{
+                        width: posterImageWidth,
+                        height: posterImageHeight,
+                        marginTop: -posterImageHeight * POSTER_CROP_TOP,
+                        marginLeft: -posterImageWidth * POSTER_CROP_SIDE,
+                      }}
+                      resizeMode="contain"
+                    />
+                  </View>
                 ) : (
                   <View style={{ width: qrSize, height: qrSize }} />
                 )}
@@ -293,6 +348,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  qrCardPoster: { padding: POSTER_PADDING, overflow: 'hidden' },
   qrCardDead: { opacity: 0.35 },
   expiredCover: {
     position: 'absolute',

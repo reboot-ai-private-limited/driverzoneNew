@@ -16,6 +16,7 @@ import { buildPackagesContainer } from '@/modules/packages/packages.container.js
 import { buildPaymentsContainer } from '@/modules/payments/payments.container.js';
 import { buildQuotesContainer } from '@/modules/quotes/quotes.container.js';
 import { buildReviewsContainer } from '@/modules/reviews/reviews.container.js';
+import { buildInvoicesContainer } from '@/modules/invoices/invoices.container.js';
 import { buildSettingsContainer } from '@/modules/settings/settings.container.js';
 import { buildFaqContainer } from '@/modules/faq/faq.container.js';
 import { buildWalletContainer } from '@/modules/wallet/wallet.container.js';
@@ -51,6 +52,7 @@ export interface AppContainers {
   favourites: ReturnType<typeof buildFavouritesContainer>;
   dispatch: ReturnType<typeof buildDispatchContainer>;
   reviews: ReturnType<typeof buildReviewsContainer>;
+  invoices: ReturnType<typeof buildInvoicesContainer>;
   admin: ReturnType<typeof buildAdminContainer>;
   accounts: ReturnType<typeof buildAccountsContainer>;
 }
@@ -177,6 +179,15 @@ export function buildContainers(): AppContainers {
   });
 
   /*
+   * Tier 8 beside `reviews`, for the same reason: a GST invoice request is written after the trip
+   * is over and only READS the finished booking. Names for the admin queue come from identity.
+   */
+  const invoices = buildInvoicesContainer({
+    bookings: bookings.contract,
+    identity: identity.contract,
+  });
+
+  /*
    * LAST, and at the top of the tier list. It is the first module here that reads across four
    * tiers at once — balances from `ledger` joined with names from `identity` — which is what a
    * tier-8 module is for. Nothing below it may ever depend on it, which is precisely what makes
@@ -218,6 +229,7 @@ export function buildContainers(): AppContainers {
     favourites,
     dispatch,
     reviews,
+    invoices,
     admin,
     accounts,
   };

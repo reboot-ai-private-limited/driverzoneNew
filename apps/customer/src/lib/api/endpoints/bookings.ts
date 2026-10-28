@@ -5,7 +5,10 @@ import type {
   CancelBookingResponse,
   CreateBookingRequest,
   CreateBookingResponse,
+  CreateGstInvoiceRequest,
   CurrentCustomerBookingResponse,
+  CustomerGstInvoiceResponse,
+  GstInvoiceRequestDto,
   ListBookingsQuery,
   ListBookingsResponse,
   PaymentMode,
@@ -142,6 +145,29 @@ export function requestDayExtension(bookingId: string): Promise<BookingExtension
 
 export function rateTrip(bookingId: string, body: RateTripRequest): Promise<RateTripResponse> {
   return request<RateTripResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/rate`, {
+    method: 'POST',
+    body,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `GET /customer/bookings/:id/gst-invoice` — mounted by the INVOICES module, on the same prefix
+ * fall-through as `/rate`. This trip's request, or the details to pre-fill a new one with.
+ */
+export function getGstInvoice(bookingId: string, signal?: AbortSignal): Promise<CustomerGstInvoiceResponse> {
+  return request<CustomerGstInvoiceResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/gst-invoice`, {
+    signal,
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/** `POST /customer/bookings/:id/gst-invoice` — one request per completed trip. */
+export function requestGstInvoice(
+  bookingId: string,
+  body: CreateGstInvoiceRequest,
+): Promise<GstInvoiceRequestDto> {
+  return request<GstInvoiceRequestDto>(`${ROLE_PREFIX}/bookings/${bookingId}/gst-invoice`, {
     method: 'POST',
     body,
     token: getAccessToken() ?? undefined,

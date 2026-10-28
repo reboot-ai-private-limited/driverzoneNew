@@ -86,6 +86,8 @@ export const keys = {
      */
     history: (view: RideHistoryView) => ['bookings', 'list', view] as const,
     detail: (id: string) => ['bookings', id] as const,
+    /** This trip's GST invoice request (and the form's pre-fill). Under the trip's own key. */
+    gstInvoice: (id: string) => ['bookings', id, 'gst-invoice'] as const,
     /** "Am I in the middle of a booking?" — asked on launch, and on Home regaining focus. */
     current: () => ['bookings', 'current'] as const,
   },

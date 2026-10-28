@@ -3,6 +3,8 @@ import type {
   BookingEventDto,
   BookingPaymentStatus,
   BookingStatus,
+  DriverPaymentQrDto,
+  PaymentQrLineDto,
 } from '@driverzone/contracts';
 import type { CustomerContact, DriverCard } from '../../identity/identity.public.js';
 import { toMoney } from '../../../shared/money/format.js';
@@ -16,6 +18,48 @@ import {
   extensionRefusal,
   extensionRefusalMessage,
 } from '../application/useCases/extendBooking.usecase.js';
+import { breakdownOf, type PaymentQrView } from '../application/useCases/driverPaymentQr.usecase.js';
+
+/**
+ * The driver's payment QR as the wire sees it.
+ *
+ * The link and the image go out ONLY while the QR is live: a paid or expired one has nothing left
+ * to scan, and a driver's screen that kept drawing it would invite a customer to pay a dead code.
+ * The breakdown is read back from what the QR was made for, not recomputed from the booking — the
+ * trip may have changed since, and these lines must add up to the amount on the QR.
+ */
+export function toPaymentQrDto(view: PaymentQrView): DriverPaymentQrDto {
+  const { payment } = view;
+  if (payment === null) {
+    return {
+      state: view.state,
+      amount: null,
+      upi_uri: null,
+      image_url: null,
+      expires_at: null,
+      lines: [],
+      waiting: toMoney(0),
+    };
+  }
+
+  const b = breakdownOf(payment);
+  const lines: PaymentQrLineDto[] = [{ label: 'Trip fare (incl. GST)', amount: toMoney(b.farePaise) }];
+  if (b.extensionPaise > 0) lines.push({ label: 'Extra day', amount: toMoney(b.extensionPaise) });
+  if (b.waitingPaise > 0) lines.push({ label: 'Waiting charge', amount: toMoney(b.waitingPaise) });
+  if (b.debtPaise > 0) lines.push({ label: 'Earlier dues', amount: toMoney(b.debtPaise) });
+  if (b.creditPaise > 0) lines.push({ label: 'Wallet credit used', amount: toMoney(-b.creditPaise) });
+
+  const live = view.state === 'PENDING' && payment.qr !== null;
+  return {
+    state: view.state,
+    amount: toMoney(payment.amountPaise),
+    upi_uri: live ? (payment.qr?.upiUri ?? null) : null,
+    image_url: live ? (payment.qr?.imageUrl ?? null) : null,
+    expires_at: live ? (payment.qr?.expiresAt.toISOString() ?? null) : null,
+    lines,
+    waiting: toMoney(b.waitingPaise),
+  };
+}
 
 export interface BookingView {
   booking: Booking;
@@ -100,6 +144,11 @@ export interface BookingView {
    */
   revealPhones?: boolean | undefined;
   /**
+   * How the online payment was made. ADMIN SINGLE READ ONLY — resolving it is a payments lookup,
+   * which no list should pay per row. Absent renders as null.
+   */
+  onlinePayment?: { channel: 'ORDER' | 'QR'; providerPaymentId: string | null } | null | undefined;
+  /**
    * Puts the driver's own cut of a pending day extension on the response. DRIVER READS ONLY.
    *
    * The same rule as `revealPhones` above, aimed at the other party: a driver deciding whether to
@@ -163,6 +212,10 @@ export function toBookingDto(view: BookingView): BookingDto {
             ? 'PAID'
             : 'AWAITING_PAYMENT'),
     payment_reference: booking.paymentReference,
+    online_payment:
+      view.onlinePayment === null || view.onlinePayment === undefined
+        ? null
+        : { channel: view.onlinePayment.channel, provider_payment_id: view.onlinePayment.providerPaymentId },
     extras_collection: booking.extrasCollection,
 
     pickup: { ...booking.pickup, address: booking.pickupAddress },
@@ -177,6 +230,15 @@ export function toBookingDto(view: BookingView): BookingDto {
     car_category: booking.carCategory,
     vehicle_type: booking.vehicleType,
     car_plate: booking.plateNumber,
+    /*
+     * The passenger's number is gated exactly like the two parties' own — see
+     * `PHONE_VISIBLE_STATUSES`. The name is not: the driver needs to know who to look for before
+     * the trip is live, and the booker needs to see who they booked for afterwards.
+     */
+    rider:
+      booking.rider === null
+        ? null
+        : { name: booking.rider.name, phone: canSeePhone(view) ? booking.rider.phone : null },
     prefer_favourite_drivers: booking.preferFavouriteDrivers,
     dispatch_mode: booking.dispatchMode,
 

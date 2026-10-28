@@ -76,11 +76,37 @@ export function isCaptured(status: PaymentStatus): boolean {
   return status === 'CAPTURED' || status === 'PARTIALLY_REFUNDED';
 }
 
+/**
+ * HOW THE CUSTOMER PAYS. An `ORDER` is a gateway order the customer's own app checks out against;
+ * a `QR` is a single-use UPI QR the DRIVER shows on their phone (2026-10-28). Both are a charge
+ * for the same trip and both settle through the same capture — what differs is who starts it and
+ * what the gateway reference is (an order id, or a QR code id).
+ */
+export const PAYMENT_CHANNELS = ['ORDER', 'QR'] as const;
+export type PaymentChannel = (typeof PAYMENT_CHANNELS)[number];
+
+/** What a driver's phone needs to draw a QR, and when it stops working. */
+export interface PaymentQr {
+  /** The `upi://pay?…` link the QR encodes, when the gateway gives it. Preferred: it draws crisply. */
+  upiUri: string | null;
+  /** A hosted image of the QR, for a gateway that gives no link. */
+  imageUrl: string | null;
+  expiresAt: Date;
+}
+
 export interface Payment {
   id: string;
   bookingId: string;
   customerId: string;
   kind: PaymentKind;
+  channel: PaymentChannel;
+  /**
+   * Amounts the CALLER wants remembered with the charge, opaque to this module. `bookings` records
+   * what a QR was made up of (fare, extra day, waiting) so that when it captures, the booking can
+   * tell which of those the one payment already covered.
+   */
+  metadata: Record<string, number>;
+  qr: PaymentQr | null;
   status: PaymentStatus;
   amountPaise: number;
   /** How much of `amountPaise` has gone back. Always 0 for a REFUND row itself. */

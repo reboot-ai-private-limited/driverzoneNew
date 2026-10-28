@@ -6,6 +6,7 @@ import {
   placeLabel,
   pointLabelFromGeocode,
   quoteBlocker,
+  riderBlocker,
   toIndianE164,
   type TripDraft,
 } from './newBooking';
@@ -174,6 +175,47 @@ describe('buildCreateBookingRequest', () => {
       paymentReference: 'UTR 4455',
     });
     expect(request).not.toHaveProperty('payment_reference');
+  });
+
+  it('sends the passenger, trimmed and in E.164, when the admin booked for someone else', () => {
+    const request = buildCreateBookingRequest({
+      ...base,
+      paymentMode: 'CASH',
+      paymentReference: '',
+      riderName: '  Ramesh Das ',
+      riderPhone: '98765 43210',
+    });
+    expect(request.rider).toEqual({ name: 'Ramesh Das', phone: '+919876543210' });
+  });
+
+  it('sends no passenger when the fields are blank — the customer is travelling', () => {
+    const request = buildCreateBookingRequest({
+      ...base,
+      paymentMode: 'CASH',
+      paymentReference: '',
+      riderName: ' ',
+      riderPhone: '',
+    });
+    expect(request).not.toHaveProperty('rider');
+  });
+});
+
+describe('riderBlocker', () => {
+  it('lets both fields be blank', () => {
+    expect(riderBlocker('', '')).toBeNull();
+  });
+
+  it('accepts a name with a valid number', () => {
+    expect(riderBlocker('Ramesh', '98765 43210')).toBeNull();
+  });
+
+  it('stops a half-filled passenger', () => {
+    expect(riderBlocker('Ramesh', '')).toMatch(/mobile number/);
+    expect(riderBlocker('', '9876543210')).toMatch(/name/);
+  });
+
+  it('stops a number that is not an Indian mobile', () => {
+    expect(riderBlocker('Ramesh', '12345')).toMatch(/10-digit/);
   });
 });
 

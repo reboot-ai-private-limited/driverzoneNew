@@ -35,3 +35,7 @@ apps/*/ios/
 apps/api/firebaseServiceAccount.json
 apps/api/**/firebase*serviceaccount*.json
 apps/api/secrets/
+
+# Local tokens — never commit
+drvtok.txt
+*.token.txt

@@ -1,12 +1,14 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { AppError } from '../../../shared/errors/AppError.js';
 import { logger } from '../../../shared/logging/logger.js';
-import type {
-  GatewayEvent,
-  PaymentGatewayPort,
-  PaymentIntent,
-  RefundResult,
-  WebhookRequest,
+import {
+  IGNORED_WEBHOOK,
+  type GatewayEvent,
+  type PaymentGatewayPort,
+  type PaymentIntent,
+  type QrCodeIntent,
+  type RefundResult,
+  type WebhookRequest,
 } from '../domain/paymentGateway.port.js';
 
 /**
@@ -145,19 +147,101 @@ export class RazorpayGateway implements PaymentGatewayPort {
     return { gatewayRef: refund.id, amountPaise: input.amountPaise };
   }
 
-  verifyWebhook(request: WebhookRequest): GatewayEvent | null {
+  /**
+   * A single-use UPI QR for exactly `amountPaise`.
+   *
+   * `fixed_amount: true` is what makes `single_use` legal — and what makes a UPI app refuse any
+   * other amount, so a customer cannot underpay by editing the figure. `close_by` is a unix
+   * timestamp in SECONDS. There is no idempotency header on this API, so duplicate QRs are
+   * prevented the same way duplicate orders are: the caller creates our payment row first, under a
+   * unique idempotency key, and only reaches here once.
+   */
+  async createQrCode(input: {
+    amountPaise: number;
+    reference: string;
+    idempotencyKey: string;
+    expiresAt: Date;
+  }): Promise<QrCodeIntent> {
+    if (input.amountPaise < MIN_ORDER_PAISE) {
+      throw AppError.internal('INTERNAL', {
+        reason: 'Razorpay refuses a payment below ₹1.00',
+        amountPaise: input.amountPaise,
+      });
+    }
+
+    const qr = await this.post<{ id?: unknown; image_url?: unknown; image_content?: unknown }>(
+      '/payments/qr_codes',
+      {
+        type: 'upi_qr',
+        name: `DriverZone ${input.reference}`.slice(0, 40),
+        usage: 'single_use',
+        fixed_amount: true,
+        payment_amount: input.amountPaise,
+        description: `Trip ${input.reference}`,
+        close_by: Math.floor(input.expiresAt.getTime() / 1000),
+        notes: { reference: input.reference },
+      },
+    );
+
+    if (typeof qr.id !== 'string') {
+      throw AppError.internal('INTERNAL', { reason: 'Razorpay QR response had no id' });
+    }
+
+    logger.info({ qrId: qr.id, amountPaise: input.amountPaise, reference: input.reference }, 'razorpay qr created');
+
+    return {
+      gatewayRef: qr.id,
+      // Only a real UPI link is kept — `image_content` is not documented as one, so it is trusted
+      // only when it looks like one, and the hosted image is the fallback otherwise.
+      upiUri:
+        typeof qr.image_content === 'string' && qr.image_content.startsWith('upi://')
+          ? qr.image_content
+          : null,
+      imageUrl: typeof qr.image_url === 'string' ? qr.image_url : null,
+    };
+  }
+
+  async closeQrCode(gatewayRef: string): Promise<void> {
+    try {
+      await this.post(`/payments/qr_codes/${gatewayRef}/close`, {});
+    } catch (error) {
+      // Closing a QR that is already closed (paid, expired) is a 400, and is exactly the outcome
+      // wanted — so this is logged, not thrown.
+      logger.warn({ err: error, qrId: gatewayRef }, 'razorpay qr could not be closed');
+    }
+  }
+
+  async fetchQrCredit(
+    gatewayRef: string,
+  ): Promise<{ providerPaymentId: string; amountPaise: number } | null> {
+    const list = await this.get<{ items?: unknown }>(`/payments/qr_codes/${gatewayRef}/payments`);
+    const items = Array.isArray(list.items) ? (list.items as Array<Record<string, unknown>>) : [];
+
+    // A QR's payments are auto-captured. `captured` is the only status that is money in hand.
+    const paid = items.find(
+      (item) => item['status'] === 'captured' && typeof item['id'] === 'string' && Number.isInteger(item['amount']),
+    );
+    if (paid === undefined) return null;
+
+    return { providerPaymentId: paid['id'] as string, amountPaise: paid['amount'] as number };
+  }
+
+  verifyWebhook(request: WebhookRequest): GatewayEvent | typeof IGNORED_WEBHOOK | null {
     if (!this.signatureMatches(request.rawBody, request.signature)) return null;
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(request.rawBody);
     } catch {
-      // Verified but unparseable is our problem, not an attack — and still not an event.
+      // Verified but unparseable is our problem, not an attack — answer 200, or it is redelivered
+      // for hours and fails the same way every time.
       logger.error('razorpay webhook verified but did not parse');
-      return null;
+      return IGNORED_WEBHOOK;
     }
 
-    return toGatewayEvent(parsed, request.eventId);
+    // Authentic, but nothing we act on (an event we never subscribed to; a payment made outside an
+    // order, such as a QR payment's own `payment.captured`). Not the same answer as a bad signature.
+    return toGatewayEvent(parsed, request.eventId) ?? IGNORED_WEBHOOK;
   }
 
   /**
@@ -183,9 +267,18 @@ export class RazorpayGateway implements PaymentGatewayPort {
     return constantTimeEquals(expected, signature);
   }
 
-  private async post<T>(
+  private get<T>(path: string): Promise<T> {
+    return this.call<T>('GET', path);
+  }
+
+  private post<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
+    return this.call<T>('POST', path, body, headers);
+  }
+
+  private async call<T>(
+    method: 'GET' | 'POST',
     path: string,
-    body: unknown,
+    body?: unknown,
     headers: Record<string, string> = {},
   ): Promise<T> {
     const controller = new AbortController();
@@ -193,9 +286,9 @@ export class RazorpayGateway implements PaymentGatewayPort {
 
     try {
       const response = await fetch(`${API}${path}`, {
-        method: 'POST',
+        method,
         headers: { authorization: this.auth, 'content-type': 'application/json', ...headers },
-        body: JSON.stringify(body),
+        ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
         signal: controller.signal,
       });
 
@@ -261,6 +354,8 @@ function toGatewayEvent(body: unknown, eventId: string | undefined): GatewayEven
   const event = (body as { event?: unknown }).event;
   if (typeof event !== 'string') return null;
 
+  if (event === 'qr_code.credited' || event === 'qr_code.closed') return toQrEvent(body, event, eventId);
+
   const type = EVENT_TYPES[event];
   if (type === undefined) return null;
 
@@ -291,6 +386,43 @@ function toGatewayEvent(body: unknown, eventId: string | undefined): GatewayEven
     ...(typeof entity['error_description'] === 'string'
       ? { failureReason: customerSafeFailure(entity['error_description']) }
       : {}),
+  };
+}
+
+/**
+ * A QR event. `gatewayRef` is the QR's OWN id — what we stored when we made it — because a payment
+ * made on a QR has no order. A credit carries the payment it brought; a close carries only the QR.
+ *
+ * THE PROVIDER'S CLOSE OF A QR THAT WAS PAID IS NOT AN EVENT FOR US. A single-use QR closes itself
+ * the moment it is paid, and that arrives beside (and sometimes before) the credit — reporting it
+ * would mark a paid trip's QR as expired. Only a close that was NOT a payment is reported.
+ */
+function toQrEvent(
+  body: unknown,
+  event: 'qr_code.credited' | 'qr_code.closed',
+  eventId: string | undefined,
+): GatewayEvent | null {
+  const qr = readEntity(body, 'qr_code');
+  const qrId = qr?.['id'];
+  if (qr === null || typeof qrId !== 'string') return null;
+
+  if (event === 'qr_code.closed') {
+    if (qr['close_reason'] === 'paid') return null;
+    return { eventId: eventId ?? `${event}:${qrId}`, type: 'QR_CLOSED', gatewayRef: qrId, amountPaise: 0 };
+  }
+
+  const payment = readEntity(body, 'payment');
+  const paymentId = payment?.['id'];
+  const amount = payment?.['amount'];
+  if (payment === null || typeof paymentId !== 'string') return null;
+  if (typeof amount !== 'number' || !Number.isInteger(amount)) return null;
+
+  return {
+    eventId: eventId ?? `${event}:${qrId}:${paymentId}`,
+    type: 'PAYMENT_CAPTURED',
+    gatewayRef: qrId,
+    providerPaymentId: paymentId,
+    amountPaise: amount,
   };
 }
 

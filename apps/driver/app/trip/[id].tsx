@@ -30,6 +30,7 @@ import { AppIcon, type AppIconName } from '@/components/AppIcon';
 import { CancelTripSheet } from '@/components/CancelTripSheet';
 import { EndTripExtrasSheet, extrasOwedPaise } from '@/components/EndTripExtrasSheet';
 import { PaymentOverrideSheet } from '@/components/PaymentOverrideSheet';
+import { PaymentQrSheet } from '@/components/PaymentQrSheet';
 import { ExtensionRequestCard } from '@/components/ExtensionRequestCard';
 import { OtpInput } from '@/components/OtpInput';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -43,6 +44,7 @@ import { getDriverSettings } from '@/lib/api/endpoints/driver';
 import {
   collectExtrasInCash,
   completeTrip,
+  getPaymentQr,
   getTrip,
   goEnRoute,
   markArrived,
@@ -51,7 +53,7 @@ import {
 } from '@/lib/api/endpoints/trip';
 import { keys } from '@/lib/query/keys';
 import { MOTION_EASING, motion } from '@/theme/motion';
-import { colors, radius, shadow, space, text } from '@/theme/theme';
+import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
 
 type FeatherName = ComponentProps<typeof Feather>['name'];
 
@@ -145,6 +147,23 @@ export default function TripScreen(): ReactElement {
     queryFn: ({ signal }) => getDriverSettings(signal),
     staleTime: 60 * 60 * 1000,
   });
+
+  /**
+   * WHAT THE DRIVER'S PAYMENT QR ALREADY COLLECTED. A QR charges the whole trip up front, waiting
+   * charge included, so once one has been paid the end-of-trip question "how was the waiting
+   * settled?" has been answered — asking it again would invite the driver to take that money twice.
+   *
+   * Read from the server rather than remembered on this screen, so it survives the app being
+   * killed and reopened mid-trip. Only asked when it can matter: a started trip already paid online.
+   */
+  const paidQr = useQuery({
+    queryKey: [...keys.trip.detail(id), 'payment-qr'],
+    queryFn: ({ signal }) => getPaymentQr(id, signal),
+    enabled:
+      booking?.status === 'STARTED' && booking.payment_mode === 'UPI' && booking.payment_status === 'PAID',
+    staleTime: Infinity,
+  });
+  const qrWaitingPaise = paidQr.data?.qr.state === 'PAID' ? paidQr.data.qr.waiting.amount_paise : 0;
 
   /** Every action writes the returned booking straight back — see the header. */
   function adopt(next: BookingDto): void {
@@ -252,6 +271,8 @@ export default function TripScreen(): ReactElement {
    * phone that died first) and an online payment that will not go through.
    */
   const [overriding, setOverriding] = useState(false);
+  /** The full-screen QR the customer scans to pay. */
+  const [qrOpen, setQrOpen] = useState(false);
 
   const takeExtrasCash = useMutation({
     mutationFn: () => collectExtrasInCash(id),
@@ -302,7 +323,14 @@ export default function TripScreen(): ReactElement {
     booking.payment_mode === null ||
     (booking.payment_mode === 'UPI' && booking.payment_status !== 'PAID');
   const canEndTrip = !paymentPending;
-  const owedExtras = extrasOwedPaise(booking);
+  // Less the waiting charge a paid QR already collected — see `paidQr` above.
+  const owedExtras = Math.max(0, extrasOwedPaise(booking) - qrWaitingPaise);
+  /**
+   * A QR can be shown for any trip with something still to pay. Cash trips included: a customer who
+   * chose cash and then reaches for their phone is normal. Never a prepaid trip, nor one already paid.
+   */
+  const canCollectByQr =
+    booking.status === 'STARTED' && booking.payment_mode !== 'PREPAID' && booking.payment_status !== 'PAID';
 
   /** Ending the trip: straight through, unless there are extras the driver must account for. */
   const endTrip = (): void => {
@@ -435,28 +463,39 @@ export default function TripScreen(): ReactElement {
           Call button appears with ASSIGNED and is gone the moment the trip ends. Nothing to hide
           client-side: a finished trip's response never carries the number.
         */}
+        {/*
+          BOOKED FOR SOMEONE ELSE: the passenger is who the driver meets at the kerb, so they come
+          first. The booker stays below as "Booked by" — they still choose how to pay in their app,
+          so the driver may need them too. Same server-side phone gate for both.
+        */}
+        {booking.rider !== null ? (
+          <ContactCard label="Your passenger" name={booking.rider.name} phone={booking.rider.phone} />
+        ) : null}
         {booking.customer !== null ? (
-          <Animated.View entering={FadeInDown.duration(260)} style={styles.riderCard}>
-            <View style={styles.riderAvatar}>
-              <Feather name="user" size={18} color={colors.fg} />
-            </View>
-            <View style={styles.riderText}>
-              <Text style={styles.riderLabel}>Your rider</Text>
-              <Text style={styles.riderName} numberOfLines={1}>
-                {booking.customer.name ?? 'Rider'}
-              </Text>
-            </View>
-            {booking.customer.phone !== null ? (
-              <Pressable
-                onPress={() => callCustomer(booking.customer!.phone!)}
-                accessibilityRole="button"
-                accessibilityLabel={`Call ${booking.customer.name ?? 'the rider'}`}
-                style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
-              >
-                <Feather name="phone" size={16} color={colors.onFg} />
-                <Text style={styles.callButtonText}>Call</Text>
-              </Pressable>
-            ) : null}
+          <ContactCard
+            label={booking.rider === null ? 'Your rider' : 'Booked by'}
+            name={booking.customer.name ?? (booking.rider === null ? 'Rider' : 'Customer')}
+            phone={booking.customer.phone}
+          />
+        ) : null}
+
+        {canCollectByQr ? (
+          <Animated.View entering={FadeIn} style={styles.qrBlock}>
+            <Pressable
+              onPress={() => setQrOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Collect the payment by QR code"
+              style={({ pressed }) => [styles.qrButton, pressed && styles.qrButtonPressed]}
+            >
+              <View style={styles.qrIcon}>
+                <Feather name="grid" size={20} color={colors.fg} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={styles.qrButtonTitle}>Collect by QR</Text>
+                <Text style={styles.qrButtonHint}>Customer scans with GPay, PhonePe, Paytm or any UPI app</Text>
+              </View>
+              <Feather name="chevron-right" size={20} color={colors.brandOnFg} />
+            </Pressable>
           </Animated.View>
         ) : null}
 
@@ -657,7 +696,9 @@ export default function TripScreen(): ReactElement {
             */}
             <Text style={styles.otpTitle}>Ask for the 4-digit code</Text>
             <Text style={styles.otpBody}>
-              The customer has it in their app. The trip starts once it matches.
+              {booking.rider === null
+                ? 'The customer has it in their app. The trip starts once it matches.'
+                : `${booking.rider.name} has it — the person who booked sends it to them. The trip starts once it matches.`}
             </Text>
 
             <View style={styles.otpBox}>
@@ -786,6 +827,17 @@ export default function TripScreen(): ReactElement {
           </Animated.View>
         ) : null}
       </KeyboardAwareScrollView>
+
+      <PaymentQrSheet
+        visible={qrOpen}
+        bookingId={booking.id}
+        onBooking={adopt}
+        onClose={() => setQrOpen(false)}
+        onCash={() => {
+          setQrOpen(false);
+          setOverriding(true);
+        }}
+      />
 
       <PaymentOverrideSheet
         visible={overriding}
@@ -1028,6 +1080,46 @@ function callCustomer(phone: string): void {
   });
 }
 
+/**
+ * One person the driver may need to reach — the rider, or on a booking made for someone else, the
+ * passenger and the booker. `phone` is null outside the live trip (the server's gate), and so is
+ * the Call button.
+ */
+function ContactCard({
+  label,
+  name,
+  phone,
+}: {
+  label: string;
+  name: string;
+  phone: string | null;
+}): ReactElement {
+  return (
+    <Animated.View entering={FadeInDown.duration(260)} style={styles.riderCard}>
+      <View style={styles.riderAvatar}>
+        <Feather name="user" size={18} color={colors.fg} />
+      </View>
+      <View style={styles.riderText}>
+        <Text style={styles.riderLabel}>{label}</Text>
+        <Text style={styles.riderName} numberOfLines={1}>
+          {name}
+        </Text>
+      </View>
+      {phone !== null ? (
+        <Pressable
+          onPress={() => callCustomer(phone)}
+          accessibilityRole="button"
+          accessibilityLabel={`Call ${name}`}
+          style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
+        >
+          <Feather name="phone" size={16} color={colors.onFg} />
+          <Text style={styles.callButtonText}>Call</Text>
+        </Pressable>
+      ) : null}
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
@@ -1173,6 +1265,27 @@ const styles = StyleSheet.create({
     gap: space.sm,
   },
   paymentWarningRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  // The QR entry point: black with yellow ink, the app's main-action look — it is the main action.
+  qrBlock: { marginTop: space.md },
+  qrButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    padding: space.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.fg,
+  },
+  qrButtonPressed: { opacity: 0.85 },
+  qrIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand,
+  },
+  qrButtonTitle: { ...text.label, color: colors.brandOnFg, fontFamily: fontFamily.bold },
+  qrButtonHint: { ...text.caption, color: '#CFCFC8', marginTop: 1 },
   takeCashBtn: {
     flexDirection: 'row',
     alignItems: 'center',

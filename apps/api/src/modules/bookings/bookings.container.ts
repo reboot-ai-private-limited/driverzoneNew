@@ -30,6 +30,8 @@ import {
   VerifyPaymentUseCase,
 } from './application/useCases/verifyPayment.usecase.js';
 import { PayTripExtrasUseCase } from './application/useCases/payExtras.usecase.js';
+import { DriverPaymentQrUseCase } from './application/useCases/driverPaymentQr.usecase.js';
+import { ApplyCapturedPaymentUseCase } from './application/useCases/applyCapturedPayment.usecase.js';
 import {
   CollectExtrasInCashUseCase,
   DriverPaymentOverrideUseCase,
@@ -195,6 +197,29 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
   const respondToExtension = new RespondToExtensionUseCase(repo, extensions, deps.notifications);
   const forceArrive = new ForceArriveUseCase(repo, deps.notifications);
 
+  /**
+   * What a captured payment does to its booking — one use case for the webhook's callback AND the
+   * driver's QR poll, so the money is credited once however the news arrived.
+   */
+  const applyCaptured = new ApplyCapturedPaymentUseCase(repo, deps.payments, confirm, confirmLate);
+  const applyCapture = (bookingId: string, paymentId: string): Promise<void> =>
+    applyCaptured.execute(bookingId, paymentId);
+
+  const driverPaymentQr = new DriverPaymentQrUseCase(
+    repo,
+    deps.payments,
+    extensions,
+    deps.settings,
+    deps.notifications,
+    applyCapture,
+  );
+  const driverPaymentQrControllers = controllers.makeDriverPaymentQrControllers(
+    driverPaymentQr,
+    charges,
+    deps.identity,
+    extensions,
+  );
+
   return {
     contract: {
       findById: (bookingId) => repo.findById(bookingId),
@@ -347,30 +372,9 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
       hasOpenBooking: (party, accountId) => repo.hasOpenBooking(party, accountId),
     },
 
-    onPaymentCaptured: async (bookingId, paymentId) => {
-      /*
-       * A DAY EXTENSION BEING PAID FOR, not the trip. It has its own order (see
-       * `payExtras.usecase.ts`) because the booking's own was raised, and usually captured, before
-       * the extra day existed. Nothing about the booking's payment status changes — the fare was
-       * already settled — so this credits the extension and stops.
-       *
-       * The increment happens HERE and in `VerifyExtrasPaymentUseCase`, and exactly one of them
-       * runs for any given capture: both hang off the same compare-and-swap, and this callback is
-       * only reached when the webhook itself performed the transition.
-       */
-      const payment = await deps.payments.findById(paymentId);
-      if (payment?.kind === 'EXTENSION') {
-        await repo.addPaidExtensionPaise(bookingId, payment.amountPaise);
-        return;
-      }
-
-      const booking = await repo.findById(bookingId);
-      if (booking?.status === 'PENDING_PAYMENT') {
-        await confirm.execute(bookingId);
-      } else {
-        await confirmLate.execute(bookingId);
-      }
-    },
+    // Reached only when the webhook itself performed the capture. `VerifyExtrasPaymentUseCase` and
+    // the driver's QR poll are the other messengers — see `applyCapture` above.
+    onPaymentCaptured: applyCapture,
     onPaymentFailed: async (bookingId, reason) => {
       const booking = await repo.findById(bookingId);
       if (booking?.status === 'PENDING_PAYMENT') {
@@ -452,6 +456,8 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
         declineExtension: controllers.makeRespondToExtensionController(respondToExtension, false),
         switchToCash: controllers.makeDriverSwitchToCashController(switchToCash),
         paymentOverride: controllers.makeDriverPaymentOverrideController(paymentOverride),
+        createPaymentQr: driverPaymentQrControllers.create,
+        paymentQrStatus: driverPaymentQrControllers.status,
         collectExtrasInCash: controllers.makeCollectExtrasInCashController(collectExtrasInCash),
       }),
 
@@ -464,7 +470,13 @@ export function buildBookingsContainer(deps: BookingsDependencies): BookingsCont
           deps.scheduleDispatch,
         ),
         list: controllers.makeListAdminBookingsController(repo, charges, deps.identity),
-        get: controllers.makeGetAdminBookingController(repo, charges, deps.identity, extensions),
+        get: controllers.makeGetAdminBookingController(
+          repo,
+          charges,
+          deps.identity,
+          extensions,
+          deps.payments,
+        ),
         events: controllers.makeListEventsController(repo),
         forceArrive: controllers.makeForceArriveController(forceArrive),
         cancel: controllers.makeCancelByAdminController(cancelByAdmin),

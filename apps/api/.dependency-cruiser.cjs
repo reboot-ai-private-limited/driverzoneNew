@@ -64,7 +64,9 @@ const MODULE_TIERS = [
   ['favourites'], //                   identity (driver cards) + bookings (proof of a shared trip)
   // Same tier, and they never speak: dispatch finds a driver for a booking, reviews reads one
   // that is already over. Both need `bookings` below them and nothing needs either.
-  ['dispatch', 'reviews'], //          dispatch: the only module permitted to set bookings.driverId
+  // `invoices` joins them on the same terms as `reviews`: it reads a finished booking (GST invoice
+  // requests), needs `bookings` and `identity` below it, and nothing needs it.
+  ['dispatch', 'reviews', 'invoices'], // dispatch: the only module permitted to set bookings.driverId
   ['admin', 'reporting', 'accounts'], // top of the graph; nothing may depend on these
 ];
 

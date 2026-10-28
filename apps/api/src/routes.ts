@@ -73,6 +73,8 @@ export function buildApiRouter(c: AppContainers): Router {
   /** `/admin/customers/:id/wallet`, by the same fall-through past identity's admin router. */
   router.use('/admin/customers', c.wallet.buildAdminRouter());
   router.use('/admin/reviews', c.reviews.buildAdminRouter());
+  /** `/admin/gst-invoices` — the GST invoice request queue. */
+  router.use('/admin/gst-invoices', c.invoices.buildAdminRouter());
   /*
    * The finance surface. Same prefix fall-through as the mounts above it: identity's `/admin`
    * role router has no `/finance` route, so it calls `next()` and the request lands here.
@@ -163,6 +165,8 @@ export function buildApiRouter(c: AppContainers): Router {
    */
   router.use('/customer/bookings', c.reviews.buildAudienceRouter('CUSTOMER'));
   router.use('/driver/bookings', c.reviews.buildAudienceRouter('DRIVER'));
+  /** `/customer/bookings/:id/gst-invoice` — the same fall-through, one more router down. */
+  router.use('/customer/bookings', c.invoices.buildCustomerRouter());
 
   /**
    * The payment provider's callback. NOT under a role prefix and NOT behind `requireAuth` — the

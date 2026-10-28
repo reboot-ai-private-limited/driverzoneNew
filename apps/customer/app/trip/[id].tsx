@@ -38,6 +38,7 @@ import { DriverCard } from '@/components/DriverCard';
 import { ExtendDayCard } from '@/components/ExtendDayCard';
 import { FareBreakdown } from '@/components/FareBreakdown';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { formatDuration, formatTime, formatWhen } from '@/features/booking/schedule';
 import {
   hasDriverAssigned,
@@ -365,7 +366,11 @@ export default function TripScreen(): ReactElement {
                 <View style={styles.otpCard}>
                   <Text style={styles.otpLabel}>Your trip code</Text>
                   <OtpDigits code={data.start_otp} />
-                  <Text style={styles.otpHint}>Read this to your driver to start the ride.</Text>
+                  <Text style={styles.otpHint}>
+                    {data.rider === null
+                      ? 'Read this to your driver to start the ride.'
+                      : `Share this code with ${data.rider.name} — they read it to the driver to start the ride.`}
+                  </Text>
                 </View>
               </Stagger>
             ) : null}
@@ -400,10 +405,22 @@ export default function TripScreen(): ReactElement {
                   icon="flag"
                   label="Destination"
                   value={data.drop.address}
-                  last={data.car_plate === null}
+                  last={data.car_plate === null && data.rider === null}
                 />
                 {data.car_plate === null ? null : (
-                  <DetailRow icon="truck" label="Your car" value={data.car_plate} last />
+                  <DetailRow icon="truck" label="Your car" value={data.car_plate} last={data.rider === null} />
+                )}
+                {data.rider === null ? null : (
+                  <DetailRow
+                    icon="user"
+                    label="Booked for"
+                    value={
+                      data.rider.phone === null
+                        ? data.rider.name
+                        : `${data.rider.name} · ${formatForDisplay(data.rider.phone)}`
+                    }
+                    last
+                  />
                 )}
               </View>
             </Stagger>
@@ -493,7 +510,9 @@ export default function TripScreen(): ReactElement {
                     <View style={styles.rule} />
                     <Text style={styles.paymentHeading}>How would you like to pay?</Text>
                     <Text style={styles.paymentSubtext}>
-                      Select a payment method before you reach your destination.
+                      Select a payment method before you reach your destination. Or just pay your
+                      driver by scanning the QR on their phone with GPay, PhonePe, Paytm or any UPI
+                      app.
                     </Text>
                     {paymentError !== null ? (
                       <Text style={styles.paymentError}>{paymentError}</Text>
@@ -598,8 +617,15 @@ export default function TripScreen(): ReactElement {
                     <Feather name="clock" size={16} color="#ca8a04" />
                     <View style={styles.flex}>
                       <Text style={styles.paymentPendingTitle}>Online payment pending</Text>
+                      {/*
+                        THE DRIVER MAY BE SHOWING A QR. This screen cannot tell a QR from an order (the
+                        trip carries no such field), so the wording is true of both: scan the driver's
+                        code with any UPI app of your own — nothing in THIS app scans it — or pay here.
+                      */}
                       <Text style={styles.paymentPendingBody}>
-                        Waiting for payment confirmation. The driver cannot end the trip until this clears.
+                        If your driver is showing a QR, scan it with GPay, PhonePe, Paytm or any UPI app
+                        and this will update by itself. The driver cannot end the trip until the payment
+                        clears.
                       </Text>
                       {paymentError !== null ? (
                         <Text style={styles.paymentError}>{paymentError}</Text>

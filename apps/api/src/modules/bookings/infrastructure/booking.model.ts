@@ -32,6 +32,7 @@ export interface BookingDoc {
   carCategory?: string | null;
   vehicleType?: string | null;
   plateNumber?: string | null;
+  rider?: { name: string; phone: string } | null;
   preferFavouriteDrivers?: boolean;
   dispatchMode?: string;
   walletCreditPaise?: number;
@@ -101,6 +102,15 @@ const bookingSchema = new Schema<BookingDoc>(
      * the customer's CURRENT default car is not evidence of it.
      */
     plateNumber: { type: String, default: null },
+
+    /*
+     * The passenger when the customer booked for someone else (2026-10-28). Null — not absent — on
+     * a booking the customer is travelling on themselves, and on every row made before this field.
+     */
+    rider: {
+      type: new Schema({ name: { type: String, required: true }, phone: { type: String, required: true } }, { _id: false }),
+      default: null,
+    },
 
     /*
      * Ring this customer's favourites first (dispatch's wave 0).
@@ -205,6 +215,15 @@ bookingSchema.index(
   { dispatchAt: 1 },
   { partialFilterExpression: { status: { $in: ['CONFIRMED', 'WAITING_DRIVER'] } } },
 );
+
+/**
+ * The abandoned-payment sweep (`findAbandonedPayments`), run every minute by the worker. Partial
+ * for the same reason as above: only the few bookings still waiting on payment are in it.
+ */
+bookingSchema.index({ createdAt: 1 }, { partialFilterExpression: { status: 'PENDING_PAYMENT' } });
+
+/** The driver's scheduled board (`findWaitingForDriver`), sorted by pickup. */
+bookingSchema.index({ scheduledAt: 1 }, { partialFilterExpression: { status: 'WAITING_DRIVER' } });
 
 export const BookingModel =
   (mongoose.models['Booking'] as mongoose.Model<BookingDoc> | undefined) ??

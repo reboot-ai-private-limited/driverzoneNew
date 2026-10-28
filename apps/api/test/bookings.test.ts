@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Request, Response } from 'express';
 import {
   BOOKING_STATUSES,
+  type ListDriverTripsResponse,
   type BookingPaymentStatus,
   type BookingStatus,
   type PaymentMode,
@@ -17,6 +19,7 @@ import {
   type FareSnapshot,
 } from '../src/modules/bookings/domain/booking.entity.js';
 import { distanceMetres, isFixStale } from '../src/modules/bookings/domain/distance.js';
+import { makeListDriverTripsController } from '../src/modules/bookings/interface/bookings.controller.js';
 import { toBookingDto } from '../src/modules/bookings/interface/bookings.mapper.js';
 import type { CustomerContact, DriverCard } from '../src/modules/identity/identity.public.js';
 import type {
@@ -140,6 +143,7 @@ function booking(over: Partial<Booking> = {}): Booking {
     paymentReference: null,
     extrasCollection: null,
     plateNumber: null,
+    rider: null,
     carCategory: null,
     vehicleType: null,
     preferFavouriteDrivers: false,
@@ -459,6 +463,9 @@ function fakePayments(payment: Partial<Payment> = {}) {
     bookingId: 'bkg_1',
     customerId: 'cus_1',
     kind: 'BOOKING',
+    channel: 'ORDER',
+    metadata: {},
+    qr: null,
     status: 'CAPTURED',
     amountPaise: 105_000,
     refundedPaise: 0,
@@ -475,6 +482,9 @@ function fakePayments(payment: Partial<Payment> = {}) {
   const payments: PaymentsContract & { refunds: () => typeof refunds } = {
     refunds: () => refunds,
     charge: vi.fn(async () => ({ payment: stored, clientToken: 'mock_token' })),
+    chargeByQr: vi.fn(async () => stored),
+    closeQr: vi.fn(async () => undefined),
+    refreshQr: vi.fn(async () => ({ payment: stored, justCaptured: false })),
     refund: vi.fn(async (input) => {
       refunds.push({ amountPaise: input.amountPaise });
       return stored;
@@ -1473,6 +1483,40 @@ describe('toBookingDto — the driver card', () => {
     });
 
     expect(dto.driver).toBeNull();
+  });
+});
+
+describe('toBookingDto — booking for someone else', () => {
+  const RIDER = { name: 'Ramesh Das', phone: '+919811111111' };
+  const withStatus = (status: BookingStatus, revealPhones?: boolean): ReturnType<typeof toBookingDto> =>
+    toBookingDto({
+      booking: booking({ status, driverId: 'drv_1', rider: RIDER }),
+      adjustments: [],
+      ...(revealPhones === undefined ? {} : { revealPhones }),
+    });
+
+  it('is null when the customer is travelling themselves', () => {
+    expect(toBookingDto({ booking: booking(), adjustments: [] }).rider).toBeNull();
+  });
+
+  it.each(['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] as const)(
+    "carries the passenger's number while the trip is live (%s)",
+    (status) => {
+      expect(withStatus(status).rider).toEqual(RIDER);
+    },
+  );
+
+  it.each(['CONFIRMED', 'SEARCHING', 'COMPLETED', 'CANCELLED_BY_CUSTOMER'] as const)(
+    "keeps the passenger's name but withholds the number outside the live trip (%s)",
+    (status) => {
+      // The same gate as the two parties' own numbers: a driver does not keep a passenger's
+      // number after the trip, but everyone can still see who the trip was for.
+      expect(withStatus(status).rider).toEqual({ name: 'Ramesh Das', phone: null });
+    },
+  );
+
+  it('shows the number to an admin whatever the status', () => {
+    expect(withStatus('COMPLETED', true).rider?.phone).toBe('+919811111111');
   });
 });
 
@@ -3183,5 +3227,197 @@ describe('Cancelling a PREPAID booking', () => {
     expect(repo.events().at(-1)?.metadata).toEqual(
       expect.objectContaining({ manualRefundPaise: repo.current().fareSnapshot.fare.totalPaise }),
     );
+  });
+});
+
+describe("GET /driver/bookings — the customer's name, never their number", () => {
+  async function listWith(contacts: Map<string, CustomerContact>) {
+    const repo = {
+      listForDriver: vi.fn(async () => [booking({ status: 'COMPLETED', customerId: 'cus_1' })]),
+    };
+    const directory = {
+      namesByIds: vi.fn(async () => new Map([['cus_1', '+919000000002']])), // the phone fallback
+      customerContactsByIds: vi.fn(async () => contacts),
+    };
+    const handler = makeListDriverTripsController(
+      repo as unknown as BookingRepositoryPort,
+      { listAdjustments: vi.fn(async () => []) } as unknown as ChargeRepositoryPort,
+      directory as unknown as Parameters<typeof makeListDriverTripsController>[2],
+    );
+
+    let body: { data: ListDriverTripsResponse } | undefined;
+    const req = { query: {}, principal: { sub: 'drv_1' }, method: 'GET', originalUrl: '/' } as unknown as Request;
+    const res = {
+      status: () => res,
+      json: (b: { data: ListDriverTripsResponse }) => {
+        body = b;
+      },
+    } as unknown as Response;
+    await new Promise<void>((resolve) => {
+      handler(req, res, () => resolve());
+      setTimeout(resolve, 20);
+    });
+    return body?.data.bookings[0];
+  }
+
+  it('shows no name — not the phone number — for a customer who never set one', async () => {
+    const trip = await listWith(
+      new Map([['cus_1', { id: 'cus_1', fullName: null, phone: '+919000000002' }]]),
+    );
+
+    // The app renders "Customer" for a null name. What it must never get is the number: the list is
+    // full of finished trips, and a finished trip does not carry one.
+    expect(trip?.customer?.name).toBeNull();
+    expect(JSON.stringify(trip)).not.toContain('9000000002');
+  });
+
+  it('shows the name when the customer has one, and still no number', async () => {
+    const trip = await listWith(
+      new Map([['cus_1', { id: 'cus_1', fullName: 'Anita Rai', phone: '+919000000002' }]]),
+    );
+
+    expect(trip?.customer?.name).toBe('Anita Rai');
+    expect(trip?.customer?.phone).toBeNull();
+  });
+});
+
+describe('CompleteTripUseCase — a trip paid by the driver’s QR', () => {
+  // Arrived 09:00, started 09:40: 15 free, 25 chargeable at ₹2 = ₹50 of waiting.
+  const waited = {
+    arrivedAt: new Date('2026-08-31T09:00:00Z'),
+    startedAt: new Date('2026-08-31T09:40:00Z'),
+  };
+
+  const qrPayment = (over: Partial<Payment> = {}): Payment => ({
+    id: 'pay_qr',
+    bookingId: 'bkg_1',
+    customerId: 'cus_1',
+    kind: 'BOOKING',
+    channel: 'QR',
+    metadata: { farePaise: 105_000, waitingPaise: 5_000 },
+    qr: null,
+    status: 'CAPTURED',
+    amountPaise: 110_000,
+    refundedPaise: 0,
+    gatewayRef: 'qr_1',
+    providerPaymentId: 'pay_x',
+    idempotencyKey: 'qr-1',
+    failureReason: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...over,
+  });
+
+  function build(paymentsList: Payment[], over: Partial<Booking> = {}, extensions: BookingExtension[] = []) {
+    const repo = fakeRepo(
+      booking({ status: 'STARTED', paymentMode: 'UPI', paymentStatus: 'PAID', ...waited, ...over }),
+    );
+    const charges = fakeCharges();
+    const ledger = fakeLedger();
+    const payments = fakePayments();
+    payments.listForBooking = vi.fn(async () => paymentsList);
+    return {
+      charges,
+      ledger,
+      payments,
+      useCase: new CompleteTripUseCase(
+        repo,
+        charges,
+        settings,
+        ledger,
+        payments,
+        fakeNotifications(),
+        fakeExtensions(extensions),
+      ),
+    };
+  }
+
+  const complete = { bookingId: 'bkg_1', driverId: 'drv_1', idempotencyKey: 'k1' };
+
+  it('does not ask for the waiting charge again — the QR already collected it', async () => {
+    const { useCase, payments } = build([qrPayment()]);
+    const result = await useCase.execute(complete);
+
+    // The charge is still BOOKED (the driver earns it, the receipt shows it)…
+    expect(result.waitingChargePaise).toBe(5_000);
+    // …but nothing is charged for it a second time.
+    expect(payments.charge).not.toHaveBeenCalled();
+  });
+
+  it('marks the booked charges as paid by the QR', async () => {
+    const { useCase, charges } = build([qrPayment()]);
+    await useCase.execute(complete);
+    expect(charges.markAdjustmentsSettled).toHaveBeenCalledWith('bkg_1', 'pay_qr');
+  });
+
+  it('still pays the driver the waiting charge in full', async () => {
+    const { useCase, ledger } = build([qrPayment()]);
+    await useCase.execute(complete);
+    expect(ledger.entries().find((e) => e.entryType === 'WAITING_EARNING')?.amountPaise).toBe(5_000);
+  });
+
+  it('still charges whatever the QR did NOT cover — an extra day accepted after it was paid', async () => {
+    const { useCase, payments } = build([qrPayment()], { paidExtensionPaise: 0 }, [acceptedExtension()]);
+    await useCase.execute({ ...complete, extrasCollection: 'ONLINE' });
+
+    // 3,000 for the day; the waiting charge was already in the QR.
+    expect(vi.mocked(payments.charge).mock.calls[0]?.[0]).toMatchObject({
+      kind: 'SETTLEMENT',
+      amountPaise: 300_000,
+    });
+  });
+
+  it('a waiting charge the QR did not include is still collected', async () => {
+    // A QR made before this trip waited (older metadata, or a rate change) covers none of it.
+    const { useCase, payments } = build([qrPayment({ metadata: { farePaise: 105_000 } })]);
+    await useCase.execute({ ...complete, extrasCollection: 'ONLINE' });
+
+    expect(vi.mocked(payments.charge).mock.calls[0]?.[0]).toMatchObject({ amountPaise: 5_000 });
+  });
+
+  it('lets the trip end on a paid QR even when an abandoned order of the customer\'s comes first', async () => {
+    const abandonedOrder = qrPayment({
+      id: 'pay_order',
+      channel: 'ORDER',
+      status: 'PENDING',
+      metadata: {},
+      createdAt: new Date('2026-08-31T09:30:00Z'),
+    });
+    const { useCase } = build([abandonedOrder, qrPayment()]);
+    await expect(useCase.execute(complete)).resolves.toBeDefined();
+  });
+
+  it('still refuses to end the trip while the QR is unpaid', async () => {
+    const { useCase } = build([qrPayment({ status: 'PENDING' })], { paymentStatus: 'AWAITING_PAYMENT' });
+    await expect(useCase.execute(complete)).rejects.toThrow(/online payment to go through/);
+  });
+
+  it('does not count a QR that was refunded as having paid the trip', async () => {
+    const { useCase } = build([qrPayment({ status: 'REFUNDED' })]);
+    await expect(useCase.execute(complete)).rejects.toThrow(/online payment to go through/);
+  });
+});
+
+describe('toBookingDto — how the online payment was made', () => {
+  it('is null unless the caller resolved it — every list and the apps\' own reads', () => {
+    expect(toBookingDto({ booking: booking({ paymentMode: 'UPI' }), adjustments: [] }).online_payment).toBeNull();
+  });
+
+  it('says a QR payment was a QR, with the provider\'s payment id', () => {
+    const dto = toBookingDto({
+      booking: booking({ paymentMode: 'UPI' }),
+      adjustments: [],
+      onlinePayment: { channel: 'QR', providerPaymentId: 'pay_ABC123' },
+    });
+    expect(dto.online_payment).toEqual({ channel: 'QR', provider_payment_id: 'pay_ABC123' });
+  });
+
+  it('says an ordinary checkout was an order', () => {
+    const dto = toBookingDto({
+      booking: booking({ paymentMode: 'UPI' }),
+      adjustments: [],
+      onlinePayment: { channel: 'ORDER', providerPaymentId: null },
+    });
+    expect(dto.online_payment).toEqual({ channel: 'ORDER', provider_payment_id: null });
   });
 });

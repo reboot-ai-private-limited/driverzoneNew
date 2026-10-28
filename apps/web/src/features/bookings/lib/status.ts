@@ -5,6 +5,7 @@ import {
   type BookingPaymentStatus,
   type BookingStatus,
   type ExtrasCollection,
+  type OnlinePaymentDto,
   type ServiceType,
 } from '@driverzone/contracts';
 
@@ -196,9 +197,15 @@ export function paymentStatusTone(
 }
 
 /** How the payment method reads on the booking page. */
-export function paymentModeLabel(mode: BookingPaymentMode | null): string {
+export function paymentModeLabel(
+  mode: BookingPaymentMode | null,
+  /** How the online payment was made, when one has been captured. Admin single read only. */
+  onlinePayment: OnlinePaymentDto | null = null,
+): string {
   if (mode === 'PREPAID') return 'Prepaid (paid offline)';
-  if (mode === 'UPI') return 'Online (UPI)';
+  // The driver's QR is "UPI" too — and the thing support needs to know is that the customer paid by
+  // scanning it, not from their own app, which is a different place to look when it goes wrong.
+  if (mode === 'UPI') return onlinePayment?.channel === 'QR' ? 'UPI (QR scanned at the trip)' : 'Online (UPI)';
   if (mode === 'CASH') return 'Cash';
   return 'Not selected';
 }

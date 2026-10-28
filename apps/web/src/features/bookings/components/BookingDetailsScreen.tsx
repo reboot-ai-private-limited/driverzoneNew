@@ -457,6 +457,22 @@ function CustomerCard({ booking }: { booking: BookingDto }) {
               {booking.pickup.address}
             </ContactLine>
           </div>
+
+          {/*
+            BOOKED FOR SOMEONE ELSE — the person the driver actually meets. The customer above is
+            still who booked and who pays; this is who is in the car.
+          */}
+          {booking.rider !== null && (
+            <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Passenger (booked for someone else)
+              </p>
+              <ContactLine icon={<User aria-hidden className="size-3.5" />}>{booking.rider.name}</ContactLine>
+              <ContactLine icon={<Phone aria-hidden className="size-3.5" />}>
+                {booking.rider.phone === null ? <Dash /> : formatBookingMobile(booking.rider.phone)}
+              </ContactLine>
+            </div>
+          )}
         </div>
       )}
     </Panel>
@@ -780,7 +796,15 @@ function PaymentDetailsCard({ booking }: { booking: BookingDto }) {
   return (
     <Panel title="Payment Details" icon={<CreditCard aria-hidden className="size-4" />} className={CARD}>
       <DefinitionList>
-        <FieldRow label="Payment Method">{paymentModeLabel(booking.payment_mode)}</FieldRow>
+        <FieldRow label="Payment Method">
+          {paymentModeLabel(booking.payment_mode, booking.online_payment)}
+        </FieldRow>
+        {/* The provider's id — what support quotes to Razorpay to trace a payment. */}
+        {booking.online_payment?.provider_payment_id != null && (
+          <FieldRow label="Razorpay Payment ID">
+            <span className="font-mono text-xs">{booking.online_payment.provider_payment_id}</span>
+          </FieldRow>
+        )}
         {booking.payment_reference !== null && (
           <FieldRow label="Payment Reference">{booking.payment_reference}</FieldRow>
         )}

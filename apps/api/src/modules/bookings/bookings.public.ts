@@ -129,6 +129,13 @@ export interface BookingReviewContract {
 }
 
 /**
+ * For `invoices`: the same read-only question as `BookingReviewContract` — is this trip finished,
+ * and whose is it — under its own name so the two consumers can drift apart without either
+ * reaching through the other's contract.
+ */
+export type BookingInvoiceContract = BookingReviewContract;
+
+/**
  * One question, for `favourites`: have this customer and this driver finished a trip together?
  *
  * ITS OWN CONTRACT, and it deliberately cannot answer anything else. A customer may only

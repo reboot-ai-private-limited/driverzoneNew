@@ -1,4 +1,4 @@
-import type { Request, RequestHandler } from 'express';
+import type { Request, RequestHandler, Response } from 'express';
 import type {
   BookingStatus,
   DriverTripsSummary,
@@ -56,7 +56,12 @@ import type {
   DriverPaymentOverrideUseCase,
   DriverSwitchToCashUseCase,
 } from '../application/useCases/driverSwitchToCash.usecase.js';
-import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
+import type {
+  DriverPaymentQrUseCase,
+  PaymentQrResult,
+} from '../application/useCases/driverPaymentQr.usecase.js';
+import { isCaptured, type PaymentsContract } from '../../payments/payments.public.js';
+import { toBookingDto, toBookingEventDto, toPaymentQrDto } from './bookings.mapper.js';
 import type { Booking } from '../domain/booking.entity.js';
 import {
   adminBookingListQuerySchema,
@@ -123,6 +128,7 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       vehicleType: body.vehicleType,
       vehicleId: body.vehicleId,
       plateNumber: body.plateNumber,
+      rider: body.rider,
       preferFavouriteDrivers: body.preferFavouriteDrivers,
       idempotencyKey: idempotencyKeyOf(req),
     });
@@ -174,6 +180,7 @@ export function makeAdminCreateBookingController(
       dropAddress: body.drop_address,
       carCategory: body.car_category,
       vehicleType: body.vehicle_type,
+      rider: body.rider,
       preferFavouriteDrivers: false,
       idempotencyKey: idempotencyKeyOf(req),
       dispatchMode: 'MANUAL',
@@ -390,6 +397,61 @@ export function makeDriverSwitchToCashController(
  * `POST /driver/bookings/:id/payment-override` — the driver takes the payment in cash because the
  * customer cannot finish it in their app. See `DriverPaymentOverrideUseCase`.
  */
+/**
+ * `POST` and `GET /driver/bookings/:id/payment-qr` — the QR the driver shows to collect the whole
+ * trip, and where it stands. See `DriverPaymentQrUseCase`.
+ *
+ * THE BOOKING IN THE RESPONSE IS BUILT EXACTLY LIKE `GET /driver/bookings/:id`, customer card and
+ * all. The driver's screen polls this every couple of seconds while the QR is up and adopts the
+ * booking it returns; a leaner copy would wipe the customer and passenger cards off the trip
+ * screen on every poll.
+ */
+export function makeDriverPaymentQrControllers(
+  useCase: DriverPaymentQrUseCase,
+  charges: ChargeRepositoryPort,
+  directory: CustomerContactContract,
+  extensions: ExtensionRepositoryPort,
+): { create: RequestHandler; status: RequestHandler } {
+  const respond = async (req: Request, res: Response, result: PaymentQrResult, message: string, code = 200) => {
+    const { booking } = result;
+    const [adjustments, contacts, extensionRows] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      directory.customerContactsByIds([booking.customerId]),
+      extensions.listForBooking(booking.id),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      {
+        qr: toPaymentQrDto(result.qr),
+        booking: toBookingDto({
+          booking,
+          adjustments,
+          customerCard: contacts.get(booking.customerId) ?? null,
+          extensions: extensionRows,
+          revealDriverEarnings: true,
+        }),
+      },
+      message,
+      code,
+    );
+  };
+
+  return {
+    create: asyncHandler(async (req, res) => {
+      const { id } = bookingIdParamSchema.parse(req.params);
+      const result = await useCase.create({ bookingId: id, driverId: principalOf(req) });
+      await respond(req, res, result, 'Payment QR ready', 201);
+    }),
+    status: asyncHandler(async (req, res) => {
+      const { id } = bookingIdParamSchema.parse(req.params);
+      const result = await useCase.status({ bookingId: id, driverId: principalOf(req) });
+      await respond(req, res, result, 'Payment QR');
+    }),
+  };
+}
+
 export function makeDriverPaymentOverrideController(
   useCase: DriverPaymentOverrideUseCase,
 ): RequestHandler {
@@ -681,7 +743,7 @@ export function makeGetDriverBookingController(
 export function makeListDriverTripsController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
-  directory: AccountDirectoryContract,
+  directory: AccountDirectoryContract & CustomerContactContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const driverId = principalOf(req);
@@ -726,18 +788,24 @@ export function makeListDriverTripsController(
             };
     }
 
-    const names = await directory.namesByIds(
-      'CUSTOMER',
+    /*
+     * `customerContactsByIds`, NOT `namesByIds`. The latter falls back to the PHONE NUMBER when an
+     * account has no name — right for an admin identifying a row, wrong here: this list is full of
+     * FINISHED trips, and the number is withheld after a trip ends (`PHONE_VISIBLE_STATUSES`). A
+     * customer who never set a name used to appear to their driver as their own phone number.
+     * Only the name is read from the contact; the app shows "Customer" when it is null.
+     */
+    const contacts = await directory.customerContactsByIds([
       // Deduped: a repeat customer must not be looked up once per trip they took.
-      [...new Set(bookings.map((booking) => booking.customerId))],
-    );
+      ...new Set(bookings.map((booking) => booking.customerId)),
+    ]);
 
     const dtos = await Promise.all(
       bookings.map(async (booking) =>
         toBookingDto({
           booking,
           adjustments: await charges.listAdjustments(booking.id),
-          customerName: names.get(booking.customerId) ?? null,
+          customerName: contacts.get(booking.customerId)?.fullName ?? null,
         }),
       ),
     );
@@ -1230,6 +1298,7 @@ export function makeGetAdminBookingController(
   charges: ChargeRepositoryPort,
   directory: CustomerContactContract & DriverCardContract,
   extensions: ExtensionRepositoryPort,
+  payments: PaymentsContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const { id } = bookingIdParamSchema.parse(req.params);
@@ -1253,7 +1322,7 @@ export function makeGetAdminBookingController(
      * customer must give the driver at pickup. Support also gets asked for it by a customer whose
      * phone has died. A page of every code in the city stays off the list read.
      */
-    const [contacts, cards, adjustments, extensionRows, startOtp] = await Promise.all([
+    const [contacts, cards, adjustments, extensionRows, startOtp, paymentRows] = await Promise.all([
       directory.customerContactsByIds([booking.customerId]),
       booking.driverId === null
         ? Promise.resolve(new Map<string, DriverCard>())
@@ -1261,7 +1330,14 @@ export function makeGetAdminBookingController(
       charges.listAdjustments(booking.id),
       extensions.listForBooking(booking.id),
       repo.readStartOtp(booking.id),
+      payments.listForBooking(booking.id),
     ]);
+
+    /*
+     * HOW IT WAS PAID: the fare's captured payment. The newest, if (against the odds) there were
+     * two — a duplicate is refunded, so it is no longer captured and is not in this list.
+     */
+    const paid = paymentRows.filter((p) => p.kind === 'BOOKING' && isCaptured(p.status)).at(-1);
 
     sendSuccess(
       req,
@@ -1272,6 +1348,8 @@ export function makeGetAdminBookingController(
         extensions: extensionRows,
         startOtp,
         revealPhones: true,
+        onlinePayment:
+          paid === undefined ? null : { channel: paid.channel, providerPaymentId: paid.providerPaymentId },
         customerCard: contacts.get(booking.customerId) ?? null,
         driverCard: booking.driverId === null ? null : (cards.get(booking.driverId) ?? null),
       }),

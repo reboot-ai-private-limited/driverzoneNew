@@ -4,6 +4,7 @@ import type {
   CancelBookingResponse,
   CompleteTripResponse,
   CurrentDriverTripResponse,
+  DriverPaymentQrResponse,
   ExtrasCollection,
   ListDriverTripsQuery,
   ListDriverTripsResponse,
@@ -146,6 +147,28 @@ export function overridePayment(
     method: 'POST',
     body,
     token: getAccessToken() ?? undefined,
+  });
+}
+
+/**
+ * `POST /driver/bookings/:id/payment-qr` — a UPI QR for the WHOLE trip, to show the customer.
+ *
+ * Returns the QR already on screen when it is still right, so opening the sheet twice is not two
+ * QR codes. Makes the trip an online payment on the server: the end-trip slide stays locked until
+ * the server has the money, which the sheet learns of by polling `getPaymentQr`.
+ */
+export function createPaymentQr(bookingId: string): Promise<DriverPaymentQrResponse> {
+  return request<DriverPaymentQrResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/payment-qr`, {
+    method: 'POST',
+    token: getAccessToken() ?? undefined,
+  });
+}
+
+/** `GET /driver/bookings/:id/payment-qr` — waiting, paid, or expired. Also the trip as it now stands. */
+export function getPaymentQr(bookingId: string, signal?: AbortSignal): Promise<DriverPaymentQrResponse> {
+  return request<DriverPaymentQrResponse>(`${ROLE_PREFIX}/bookings/${bookingId}/payment-qr`, {
+    token: getAccessToken() ?? undefined,
+    signal,
   });
 }
 

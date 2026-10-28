@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import { router, useLocalSearchParams } from 'expo-router';
 import { type ReactElement, type ReactNode, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { CUSTOMER_TERMS, type TermsBlock } from '@/features/legal/customerTerms';
 import { PAYMENT_METHODS } from '@/features/profile/completion';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
@@ -357,69 +358,79 @@ function StaticBody({ topic }: { topic: 'privacy' | 'terms' | 'about' }): ReactE
     );
   }
 
-  // topic === 'terms'
+  // topic === 'terms' — the copy lives in `customerTerms.ts`; this only lays it out.
+  const terms = CUSTOMER_TERMS;
   return (
     <View style={styles.legalContent}>
       <View style={styles.metaBadge}>
-        <Text style={styles.metaBadgeText}>Last Updated: September 2026</Text>
-      </View>
-
-      <Text style={styles.leadText}>Terms & Conditions — DriverZone</Text>
-      <Text style={styles.body}>
-        These Terms govern on-demand chauffeur hire services operated by DriverZone (Siliguri, West Bengal). By booking a driver, you agree to comply with and be bound by these conditions.
-      </Text>
-
-      <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>1. Scope of Service: Customer&apos;s Own Vehicle</Text>
-        <Text style={styles.sectionBody}>
-          DriverZone provides professional chauffeurs to operate vehicles owned, rented, or leased by the Customer. We do not provide rental cars. Fuel, road taxes, tolls, parking fees, and vehicle maintenance remain the sole responsibility of the vehicle owner.
+        <Text style={styles.metaBadgeText}>
+          Effective Date: {terms.effectiveDate} · Version {terms.version}
         </Text>
       </View>
 
-      <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>2. Vehicle Roadworthiness & Documents</Text>
-        <Text style={styles.sectionBody}>
-          Before handing over keys, the Customer warrants that the vehicle possesses valid Registration (RC), Comprehensive Motor Insurance, and Pollution Under Control (PUC) certificates. Brakes, steering, tires (including spare), headlights, and wipers must be in sound operating condition. For mountain travel, cooling and braking systems must satisfy hill safety standards.
-        </Text>
-      </View>
+      <Text style={styles.leadText}>Customer Terms & Conditions — Driver Zone</Text>
+      <Text style={styles.metaLine}>Jurisdiction: {terms.jurisdiction}</Text>
+      <Text style={styles.body}>{terms.intro}</Text>
+
+      {terms.sections.map((section) => (
+        <View key={section.heading} style={styles.policySection}>
+          <Text style={styles.sectionHeading}>{section.heading}</Text>
+          {section.blocks.map((block) => (
+            <TermsBlockView key={termsBlockKey(block)} block={block} />
+          ))}
+        </View>
+      ))}
 
       <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>3. Pricing & Night / Outstation Allowances</Text>
-        <Text style={styles.sectionBody}>
-          All tariffs are billed in Indian Rupees (INR - ₹) with GST compliance. Night allowance of ₹200 applies for duties extending between 10:00 PM and 6:00 AM. For outstation journeys or hill tours requiring overnight halt where lodging is not provided, a driver night allowance of ₹300/night applies.
-        </Text>
+        <Text style={styles.sectionHeading}>Customer Acceptance</Text>
+        <Text style={styles.sectionBody}>{terms.acceptance}</Text>
       </View>
 
-      <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>4. Cancellation & Refund Policy (Razorpay)</Text>
-        <Text style={styles.sectionBody}>
-          Cancellations made 2 hours or more prior to the scheduled pickup time receive a 100% full refund. Refunds are credited to the original payment source within 5 to 7 working days via Razorpay.
+      {terms.closing.map((line) => (
+        <Text key={line} style={styles.closingText}>
+          {line}
         </Text>
-      </View>
-
-      <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>5. Customer Conduct & Safety</Text>
-        <Text style={styles.sectionBody}>
-          Customers agree not to instruct the chauffeur to violate traffic rules, exceed speed limits, or carry illegal contraband or alcohol in violation of state excise laws. Mutual courtesy and safety are mandatory.
-        </Text>
-      </View>
-
-      <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>6. Limitation of Liability & Insurance</Text>
-        <Text style={styles.sectionBody}>
-          Vehicle damage in unforeseen road incidents is governed primarily by the vehicle&apos;s own Comprehensive Motor Insurance. Traffic challans resulting directly from driver negligence are borne by DriverZone; challans arising from expired vehicle documentation or passenger insistence remain the customer&apos;s responsibility.
-        </Text>
-      </View>
-
-      <View style={styles.policySection}>
-        <Text style={styles.sectionHeading}>7. Governing Law & Jurisdiction</Text>
-        <Text style={styles.sectionBody}>
-          These Terms are governed by the laws of India. The courts and consumer forums of Siliguri /
-          Jalpaiguri District, West Bengal, hold exclusive jurisdiction.
-        </Text>
-      </View>
+      ))}
     </View>
   );
+}
+
+/** Every block's own first line is unique within its section, so it doubles as the React key. */
+function termsBlockKey(block: TermsBlock): string {
+  switch (block.kind) {
+    case 'p':
+    case 'subheading':
+      return `${block.kind}:${block.text}`;
+    case 'bullets':
+      return `bullets:${block.items[0] ?? ''}`;
+    case 'labelled':
+      return `labelled:${block.items[0]?.label ?? ''}`;
+  }
+}
+
+function TermsBlockView({ block }: { block: TermsBlock }): ReactElement {
+  switch (block.kind) {
+    case 'p':
+      return <Text style={[styles.sectionBody, styles.blockGap]}>{block.text}</Text>;
+    case 'subheading':
+      return <Text style={styles.subheading}>{block.text}</Text>;
+    case 'bullets':
+      return <BulletList items={block.items} />;
+    case 'labelled':
+      return (
+        <View style={styles.bulletList}>
+          {block.items.map((item) => (
+            <View key={item.label} style={styles.bulletRow}>
+              <Text style={styles.bulletMark}>•</Text>
+              <Text style={styles.bulletText}>
+                <Text style={styles.bulletLabel}>{item.label}: </Text>
+                {item.text}
+              </Text>
+            </View>
+          ))}
+        </View>
+      );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -516,6 +527,11 @@ const styles = StyleSheet.create({
   bulletRow: { flexDirection: 'row', marginTop: space.xs },
   bulletMark: { ...text.body, color: colors.muted, fontSize: 13, lineHeight: 20, marginRight: space.xs },
   bulletText: { ...text.body, color: colors.muted, fontSize: 13, lineHeight: 20, flex: 1 },
+  bulletLabel: { fontFamily: fontFamily.semibold, color: colors.fg },
+  blockGap: { marginTop: space.xs },
+  subheading: { ...text.label, color: colors.fg, fontFamily: fontFamily.semibold, marginTop: space.sm },
+  metaLine: { ...text.caption, color: colors.muted, marginBottom: space.sm },
+  closingText: { ...text.body, color: colors.muted, textAlign: 'center', marginTop: space.md },
 
   webLinkRow: {
     flexDirection: 'row',

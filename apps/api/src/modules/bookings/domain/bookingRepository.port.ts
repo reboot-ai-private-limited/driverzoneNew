@@ -20,6 +20,7 @@ export interface NewBooking {
   carCategory: Booking['carCategory'];
   vehicleType: Booking['vehicleType'];
   plateNumber: Booking['plateNumber'];
+  rider: Booking['rider'];
   preferFavouriteDrivers: boolean;
   dispatchMode: Booking['dispatchMode'];
   /**

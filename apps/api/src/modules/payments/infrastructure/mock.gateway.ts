@@ -1,12 +1,14 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { env, isProduction } from '../../../config/env.js';
 import { logger } from '../../../shared/logging/logger.js';
-import type {
-  GatewayEvent,
-  PaymentGatewayPort,
-  PaymentIntent,
-  RefundResult,
-  WebhookRequest,
+import {
+  IGNORED_WEBHOOK,
+  type GatewayEvent,
+  type PaymentGatewayPort,
+  type PaymentIntent,
+  type QrCodeIntent,
+  type RefundResult,
+  type WebhookRequest,
 } from '../domain/paymentGateway.port.js';
 
 /**
@@ -72,17 +74,64 @@ export class MockPaymentGateway implements PaymentGatewayPort {
     return { gatewayRef: refundRef, amountPaise: input.amountPaise };
   }
 
-  verifyWebhook(request: WebhookRequest): GatewayEvent | null {
+  verifyWebhook(request: WebhookRequest): GatewayEvent | typeof IGNORED_WEBHOOK | null {
     if (!verifySignature(request.rawBody, request.signature)) return null;
 
     try {
       const parsed: unknown = JSON.parse(request.rawBody);
-      return asGatewayEvent(parsed);
+      return asGatewayEvent(parsed) ?? IGNORED_WEBHOOK;
     } catch {
-      // A body that verified but does not parse is our own bug, not an attack — but it is still
-      // not an event, and the caller's answer is the same either way.
-      return null;
+      // A body that verified but does not parse is our own bug, not an attack — authentic, but not
+      // an event, so it is answered 200 and not redelivered.
+      return IGNORED_WEBHOOK;
     }
+  }
+
+  /**
+   * QR codes the mock has handed out, and which of them a "customer" has paid. In memory — it is a
+   * stand-in for a provider, and a restart is the same as the provider having forgotten.
+   */
+  private static readonly qrAmounts = new Map<string, number>();
+  private static readonly paidQrs = new Map<string, { providerPaymentId: string; amountPaise: number }>();
+
+  async createQrCode(input: {
+    amountPaise: number;
+    reference: string;
+    idempotencyKey: string;
+    expiresAt: Date;
+  }): Promise<QrCodeIntent> {
+    const gatewayRef = `mock_qr_${randomUUID()}`;
+    MockPaymentGateway.qrAmounts.set(gatewayRef, input.amountPaise);
+
+    logger.info(
+      { gatewayRef, amountPaise: input.amountPaise, reference: input.reference },
+      'mock gateway: created a QR code',
+    );
+
+    return {
+      gatewayRef,
+      // A real-looking UPI link, so the app draws a genuine QR. Scanning it pays nobody — nobody
+      // owns `mock@driverzone`; use `payQr` (tests) or a signed webhook (a local walkthrough).
+      upiUri: `upi://pay?pa=mock@driverzone&pn=DriverZone&am=${(input.amountPaise / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(input.reference)}&tr=${gatewayRef}`,
+      imageUrl: null,
+    };
+  }
+
+  async closeQrCode(gatewayRef: string): Promise<void> {
+    logger.info({ gatewayRef }, 'mock gateway: closed a QR code');
+  }
+
+  async fetchQrCredit(
+    gatewayRef: string,
+  ): Promise<{ providerPaymentId: string; amountPaise: number } | null> {
+    return MockPaymentGateway.paidQrs.get(gatewayRef) ?? null;
+  }
+
+  /** Pays a mock QR, as a customer scanning it would. Tests and local walkthroughs only. */
+  static payQr(gatewayRef: string): void {
+    const amountPaise = MockPaymentGateway.qrAmounts.get(gatewayRef);
+    if (amountPaise === undefined) throw new Error(`no such mock QR: ${gatewayRef}`);
+    MockPaymentGateway.paidQrs.set(gatewayRef, { providerPaymentId: `mock_qrpay_${randomUUID()}`, amountPaise });
   }
 
   /**
@@ -132,6 +181,7 @@ const EVENT_TYPES = new Set([
   'PAYMENT_CAPTURED',
   'PAYMENT_FAILED',
   'REFUND_COMPLETED',
+  'QR_CLOSED',
 ]);
 
 /** Narrows a verified body. A signed body is trusted for authorship, never for shape. */

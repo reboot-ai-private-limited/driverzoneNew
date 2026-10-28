@@ -1,11 +1,14 @@
 import mongoose, { Schema } from 'mongoose';
-import { PAYMENT_KINDS, PAYMENT_STATUSES } from '../domain/payment.entity.js';
+import { PAYMENT_CHANNELS, PAYMENT_KINDS, PAYMENT_STATUSES } from '../domain/payment.entity.js';
 
 export interface PaymentDoc {
   _id: mongoose.Types.ObjectId;
   bookingId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
   kind: string;
+  channel?: string;
+  metadata?: Record<string, number> | null;
+  qr?: { upiUri: string | null; imageUrl: string | null; expiresAt: Date } | null;
   status: string;
   amountPaise: number;
   refundedPaise: number;
@@ -22,6 +25,16 @@ const paymentSchema = new Schema<PaymentDoc>(
     bookingId: { type: Schema.Types.ObjectId, ref: 'Booking', required: true },
     customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
     kind: { type: String, enum: PAYMENT_KINDS, required: true },
+    // Absent on every row before 2026-10-28, and those are all orders — see `toEntity`.
+    channel: { type: String, enum: PAYMENT_CHANNELS, default: 'ORDER' },
+    metadata: { type: Schema.Types.Mixed, default: {} },
+    qr: {
+      type: new Schema(
+        { upiUri: { type: String, default: null }, imageUrl: { type: String, default: null }, expiresAt: { type: Date, required: true } },
+        { _id: false },
+      ),
+      default: null,
+    },
     status: { type: String, enum: PAYMENT_STATUSES, required: true, default: 'CREATED' },
     amountPaise: { type: Number, required: true, min: 0 },
     refundedPaise: { type: Number, required: true, default: 0, min: 0 },

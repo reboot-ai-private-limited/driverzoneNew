@@ -21,3 +21,4 @@ export * from './favourites.js';
 export * from './dispatch.js';
 export * from './quotes.js';
 export * from './accounts.js';
+export * from './invoices.js';

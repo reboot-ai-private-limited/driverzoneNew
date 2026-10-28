@@ -17,6 +17,20 @@ const latLng = z.object({
   lng: z.number().min(-180).max(180),
 });
 
+/*
+ * BOOKING FOR SOMEONE ELSE — the passenger. E.164 for the number, the identity module's rule
+ * (`identity.validation.ts`): the client normalises, the server refuses anything else.
+ */
+const rider = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{7,14}$/, 'Enter the mobile number in international format, e.g. +919876543210'),
+  })
+  .strict();
+
 export const createBookingSchema = z
   .object({
     quoteId: z.string().min(1),
@@ -38,6 +52,8 @@ export const createBookingSchema = z
      */
     vehicleId: z.string().min(1).max(64).optional(),
     plateNumber: z.string().trim().min(4).max(16).optional(),
+    /** Optional: absent means the customer is travelling themselves, as every older app assumes. */
+    rider: rider.optional(),
     /*
      * OPTIONAL WITH A DEFAULT, unlike the two above, and for the opposite reason. A missing car
      * category is a question nobody answered; a missing favourites flag is an answer — the app
@@ -66,6 +82,7 @@ export const adminCreateBookingSchema = z
     vehicle_type: z.enum(VEHICLE_TYPE_PREFERENCES),
     payment_mode: z.enum(ADMIN_PAYMENT_MODES),
     payment_reference: z.string().trim().max(200).optional(),
+    rider: rider.optional(),
   })
   .strict();
 

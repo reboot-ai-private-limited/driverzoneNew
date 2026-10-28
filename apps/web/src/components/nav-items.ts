@@ -2,6 +2,7 @@ import {
   Building2,
   CalendarClock,
   Coins,
+  FileText,
   LayoutDashboard,
   type LucideIcon,
   Package,
@@ -49,6 +50,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Packages', href: '/packages', icon: Package },
   { label: 'Zones', href: '/zones', icon: Building2 },
   { label: 'Reviews', href: '/reviews', icon: Star },
+  // Enabled: `GET/PATCH /admin/gst-invoices` (the `invoices` module) — customers' GST bill requests.
+  { label: 'GST Invoices', href: '/gst-invoices', icon: FileText },
   // Enabled: all three tabs are built and `GET /admin/finance/{driver-balances,transactions,
   // customer-wallets}` exist in `apps/api` (the tier-8 `admin` module), as does the settlement
   // POST. Payout batching is a separate project and is deliberately not behind this item.

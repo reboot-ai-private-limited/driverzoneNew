@@ -129,8 +129,13 @@ export function buildCreateBookingRequest(input: {
   vehicleType: VehicleTypePreference;
   paymentMode: AdminPaymentMode;
   paymentReference: string;
+  /** Both blank means the customer is travelling themselves. See `riderBlocker`. */
+  riderName?: string;
+  riderPhone?: string;
 }): AdminCreateBookingRequest {
   const reference = input.paymentReference.trim();
+  const riderName = input.riderName?.trim() ?? '';
+  const riderPhone = toIndianE164(input.riderPhone ?? '');
   return {
     customer_id: input.customerId,
     quote_id: input.quoteId,
@@ -141,7 +146,24 @@ export function buildCreateBookingRequest(input: {
     payment_mode: input.paymentMode,
     // Only a prepaid booking carries a reference — on cash there is nothing it would refer to.
     ...(input.paymentMode === 'PREPAID' && reference !== '' ? { payment_reference: reference } : {}),
+    ...(riderName !== '' && riderPhone !== null ? { rider: { name: riderName, phone: riderPhone } } : {}),
   };
+}
+
+/**
+ * Why the passenger fields stop the booking, or null when they do not.
+ *
+ * Optional as a pair: both blank is a customer travelling themselves. Half-filled is a mistake
+ * worth stopping — a name the driver cannot call, or a number with nobody to ask for.
+ */
+export function riderBlocker(name: string, phone: string): string | null {
+  const hasName = name.trim() !== '';
+  const hasPhone = phone.trim() !== '';
+  if (!hasName && !hasPhone) return null;
+  if (!hasName) return "Add the passenger's name, or clear the number.";
+  if (!hasPhone) return "Add the passenger's mobile number, or clear the name.";
+  if (toIndianE164(phone) === null) return "The passenger's number is not a 10-digit Indian mobile.";
+  return null;
 }
 
 /**

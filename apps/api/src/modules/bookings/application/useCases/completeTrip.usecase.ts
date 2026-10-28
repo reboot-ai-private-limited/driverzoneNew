@@ -1,8 +1,7 @@
 import type { BookingPaymentMode, ExtrasCollection } from '@driverzone/contracts';
 import { AppError } from '../../../../shared/errors/AppError.js';
 import { logger } from '../../../../shared/logging/logger.js';
-import { rupeesToPaise, type SettingsReadContract } from '../../../settings/settings.public.js';
-import { computeWaitingCharge } from '../../../pricing/pricing.public.js';
+import type { SettingsReadContract } from '../../../settings/settings.public.js';
 import type { LedgerWriteContract, NewLedgerEntry } from '../../../ledger/ledger.public.js';
 import type { NotificationsContract } from '../../../notifications/notifications.public.js';
 import { isCaptured, type PaymentsContract } from '../../../payments/payments.public.js';
@@ -14,6 +13,7 @@ import type { ChargeRepositoryPort } from '../../domain/chargeRepository.port.js
 import type { ExtensionRepositoryPort } from '../../domain/extensionRepository.port.js';
 import { extensionLabel, totalExtension } from '../../domain/bookingExtension.entity.js';
 import { explainLostTransition, loadForDriver } from '../bookingAccess.js';
+import { waitingChargeFor } from '../tripWaiting.js';
 
 export interface CompleteTripInput {
   bookingId: string;
@@ -87,14 +87,31 @@ export class CompleteTripUseCase {
         'The customer has not chosen how to pay yet. Ask them to select a payment method in their app before you can end the trip.',
       );
     }
+    /*
+     * WHAT A DRIVER'S PAYMENT QR ALREADY COLLECTED of the waiting charge, and which payment did it.
+     * The QR charges the whole trip up front (`DriverPaymentQrUseCase`), waiting included — so
+     * the waiting charge computed below must not be asked for a second time.
+     */
+    let prepaidWaitingPaise = 0;
+    let qrPaymentId: string | null = null;
+
     if (booking.paymentMode === 'UPI') {
       const payments = await this.payments.listForBooking(booking.id);
-      const bookingPayment = payments.find((p) => p.kind === 'BOOKING');
-      if (bookingPayment === undefined || !isCaptured(bookingPayment.status)) {
+      /*
+       * ANY captured fare payment, not the first one. A trip can carry the customer's own online
+       * order AND the driver's QR; whichever was actually paid is the one that lets the trip end.
+       * Reading only the first row meant an abandoned order ahead of a paid QR blocked the trip.
+       */
+      const settled = payments.filter((p) => p.kind === 'BOOKING' && isCaptured(p.status));
+      if (settled.length === 0) {
         throw AppError.conflict(
           "Waiting for the customer's online payment to go through. You can end the trip once it clears.",
         );
       }
+
+      const qr = settled.filter((p) => p.channel === 'QR');
+      prepaidWaitingPaise = Math.max(0, ...qr.map((p) => p.metadata['waitingPaise'] ?? 0));
+      qrPaymentId = qr[0]?.id ?? null;
     }
 
     const collection = input.extrasCollection ?? defaultExtrasCollection(booking.paymentMode);
@@ -143,14 +160,7 @@ export class CompleteTripUseCase {
      * charge already is "free waiting, then a fine", and building a second concept would mean two
      * clocks measuring the same gap and disagreeing at the boundary.
      */
-    const waiting =
-      booking.arrivedAt !== null && booking.startedAt !== null
-        ? computeWaitingCharge(booking.arrivedAt, booking.startedAt, {
-            freeMinutes: snapshot['waiting.free_minutes'],
-            chargePerMinutePaise: rupeesToPaise(snapshot['waiting.charge_per_minute']),
-            maxChargePaise: rupeesToPaise(snapshot['waiting.max_charge']),
-          })
-        : { waitedMinutes: 0, chargeableMinutes: 0, amountPaise: 0, capped: false };
+    const waiting = waitingChargeFor(booking, snapshot);
 
     /*
      * Every extra day the driver actually agreed to. DECLINED and EXPIRED requests are excluded by
@@ -172,7 +182,10 @@ export class CompleteTripUseCase {
      */
     const collectedExtrasPaise = booking.paymentMode === 'CASH' ? 0 : booking.paidExtensionPaise;
     const uncollectedExtrasPaise = Math.max(0, extras.amountPaise - collectedExtrasPaise);
-    const owedPaise = waiting.amountPaise + uncollectedExtrasPaise;
+    // `max(0, …)`: the waiting charge is computed from the same clock and settings the QR used, but
+    // an admin changing the rate in between must never turn "already paid" into a negative debt.
+    const uncollectedWaitingPaise = Math.max(0, waiting.amountPaise - prepaidWaitingPaise);
+    const owedPaise = uncollectedWaitingPaise + uncollectedExtrasPaise;
 
     const completed = await this.repo.transition({
       bookingId: booking.id,
@@ -236,6 +249,12 @@ export class CompleteTripUseCase {
      * The adjustment rows above record the FULL extension either way — a receipt has to explain
      * the charge whoever collected it.
      */
+    // Everything this trip cost was in the driver's QR: the adjustment rows are paid, and by which
+    // payment — the same record the online settlement below writes for an extras order.
+    if (owedPaise === 0 && qrPaymentId !== null && (waiting.amountPaise > 0 || extras.amountPaise > 0)) {
+      await this.charges.markAdjustmentsSettled(booking.id, qrPaymentId);
+    }
+
     if (owedPaise > 0) {
       if (collection === 'ONLINE') {
         try {

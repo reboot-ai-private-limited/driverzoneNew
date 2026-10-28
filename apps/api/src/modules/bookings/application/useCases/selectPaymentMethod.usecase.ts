@@ -78,17 +78,21 @@ export class SelectPaymentMethodUseCase {
        * check out an amount that does not match the order id already handed to the customer.
        */
       const existingPayments = await this.payments.listForBooking(booking.id);
-      const bookingPayment = existingPayments.find((p) => p.kind === 'BOOKING');
-      const amountPaise =
-        bookingPayment?.amountPaise ??
-        booking.fareSnapshot.fare.totalPaise - booking.walletCreditPaise + booking.walletDebtPaise;
-
-      return {
-        booking,
-        clientToken: bookingPayment?.gatewayRef ?? null,
-        publicKey: this.payments.publicKey,
-        amountPaise,
-      };
+      /*
+       * AN ORDER, NOT A QR. A driver's payment QR also makes the trip "UPI", and its payment row
+       * carries a QR id — which the checkout SDK cannot open as an order. A customer who then
+       * chooses to pay in their own app instead has no order yet, so they fall through to the code
+       * below and get one; if they pay both, the later payment is refunded (`applyCapture`).
+       */
+      const bookingPayment = existingPayments.find((p) => p.kind === 'BOOKING' && p.channel === 'ORDER');
+      if (bookingPayment !== undefined) {
+        return {
+          booking,
+          clientToken: bookingPayment.gatewayRef,
+          publicKey: this.payments.publicKey,
+          amountPaise: bookingPayment.amountPaise,
+        };
+      }
     }
 
     if (booking.paymentStatus === 'PAID') {

@@ -158,6 +158,12 @@ export interface CreateBookingRequest {
   vehicleId?: string | undefined;
   plateNumber?: string | undefined;
   /**
+   * BOOKING FOR SOMEONE ELSE (2026-10-28) — the person who will actually be in the car. Omit it
+   * when the customer is travelling themselves, which is what every client built before this field
+   * does. `phone` is E.164 (`+919876543210`), the same rule as every other number the API takes.
+   */
+  rider?: BookingRiderInput | undefined;
+  /**
    * Ring this customer's favourite drivers before anyone else.
    *
    * OPTIONAL AND FALSE BY DEFAULT, so a client that has never heard of favourites books exactly
@@ -300,9 +306,85 @@ export interface AdminCreateBookingRequest {
   payment_mode: AdminPaymentMode;
   /** How the customer paid, for a `PREPAID` booking — a UTR, a transfer reference, a note. */
   payment_reference?: string | undefined;
+  /** The passenger, when the customer is booking for someone else. See `CreateBookingRequest.rider`. */
+  rider?: BookingRiderInput | undefined;
+}
+
+/** Who will be in the car, when that is not the customer who booked. */
+export interface BookingRiderInput {
+  name: string;
+  /** E.164, e.g. `+919876543210`. */
+  phone: string;
+}
+
+/**
+ * The passenger on a booking made for someone else.
+ *
+ * `name` is always present — the driver needs to know who to look for, and the booker needs to see
+ * who they booked for. `phone` follows the same live-trip gate as `driver.phone` and
+ * `customer.phone`: present while the trip is assigned through started (and on admin reads), null
+ * otherwise, so a driver does not keep a passenger's number after the trip.
+ */
+export interface BookingRiderDto {
+  name: string;
+  phone: string | null;
 }
 
 export interface AdminCreateBookingResponse {
+  booking: BookingDto;
+}
+
+/**
+ * THE DRIVER'S PAYMENT QR (2026-10-28). The driver shows a UPI QR for the WHOLE trip amount; the
+ * customer scans it; the server confirms the money and only then does the driver's "end trip"
+ * slide unlock. `PENDING` is a live QR, `PAID` is money in, `EXPIRED` is one that ran out of time
+ * (a fresh one is one tap away), `NONE` is a trip nobody has made a QR for yet.
+ */
+export const PAYMENT_QR_STATES = ['NONE', 'PENDING', 'PAID', 'EXPIRED'] as const;
+export type PaymentQrState = (typeof PAYMENT_QR_STATES)[number];
+
+export interface PaymentQrLineDto {
+  label: string;
+  /** Negative for a credit (wallet balance spent on this trip). */
+  amount: Money;
+}
+
+/**
+ * HOW AN ONLINE PAYMENT WAS MADE — the customer's own checkout (`ORDER`) or the driver's QR (`QR`),
+ * and the provider's payment id, which is what support quotes to the payment provider.
+ *
+ * ADMIN SINGLE-BOOKING READ ONLY; null everywhere else, and null when nothing has been captured.
+ */
+export interface OnlinePaymentDto {
+  channel: 'ORDER' | 'QR';
+  provider_payment_id: string | null;
+}
+
+export interface DriverPaymentQrDto {
+  state: PaymentQrState;
+  /** What the QR collects, in full. Null only when `state` is `NONE`. */
+  amount: Money | null;
+  /**
+   * The `upi://pay?…` link to draw as a QR. Preferred: drawn on the phone it is always sharp. Null
+   * when the provider gave only a hosted image — then `image_url` is what to show.
+   */
+  upi_uri: string | null;
+  image_url: string | null;
+  /** When the QR stops working. Null when there is no live QR. */
+  expires_at: string | null;
+  /** What the amount is made of, so the driver can say it out loud if the customer asks. */
+  lines: PaymentQrLineDto[];
+  /**
+   * The waiting charge INSIDE `amount`. The trip screen needs it on its own: when the QR has
+   * already collected the waiting charge, ending the trip must not ask the driver how the waiting
+   * charge was settled. Zero when there is no QR or it did not include any.
+   */
+  waiting: Money;
+}
+
+/** `POST` and `GET /driver/bookings/:id/payment-qr` — the QR, and the trip as it now stands. */
+export interface DriverPaymentQrResponse {
+  qr: DriverPaymentQrDto;
   booking: BookingDto;
 }
 
@@ -316,6 +398,8 @@ export interface BookingDto {
   payment_status: BookingPaymentStatus;
   /** The admin's note of how a `PREPAID` booking was paid. Null on every other booking. */
   payment_reference: string | null;
+  /** How the online payment was made, once one has been captured. Admin single read only. */
+  online_payment: OnlinePaymentDto | null;
   /**
    * How the extras were settled when the trip ended — see `EXTRAS_COLLECTIONS`. Null until the
    * trip is complete, and on a trip that had no extras to settle.
@@ -366,6 +450,13 @@ export interface BookingDto {
    * was in. Null on bookings made before 2026-10-13 and for a customer with no car on file.
    */
   car_plate: string | null;
+
+  /**
+   * The person travelling, when the customer booked for someone else. Null when the customer is
+   * travelling themselves — every booking made before 2026-10-28, and every booking since that
+   * did not say otherwise.
+   */
+  rider: BookingRiderDto | null;
 
   /**
    * Whether this booking asked for the customer's favourite drivers to be rung first.

@@ -54,9 +54,11 @@ export interface GatewayEvent {
   eventId: string;
   /**
    * `PAYMENT_AUTHORIZED` means the money is held but not taken, and something must capture it.
-   * The other three are settled outcomes.
+   * `QR_CLOSED` is a QR that stopped taking payments WITHOUT being paid (it expired, or was closed
+   * on purpose) — the provider's own close of a QR that WAS paid is not reported, the credit
+   * already said so. The rest are settled outcomes.
    */
-  type: 'PAYMENT_AUTHORIZED' | 'PAYMENT_CAPTURED' | 'PAYMENT_FAILED' | 'REFUND_COMPLETED';
+  type: 'PAYMENT_AUTHORIZED' | 'PAYMENT_CAPTURED' | 'PAYMENT_FAILED' | 'REFUND_COMPLETED' | 'QR_CLOSED';
   /**
    * OUR payment's gateway reference — for Razorpay the ORDER id, which is what we stored when the
    * intent was created. A refund event carries the order of the payment being refunded, not the
@@ -68,6 +70,18 @@ export interface GatewayEvent {
   amountPaise: number;
   /** Customer-safe decline reason, when the provider gives one. */
   failureReason?: string | undefined;
+}
+
+/** `verifyWebhook`'s answer for an authentic webhook we deliberately do nothing with. */
+export const IGNORED_WEBHOOK = 'IGNORED' as const;
+
+/** A QR the provider made for us. `gatewayRef` is the QR's own id, stored on our payment row. */
+export interface QrCodeIntent {
+  gatewayRef: string;
+  /** The `upi://pay?…` link, when the provider returns it. */
+  upiUri: string | null;
+  /** A hosted image of the QR, for a provider that returns no link. */
+  imageUrl: string | null;
 }
 
 export interface PaymentGatewayPort {
@@ -91,11 +105,39 @@ export interface PaymentGatewayPort {
   capture(gatewayRef: string, amountPaise: number): Promise<void>;
 
   /**
-   * Verifies a webhook, returning the event or `null` if it does not verify. Returns rather than
-   * throws: an unverified webhook is not an exception, it is a request from someone who is not the
-   * payment provider, and the caller answers it with a 401.
+   * Verifies a webhook. Three answers, and the difference between the last two matters:
+   *
+   *   - a `GatewayEvent` — authentic, and one we act on;
+   *   - `IGNORED_WEBHOOK` — authentic, but not ours to act on (an event type we never subscribed
+   *     to, or a payment made outside an order — a QR payment's own `payment.captured`). The
+   *     caller answers 200, or the provider redelivers it for hours;
+   *   - `null` — NOT authentic. A request from someone who is not the payment provider, which the
+   *     caller answers with a 401.
+   *
+   * Returns rather than throws: an unverified webhook is not an exception.
    */
-  verifyWebhook(request: WebhookRequest): GatewayEvent | null;
+  verifyWebhook(request: WebhookRequest): GatewayEvent | typeof IGNORED_WEBHOOK | null;
+
+  /**
+   * A single-use UPI QR for exactly `amountPaise`, good until `expiresAt`. The DRIVER's phone
+   * shows it and the customer scans it with any UPI app; the money lands as a QR credit, which
+   * `verifyWebhook` reports as `PAYMENT_CAPTURED` against the QR's own id.
+   */
+  createQrCode(input: {
+    amountPaise: number;
+    reference: string;
+    idempotencyKey: string;
+    expiresAt: Date;
+  }): Promise<QrCodeIntent>;
+
+  /** Stops a QR taking payments — expired, replaced, or the trip was paid another way. Best effort. */
+  closeQrCode(gatewayRef: string): Promise<void>;
+
+  /**
+   * Whether this QR has been paid, asked of the provider directly. The fallback for a webhook
+   * that is late, lost, or cannot reach us at all (local development). Null while unpaid.
+   */
+  fetchQrCredit(gatewayRef: string): Promise<{ providerPaymentId: string; amountPaise: number } | null>;
 
   /**
    * Verifies the signature a checkout SDK hands back on success, so the caller can confirm a

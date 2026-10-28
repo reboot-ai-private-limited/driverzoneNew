@@ -86,6 +86,8 @@ function toEntity(doc: BookingDoc): Booking {
     carCategory: (doc.carCategory ?? null) as Booking['carCategory'],
     vehicleType: (doc.vehicleType ?? null) as Booking['vehicleType'],
     plateNumber: doc.plateNumber ?? null,
+    rider:
+      doc.rider === null || doc.rider === undefined ? null : { name: doc.rider.name, phone: doc.rider.phone },
     preferFavouriteDrivers: doc.preferFavouriteDrivers ?? false,
     dispatchMode: doc.dispatchMode === 'MANUAL' ? 'MANUAL' : 'AUTO',
     walletCreditPaise: doc.walletCreditPaise ?? 0,

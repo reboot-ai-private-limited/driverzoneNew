@@ -177,6 +177,15 @@ export function toBookingDto(view: BookingView): BookingDto {
     car_category: booking.carCategory,
     vehicle_type: booking.vehicleType,
     car_plate: booking.plateNumber,
+    /*
+     * The passenger's number is gated exactly like the two parties' own — see
+     * `PHONE_VISIBLE_STATUSES`. The name is not: the driver needs to know who to look for before
+     * the trip is live, and the booker needs to see who they booked for afterwards.
+     */
+    rider:
+      booking.rider === null
+        ? null
+        : { name: booking.rider.name, phone: canSeePhone(view) ? booking.rider.phone : null },
     prefer_favourite_drivers: booking.preferFavouriteDrivers,
     dispatch_mode: booking.dispatchMode,
 

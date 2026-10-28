@@ -32,6 +32,7 @@ export interface BookingDoc {
   carCategory?: string | null;
   vehicleType?: string | null;
   plateNumber?: string | null;
+  rider?: { name: string; phone: string } | null;
   preferFavouriteDrivers?: boolean;
   dispatchMode?: string;
   walletCreditPaise?: number;
@@ -101,6 +102,15 @@ const bookingSchema = new Schema<BookingDoc>(
      * the customer's CURRENT default car is not evidence of it.
      */
     plateNumber: { type: String, default: null },
+
+    /*
+     * The passenger when the customer booked for someone else (2026-10-28). Null — not absent — on
+     * a booking the customer is travelling on themselves, and on every row made before this field.
+     */
+    rider: {
+      type: new Schema({ name: { type: String, required: true }, phone: { type: String, required: true } }, { _id: false }),
+      default: null,
+    },
 
     /*
      * Ring this customer's favourites first (dispatch's wave 0).

@@ -457,6 +457,22 @@ function CustomerCard({ booking }: { booking: BookingDto }) {
               {booking.pickup.address}
             </ContactLine>
           </div>
+
+          {/*
+            BOOKED FOR SOMEONE ELSE — the person the driver actually meets. The customer above is
+            still who booked and who pays; this is who is in the car.
+          */}
+          {booking.rider !== null && (
+            <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Passenger (booked for someone else)
+              </p>
+              <ContactLine icon={<User aria-hidden className="size-3.5" />}>{booking.rider.name}</ContactLine>
+              <ContactLine icon={<Phone aria-hidden className="size-3.5" />}>
+                {booking.rider.phone === null ? <Dash /> : formatBookingMobile(booking.rider.phone)}
+              </ContactLine>
+            </div>
+          )}
         </div>
       )}
     </Panel>

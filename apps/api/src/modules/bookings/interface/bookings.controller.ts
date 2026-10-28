@@ -123,6 +123,7 @@ export function makeCreateBookingController(useCase: CreateBookingUseCase): Requ
       vehicleType: body.vehicleType,
       vehicleId: body.vehicleId,
       plateNumber: body.plateNumber,
+      rider: body.rider,
       preferFavouriteDrivers: body.preferFavouriteDrivers,
       idempotencyKey: idempotencyKeyOf(req),
     });
@@ -174,6 +175,7 @@ export function makeAdminCreateBookingController(
       dropAddress: body.drop_address,
       carCategory: body.car_category,
       vehicleType: body.vehicle_type,
+      rider: body.rider,
       preferFavouriteDrivers: false,
       idempotencyKey: idempotencyKeyOf(req),
       dispatchMode: 'MANUAL',

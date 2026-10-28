@@ -158,6 +158,12 @@ export interface CreateBookingRequest {
   vehicleId?: string | undefined;
   plateNumber?: string | undefined;
   /**
+   * BOOKING FOR SOMEONE ELSE (2026-10-28) — the person who will actually be in the car. Omit it
+   * when the customer is travelling themselves, which is what every client built before this field
+   * does. `phone` is E.164 (`+919876543210`), the same rule as every other number the API takes.
+   */
+  rider?: BookingRiderInput | undefined;
+  /**
    * Ring this customer's favourite drivers before anyone else.
    *
    * OPTIONAL AND FALSE BY DEFAULT, so a client that has never heard of favourites books exactly
@@ -300,6 +306,28 @@ export interface AdminCreateBookingRequest {
   payment_mode: AdminPaymentMode;
   /** How the customer paid, for a `PREPAID` booking — a UTR, a transfer reference, a note. */
   payment_reference?: string | undefined;
+  /** The passenger, when the customer is booking for someone else. See `CreateBookingRequest.rider`. */
+  rider?: BookingRiderInput | undefined;
+}
+
+/** Who will be in the car, when that is not the customer who booked. */
+export interface BookingRiderInput {
+  name: string;
+  /** E.164, e.g. `+919876543210`. */
+  phone: string;
+}
+
+/**
+ * The passenger on a booking made for someone else.
+ *
+ * `name` is always present — the driver needs to know who to look for, and the booker needs to see
+ * who they booked for. `phone` follows the same live-trip gate as `driver.phone` and
+ * `customer.phone`: present while the trip is assigned through started (and on admin reads), null
+ * otherwise, so a driver does not keep a passenger's number after the trip.
+ */
+export interface BookingRiderDto {
+  name: string;
+  phone: string | null;
 }
 
 export interface AdminCreateBookingResponse {
@@ -366,6 +394,13 @@ export interface BookingDto {
    * was in. Null on bookings made before 2026-10-13 and for a customer with no car on file.
    */
   car_plate: string | null;
+
+  /**
+   * The person travelling, when the customer booked for someone else. Null when the customer is
+   * travelling themselves — every booking made before 2026-10-28, and every booking since that
+   * did not say otherwise.
+   */
+  rider: BookingRiderDto | null;
 
   /**
    * Whether this booking asked for the customer's favourite drivers to be rung first.

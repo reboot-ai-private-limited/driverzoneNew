@@ -140,6 +140,7 @@ function booking(over: Partial<Booking> = {}): Booking {
     paymentReference: null,
     extrasCollection: null,
     plateNumber: null,
+    rider: null,
     carCategory: null,
     vehicleType: null,
     preferFavouriteDrivers: false,
@@ -1473,6 +1474,40 @@ describe('toBookingDto — the driver card', () => {
     });
 
     expect(dto.driver).toBeNull();
+  });
+});
+
+describe('toBookingDto — booking for someone else', () => {
+  const RIDER = { name: 'Ramesh Das', phone: '+919811111111' };
+  const withStatus = (status: BookingStatus, revealPhones?: boolean): ReturnType<typeof toBookingDto> =>
+    toBookingDto({
+      booking: booking({ status, driverId: 'drv_1', rider: RIDER }),
+      adjustments: [],
+      ...(revealPhones === undefined ? {} : { revealPhones }),
+    });
+
+  it('is null when the customer is travelling themselves', () => {
+    expect(toBookingDto({ booking: booking(), adjustments: [] }).rider).toBeNull();
+  });
+
+  it.each(['ASSIGNED', 'DRIVER_EN_ROUTE', 'ARRIVED', 'STARTED'] as const)(
+    "carries the passenger's number while the trip is live (%s)",
+    (status) => {
+      expect(withStatus(status).rider).toEqual(RIDER);
+    },
+  );
+
+  it.each(['CONFIRMED', 'SEARCHING', 'COMPLETED', 'CANCELLED_BY_CUSTOMER'] as const)(
+    "keeps the passenger's name but withholds the number outside the live trip (%s)",
+    (status) => {
+      // The same gate as the two parties' own numbers: a driver does not keep a passenger's
+      // number after the trip, but everyone can still see who the trip was for.
+      expect(withStatus(status).rider).toEqual({ name: 'Ramesh Das', phone: null });
+    },
+  );
+
+  it('shows the number to an admin whatever the status', () => {
+    expect(withStatus('COMPLETED', true).rider?.phone).toBe('+919811111111');
   });
 });
 

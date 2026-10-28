@@ -435,29 +435,20 @@ export default function TripScreen(): ReactElement {
           Call button appears with ASSIGNED and is gone the moment the trip ends. Nothing to hide
           client-side: a finished trip's response never carries the number.
         */}
+        {/*
+          BOOKED FOR SOMEONE ELSE: the passenger is who the driver meets at the kerb, so they come
+          first. The booker stays below as "Booked by" — they still choose how to pay in their app,
+          so the driver may need them too. Same server-side phone gate for both.
+        */}
+        {booking.rider !== null ? (
+          <ContactCard label="Your passenger" name={booking.rider.name} phone={booking.rider.phone} />
+        ) : null}
         {booking.customer !== null ? (
-          <Animated.View entering={FadeInDown.duration(260)} style={styles.riderCard}>
-            <View style={styles.riderAvatar}>
-              <Feather name="user" size={18} color={colors.fg} />
-            </View>
-            <View style={styles.riderText}>
-              <Text style={styles.riderLabel}>Your rider</Text>
-              <Text style={styles.riderName} numberOfLines={1}>
-                {booking.customer.name ?? 'Rider'}
-              </Text>
-            </View>
-            {booking.customer.phone !== null ? (
-              <Pressable
-                onPress={() => callCustomer(booking.customer!.phone!)}
-                accessibilityRole="button"
-                accessibilityLabel={`Call ${booking.customer.name ?? 'the rider'}`}
-                style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
-              >
-                <Feather name="phone" size={16} color={colors.onFg} />
-                <Text style={styles.callButtonText}>Call</Text>
-              </Pressable>
-            ) : null}
-          </Animated.View>
+          <ContactCard
+            label={booking.rider === null ? 'Your rider' : 'Booked by'}
+            name={booking.customer.name ?? (booking.rider === null ? 'Rider' : 'Customer')}
+            phone={booking.customer.phone}
+          />
         ) : null}
 
         {/*
@@ -657,7 +648,9 @@ export default function TripScreen(): ReactElement {
             */}
             <Text style={styles.otpTitle}>Ask for the 4-digit code</Text>
             <Text style={styles.otpBody}>
-              The customer has it in their app. The trip starts once it matches.
+              {booking.rider === null
+                ? 'The customer has it in their app. The trip starts once it matches.'
+                : `${booking.rider.name} has it — the person who booked sends it to them. The trip starts once it matches.`}
             </Text>
 
             <View style={styles.otpBox}>
@@ -1026,6 +1019,46 @@ function callCustomer(phone: string): void {
   void Linking.openURL(`tel:${phone}`).catch(() => {
     /* No dialler (a tablet, mostly). Nothing useful to say — the number is on screen to read. */
   });
+}
+
+/**
+ * One person the driver may need to reach — the rider, or on a booking made for someone else, the
+ * passenger and the booker. `phone` is null outside the live trip (the server's gate), and so is
+ * the Call button.
+ */
+function ContactCard({
+  label,
+  name,
+  phone,
+}: {
+  label: string;
+  name: string;
+  phone: string | null;
+}): ReactElement {
+  return (
+    <Animated.View entering={FadeInDown.duration(260)} style={styles.riderCard}>
+      <View style={styles.riderAvatar}>
+        <Feather name="user" size={18} color={colors.fg} />
+      </View>
+      <View style={styles.riderText}>
+        <Text style={styles.riderLabel}>{label}</Text>
+        <Text style={styles.riderName} numberOfLines={1}>
+          {name}
+        </Text>
+      </View>
+      {phone !== null ? (
+        <Pressable
+          onPress={() => callCustomer(phone)}
+          accessibilityRole="button"
+          accessibilityLabel={`Call ${name}`}
+          style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
+        >
+          <Feather name="phone" size={16} color={colors.onFg} />
+          <Text style={styles.callButtonText}>Call</Text>
+        </Pressable>
+      ) : null}
+    </Animated.View>
+  );
 }
 
 const styles = StyleSheet.create({

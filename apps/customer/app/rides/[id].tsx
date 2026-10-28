@@ -122,6 +122,7 @@ export default function RideDetailScreen(): ReactElement {
           )}
           <SummaryRow label="Trip Type" value={SERVICE_LABEL[ride.service_type]} />
           {ride.car_plate === null ? null : <SummaryRow label="Car number" value={ride.car_plate} />}
+          {ride.rider === null ? null : <SummaryRow label="Booked for" value={ride.rider.name} />}
           {/* Only on bookings placed since the car choice existed — older rows have no answer,
               and a dash there would read as "no car" rather than "never asked". */}
           {ride.car_category === null ? null : (

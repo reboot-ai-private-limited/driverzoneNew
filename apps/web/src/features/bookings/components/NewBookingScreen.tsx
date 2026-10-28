@@ -35,6 +35,7 @@ import {
   buildCreateBookingRequest,
   buildQuoteRequest,
   quoteBlocker,
+  riderBlocker,
   toIndianE164,
   type TripDraft,
   type TripPoint,
@@ -93,6 +94,10 @@ export function NewBookingScreen() {
    */
   const [paymentMode, setPaymentMode] = useState<AdminPaymentMode | ''>('');
   const [paymentReference, setPaymentReference] = useState('');
+  /** Booking for someone else. Both blank — the default — is the customer travelling themselves. */
+  const [riderName, setRiderName] = useState('');
+  const [riderPhone, setRiderPhone] = useState('');
+  const riderProblem = riderBlocker(riderName, riderPhone);
 
   /** Which end the map is setting. Moves to the destination once the pickup is first placed. */
   const [active, setActive] = useState<PointKind>('pickup');
@@ -159,11 +164,13 @@ export function NewBookingScreen() {
     carCategory !== '' &&
     vehicleType !== '' &&
     paymentMode !== '' &&
+    riderProblem === null &&
     !create.isPending;
 
   const book = () => {
     if (customer === null || chosen === null || trip.pickup === null || trip.drop === null) return;
     if (carCategory === '' || vehicleType === '' || paymentMode === '' || create.isPending) return;
+    if (riderProblem !== null) return;
     create.mutate(
       buildCreateBookingRequest({
         customerId: customer.id,
@@ -174,6 +181,8 @@ export function NewBookingScreen() {
         vehicleType,
         paymentMode,
         paymentReference,
+        riderName,
+        riderPhone,
       }),
       {
         onSuccess: (result) => router.push(`/bookings/${result.booking.id}`),
@@ -291,6 +300,45 @@ export function NewBookingScreen() {
             </div>
           </Panel>
 
+          {/*
+            BOOKING FOR SOMEONE ELSE — optional. Left blank, the customer above is the passenger,
+            which is every booking made before this existed.
+          */}
+          <Panel title="Passenger (optional)" icon={<User aria-hidden className="size-4" />}>
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-text-subtle">
+                Only when the customer is booking for someone else. The driver will contact this
+                person at pickup.
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <FormField label="Passenger name">
+                  {({ id }) => (
+                    <Input
+                      id={id}
+                      value={riderName}
+                      maxLength={80}
+                      onChange={(e) => setRiderName(e.target.value)}
+                      placeholder="e.g. Ramesh Das"
+                    />
+                  )}
+                </FormField>
+                <FormField label="Passenger mobile">
+                  {({ id }) => (
+                    <Input
+                      id={id}
+                      value={riderPhone}
+                      inputMode="tel"
+                      maxLength={16}
+                      onChange={(e) => setRiderPhone(e.target.value)}
+                      placeholder="e.g. 98765 43210"
+                    />
+                  )}
+                </FormField>
+              </div>
+              {riderProblem !== null && <p className="text-xs text-danger">{riderProblem}</p>}
+            </div>
+          </Panel>
+
           <Panel title="Payment" icon={<IndianRupee aria-hidden className="size-4" />}>
             <div className="flex flex-col gap-3">
               {/*
@@ -342,6 +390,9 @@ export function NewBookingScreen() {
                 <FieldRow label="Customer">
                   {customer === null ? '—' : (customer.name ?? customer.phone)}
                 </FieldRow>
+                {riderName.trim() !== '' && (
+                  <FieldRow label="Passenger">{riderName.trim()}</FieldRow>
+                )}
                 <FieldRow label="Pickup">{trip.pickup?.address ?? '—'}</FieldRow>
                 <FieldRow label="Drop">{trip.drop?.address ?? '—'}</FieldRow>
                 <FieldRow label="Fare">{chosen?.fare.total.amount_display ?? '—'}</FieldRow>

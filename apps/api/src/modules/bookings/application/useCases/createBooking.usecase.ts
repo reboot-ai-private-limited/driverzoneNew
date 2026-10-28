@@ -18,6 +18,7 @@ import {
   isScheduledBooking,
   type Actor,
   type Booking,
+  type BookingRider,
   type FareSnapshot,
 } from '../../domain/booking.entity.js';
 import type { BookingRepositoryPort } from '../../domain/bookingRepository.port.js';
@@ -38,6 +39,8 @@ export interface CreateBookingInput {
   vehicleId?: string | undefined;
   /** A car number typed at booking — saved to the customer's profile as well. */
   plateNumber?: string | undefined;
+  /** The passenger, when booking for someone else. Absent means the customer is travelling. */
+  rider?: BookingRider | undefined;
   /**
    * Ring this customer's favourites first. Frozen onto the booking, not consulted here — `bookings`
    * sits below `favourites` and below `dispatch`, and neither the list nor the wave is its
@@ -240,6 +243,7 @@ export class CreateBookingUseCase {
       carCategory: input.carCategory,
       vehicleType: input.vehicleType,
       plateNumber,
+      rider: input.rider === undefined ? null : { name: input.rider.name.trim(), phone: input.rider.phone.trim() },
       preferFavouriteDrivers: input.preferFavouriteDrivers,
       dispatchMode,
       createdBy,

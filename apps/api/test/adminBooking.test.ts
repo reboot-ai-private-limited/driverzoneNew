@@ -11,6 +11,7 @@ import type { QuoteConsumptionContract } from '../src/modules/quotes/quotes.publ
 import type { SettingsReadContract } from '../src/modules/settings/settings.public.js';
 import type { WalletPublicContract } from '../src/modules/wallet/wallet.public.js';
 import { RunDispatchWaveUseCase } from '../src/modules/dispatch/application/useCases/runWave.usecase.js';
+import { createBookingSchema } from '../src/modules/bookings/interface/bookings.validation.js';
 
 /**
  * ADMIN BOOKING — a trip booked from the panel on a customer's behalf.
@@ -313,6 +314,59 @@ describe('CreateBookingUseCase — the car number on the booking', () => {
       createdBy: { type: 'ADMIN', id: 'adm_1' },
     });
     expect(repo.created()[0]?.plateNumber).toBeNull();
+  });
+});
+
+describe('CreateBookingUseCase — booking for someone else', () => {
+  it('records the passenger on the booking, trimmed', async () => {
+    const { useCase, repo } = build();
+    await useCase.execute({ ...input, rider: { name: '  Ramesh Das ', phone: ' +919811111111 ' } });
+    expect(repo.created()[0]?.rider).toEqual({ name: 'Ramesh Das', phone: '+919811111111' });
+  });
+
+  it('records no passenger when none is given — the customer is travelling, as every older app means', async () => {
+    const { useCase, repo } = build();
+    await useCase.execute(input);
+    expect(repo.created()[0]?.rider).toBeNull();
+  });
+
+  it('lets an admin booking carry a passenger too', async () => {
+    const { useCase, repo } = build();
+    await useCase.execute({
+      ...input,
+      rider: { name: 'Ramesh Das', phone: '+919811111111' },
+      dispatchMode: 'MANUAL',
+      createdBy: { type: 'ADMIN', id: 'adm_1' },
+    });
+    expect(repo.created()[0]?.rider?.name).toBe('Ramesh Das');
+  });
+});
+
+describe('createBookingSchema — the passenger', () => {
+  const body = {
+    quoteId: 'q_1',
+    pickupAddress: 'Siliguri',
+    dropAddress: 'Darjeeling',
+    carCategory: 'SEDAN',
+    vehicleType: 'MANUAL',
+  };
+
+  it('accepts a booking with no passenger — the request every older app sends', () => {
+    expect(createBookingSchema.parse(body).rider).toBeUndefined();
+  });
+
+  it('accepts a passenger with an E.164 number', () => {
+    const parsed = createBookingSchema.parse({ ...body, rider: { name: 'Ramesh', phone: '+919811111111' } });
+    expect(parsed.rider).toEqual({ name: 'Ramesh', phone: '+919811111111' });
+  });
+
+  it.each([
+    ['a bare national number', { name: 'Ramesh', phone: '9811111111' }],
+    ['an empty name', { name: '   ', phone: '+919811111111' }],
+    ['a missing number', { name: 'Ramesh' }],
+    ['an unknown field', { name: 'Ramesh', phone: '+919811111111', email: 'r@example.com' }],
+  ])('refuses %s', (_label, rider) => {
+    expect(createBookingSchema.safeParse({ ...body, rider }).success).toBe(false);
   });
 });
 

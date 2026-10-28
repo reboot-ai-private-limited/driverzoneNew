@@ -156,6 +156,12 @@ export interface GeoPoint {
   lng: number;
 }
 
+/** The person in the car when the customer booked for someone else. `phone` is E.164. */
+export interface BookingRider {
+  name: string;
+  phone: string;
+}
+
 /**
  * What the customer agreed to, frozen at confirmation and never edited (invariant B-1).
  *
@@ -212,6 +218,13 @@ export interface Booking {
    * past trip was in. Null on bookings made before plates were recorded (2026-10-13).
    */
   plateNumber: string | null;
+
+  /**
+   * The passenger, when the customer booked for someone else (2026-10-28). Null when the customer
+   * is travelling themselves. Frozen at booking time like the plate — the person in the car does
+   * not change because the booker later edits a contact.
+   */
+  rider: BookingRider | null;
 
   /**
    * The customer asked for their favourite drivers to be rung before anybody else.

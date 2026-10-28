@@ -30,6 +30,13 @@ import {
 import { Checkbox } from '@/components/Checkbox';
 import { FareOptionCard } from '@/components/FareOptionCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import {
+  RiderChoice,
+  type RiderSelection,
+  SELF_RIDER,
+  isRiderReady,
+  toRiderInput,
+} from '@/components/RiderChoice';
 import { ToggleSwitch } from '@/components/ToggleSwitch';
 import {
   needsDriverExpenseAgreement,
@@ -189,6 +196,14 @@ export function FareSheet({
   const carChosen = carCategory !== null && vehicleType !== null && carNumberReady;
 
   /**
+   * WHO IS TRAVELLING (2026-10-28). Survives a re-quote like the car does — the passenger does not
+   * change because the price did — but is reset once a booking is made, so the next trip starts
+   * as the customer's own rather than silently inheriting last week's passenger.
+   */
+  const [rider, setRider] = useState<RiderSelection>(SELF_RIDER);
+  const riderReady = isRiderReady(rider);
+
+  /**
    * The wallet, read only to SHOW what it will do — the server applies it, this never sends it.
    *
    * That split matters: a client that computed its own discount would be a client that could
@@ -272,12 +287,14 @@ export function FareSheet({
             : carNumber?.kind === 'new'
               ? { plateNumber: carNumber.plate.trim() }
               : {}),
+          rider: toRiderInput(rider),
           preferFavouriteDrivers,
         },
         idempotencyKey.current,
       );
     },
     onSuccess: (result) => {
+      setRider(SELF_RIDER);
       // The booking just spent credit (or collected a debt), so the cached balance is now a lie —
       // and the wallet screen is two taps away.
       void queryClient.invalidateQueries({ queryKey: keys.wallet.me() });
@@ -526,6 +543,12 @@ export function FareSheet({
               </Animated.View>
             ) : null}
 
+            {/*
+              WHO IS TRAVELLING — first, straight under the fare. At the bottom it sat against the
+              button, and on most phones its fields opened below the fold where nobody saw them.
+            */}
+            <RiderChoice selection={rider} onChange={setRider} />
+
             <CarChoice
               category={carCategory}
               vehicleType={vehicleType}
@@ -695,7 +718,7 @@ export function FareSheet({
             // Neither gate applies to "get a new price" — that tap is not the one the checkbox
             // or the car chips are about, and blocking it would trap a customer who has not yet
             // answered behind a stale price they cannot even refresh.
-            disabled={quoteExpired ? false : !carChosen || (needsAgreement && !agreed)}
+            disabled={quoteExpired ? false : !carChosen || !riderReady || (needsAgreement && !agreed)}
             showArrow={false}
           />
           <Text
@@ -712,7 +735,9 @@ export function FareSheet({
                   ? carCategory !== null && vehicleType !== null
                     ? 'Add your car number above, so your driver can find your car.'
                     : 'Tell us your car above, so we only ring drivers who can drive it.'
-                  : needsAgreement && !agreed
+                  : !riderReady
+                    ? "Add the passenger's name and mobile number above."
+                    : needsAgreement && !agreed
                     ? 'Agree to the note above to confirm.'
                     : 'Pay the driver in cash at the end of your trip.'}
           </Text>

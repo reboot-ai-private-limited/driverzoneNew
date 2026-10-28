@@ -24,7 +24,6 @@ import {
   type BookingEventDoc,
 } from './booking.model.js';
 import { FareAdjustmentModel } from './charge.model.js';
-import { netPayablePaise } from '../domain/payable.js';
 
 /**
  * Every status a booking can still leave. Typed against `BookingStatus` so a status added to the
@@ -41,6 +40,34 @@ const OPEN_BOOKING_STATUSES: readonly BookingStatus[] = [
   'ARRIVED',
   'STARTED',
 ];
+
+/**
+ * Count and sum of `amount` over one account's COMPLETED bookings, as a single aggregation row.
+ *
+ * `amount` is evaluated per booking and may read `$extensionRows.amountPaise` — the booking's
+ * `DAY_EXTENSION` adjustment (at most one, by the `{ bookingId, type }` unique index, which the
+ * `localField` form of `$lookup` uses). The match key must already be an ObjectId: aggregation,
+ * unlike `find`, does not cast.
+ */
+async function completedTotals(
+  owner: { customerId: mongoose.Types.ObjectId } | { driverId: mongoose.Types.ObjectId },
+  amount: Record<string, unknown>,
+): Promise<{ count: number; amountPaise: number }> {
+  const [row] = await BookingModel.aggregate<{ count: number; amountPaise: number }>([
+    { $match: { ...owner, status: 'COMPLETED' } },
+    {
+      $lookup: {
+        from: FareAdjustmentModel.collection.name,
+        localField: '_id',
+        foreignField: 'bookingId',
+        pipeline: [{ $match: { type: 'DAY_EXTENSION' } }, { $project: { _id: 0, amountPaise: 1 } }],
+        as: 'extensionRows',
+      },
+    },
+    { $group: { _id: null, count: { $sum: 1 }, amountPaise: { $sum: amount } } },
+  ]).exec();
+  return row ?? { count: 0, amountPaise: 0 };
+}
 
 function toEntity(doc: BookingDoc): Booking {
   return {
@@ -339,59 +366,40 @@ export class MongoBookingRepository implements BookingRepositoryPort {
 
   /**
    * Counted over EVERY booking; spend over the completed ones only, each at the same net figure
-   * its row shows (`netPayablePaise`, with the extra day from its adjustment row). Two lean
-   * reads and the sum in code, rather than the payable arithmetic written a second time in
-   * aggregation operators.
+   * its row shows (`netPayablePaise`, with the extra day from its adjustment row).
+   *
+   * SUMMED IN MONGO, not in code. Pulling every completed booking back to add them up made the
+   * first page of history cost O(lifetime trips) on every open; the aggregation returns one row.
+   * The arithmetic below must stay the same as `netPayablePaise` — the integration test pins it.
    */
   async customerHistorySummary(
     customerId: string,
   ): Promise<{ totalTrips: number; totalSpentPaise: number }> {
     if (!mongoose.isValidObjectId(customerId)) return { totalTrips: 0, totalSpentPaise: 0 };
 
-    const [totalTrips, completed] = await Promise.all([
+    const [totalTrips, totals] = await Promise.all([
       BookingModel.countDocuments({ customerId }).exec(),
-      BookingModel.find({ customerId, status: 'COMPLETED' })
-        .select({
-          'fareSnapshot.fare.totalPaise': 1,
-          waitingChargePaise: 1,
-          walletCreditPaise: 1,
-          walletDebtPaise: 1,
-        })
-        .lean<
-          Array<
-            Pick<BookingDoc, '_id' | 'waitingChargePaise' | 'walletCreditPaise' | 'walletDebtPaise'> & {
-              fareSnapshot?: { fare?: { totalPaise?: number } };
-            }
-          >
-        >()
-        .exec(),
+      completedTotals({ customerId: new mongoose.Types.ObjectId(customerId) }, {
+        $max: [
+          0,
+          {
+            $subtract: [
+              {
+                $add: [
+                  { $ifNull: ['$fareSnapshot.fare.totalPaise', 0] },
+                  { $sum: '$extensionRows.amountPaise' },
+                  { $ifNull: ['$waitingChargePaise', 0] },
+                  { $ifNull: ['$walletDebtPaise', 0] },
+                ],
+              },
+              { $ifNull: ['$walletCreditPaise', 0] },
+            ],
+          },
+        ],
+      }),
     ]);
 
-    if (completed.length === 0) return { totalTrips, totalSpentPaise: 0 };
-
-    const extensions = await FareAdjustmentModel.find({
-      bookingId: { $in: completed.map((doc) => doc._id) },
-      type: 'DAY_EXTENSION',
-    })
-      .select({ bookingId: 1, amountPaise: 1 })
-      .lean()
-      .exec();
-    const extensionByBooking = new Map(extensions.map((row) => [String(row.bookingId), row.amountPaise]));
-
-    const totalSpentPaise = completed.reduce(
-      (sum, doc) =>
-        sum +
-        netPayablePaise({
-          farePaise: doc.fareSnapshot?.fare?.totalPaise ?? 0,
-          extrasPaise: extensionByBooking.get(String(doc._id)) ?? 0,
-          waitingPaise: doc.waitingChargePaise ?? 0,
-          walletCreditPaise: doc.walletCreditPaise ?? 0,
-          walletDebtPaise: doc.walletDebtPaise ?? 0,
-        }),
-      0,
-    );
-
-    return { totalTrips, totalSpentPaise };
+    return { totalTrips, totalSpentPaise: totals.amountPaise };
   }
 
   /**
@@ -528,41 +536,19 @@ export class MongoBookingRepository implements BookingRepositoryPort {
       return { totalTrips: 0, completedTrips: 0, faresPaise: 0 };
     }
 
-    const [totalTrips, completed] = await Promise.all([
+    const [totalTrips, totals] = await Promise.all([
       BookingModel.countDocuments({ driverId }).exec(),
-      BookingModel.find({ driverId, status: 'COMPLETED' })
-        .select({ 'fareSnapshot.fare.totalPaise': 1, waitingChargePaise: 1 })
-        .lean<
-          Array<
-            Pick<BookingDoc, '_id' | 'waitingChargePaise'> & {
-              fareSnapshot?: { fare?: { totalPaise?: number } };
-            }
-          >
-        >()
-        .exec(),
+      // Summed in Mongo for the same reason as `customerHistorySummary`.
+      completedTotals({ driverId: new mongoose.Types.ObjectId(driverId) }, {
+        $add: [
+          { $ifNull: ['$fareSnapshot.fare.totalPaise', 0] },
+          { $sum: '$extensionRows.amountPaise' },
+          { $ifNull: ['$waitingChargePaise', 0] },
+        ],
+      }),
     ]);
 
-    if (completed.length === 0) return { totalTrips, completedTrips: 0, faresPaise: 0 };
-
-    const extensions = await FareAdjustmentModel.find({
-      bookingId: { $in: completed.map((doc) => doc._id) },
-      type: 'DAY_EXTENSION',
-    })
-      .select({ bookingId: 1, amountPaise: 1 })
-      .lean()
-      .exec();
-    const extensionByBooking = new Map(extensions.map((row) => [String(row.bookingId), row.amountPaise]));
-
-    const faresPaise = completed.reduce(
-      (sum, doc) =>
-        sum +
-        (doc.fareSnapshot?.fare?.totalPaise ?? 0) +
-        (extensionByBooking.get(String(doc._id)) ?? 0) +
-        (doc.waitingChargePaise ?? 0),
-      0,
-    );
-
-    return { totalTrips, completedTrips: completed.length, faresPaise };
+    return { totalTrips, completedTrips: totals.count, faresPaise: totals.amountPaise };
   }
 
   /**

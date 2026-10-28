@@ -206,6 +206,15 @@ bookingSchema.index(
   { partialFilterExpression: { status: { $in: ['CONFIRMED', 'WAITING_DRIVER'] } } },
 );
 
+/**
+ * The abandoned-payment sweep (`findAbandonedPayments`), run every minute by the worker. Partial
+ * for the same reason as above: only the few bookings still waiting on payment are in it.
+ */
+bookingSchema.index({ createdAt: 1 }, { partialFilterExpression: { status: 'PENDING_PAYMENT' } });
+
+/** The driver's scheduled board (`findWaitingForDriver`), sorted by pickup. */
+bookingSchema.index({ scheduledAt: 1 }, { partialFilterExpression: { status: 'WAITING_DRIVER' } });
+
 export const BookingModel =
   (mongoose.models['Booking'] as mongoose.Model<BookingDoc> | undefined) ??
   mongoose.model<BookingDoc>('Booking', bookingSchema);

@@ -1,7 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 
-import { Phone, MessageCircle, Mail, MapPin, Check } from 'lucide-react';
+import { Phone, Mail, MapPin, Check } from 'lucide-react';
 import type { ReactElement } from 'react';
 
 const QUICK_LINKS = [

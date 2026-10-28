@@ -175,7 +175,7 @@ export function WhyChooseSection(): ReactElement {
             <div className="flex flex-col justify-center p-8 lg:p-12">
               <h3 className="text-2xl font-bold text-fg">{active.title}</h3>
               <div className="mt-4 space-y-3">
-                {active.body.map((para, i) => (
+                {active.body.map((para) => (
                   <p key={para} className="text-[15px] leading-relaxed text-muted">
                     {para}
                   </p>

@@ -646,6 +646,7 @@ describe('toPaymentQrDto', () => {
       ['Wallet credit used', -10_000],
     ]);
     expect(dto.amount?.amount_paise).toBe(47_500);
+    expect(dto.waiting.amount_paise).toBe(5_000);
   });
 
   it('sends the link and expiry only while the QR is live', () => {
@@ -668,6 +669,7 @@ describe('toPaymentQrDto', () => {
       image_url: null,
       expires_at: null,
       lines: [],
+      waiting: { amount_paise: 0, amount_display: expect.any(String) },
     });
   });
 });

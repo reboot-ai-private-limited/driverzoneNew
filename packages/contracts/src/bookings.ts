@@ -363,6 +363,12 @@ export interface DriverPaymentQrDto {
   expires_at: string | null;
   /** What the amount is made of, so the driver can say it out loud if the customer asks. */
   lines: PaymentQrLineDto[];
+  /**
+   * The waiting charge INSIDE `amount`. The trip screen needs it on its own: when the QR has
+   * already collected the waiting charge, ending the trip must not ask the driver how the waiting
+   * charge was settled. Zero when there is no QR or it did not include any.
+   */
+  waiting: Money;
 }
 
 /** `POST` and `GET /driver/bookings/:id/payment-qr` — the QR, and the trip as it now stands. */

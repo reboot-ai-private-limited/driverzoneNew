@@ -31,7 +31,15 @@ import { breakdownOf, type PaymentQrView } from '../application/useCases/driverP
 export function toPaymentQrDto(view: PaymentQrView): DriverPaymentQrDto {
   const { payment } = view;
   if (payment === null) {
-    return { state: view.state, amount: null, upi_uri: null, image_url: null, expires_at: null, lines: [] };
+    return {
+      state: view.state,
+      amount: null,
+      upi_uri: null,
+      image_url: null,
+      expires_at: null,
+      lines: [],
+      waiting: toMoney(0),
+    };
   }
 
   const b = breakdownOf(payment);
@@ -49,6 +57,7 @@ export function toPaymentQrDto(view: PaymentQrView): DriverPaymentQrDto {
     image_url: live ? (payment.qr?.imageUrl ?? null) : null,
     expires_at: live ? (payment.qr?.expiresAt.toISOString() ?? null) : null,
     lines,
+    waiting: toMoney(b.waitingPaise),
   };
 }
 

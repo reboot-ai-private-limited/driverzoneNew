@@ -510,7 +510,9 @@ export default function TripScreen(): ReactElement {
                     <View style={styles.rule} />
                     <Text style={styles.paymentHeading}>How would you like to pay?</Text>
                     <Text style={styles.paymentSubtext}>
-                      Select a payment method before you reach your destination.
+                      Select a payment method before you reach your destination. Or just pay your
+                      driver by scanning the QR on their phone with GPay, PhonePe, Paytm or any UPI
+                      app.
                     </Text>
                     {paymentError !== null ? (
                       <Text style={styles.paymentError}>{paymentError}</Text>
@@ -615,8 +617,15 @@ export default function TripScreen(): ReactElement {
                     <Feather name="clock" size={16} color="#ca8a04" />
                     <View style={styles.flex}>
                       <Text style={styles.paymentPendingTitle}>Online payment pending</Text>
+                      {/*
+                        THE DRIVER MAY BE SHOWING A QR. This screen cannot tell a QR from an order (the
+                        trip carries no such field), so the wording is true of both: scan the driver's
+                        code with any UPI app of your own — nothing in THIS app scans it — or pay here.
+                      */}
                       <Text style={styles.paymentPendingBody}>
-                        Waiting for payment confirmation. The driver cannot end the trip until this clears.
+                        If your driver is showing a QR, scan it with GPay, PhonePe, Paytm or any UPI app
+                        and this will update by itself. The driver cannot end the trip until the payment
+                        clears.
                       </Text>
                       {paymentError !== null ? (
                         <Text style={styles.paymentError}>{paymentError}</Text>

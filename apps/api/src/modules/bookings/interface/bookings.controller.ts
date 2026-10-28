@@ -1,4 +1,4 @@
-import type { Request, RequestHandler } from 'express';
+import type { Request, RequestHandler, Response } from 'express';
 import type {
   BookingStatus,
   DriverTripsSummary,
@@ -56,7 +56,11 @@ import type {
   DriverPaymentOverrideUseCase,
   DriverSwitchToCashUseCase,
 } from '../application/useCases/driverSwitchToCash.usecase.js';
-import { toBookingDto, toBookingEventDto } from './bookings.mapper.js';
+import type {
+  DriverPaymentQrUseCase,
+  PaymentQrResult,
+} from '../application/useCases/driverPaymentQr.usecase.js';
+import { toBookingDto, toBookingEventDto, toPaymentQrDto } from './bookings.mapper.js';
 import type { Booking } from '../domain/booking.entity.js';
 import {
   adminBookingListQuerySchema,
@@ -392,6 +396,61 @@ export function makeDriverSwitchToCashController(
  * `POST /driver/bookings/:id/payment-override` — the driver takes the payment in cash because the
  * customer cannot finish it in their app. See `DriverPaymentOverrideUseCase`.
  */
+/**
+ * `POST` and `GET /driver/bookings/:id/payment-qr` — the QR the driver shows to collect the whole
+ * trip, and where it stands. See `DriverPaymentQrUseCase`.
+ *
+ * THE BOOKING IN THE RESPONSE IS BUILT EXACTLY LIKE `GET /driver/bookings/:id`, customer card and
+ * all. The driver's screen polls this every couple of seconds while the QR is up and adopts the
+ * booking it returns; a leaner copy would wipe the customer and passenger cards off the trip
+ * screen on every poll.
+ */
+export function makeDriverPaymentQrControllers(
+  useCase: DriverPaymentQrUseCase,
+  charges: ChargeRepositoryPort,
+  directory: CustomerContactContract,
+  extensions: ExtensionRepositoryPort,
+): { create: RequestHandler; status: RequestHandler } {
+  const respond = async (req: Request, res: Response, result: PaymentQrResult, message: string, code = 200) => {
+    const { booking } = result;
+    const [adjustments, contacts, extensionRows] = await Promise.all([
+      charges.listAdjustments(booking.id),
+      directory.customerContactsByIds([booking.customerId]),
+      extensions.listForBooking(booking.id),
+    ]);
+
+    sendSuccess(
+      req,
+      res,
+      {
+        qr: toPaymentQrDto(result.qr),
+        booking: toBookingDto({
+          booking,
+          adjustments,
+          customerCard: contacts.get(booking.customerId) ?? null,
+          extensions: extensionRows,
+          revealDriverEarnings: true,
+        }),
+      },
+      message,
+      code,
+    );
+  };
+
+  return {
+    create: asyncHandler(async (req, res) => {
+      const { id } = bookingIdParamSchema.parse(req.params);
+      const result = await useCase.create({ bookingId: id, driverId: principalOf(req) });
+      await respond(req, res, result, 'Payment QR ready', 201);
+    }),
+    status: asyncHandler(async (req, res) => {
+      const { id } = bookingIdParamSchema.parse(req.params);
+      const result = await useCase.status({ bookingId: id, driverId: principalOf(req) });
+      await respond(req, res, result, 'Payment QR');
+    }),
+  };
+}
+
 export function makeDriverPaymentOverrideController(
   useCase: DriverPaymentOverrideUseCase,
 ): RequestHandler {

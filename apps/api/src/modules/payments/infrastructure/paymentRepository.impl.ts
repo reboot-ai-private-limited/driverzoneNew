@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import type { Payment, PaymentStatus } from '../domain/payment.entity.js';
+import type { Payment, PaymentQr, PaymentStatus } from '../domain/payment.entity.js';
 import type {
   CreatePaymentData,
   PaymentRepositoryPort,
@@ -14,6 +14,13 @@ function toEntity(doc: PaymentDoc): Payment {
     bookingId: String(doc.bookingId),
     customerId: String(doc.customerId),
     kind: doc.kind as Payment['kind'],
+    // Rows from before QR codes have no channel — and are all orders.
+    channel: (doc.channel ?? 'ORDER') as Payment['channel'],
+    metadata: doc.metadata ?? {},
+    qr:
+      doc.qr === null || doc.qr === undefined
+        ? null
+        : { upiUri: doc.qr.upiUri ?? null, imageUrl: doc.qr.imageUrl ?? null, expiresAt: doc.qr.expiresAt },
     status: doc.status as PaymentStatus,
     amountPaise: doc.amountPaise,
     refundedPaise: doc.refundedPaise,
@@ -41,6 +48,8 @@ export class MongoPaymentRepository implements PaymentRepositoryPort {
         bookingId: new mongoose.Types.ObjectId(data.bookingId),
         customerId: new mongoose.Types.ObjectId(data.customerId),
         kind: data.kind,
+        channel: data.channel ?? 'ORDER',
+        metadata: data.metadata ?? {},
         amountPaise: data.amountPaise,
         idempotencyKey: data.idempotencyKey,
         status: 'CREATED',
@@ -91,6 +100,7 @@ export class MongoPaymentRepository implements PaymentRepositoryPort {
       providerPaymentId?: string;
       failureReason?: string;
       refundedPaise?: number;
+      qr?: PaymentQr;
     } = {},
   ): Promise<Payment | null> {
     if (!mongoose.isValidObjectId(id)) return null;

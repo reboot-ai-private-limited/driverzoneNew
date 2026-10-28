@@ -334,6 +334,43 @@ export interface AdminCreateBookingResponse {
   booking: BookingDto;
 }
 
+/**
+ * THE DRIVER'S PAYMENT QR (2026-10-28). The driver shows a UPI QR for the WHOLE trip amount; the
+ * customer scans it; the server confirms the money and only then does the driver's "end trip"
+ * slide unlock. `PENDING` is a live QR, `PAID` is money in, `EXPIRED` is one that ran out of time
+ * (a fresh one is one tap away), `NONE` is a trip nobody has made a QR for yet.
+ */
+export const PAYMENT_QR_STATES = ['NONE', 'PENDING', 'PAID', 'EXPIRED'] as const;
+export type PaymentQrState = (typeof PAYMENT_QR_STATES)[number];
+
+export interface PaymentQrLineDto {
+  label: string;
+  /** Negative for a credit (wallet balance spent on this trip). */
+  amount: Money;
+}
+
+export interface DriverPaymentQrDto {
+  state: PaymentQrState;
+  /** What the QR collects, in full. Null only when `state` is `NONE`. */
+  amount: Money | null;
+  /**
+   * The `upi://pay?…` link to draw as a QR. Preferred: drawn on the phone it is always sharp. Null
+   * when the provider gave only a hosted image — then `image_url` is what to show.
+   */
+  upi_uri: string | null;
+  image_url: string | null;
+  /** When the QR stops working. Null when there is no live QR. */
+  expires_at: string | null;
+  /** What the amount is made of, so the driver can say it out loud if the customer asks. */
+  lines: PaymentQrLineDto[];
+}
+
+/** `POST` and `GET /driver/bookings/:id/payment-qr` — the QR, and the trip as it now stands. */
+export interface DriverPaymentQrResponse {
+  qr: DriverPaymentQrDto;
+  booking: BookingDto;
+}
+
 export interface BookingDto {
   id: string;
   /** `DZ-8F3K2M`. What the customer reads out to support — never the raw id. */

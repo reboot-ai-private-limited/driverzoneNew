@@ -3,6 +3,8 @@ import type {
   BookingEventDto,
   BookingPaymentStatus,
   BookingStatus,
+  DriverPaymentQrDto,
+  PaymentQrLineDto,
 } from '@driverzone/contracts';
 import type { CustomerContact, DriverCard } from '../../identity/identity.public.js';
 import { toMoney } from '../../../shared/money/format.js';
@@ -16,6 +18,39 @@ import {
   extensionRefusal,
   extensionRefusalMessage,
 } from '../application/useCases/extendBooking.usecase.js';
+import { breakdownOf, type PaymentQrView } from '../application/useCases/driverPaymentQr.usecase.js';
+
+/**
+ * The driver's payment QR as the wire sees it.
+ *
+ * The link and the image go out ONLY while the QR is live: a paid or expired one has nothing left
+ * to scan, and a driver's screen that kept drawing it would invite a customer to pay a dead code.
+ * The breakdown is read back from what the QR was made for, not recomputed from the booking — the
+ * trip may have changed since, and these lines must add up to the amount on the QR.
+ */
+export function toPaymentQrDto(view: PaymentQrView): DriverPaymentQrDto {
+  const { payment } = view;
+  if (payment === null) {
+    return { state: view.state, amount: null, upi_uri: null, image_url: null, expires_at: null, lines: [] };
+  }
+
+  const b = breakdownOf(payment);
+  const lines: PaymentQrLineDto[] = [{ label: 'Trip fare (incl. GST)', amount: toMoney(b.farePaise) }];
+  if (b.extensionPaise > 0) lines.push({ label: 'Extra day', amount: toMoney(b.extensionPaise) });
+  if (b.waitingPaise > 0) lines.push({ label: 'Waiting charge', amount: toMoney(b.waitingPaise) });
+  if (b.debtPaise > 0) lines.push({ label: 'Earlier dues', amount: toMoney(b.debtPaise) });
+  if (b.creditPaise > 0) lines.push({ label: 'Wallet credit used', amount: toMoney(-b.creditPaise) });
+
+  const live = view.state === 'PENDING' && payment.qr !== null;
+  return {
+    state: view.state,
+    amount: toMoney(payment.amountPaise),
+    upi_uri: live ? (payment.qr?.upiUri ?? null) : null,
+    image_url: live ? (payment.qr?.imageUrl ?? null) : null,
+    expires_at: live ? (payment.qr?.expiresAt.toISOString() ?? null) : null,
+    lines,
+  };
+}
 
 export interface BookingView {
   booking: Booking;

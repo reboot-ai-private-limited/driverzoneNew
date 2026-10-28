@@ -1,10 +1,11 @@
 import { logger } from '../../../../shared/logging/logger.js';
 import { isCaptured } from '../../domain/payment.entity.js';
 import { WebhookSignatureError } from '../../domain/payment.errors.js';
-import type {
-  GatewayEvent,
-  PaymentGatewayPort,
-  WebhookRequest,
+import {
+  IGNORED_WEBHOOK,
+  type GatewayEvent,
+  type PaymentGatewayPort,
+  type WebhookRequest,
 } from '../../domain/paymentGateway.port.js';
 import type { PaymentRepositoryPort } from '../../domain/paymentRepository.port.js';
 
@@ -40,6 +41,11 @@ export class HandleWebhookUseCase {
     const event = this.gateway.verifyWebhook(request);
     if (event === null) throw new WebhookSignatureError();
 
+    // Authentic, but nothing for us to do — an event we never subscribed to, or a payment made on a
+    // QR (whose own credit event is the one that counts). Answered 200: a 401 here would make the
+    // provider redeliver it for hours and eventually flag the whole webhook as failing.
+    if (event === IGNORED_WEBHOOK) return { handled: false, reason: 'NOT_APPLICABLE' };
+
     const isFirstDelivery = await this.repo.markEventProcessed(event.eventId);
     if (!isFirstDelivery) {
       logger.info({ eventId: event.eventId }, 'payment webhook replayed — ignoring');
@@ -54,7 +60,14 @@ export class HandleWebhookUseCase {
       return { handled: false, reason: 'UNKNOWN_PAYMENT' };
     }
 
-    return this.apply(event, payment.id, payment.bookingId, payment.status, payment.refundedPaise);
+    return this.apply(
+      event,
+      payment.id,
+      payment.bookingId,
+      payment.status,
+      payment.refundedPaise,
+      payment.channel === 'QR' ? payment.amountPaise : null,
+    );
   }
 
   private async apply(
@@ -63,6 +76,8 @@ export class HandleWebhookUseCase {
     bookingId: string,
     status: Parameters<PaymentRepositoryPort['transition']>[1],
     refundedPaise: number,
+    /** The amount a QR was made for — null for an order, which the gateway itself holds to. */
+    qrAmountPaise: number | null,
   ): Promise<WebhookOutcome> {
     /*
      * The money is held but not taken. Capture it, or the authorisation reverses itself after a
@@ -75,7 +90,34 @@ export class HandleWebhookUseCase {
       return { handled: false, reason: 'NOT_APPLICABLE' };
     }
 
+    /*
+     * A QR that stopped taking payments WITHOUT being paid — it expired, or was closed on purpose.
+     * Marked failed so the driver's screen can say so and offer a fresh one. No booking-side effect
+     * (`handled: false`): an expired QR is not a failed payment the customer needs telling about.
+     * A paid QR's own close is never reported — see `toQrEvent`.
+     */
+    if (event.type === 'QR_CLOSED') {
+      await this.repo.transition(paymentId, 'PENDING', 'FAILED', {
+        failureReason: 'The QR code expired',
+      });
+      return { handled: false, reason: 'NOT_APPLICABLE' };
+    }
+
     if (event.type === 'PAYMENT_CAPTURED') {
+      /*
+       * A QR is fixed-amount, so a UPI app cannot send a different figure — but this is money
+       * arriving by the internet, and "cannot happen" is a claim, not a check. A credit that does
+       * not match is left UNCAPTURED so the trip is not marked paid on the wrong amount, and logged
+       * loudly: the money is real and somebody has to deal with it.
+       */
+      if (qrAmountPaise !== null && event.amountPaise !== qrAmountPaise) {
+        logger.error(
+          { paymentId, expectedPaise: qrAmountPaise, creditedPaise: event.amountPaise },
+          'a QR was credited with an amount that is not what it was made for — NOT marking the trip paid',
+        );
+        return { handled: false, reason: 'NOT_APPLICABLE' };
+      }
+
       const captured = await captureIfPending(this.repo, paymentId, event.providerPaymentId);
       if (captured === null) return { handled: false, reason: 'NOT_APPLICABLE' };
       return { handled: true, kind: 'CAPTURED', paymentId, bookingId };

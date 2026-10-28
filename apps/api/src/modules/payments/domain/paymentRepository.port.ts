@@ -1,4 +1,4 @@
-import type { Payment, PaymentKind, PaymentStatus } from './payment.entity.js';
+import type { Payment, PaymentChannel, PaymentKind, PaymentQr, PaymentStatus } from './payment.entity.js';
 
 export interface CreatePaymentData {
   bookingId: string;
@@ -6,6 +6,9 @@ export interface CreatePaymentData {
   kind: PaymentKind;
   amountPaise: number;
   idempotencyKey: string;
+  /** Omitted means an `ORDER`, which is every payment made before QR codes existed. */
+  channel?: PaymentChannel | undefined;
+  metadata?: Record<string, number> | undefined;
 }
 
 export interface PaymentRepositoryPort {
@@ -32,6 +35,7 @@ export interface PaymentRepositoryPort {
       providerPaymentId?: string;
       failureReason?: string;
       refundedPaise?: number;
+      qr?: PaymentQr;
     },
   ): Promise<Payment | null>;
 

@@ -14,6 +14,33 @@ import type { Payment, PaymentKind } from './domain/payment.entity.js';
  */
 export interface PaymentsContract {
   /**
+   * Makes a single-use UPI QR the DRIVER shows for a trip, stored as a pending payment on that
+   * trip. Idempotent on `idempotencyKey`: calling twice returns the same payment and never makes a
+   * second live QR. `metadata` is remembered with the charge and handed back on `listForBooking` —
+   * the caller's own breakdown of what the one payment covers.
+   */
+  chargeByQr(input: {
+    bookingId: string;
+    customerId: string;
+    kind: PaymentKind;
+    amountPaise: number;
+    reference: string;
+    idempotencyKey: string;
+    expiresAt: Date;
+    metadata: Record<string, number>;
+  }): Promise<Payment>;
+
+  /** Stops a QR taking payments (expired, replaced, or the trip was paid another way). */
+  closeQr(paymentId: string, reason: string): Promise<void>;
+
+  /**
+   * Asks the gateway whether a QR has been paid and expires one that ran out of time. `justCaptured`
+   * is true only when THIS call made the capture — the flag to hang a once-only side effect off,
+   * exactly like `verifyAndCapture`'s. Null when the payment is not a QR.
+   */
+  refreshQr(paymentId: string): Promise<{ payment: Payment; justCaptured: boolean } | null>;
+
+  /**
    * Starts a charge, idempotently on `idempotencyKey`. Calling twice with one key returns the
    * same payment and never charges twice.
    *

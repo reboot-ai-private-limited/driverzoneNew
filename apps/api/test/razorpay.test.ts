@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IGNORED_WEBHOOK } from '../src/modules/payments/domain/paymentGateway.port.js';
 import {
   RazorpayGateway,
   idempotencyKeyFor,
@@ -116,9 +117,13 @@ describe('verifyWebhook', () => {
 
   it('ignores an event we never subscribed to, rather than failing on it', () => {
     // Razorpay sends events we did not ask for, and the endpoint must answer 200 to all of them
-    // or they are redelivered forever.
+    // or they are redelivered forever. `IGNORED` (authentic, nothing to do) is NOT `null` (forged):
+    // the caller turns the first into a 200 and the second into a 401. This used to return `null`
+    // for both, so every unrecognised event was answered 401 and redelivered.
     const body = JSON.stringify({ event: 'subscription.charged', payload: {} });
-    expect(gateway.verifyWebhook({ rawBody: body, signature: sign(body), eventId: 'e' })).toBeNull();
+    expect(gateway.verifyWebhook({ rawBody: body, signature: sign(body), eventId: 'e' })).toBe(
+      IGNORED_WEBHOOK,
+    );
   });
 
   it('falls back to an id derived from the body when the header is absent', () => {
@@ -132,9 +137,11 @@ describe('verifyWebhook', () => {
     expect(event?.eventId).toBe('payment.captured:pay_ABC123');
   });
 
-  it('refuses a verified body of the wrong shape', () => {
+  it('does not act on a verified body of the wrong shape', () => {
     const body = JSON.stringify({ event: 'payment.captured', payload: { payment: {} } });
-    expect(gateway.verifyWebhook({ rawBody: body, signature: sign(body), eventId: 'e' })).toBeNull();
+    expect(gateway.verifyWebhook({ rawBody: body, signature: sign(body), eventId: 'e' })).toBe(
+      IGNORED_WEBHOOK,
+    );
   });
 });
 

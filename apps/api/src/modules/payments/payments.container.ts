@@ -13,6 +13,11 @@ import {
   type WebhookOutcome,
 } from './application/useCases/handleWebhook.usecase.js';
 import { VerifyCheckoutUseCase } from './application/useCases/verifyCheckout.usecase.js';
+import {
+  CloseQrPaymentUseCase,
+  CreateQrPaymentUseCase,
+  RefreshQrPaymentUseCase,
+} from './application/useCases/qrPayment.usecase.js';
 import { makeWebhookController } from './interface/payments.controller.js';
 import { buildWebhookRouter } from './interface/payments.routes.js';
 
@@ -64,10 +69,16 @@ export function buildPaymentsContainer(): PaymentsContainer {
   const refund = new RefundPaymentUseCase(repo, gateway);
   const webhook = new HandleWebhookUseCase(repo, gateway);
   const verifyCheckout = new VerifyCheckoutUseCase(repo, gateway);
+  const createQr = new CreateQrPaymentUseCase(repo, gateway);
+  const closeQr = new CloseQrPaymentUseCase(repo, gateway);
+  const refreshQr = new RefreshQrPaymentUseCase(repo, gateway);
 
   return {
     contract: {
       charge: (input) => create.execute(input),
+      chargeByQr: (input) => createQr.execute(input),
+      closeQr: (paymentId, reason) => closeQr.execute(paymentId, reason),
+      refreshQr: (paymentId) => refreshQr.execute(paymentId),
       refund: (input) => refund.execute(input),
       findById: (id) => repo.findById(id),
       listForBooking: (bookingId) => repo.listForBooking(bookingId),

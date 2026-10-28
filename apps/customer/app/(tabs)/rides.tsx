@@ -322,7 +322,7 @@ export default function RidesScreen(): ReactElement {
               */}
               <View style={styles.statTileWrap}>
                 <StatTile
-                  icon="headphones"
+                  icon="map"
                   label="Total Trips"
                   value={String(summary?.total_trips ?? 0)}
                   loading={history.isPending}
@@ -456,14 +456,10 @@ function RideListSkeleton({ rows = 4 }: { rows?: number }): ReactElement {
     <Animated.View style={pulseStyle} accessibilityLabel="Loading your rides">
       {Array.from({ length: rows }, (_, key) => (
         <View key={key} style={styles.rideCard}>
-          <View style={[styles.rideIcon, styles.skeletonFill]} />
-          <View style={styles.flex}>
-            <View style={[styles.skeletonBar, styles.skeletonTitle]} />
-            <View style={[styles.skeletonBar, styles.skeletonShort]} />
-            <View style={[styles.skeletonBar, styles.skeletonLine]} />
-            <View style={[styles.skeletonBar, styles.skeletonLine]} />
-          </View>
-          <View style={[styles.skeletonBar, styles.skeletonPrice]} />
+          <View style={[styles.skeletonBar, styles.skeletonTitle]} />
+          <View style={[styles.skeletonBar, styles.skeletonShort]} />
+          <View style={[styles.skeletonBar, styles.skeletonLine]} />
+          <View style={[styles.skeletonBar, styles.skeletonLine]} />
         </View>
       ))}
     </Animated.View>
@@ -545,58 +541,56 @@ function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
       accessibilityRole="button"
       style={({ pressed }) => [styles.rideCard, pressed && styles.rideCardPressed]}
     >
-      <View style={styles.rideIcon}>
-        <Feather name="truck" size={18} color={colors.fg} />
-      </View>
-
-      <View style={styles.flex}>
-        <View style={styles.rideTopRow}>
-          <Text style={styles.rideId} numberOfLines={1}>
-            {ride.reference}
-          </Text>
+      {/*
+        FULL WIDTH, STACKED. The card used to be three columns — an icon, the text, and a thin
+        price column — which left the reference and the date half a card to fit in and cut both
+        ("DZ-6…", a date wrapping onto a second line). Stacked, every line has the whole width.
+      */}
+      <View style={styles.rideTopRow}>
+        <View style={styles.rideTitleGroup}>
+          <Text style={styles.rideId}>{ride.reference}</Text>
           <View style={[styles.statusPill, { backgroundColor: statusCopy.tint }]}>
             <Text style={[styles.rideStatus, { color: statusCopy.color }]}>{statusCopy.label}</Text>
           </View>
         </View>
-        <Text style={styles.rideDate}>{dateLabel}</Text>
+        <Text style={styles.ridePrice}>{ride.totalDisplay}</Text>
+      </View>
+      <Text style={styles.rideDate}>{dateLabel}</Text>
 
+      {/*
+        A short connecting line between the two dots — the same reading `MapCanvas`'s dashed
+        route line gives the map: it says these two points belong to ONE trip, not two
+        unrelated lines of text that happen to sit on top of each other.
+      */}
+      <View style={styles.rideRoute}>
+        <View style={styles.rideRouteMarkers}>
+          <View style={styles.ridePlaceDotPickup} />
+          <View style={styles.rideRouteLine} />
+          <View style={styles.ridePlaceDotDrop} />
+        </View>
+        <View style={styles.rideRouteText}>
+          <Text style={styles.ridePlace} numberOfLines={1}>
+            {ride.pickup}
+          </Text>
+          <Text style={styles.ridePlace} numberOfLines={1}>
+            {ride.drop}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.rideFooter}>
         {/*
-          NO RATING BESIDE THE NAME. The demo rows carried one; `BookingDto.driver` is `{ id,
-          name }` and nothing more, so the star went rather than being filled with a constant.
-          The row itself stays even with no driver yet — a trip still searching has a name-shaped
-          gap, and collapsing it would make searching rows a different height from every other.
+          NO RATING BESIDE THE NAME. `BookingDto.driver` carries none worth showing here, so the
+          star went rather than being filled with a constant. The row stays even with no driver
+          yet — a trip still searching has a name-shaped gap, and collapsing it would make
+          searching rows a different height from every other.
         */}
         <View style={styles.rideDriverRow}>
+          <Feather name="user" size={14} color={colors.muted} />
           <Text style={styles.rideDriver} numberOfLines={1}>
             {ride.driverName ?? 'Driver not assigned yet'}
           </Text>
         </View>
-
-        {/*
-          A short connecting line between the two dots — the same reading `MapCanvas`'s dashed
-          route line gives the map: it says these two points belong to ONE trip, not two
-          unrelated lines of text that happen to sit on top of each other.
-        */}
-        <View style={styles.rideRoute}>
-          <View style={styles.rideRouteMarkers}>
-            <View style={styles.ridePlaceDotPickup} />
-            <View style={styles.rideRouteLine} />
-            <View style={styles.ridePlaceDotDrop} />
-          </View>
-          <View style={styles.rideRouteText}>
-            <Text style={styles.ridePlace} numberOfLines={1}>
-              {ride.pickup}
-            </Text>
-            <Text style={styles.ridePlace} numberOfLines={1}>
-              {ride.drop}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.rideRight}>
-        <Text style={styles.ridePrice}>{ride.totalDisplay}</Text>
-        <Feather name="chevron-right" size={16} color={colors.faint} />
 
         {/*
           BOOK AGAIN, INSIDE THE ROW'S OWN PRESSABLE. `Pressable` nests, and the inner one wins —
@@ -620,7 +614,9 @@ function RideRow({ ride }: { ride: RideHistoryRow }): ReactElement {
             <Feather name="repeat" size={12} color={colors.fg} />
             <Text style={styles.rebookChipLabel}>Book again</Text>
           </Pressable>
-        ) : null}
+        ) : (
+          <Feather name="chevron-right" size={16} color={colors.faint} />
+        )}
       </View>
     </Pressable>
   );
@@ -747,43 +743,44 @@ const styles = StyleSheet.create({
   emptyText: { ...text.body, color: colors.muted },
 
   rideCard: {
-    flexDirection: 'row',
     marginHorizontal: space.lg,
     marginBottom: space.sm,
     padding: space.md,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
   },
   rideCardPressed: { backgroundColor: colors.bgSunken },
-  rideIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: space.sm,
-  },
-  rideTopRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  rideId: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, flex: 1 },
-  statusPill: { paddingHorizontal: space.xs, paddingVertical: 2, borderRadius: radius.pill },
+  rideTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
+  rideTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: space.xs, flexShrink: 1 },
+  rideId: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
+  statusPill: { paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill },
   rideStatus: { ...text.caption, fontFamily: fontFamily.semibold, fontSize: 11 },
-  rideDate: { ...text.caption, color: colors.faint, marginTop: 2 },
-  rideDriverRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  rideDriver: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
+  rideDate: { ...text.caption, color: colors.muted, marginTop: 4 },
 
-  rideRoute: { flexDirection: 'row', marginTop: space.sm },
-  rideRouteMarkers: { alignItems: 'center', width: 8, marginRight: space.sm },
-  ridePlaceDotPickup: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.success },
-  ridePlaceDotDrop: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.danger },
-  rideRouteLine: { width: 1, flex: 1, minHeight: 14, backgroundColor: colors.border },
-  rideRouteText: { flex: 1, justifyContent: 'space-between' },
-  ridePlace: { ...text.caption, color: colors.muted },
+  rideRoute: { flexDirection: 'row', marginTop: space.md },
+  rideRouteMarkers: { alignItems: 'center', width: 10, marginRight: space.sm, paddingVertical: 4 },
+  ridePlaceDotPickup: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },
+  ridePlaceDotDrop: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
+  rideRouteLine: { width: 1, flex: 1, minHeight: 16, backgroundColor: colors.border, marginVertical: 2 },
+  rideRouteText: { flex: 1, justifyContent: 'space-between', gap: space.xs },
+  ridePlace: { ...text.body, color: colors.fg },
 
-  rideRight: { alignItems: 'flex-end', justifyContent: 'space-between', marginLeft: space.sm, gap: space.sm },
-  ridePrice: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },
+  // Under a rule, so "who drove it / book it again" reads as the card's action row, not more route.
+  rideFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    marginTop: space.md,
+    paddingTop: space.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  rideDriverRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  rideDriver: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold, flexShrink: 1 },
+  ridePrice: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, fontSize: 16 },
 
   rebookChip: {
     flexDirection: 'row',
@@ -800,12 +797,10 @@ const styles = StyleSheet.create({
   rebookChipLabel: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
 
   // ── Loading skeleton ───────────────────────────────────────────────────────────────────────
-  skeletonFill: { backgroundColor: colors.bgSunken },
   skeletonBar: { height: 10, borderRadius: radius.pill, backgroundColor: colors.bgSunken },
   skeletonTitle: { width: '55%', height: 12 },
   skeletonShort: { width: '35%', marginTop: space.sm },
   skeletonLine: { width: '80%', marginTop: space.sm },
-  skeletonPrice: { width: 48, height: 12, marginLeft: space.sm },
   skeletonStat: { width: 56, height: 20 },
 
   sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.sm },

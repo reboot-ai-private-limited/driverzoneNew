@@ -16,6 +16,7 @@ import { CAR_CATEGORY_LABELS, VEHICLE_TYPE_LABELS, type BookingDto } from '@driv
 import { rideHappenedAt, toRideStatus, type RideStatus } from '@/features/rides/rideHistory';
 import { DriverCard } from '@/components/DriverCard';
 import { FareBreakdown, fareBreakdownRows, paidViaLabel } from '@/components/FareBreakdown';
+import { GstInvoiceCard } from '@/components/GstInvoiceCard';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { formatDuration } from '@/features/booking/schedule';
 import { rebookParamsFor } from '@/features/booking/rebook';
@@ -90,52 +91,92 @@ export default function RideDetailScreen(): ReactElement {
       <Header onDownload={() => void shareInvoice(ride)} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.summaryCard}>
-          <SummaryRow label="Booking ID" value={ride.reference} />
-          <SummaryRow label="Date & Time" value={formatDateTime(when)} />
-          <SummaryRow
-            label="Status"
-            value={STATUS_LABEL[status]}
-            valueColor={STATUS_COLOR[status]}
-          />
-          {/* When the trip actually ran, beside when it was booked for — each once it happened. */}
-          {ride.timestamps.started_at === null ? null : (
-            <SummaryRow
-              label="Start time"
-              value={formatDateTime(new Date(ride.timestamps.started_at))}
-            />
+        {/*
+          THE TOP CARD — what a customer opens this screen to answer: did it happen, what did it
+          cost, and where did it go. Status, total and route first; the small print below it.
+        */}
+        <View style={styles.hero}>
+          <View style={styles.heroTop}>
+            <View style={styles.statusPill}>
+              <View style={[styles.statusDot, { backgroundColor: STATUS_COLOR[status] }]} />
+              <Text style={[styles.statusText, { color: STATUS_COLOR[status] }]}>
+                {STATUS_LABEL[status]}
+              </Text>
+            </View>
+            <Text style={styles.heroRef}>{ride.reference}</Text>
+          </View>
+
+          <Text style={styles.heroDate}>{formatDateTime(when)}</Text>
+
+          {/* A cancelled trip has nothing to pay, so no total to lead with. */}
+          {status === 'CANCELLED' ? null : (
+            <View style={styles.heroTotalBlock}>
+              <Text style={styles.heroTotalLabel}>Total</Text>
+              <Text style={styles.heroTotal}>{ride.payable.total.amount_display}</Text>
+            </View>
           )}
-          {ride.timestamps.completed_at === null ? null : (
-            <SummaryRow
-              label="End time"
-              value={formatDateTime(new Date(ride.timestamps.completed_at))}
-            />
-          )}
-          {ride.timestamps.started_at === null || ride.timestamps.completed_at === null ? null : (
-            <SummaryRow
-              label="Trip duration"
-              value={formatDuration(
-                new Date(ride.timestamps.started_at),
-                new Date(ride.timestamps.completed_at),
-              )}
-            />
-          )}
-          <SummaryRow label="Trip Type" value={SERVICE_LABEL[ride.service_type]} />
-          {ride.car_plate === null ? null : <SummaryRow label="Car number" value={ride.car_plate} />}
-          {ride.rider === null ? null : <SummaryRow label="Booked for" value={ride.rider.name} />}
-          {/* Only on bookings placed since the car choice existed — older rows have no answer,
-              and a dash there would read as "no car" rather than "never asked". */}
-          {ride.car_category === null ? null : (
-            <SummaryRow
-              label="Car"
-              value={
-                ride.vehicle_type === null
-                  ? CAR_CATEGORY_LABELS[ride.car_category]
-                  : `${CAR_CATEGORY_LABELS[ride.car_category]} · ${VEHICLE_TYPE_LABELS[ride.vehicle_type]}`
-              }
-            />
-          )}
+
+          <View style={styles.route}>
+            <View style={styles.routeMarkers}>
+              <View style={[styles.routeDot, styles.routeDotFrom]} />
+              <View style={styles.routeLine} />
+              <Feather name="map-pin" size={14} color={colors.danger} />
+            </View>
+            <View style={styles.routeText}>
+              <Text style={styles.routeLabel}>Pickup</Text>
+              <Text style={styles.routeAddress} numberOfLines={2}>
+                {ride.pickup.address}
+              </Text>
+              <Text style={[styles.routeLabel, styles.routeLabelGap]}>Drop</Text>
+              <Text style={styles.routeAddress} numberOfLines={2}>
+                {ride.drop.address}
+              </Text>
+            </View>
+          </View>
         </View>
+
+        <SectionCard title="Trip details">
+          <View>
+            <DetailRow label="Trip type" value={SERVICE_LABEL[ride.service_type]} />
+            {/* Only on bookings placed since the car choice existed — older rows have no answer,
+                and a dash there would read as "no car" rather than "never asked". */}
+            {ride.car_category === null ? null : (
+              <DetailRow
+                label="Car"
+                value={
+                  ride.vehicle_type === null
+                    ? CAR_CATEGORY_LABELS[ride.car_category]
+                    : `${CAR_CATEGORY_LABELS[ride.car_category]} · ${VEHICLE_TYPE_LABELS[ride.vehicle_type]}`
+                }
+              />
+            )}
+            {ride.car_plate === null ? null : <DetailRow label="Car number" value={ride.car_plate} />}
+            {ride.rider === null ? null : <DetailRow label="Booked for" value={ride.rider.name} />}
+            {/* When the trip actually ran — each only once it happened. */}
+            {ride.timestamps.started_at === null ? null : (
+              <DetailRow
+                label="Started"
+                value={formatDateTime(new Date(ride.timestamps.started_at))}
+              />
+            )}
+            {ride.timestamps.completed_at === null ? null : (
+              <DetailRow
+                label="Ended"
+                value={formatDateTime(new Date(ride.timestamps.completed_at))}
+              />
+            )}
+            {ride.timestamps.started_at === null || ride.timestamps.completed_at === null ? null : (
+              <DetailRow
+                label="Duration"
+                value={formatDuration(
+                  new Date(ride.timestamps.started_at),
+                  new Date(ride.timestamps.completed_at),
+                )}
+                last
+              />
+            )}
+          </View>
+        </SectionCard>
 
         {/* No card at all rather than an empty one: a trip that never found a driver has nothing
             to say here, and "Driver details: —" is a worse answer than the absence. */}
@@ -155,6 +196,48 @@ export default function RideDetailScreen(): ReactElement {
           </SectionCard>
         )}
 
+        {/*
+          THE SAME BREAKDOWN AS THE LIVE TRIP SCREEN — one component, so the receipt and the trip
+          cannot disagree: fare lines, subtotal and GST, waiting and extra days, the wallet, and
+          the server's own `payable.total`. Full width now: beside the payment box it had half a
+          screen to work with, and the numbers were the part that got squeezed.
+        */}
+        <SectionCard title="Fare breakdown">
+          <FareBreakdown booking={ride} />
+        </SectionCard>
+
+        <SectionCard title="Payment">
+          {status === 'CANCELLED' ? (
+            /*
+             * Says nothing about a cancellation FEE, which is a charge row against the customer
+             * and not this booking's payment. Claiming "no payment was collected" where a fee
+             * was is exactly the kind of thing a customer would screenshot.
+             */
+            <Text style={styles.paymentNone}>This trip was not completed.</Text>
+          ) : (
+            <View>
+              {/* "Paid" only once the trip is done. A cash trip is settled with the driver at
+                  the end, so a running trip showing Paid would be wrong on the common path. */}
+              <View style={styles.paymentHead}>
+                <Text style={styles.paymentMethod}>{paidViaLabel(ride) ?? 'Not chosen yet'}</Text>
+                {paidAt === null ? null : (
+                  <View style={styles.paidChip}>
+                    <Feather name="check" size={12} color={colors.success} />
+                    <Text style={styles.paidChipText}>Paid</Text>
+                  </View>
+                )}
+              </View>
+              {paidAt === null ? null : (
+                <DetailRow label="Paid on" value={formatDateTime(new Date(paidAt))} last />
+              )}
+            </View>
+          )}
+        </SectionCard>
+
+        {/* GST invoice — completed trips only; the API refuses a request on anything else. */}
+        {ride.status === 'COMPLETED' ? <GstInvoiceCard bookingId={ride.id} /> : null}
+
+        {/* The history of the trip, last: it is reference, where the money above is the point. */}
         {steps.length === 0 ? null : (
           <SectionCard title="Trip timeline">
             {steps.map((step, index) => (
@@ -181,46 +264,6 @@ export default function RideDetailScreen(): ReactElement {
             ))}
           </SectionCard>
         )}
-
-        <View style={styles.twoCol}>
-          <SectionCard title="Fare breakdown" style={styles.colCard}>
-            {/*
-              THE SAME BREAKDOWN AS THE LIVE TRIP SCREEN — one component, so the receipt and the
-              trip cannot disagree: fare lines, subtotal and GST, waiting and extra days, the
-              wallet, and the server's own `payable.total`.
-            */}
-            <FareBreakdown booking={ride} />
-          </SectionCard>
-
-          <SectionCard title="Payment status" style={styles.colCard}>
-            {status === 'CANCELLED' ? (
-              /*
-               * Says nothing about a cancellation FEE, which is a charge row against the customer
-               * and not this booking's payment. Claiming "no payment was collected" where a fee
-               * was is exactly the kind of thing a customer would screenshot.
-               */
-              <Text style={styles.paymentNone}>This trip was not completed.</Text>
-            ) : (
-              <>
-                {/* "Paid" only once the trip is done. A cash trip is settled with the driver at
-                    the end, so a running trip showing Paid would be wrong on the common path. */}
-                {paidAt === null ? null : (
-                  <View style={styles.paidChip}>
-                    <Text style={styles.paidChipText}>Paid</Text>
-                  </View>
-                )}
-                <Text style={styles.paymentLabel}>Payment method</Text>
-                <Text style={styles.paymentValue}>{paidViaLabel(ride) ?? 'Not chosen'}</Text>
-                {paidAt === null ? null : (
-                  <>
-                    <Text style={styles.paymentLabel}>Paid on</Text>
-                    <Text style={styles.paymentValue}>{formatDateTime(new Date(paidAt))}</Text>
-                  </>
-                )}
-              </>
-            )}
-          </SectionCard>
-        </View>
 
         {ride.cancellation_reason === null ? null : (
           <SectionCard title="Why it was cancelled">
@@ -313,21 +356,20 @@ function Header({ onDownload }: { onDownload?: () => void }): ReactElement {
   );
 }
 
-function SummaryRow({
+/** One label and its value, ruled off from the next row — `last` drops the rule under the final one. */
+function DetailRow({
   label,
   value,
-  valueColor,
+  last = false,
 }: {
   label: string;
   value: string;
-  valueColor?: string;
+  last?: boolean;
 }): ReactElement {
   return (
-    <View style={styles.summaryRow}>
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={[styles.summaryValue, valueColor !== undefined && { color: valueColor }]}>
-        {value}
-      </Text>
+    <View style={[styles.detailRow, last && styles.detailRowLast]}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
     </View>
   );
 }
@@ -449,25 +491,72 @@ const styles = StyleSheet.create({
   },
   demoBadgeText: { ...text.caption, color: colors.muted },
 
-  summaryCard: {
+  // ── Top card: status, total, route ─────────────────────────────────────────
+  hero: {
     backgroundColor: colors.bgSunken,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     padding: space.lg,
     marginBottom: space.md,
   },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: space.xs },
-  summaryLabel: { ...text.caption, color: colors.muted },
-  summaryValue: { ...text.label, color: colors.fg },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.bg,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: radius.pill },
+  statusText: { ...text.caption, fontFamily: fontFamily.bold },
+  heroRef: { ...text.caption, color: colors.muted, fontFamily: fontFamily.semibold, letterSpacing: 0.5 },
+  heroDate: { ...text.caption, color: colors.muted, marginTop: space.sm },
 
+  heroTotalBlock: { marginTop: space.md },
+  heroTotalLabel: { ...text.caption, color: colors.muted },
+  heroTotal: { ...text.heading, color: colors.fg, fontSize: 32, lineHeight: 38, fontFamily: fontFamily.bold },
+
+  route: {
+    flexDirection: 'row',
+    gap: space.sm,
+    marginTop: space.lg,
+    paddingTop: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  routeMarkers: { alignItems: 'center', width: 16, paddingTop: 3 },
+  routeDot: { width: 12, height: 12, borderRadius: radius.pill },
+  routeDotFrom: { backgroundColor: colors.success },
+  routeLine: { width: 2, flex: 1, minHeight: 24, backgroundColor: colors.border, marginVertical: 3 },
+  routeText: { flex: 1 },
+  routeLabel: { ...text.caption, color: colors.faint },
+  routeLabelGap: { marginTop: space.sm },
+  routeAddress: { ...text.body, color: colors.fg, fontFamily: fontFamily.semibold },
+
+  // ── Sections ───────────────────────────────────────────────────────────────
   card: {
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     padding: space.lg,
     marginBottom: space.md,
   },
-  cardTitle: { ...text.label, color: colors.fg, marginBottom: space.sm },
+  cardTitle: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold, marginBottom: space.sm },
+
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space.md,
+    paddingVertical: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  detailRowLast: { borderBottomWidth: 0, paddingBottom: 0 },
+  detailLabel: { ...text.body, color: colors.muted },
+  detailValue: { ...text.body, color: colors.fg, fontFamily: fontFamily.semibold, flex: 1, textAlign: 'right' },
 
 
   timelineRow: { flexDirection: 'row' },
@@ -486,25 +575,29 @@ const styles = StyleSheet.create({
   timelineTime: { ...text.caption, color: colors.muted },
   timelineNote: { ...text.caption, color: colors.faint, marginTop: 1 },
 
-  twoCol: { flexDirection: 'row', gap: space.sm },
-  // Overrides `card`'s padding down — two columns side by side have half the width to work with,
-  // and `space.lg` on each edge was crowding out the numbers it was supposed to be framing.
-  colCard: { flex: 1, padding: space.sm },
-
   rebook: { marginTop: space.lg, gap: space.sm },
   rebookHint: { ...text.caption, color: colors.muted, textAlign: 'center' },
 
+  paymentHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  paymentMethod: { ...text.body, color: colors.fg, fontFamily: fontFamily.semibold },
   paidChip: {
-    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: '#E7F5EC',
     borderRadius: radius.pill,
     paddingHorizontal: space.sm,
     paddingVertical: 3,
-    marginBottom: space.sm,
   },
   paidChipText: { ...text.caption, color: colors.success, fontFamily: fontFamily.semibold },
-  paymentNone: { ...text.caption, color: colors.muted },
-  paymentLabel: { ...text.caption, color: colors.faint, marginTop: space.xs },
+  paymentNone: { ...text.body, color: colors.muted },
   paymentValue: { ...text.caption, color: colors.fg, fontFamily: fontFamily.semibold },
 
   ratingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

@@ -77,9 +77,6 @@ export function PaymentQrSheet({
   const qrSize = Math.min(width - space.lg * 2 - space.xl * 2, 300);
   /** The hosted poster fills the card edge to edge — its own margins are already generous. */
   const posterWidth = width - space.lg * 2 - POSTER_PADDING * 2;
-  /** The whole image, drawn wider than what is shown so its side margins fall outside the card. */
-  const posterImageWidth = posterWidth / (1 - POSTER_CROP_SIDE * 2);
-  const posterImageHeight = posterImageWidth * posterRatio;
 
   const [qr, setQr] = useState<DriverPaymentQrDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +84,9 @@ export function PaymentQrSheet({
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   /** The hosted poster's height ÷ width, once the image has loaded and said what it is. */
   const [posterRatio, setPosterRatio] = useState<number>(POSTER_RATIO_GUESS);
+  /** The whole image, drawn wider than what is shown so its side margins fall outside the card. */
+  const posterImageWidth = posterWidth / (1 - POSTER_CROP_SIDE * 2);
+  const posterImageHeight = posterImageWidth * posterRatio;
 
   // Held in refs so the polling loop never reads a stale copy of a callback the parent re-created.
   const onBookingRef = useRef(onBooking);

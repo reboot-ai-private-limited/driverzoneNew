@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Request, Response } from 'express';
 import {
   BOOKING_STATUSES,
+  type ListDriverTripsResponse,
   type BookingPaymentStatus,
   type BookingStatus,
   type PaymentMode,
@@ -17,6 +19,7 @@ import {
   type FareSnapshot,
 } from '../src/modules/bookings/domain/booking.entity.js';
 import { distanceMetres, isFixStale } from '../src/modules/bookings/domain/distance.js';
+import { makeListDriverTripsController } from '../src/modules/bookings/interface/bookings.controller.js';
 import { toBookingDto } from '../src/modules/bookings/interface/bookings.mapper.js';
 import type { CustomerContact, DriverCard } from '../src/modules/identity/identity.public.js';
 import type {
@@ -3218,5 +3221,56 @@ describe('Cancelling a PREPAID booking', () => {
     expect(repo.events().at(-1)?.metadata).toEqual(
       expect.objectContaining({ manualRefundPaise: repo.current().fareSnapshot.fare.totalPaise }),
     );
+  });
+});
+
+describe("GET /driver/bookings — the customer's name, never their number", () => {
+  async function listWith(contacts: Map<string, CustomerContact>) {
+    const repo = {
+      listForDriver: vi.fn(async () => [booking({ status: 'COMPLETED', customerId: 'cus_1' })]),
+    };
+    const directory = {
+      namesByIds: vi.fn(async () => new Map([['cus_1', '+919000000002']])), // the phone fallback
+      customerContactsByIds: vi.fn(async () => contacts),
+    };
+    const handler = makeListDriverTripsController(
+      repo as unknown as BookingRepositoryPort,
+      { listAdjustments: vi.fn(async () => []) } as unknown as ChargeRepositoryPort,
+      directory as unknown as Parameters<typeof makeListDriverTripsController>[2],
+    );
+
+    let body: { data: ListDriverTripsResponse } | undefined;
+    const req = { query: {}, principal: { sub: 'drv_1' }, method: 'GET', originalUrl: '/' } as unknown as Request;
+    const res = {
+      status: () => res,
+      json: (b: { data: ListDriverTripsResponse }) => {
+        body = b;
+      },
+    } as unknown as Response;
+    await new Promise<void>((resolve) => {
+      handler(req, res, () => resolve());
+      setTimeout(resolve, 20);
+    });
+    return body?.data.bookings[0];
+  }
+
+  it('shows no name — not the phone number — for a customer who never set one', async () => {
+    const trip = await listWith(
+      new Map([['cus_1', { id: 'cus_1', fullName: null, phone: '+919000000002' }]]),
+    );
+
+    // The app renders "Customer" for a null name. What it must never get is the number: the list is
+    // full of finished trips, and a finished trip does not carry one.
+    expect(trip?.customer?.name).toBeNull();
+    expect(JSON.stringify(trip)).not.toContain('9000000002');
+  });
+
+  it('shows the name when the customer has one, and still no number', async () => {
+    const trip = await listWith(
+      new Map([['cus_1', { id: 'cus_1', fullName: 'Anita Rai', phone: '+919000000002' }]]),
+    );
+
+    expect(trip?.customer?.name).toBe('Anita Rai');
+    expect(trip?.customer?.phone).toBeNull();
   });
 });

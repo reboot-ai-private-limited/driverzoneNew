@@ -19,6 +19,7 @@ function harness() {
   };
   const directory = {
     namesByIds: vi.fn(async () => new Map()),
+    customerContactsByIds: vi.fn(async () => new Map()),
     idsMatching: vi.fn(async () => ['cus_9']),
   };
   const handler = makeListDriverTripsController(

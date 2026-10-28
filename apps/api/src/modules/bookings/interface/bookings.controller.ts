@@ -683,7 +683,7 @@ export function makeGetDriverBookingController(
 export function makeListDriverTripsController(
   repo: BookingRepositoryPort,
   charges: ChargeRepositoryPort,
-  directory: AccountDirectoryContract,
+  directory: AccountDirectoryContract & CustomerContactContract,
 ): RequestHandler {
   return asyncHandler(async (req, res) => {
     const driverId = principalOf(req);
@@ -728,18 +728,24 @@ export function makeListDriverTripsController(
             };
     }
 
-    const names = await directory.namesByIds(
-      'CUSTOMER',
+    /*
+     * `customerContactsByIds`, NOT `namesByIds`. The latter falls back to the PHONE NUMBER when an
+     * account has no name — right for an admin identifying a row, wrong here: this list is full of
+     * FINISHED trips, and the number is withheld after a trip ends (`PHONE_VISIBLE_STATUSES`). A
+     * customer who never set a name used to appear to their driver as their own phone number.
+     * Only the name is read from the contact; the app shows "Customer" when it is null.
+     */
+    const contacts = await directory.customerContactsByIds([
       // Deduped: a repeat customer must not be looked up once per trip they took.
-      [...new Set(bookings.map((booking) => booking.customerId))],
-    );
+      ...new Set(bookings.map((booking) => booking.customerId)),
+    ]);
 
     const dtos = await Promise.all(
       bookings.map(async (booking) =>
         toBookingDto({
           booking,
           adjustments: await charges.listAdjustments(booking.id),
-          customerName: names.get(booking.customerId) ?? null,
+          customerName: contacts.get(booking.customerId)?.fullName ?? null,
         }),
       ),
     );

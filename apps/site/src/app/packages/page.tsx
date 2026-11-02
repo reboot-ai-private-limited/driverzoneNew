@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactElement } from 'react';
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { MessageCircle, PhoneCall } from 'lucide-react';
 import { PageHero } from '@/components/PageHero';
 import { PackagesGrid } from '@/components/packages/PackagesGrid';
@@ -131,6 +132,10 @@ const breadcrumbSchema = {
 /* ── Page ────────────────────────────────────────────────────────────────── */
 
 export default function PackagesPage(): ReactElement {
+  // Packages are hidden on the public site for now. Remove this line to bring the page back
+  // (also restore the links in SiteHeader/SiteFooter, the home section and the services cards).
+  notFound();
+
   return (
     <>
       {/* JSON-LD structured data */}

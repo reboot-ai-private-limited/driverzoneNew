@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { HeroSlider } from '@/components/HeroSlider';
 import { WhyChooseSection } from '@/components/WhyChooseSection';
-import { PackagesPricingSection } from '@/components/PackagesPricingSection';
 import { ServicesSection } from '@/components/ServicesSection';
 import { HowItWorksSection } from '@/components/HowItWorksSection';
 import { CustomerAppSection } from '@/components/CustomerAppSection';
@@ -15,7 +14,6 @@ export default function HomePage(): ReactElement {
     <>
       <HeroSlider />
       <WhyChooseSection />
-      <PackagesPricingSection />
       <ServicesSection />
       <HowItWorksSection />
       <CustomerAppSection />

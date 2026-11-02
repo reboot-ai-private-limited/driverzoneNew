@@ -341,12 +341,6 @@ export default function ServicesPage(): ReactElement {
                 Book via WhatsApp
               </Link>
               <Link
-                href="/packages"
-                className="flex items-center justify-center gap-2 rounded-pill border-2 border-fg px-8 py-4 text-sm font-semibold text-fg transition-colors hover:bg-fg hover:text-on-fg"
-              >
-                View All Packages
-              </Link>
-              <Link
                 href="tel:+918509299342"
                 className="flex items-center justify-center gap-2 rounded-pill border-2 border-fg/40 px-8 py-4 text-sm font-medium text-fg/80 transition-colors hover:border-fg hover:text-fg"
               >
@@ -413,13 +407,6 @@ function ServiceCard({ svc }: { svc: ServiceItem }): ReactElement {
           </li>
         ))}
       </ul>
-
-      <Link
-        href={svc.href}
-        className="mt-6 inline-flex items-center text-sm font-semibold text-fg underline-offset-2 hover:underline"
-      >
-        View package →
-      </Link>
     </article>
   );
 }

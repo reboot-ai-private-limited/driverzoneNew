@@ -8,7 +8,6 @@ const QUICK_LINKS = [
   { label: 'Home',              href: '/' },
   { label: 'About Us',          href: '/about' },
   { label: 'Services',          href: '/services' },
-  { label: 'Packages & Pricing', href: '/packages' },
   { label: 'Terms & conditions', href: '/terms' },
   { label: 'Privacy Policy',   href: '/privacy' },
   { label: 'Delete Account',    href: '/delete-account' },

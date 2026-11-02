@@ -30,7 +30,6 @@ import { useState, type ReactElement } from 'react';
 const NAV = [
   { href: '/', label: 'Home' },
   { href: '/services', label: 'Services' },
-  { href: '/packages', label: 'Packages' },
   { href: '/about', label: 'About Us' },
   { href: '/contact', label: 'Contact' },
 ] as const;

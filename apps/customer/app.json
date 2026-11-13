@@ -27,14 +27,33 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area.",
-          "locationWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area."
+          "locationWhenInUsePermission": "DriverZone uses your location to set your pickup point and to check whether we have drivers in your area.",
+          "locationAlwaysAndWhenInUsePermission": "DriverZone only uses your location while the app is open, to set your pickup point and check driver coverage. It never tracks you in the background.",
+          "isIosBackgroundLocationEnabled": false,
+          "locationAlwaysPermission": "DriverZone only uses your location while the app is open, to set your pickup point and check driver coverage. It never tracks you in the background."
         }
       ],
       "@react-native-firebase/app",
       "./plugins/withUpiQueries.js",
-      ["expo-image-picker", { "microphonePermission": false, "cameraPermission": false }],
-      "./plugins/withStripPermissions.js"
+      [
+        "expo-image-picker",
+        {
+          "microphonePermission": false,
+          "cameraPermission": false,
+          "photosPermission": "DriverZone uses your photo library only when you choose a profile picture."
+        }
+      ],
+      "./plugins/withStripPermissions.js",
+      "./plugins/withHighRefreshRate.js",
+      "./plugins/withNotificationIcon.js",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
     ],
     "android": {
       "package": "in.driverzone.customer",
@@ -58,7 +77,23 @@
       "supportsTablet": false,
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "CADisableMinimumFrameDurationOnPhone": true,
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": [
+          "tez",
+          "gpay",
+          "phonepe",
+          "paytmmp",
+          "bhim",
+          "upi",
+          "credpay",
+          "mobikwik",
+          "freecharge",
+          "amazonpay"
+        ]
       }
     }
   }

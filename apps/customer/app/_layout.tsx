@@ -106,6 +106,9 @@ export default function RootLayout(): ReactElement | null {
                   headerShown: false,
                   contentStyle: { backgroundColor: colors.bg },
                   animation: 'slide_from_right',
+                  // One short, clean glide for every push/pop; iOS also gets full-screen swipe-back.
+                  animationDuration: 240,
+                  fullScreenGestureEnabled: true,
                 }}
               />
             </SafeAreaView>

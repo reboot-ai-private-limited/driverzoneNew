@@ -55,7 +55,7 @@ const BADGE_SIZE = 40;
  */
 const SELECT_TIMING = { duration: motion.layout, easing: MOTION_EASING } as const;
 /** Stiffer: touch-down feedback has to land inside the same gesture, not after it. */
-const PRESS_SPRING = { damping: 20, stiffness: 420, mass: 0.4 } as const;
+const PRESS_SPRING = { damping: 20, stiffness: 420, mass: 0.4, overshootClamping: true } as const;
 
 interface TabItemProps {
   focused: boolean;

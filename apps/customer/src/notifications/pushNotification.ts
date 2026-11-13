@@ -59,8 +59,11 @@ export async function displayBookingUpdate(data: BookingUpdateData): Promise<voi
       android: {
         channelId: BOOKING_CHANNEL_ID,
         importance: AndroidImportance.DEFAULT,
-        // No `smallIcon` set → Notifee falls back to the launcher icon. A dedicated monochrome
-        // `ic_notification` drawable would render cleaner in the status bar; add one later.
+        // Brand yellow. Android paints the whole background only for colorized-eligible
+        // notifications (foreground service / call style); everywhere else it tints the icon,
+        // app name and buttons. iOS ignores both — it has no notification colour at all.
+        color: '#F2F200',
+        colorized: true,
         pressAction: { id: 'default', launchActivity: 'default' },
         // Cleared when the customer taps it — unlike the driver's offer ring, there is nothing
         // time-critical to keep on screen.

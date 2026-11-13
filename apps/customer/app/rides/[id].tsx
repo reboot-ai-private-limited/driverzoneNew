@@ -2,6 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { type ReactElement, type ReactNode } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
   Alert,
@@ -42,6 +43,7 @@ import { colors, fontFamily, radius, space, text } from '@/theme/theme';
  */
 export default function RideDetailScreen(): ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
 
   /*
    * Shares `keys.bookings.detail(id)` with the trip screen deliberately — it is the same booking
@@ -90,7 +92,10 @@ export default function RideDetailScreen(): ReactElement {
     <View style={styles.root}>
       <Header onDownload={() => void shareInvoice(ride)} />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: space.xl + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+      >
         {/*
           THE TOP CARD — what a customer opens this screen to answer: did it happen, what did it
           cost, and where did it go. Status, total and route first; the small print below it.

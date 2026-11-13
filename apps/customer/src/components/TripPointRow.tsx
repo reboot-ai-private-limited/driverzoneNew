@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, fontFamily, radius, shadow, space, text } from '@/theme/theme';
+import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 interface TripPointRowProps {
   /**
@@ -59,7 +59,9 @@ export function TripPointRow({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${label}: ${shown}`}
-      style={({ pressed }) => [styles.hero, pressed && styles.heroPressed]}
+      // No pressed state: the darker border it used to draw read as a shadow flashing under the
+      // field on every tap. The picker opening is feedback enough.
+      style={styles.hero}
     >
       {/*
         The sheen is what makes this read as GLASS on an opaque sheet. A real backdrop blur has
@@ -121,13 +123,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.border,
-    // Lifted off the sheet rather than sunk into it. The destination is the screen's primary
-    // control and should sit closest to the customer.
-    ...shadow.card,
+    // NO elevation/shadow. On Android an elevated view's shadow is drawn separately from the view,
+    // so when this field fades out on tap the shadow lingered as a dark ghost under it. The border
+    // alone separates it from the sheet.
     // Clips the gradient to the rounded corners on Android.
     overflow: 'hidden',
   },
-  heroPressed: { borderColor: colors.borderStrong },
   heroGlyph: {
     width: 44,
     height: 44,

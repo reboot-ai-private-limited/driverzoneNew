@@ -1,9 +1,9 @@
-import notifee, { EventType } from '@notifee/react-native';
+import notifee from '@notifee/react-native';
 import { getMessaging, setBackgroundMessageHandler, type RemoteMessage } from '@react-native-firebase/messaging';
 import { rememberDutyState, teardownDutyMachinery } from '@/duty/dutyRecovery';
-import { openOffer } from '@/features/offer/openOffer';
 import { ensureNotificationChannels } from './channel';
 import { pushLog } from './log';
+import { handleOfferNotificationEvent } from './offerActions';
 import { cancelOfferNotification, displayOfferNotification, type OfferPushData } from './offerNotification';
 
 /**
@@ -131,11 +131,4 @@ setBackgroundMessageHandler(getMessaging(), async (remoteMessage: RemoteMessage)
  * backed out of a still-ringing offer is asking to go back in, and the latch exists to stop a
  * poll from doing that by itself, not to stop them.
  */
-notifee.onBackgroundEvent(async ({ type, detail }) => {
-  if (type !== EventType.PRESS) return;
-
-  const url = detail.notification?.data?.['url'];
-  pushLog('onBackgroundEvent PRESS', { url: typeof url === 'string' ? url : '(none)' });
-
-  if (typeof url === 'string') openOffer(url, { fromTap: true });
-});
+notifee.onBackgroundEvent(handleOfferNotificationEvent);

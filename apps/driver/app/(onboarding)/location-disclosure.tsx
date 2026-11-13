@@ -2,8 +2,9 @@ import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { type ReactElement, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { ensureDutyMachinery } from '@/duty/dutyRecovery';
 import {
   markBackgroundLocationAccepted,
   markBackgroundLocationDeclined,
@@ -72,12 +73,12 @@ export default function LocationDisclosureScreen(): ReactElement {
         await markBackgroundLocationAccepted();
 
         /*
-         * FOREGROUND FIRST, AND THIS IS THE FIX FOR A HUNG BUTTON. Android will not grant — or
-         * even show a request for — background location until ordinary location is granted; the
-         * request is silently ignored and `requestBackgroundPermissionsAsync` never resolves, so
-         * this button span forever. On a fresh install that is the normal case: the duty toggle
-         * asks for foreground location and pushes this screen in the same moment, so the driver
-         * can reach Allow before (or instead of) answering that first prompt.
+         * FOREGROUND FIRST — and THIS is the only place in the app that asks for it. Play's
+         * Prominent Disclosure policy wants Android's location dialog immediately after this
+         * screen, so the duty machinery only checks the grant and never prompts (a build whose
+         * dialog appeared over the "Trip alerts" screen was rejected for exactly that). Android
+         * also will not show a background request until ordinary location is granted — the
+         * request is silently ignored and never resolves — so the order is forced either way.
          *
          * Check before asking, as everywhere else: `request…` never resolves on ColorOS when the
          * grant already exists (see `dutyForegroundService.ts`).
@@ -89,9 +90,18 @@ export default function LocationDisclosureScreen(): ReactElement {
         // No foreground grant, no background request — it could only hang. The consent is still
         // recorded, so the duty service asks for background itself once location is allowed.
         if (foreground === null || !foreground.granted) return;
+        // Background location is an Android-only grant of this shape; see the disclosure module.
+        if (Platform.OS !== 'android') return;
 
         const background = await Location.getBackgroundPermissionsAsync().catch(() => null);
-        if (background === null || background.granted || !background.canAskAgain) return;
+        if (background === null || background.granted) return;
+
+        // Refused before and Android will not ask again — the settings page is the only way left,
+        // and this screen is now reachable on purpose from Home's permission check.
+        if (!background.canAskAgain) {
+          await Linking.openSettings().catch(() => undefined);
+          return;
+        }
 
         /*
          * On Android 11+ this is not a dialog but a trip to the system settings page for "Allow
@@ -111,6 +121,9 @@ export default function LocationDisclosureScreen(): ReactElement {
   }
 
   function leave(): void {
+    // Start the shift now that the driver has answered — the machinery only checks the grant, so
+    // it could not get going before this screen asked for it. A no-op when off duty.
+    void ensureDutyMachinery();
     if (router.canGoBack()) router.back();
     else router.replace('/home');
   }
@@ -136,7 +149,8 @@ export default function LocationDisclosureScreen(): ReactElement {
         */}
         <Text style={styles.lead}>
           While you are on duty, DriverZone collects your location — including when the app is
-          closed or not in use — so that trip offers near you keep reaching your phone.
+          closed or not in use — so that trip offers near you keep reaching your phone. Android
+          will ask you to allow this next.
         </Text>
 
         <View style={styles.card}>

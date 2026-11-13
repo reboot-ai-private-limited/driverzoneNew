@@ -1,10 +1,11 @@
-import notifee, { EventType } from '@notifee/react-native';
+import notifee from '@notifee/react-native';
 import { getMessaging, onMessage, type RemoteMessage } from '@react-native-firebase/messaging';
 import { useEffect } from 'react';
 import { rememberDutyState, teardownDutyMachinery } from '@/duty/dutyRecovery';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { ensureNotificationChannels } from './channel';
 import { pushLog } from './log';
+import { handleOfferNotificationEvent } from './offerActions';
 import {
   cancelOfferNotification,
   displayOfferNotification,
@@ -93,10 +94,8 @@ export function useOfferPushBridge(): void {
      * So this covers the narrow case of a driver looking at the app and tapping the heads-up
      * banner anyway — rare, but the ring screen still has to open when they do.
      */
-    const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
-      if (type !== EventType.PRESS) return;
-      const url = detail.notification?.data?.['url'];
-      if (typeof url === 'string') openOffer(url, { fromTap: true });
+    const unsubscribeNotifee = notifee.onForegroundEvent((event) => {
+      void handleOfferNotificationEvent(event);
     });
 
     /*

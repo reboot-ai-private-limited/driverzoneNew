@@ -98,7 +98,14 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
   const title = earning === '' ? 'New trip offer' : `New trip · ${earning}`;
   // Deep link into the ring screen, so tapping the notification lands on the same screen the
   // full-screen intent opens.
-  const payload = { url: `/offer/${offerId}` };
+  const payload = { url: `/offer/${offerId}`, offerId };
+
+  // Answer / Decline buttons on the ring, like an incoming call. Accept opens the ring screen
+  // (see offerActions.ts); Decline is answered without opening the app.
+  const actions = [
+    { title: 'Decline', pressAction: { id: 'decline' } },
+    { title: 'Accept', pressAction: { id: 'accept', launchActivity: 'default' } },
+  ];
 
   /**
    * Everything that makes the notification LOUD and PERSISTENT — shared by rungs 1 and 2.
@@ -122,6 +129,10 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
     // `CALL` is what asks Android to treat this as a call rather than a message — heads-up,
     // ringtone stream, harder to bury. It does not need any permission.
     category: AndroidCategory.CALL,
+    // Brand yellow. Android only fills the background for colorized-eligible notifications; on
+    // the rest it tints the icon, app name and the Accept / Decline buttons.
+    color: '#F2F200',
+    colorized: true,
     importance: AndroidImportance.HIGH,
     visibility: AndroidVisibility.PUBLIC,
     pressAction: { id: 'default', launchActivity: 'default' },
@@ -133,6 +144,7 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
     autoCancel: false,
     timeoutAfter: msLeft,
     lightUpScreen: true,
+    actions,
   };
 
   // ── Rung 1: with the full-screen intent ────────────────────────────────────────────────────
@@ -181,8 +193,11 @@ export async function displayOfferNotification(data: OfferPushData): Promise<voi
       android: {
         channelId: OFFER_CHANNEL_ID,
         importance: AndroidImportance.HIGH,
+        color: '#F2F200',
+        colorized: true,
         pressAction: { id: 'default', launchActivity: 'default' },
         timeoutAfter: msLeft,
+        actions,
       },
     });
     pushLog('offer.display ok: rung 3 (plain)', { offerId, msLeft });
@@ -216,5 +231,9 @@ export async function getInitialOfferHref(): Promise<string | null> {
   if (Platform.OS !== 'android') return null;
   const initial = await notifee.getInitialNotification();
   const url = initial?.notification.data?.['url'];
-  return typeof url === 'string' ? url : null;
+  if (typeof url !== 'string') return null;
+  // The app was launched by the notification's ACCEPT button: open the ring screen in
+  // claim-immediately mode (see `autoAcceptHref` in offerActions.ts — same flag, kept inline here
+  // to avoid an import cycle).
+  return initial?.pressAction.id === 'accept' ? `${url}?autoAccept=1` : url;
 }

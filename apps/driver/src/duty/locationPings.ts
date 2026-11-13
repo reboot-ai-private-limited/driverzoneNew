@@ -187,20 +187,18 @@ export async function startLocationPings(onDutyChange?: DutyObserver): Promise<b
 
   if (devOverride() === null) {
     /**
-     * CHECK FIRST, PROMPT ONLY IF THERE IS SOMETHING TO ASK — the same rule
-     * `startDutyForegroundService` follows, and for the same reason.
-     * `requestForegroundPermissionsAsync` NEVER RESOLVES on ColorOS / realme UI when the
-     * permission is already granted. The first call of the shift often gets away with it because
-     * a dialog is genuinely shown; the SECOND call — after going off duty and back on, or a
-     * resume re-arm — hangs forever, and because this function is awaited inside
-     * `ensureDutyMachinery`'s single-flight guard, that one hang wedges every future recovery
-     * attempt too. `getForegroundPermissionsAsync` always resolves, so it is the one on the hot
-     * path; the prompting variant runs only when the grant is genuinely missing and askable.
+     * CHECK ONLY — NEVER PROMPT. Play's Prominent Disclosure policy requires the in-app location
+     * explanation to come IMMEDIATELY before Android's location dialog, and this runs from the
+     * duty toggle, the boot screen and the resume listener — none of which is that explanation.
+     * Prompting here is what put the OS dialog on top of the "Trip alerts" screen in the review
+     * that rejected the build (2026-10-29). The one place allowed to ask is the Allow button on
+     * `app/(onboarding)/location-disclosure.tsx`; without a grant this simply reports false.
+     *
+     * `getForegroundPermissionsAsync` is also the variant that always resolves —
+     * `requestForegroundPermissionsAsync` NEVER RESOLVES on ColorOS / realme UI when the grant
+     * already exists, which used to wedge `ensureDutyMachinery`'s single-flight guard.
      */
-    let permission = await Location.getForegroundPermissionsAsync().catch(() => null);
-    if (permission !== null && !permission.granted && permission.canAskAgain) {
-      permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
-    }
+    const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
     if (permission === null || !permission.granted) return false;
   }
 

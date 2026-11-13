@@ -2,12 +2,24 @@ import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useFocusEffect } from 'expo-router';
 import { type ReactElement, useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { Logo } from '@/components/Logo';
-import { needsBackgroundLocationDisclosure } from '@/features/onboarding/backgroundLocationDisclosure';
+import { needsLocationDisclosure } from '@/features/onboarding/backgroundLocationDisclosure';
 import { needsNotificationDisclosure } from '@/features/onboarding/notificationDisclosure';
-import { needsBatterySetup } from '@/features/onboarding/batteryOptimisation';
+import {
+  type PermissionIssue,
+  checkPermissionHealth,
+  fixPermissionIssue,
+} from '@/features/onboarding/permissionHealth';
 import { offerHref, openOffer } from '@/features/offer/openOffer';
 import { formatWhen } from '@/features/trips/scheduledWhen';
 import {
@@ -82,35 +94,49 @@ export default function HomeScreen(): ReactElement {
          * Failures are reported, not fatal: duty already succeeded server-side by the time this
          * runs, and a driver working with the app open beats one bounced back off duty.
          */
-        void ensureDutyMachinery().then((result) => {
-          if (result === 'no-location') {
-            setDutyError(
-              'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
-            );
-          } else if (result === 'no-service') {
-            setDutyError(
-              'We could not keep DriverZone running in the background. Offers may only reach you while the app is open — check notification and location permissions in Settings.',
-            );
-          }
-        });
-        /*
-         * ONE PERMISSION QUESTION AT A TIME, notifications first. A driver who has never been
-         * asked sees the "Trip alerts" explanation, and that screen shows Android's prompt and
-         * then hands over to the location disclosure if it is still needed — see
-         * `notification-disclosure.tsx`.
-         *
-         * Everyone else registers for push here. `ensureDutyMachinery` registers too, but only
-         * CHECKS the permission (it also runs from contexts with no screen) and does not report
-         * back — and a refused notification permission is the one failure a driver has to be
-         * told about. `force` because "I just went on duty" must not be skipped by the rate limit
-         * that keeps the background callers from looping.
-         */
-        void needsNotificationDisclosure().then((needed) => {
-          if (needed) {
+        void (async () => {
+          /*
+           * ONE PERMISSION QUESTION AT A TIME, notifications first, and every Android prompt
+           * IMMEDIATELY after its own explanation — Play rejected a build whose location dialog
+           * appeared on top of the "Trip alerts" screen. A driver who has never been asked sees
+           * "Trip alerts", which shows Android's notification prompt and then hands over to the
+           * location disclosure if it is still needed — see `notification-disclosure.tsx`. Both
+           * screens re-run `ensureDutyMachinery` as they leave, so the shift starts the moment
+           * the grants exist.
+           *
+           * The machinery itself never prompts (it only checks), so running it now, before those
+           * screens are answered, is safe; it just reports `no-location` until the grant exists —
+           * which is why that error is only shown when no disclosure is about to ask.
+           */
+          const [notificationNeeded, locationNeeded] = await Promise.all([
+            needsNotificationDisclosure(),
+            needsLocationDisclosure(),
+          ]);
+
+          void ensureDutyMachinery().then((result) => {
+            if (result === 'no-location' && !locationNeeded) {
+              setDutyError(
+                'Location permission is needed to receive trips. Turn it on in Settings, then go on duty again.',
+              );
+            } else if (result === 'no-service') {
+              setDutyError(
+                'We could not keep DriverZone running in the background. Offers may only reach you while the app is open — check notification and location permissions in Settings.',
+              );
+            }
+          });
+
+          if (notificationNeeded) {
             router.push('/notification-disclosure');
             return;
           }
 
+          /*
+           * Everyone else registers for push here. `ensureDutyMachinery` registers too, but only
+           * CHECKS the permission (it also runs from contexts with no screen) and does not report
+           * back — and a refused notification permission is the one failure a driver has to be
+           * told about. `force` because "I just went on duty" must not be skipped by the rate
+           * limit that keeps the background callers from looping.
+           */
           void registerForPush(true).then((pushable) => {
             if (!pushable) {
               setDutyError(
@@ -120,26 +146,16 @@ export default function HomeScreen(): ReactElement {
           });
 
           /**
-           * THE PROMINENT DISCLOSURE, on the way into the first shift.
+           * THE PROMINENT DISCLOSURE, on the way into the shift.
            *
-           * Play requires it before Android's background-location prompt, and this is the only
-           * place in the app with both a reason to ask and a screen to ask from — the other two
-           * callers of `startDutyForegroundService` are the boot receiver and the resume listener,
-           * which run with nothing mounted. So the flow is: the service's own request is gated on
-           * the stored consent (see its background-permission comment), and this navigates to the
-           * screen that can write it. (When the "Trip alerts" screen was shown instead, it hands
-           * over to this one itself.)
-           *
-           * LAST and not awaited, deliberately. Duty already succeeded server-side and the
-           * machinery above is already starting; pushing a screen is the least urgent thing here
-           * and must not delay any of it. `needsBackgroundLocationDisclosure` answers false for
-           * everyone who has already decided, already granted, or cannot be asked — so the
-           * ordinary shift start pushes nothing at all.
+           * The only place in the app with both a reason to ask and a screen to ask from — the
+           * other callers of the duty machinery are the boot screen and the resume listener, which
+           * run with nothing mounted, so they only check. `needsLocationDisclosure` answers false
+           * for everyone who already holds the grants, has already decided about background, or
+           * cannot be asked — so the ordinary shift start pushes nothing at all.
            */
-          void needsBackgroundLocationDisclosure().then((locationNeeded) => {
-            if (locationNeeded) router.push('/location-disclosure');
-          });
-        });
+          if (locationNeeded) router.push('/location-disclosure');
+        })();
       } else {
         // The reverse order of going on duty: stop what the service was protecting, then release
         // the service itself, so the process is never kept alive for a loop that has already gone.
@@ -263,29 +279,52 @@ export default function HomeScreen(): ReactElement {
   );
 
   /**
-   * `undefined` while the first read is in flight, so the banner does not flash in and out on a
-   * cold start. `true` means Android is still battery-optimising this app.
+   * PERMISSION HEALTH — every grant a ringing offer depends on, read live (see
+   * `permissionHealth.ts`). Replaces the battery-only banner.
    *
-   * Re-read on every focus, and that is load-bearing rather than tidy: the driver leaves this
-   * screen for the system settings and comes straight back, so the focus event is the moment the
-   * answer changes. It also catches the case the old stored flag could not — a system update that
-   * silently re-enables optimisation on a driver who set it up weeks ago.
+   * Re-read on FOCUS (back from an in-app screen such as battery setup or the location
+   * disclosure), on APP RESUME (back from the system Settings page, which never fires a focus
+   * event), and right after going online. That is what catches a grant revoked weeks later — an
+   * OEM update re-enabling battery optimisation, Android 14 revoking full-screen intents — rather
+   * than trusting a flag stored the day the driver first said yes.
    */
-  const [needsBattery, setNeedsBattery] = useState<boolean | undefined>(undefined);
+  const [issues, setIssues] = useState<PermissionIssue[]>([]);
+  const [fixing, setFixing] = useState<string | null>(null);
+  const refreshHealth = useCallback(() => {
+    void checkPermissionHealth().then(setIssues);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      void needsBatterySetup().then((value) => {
-        if (active) setNeedsBattery(value);
-      });
+      refreshHealth();
       // Re-read the live trip on every focus too: completing one lands back here, and a banner
       // still offering to resume a finished trip is worse than no banner at all.
       void queryClient.invalidateQueries({ queryKey: keys.trip.current() });
-      return () => {
-        active = false;
-      };
-    }, [queryClient]),
+    }, [queryClient, refreshHealth]),
   );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshHealth();
+    });
+    return () => subscription.remove();
+  }, [refreshHealth]);
+
+  useEffect(() => {
+    if (onDuty) refreshHealth();
+  }, [onDuty, refreshHealth]);
+
+  function fix(issue: PermissionIssue): void {
+    setFixing(issue.id);
+    void fixPermissionIssue(issue.id).finally(() => {
+      setFixing(null);
+      refreshHealth();
+      // A grant just appeared — start whatever was waiting on it instead of waiting for a resume.
+      if (onDuty) void ensureDutyMachinery();
+    });
+  }
+
+  const hasRequiredIssue = issues.some((issue) => issue.severity === 'required');
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -402,23 +441,46 @@ export default function HomeScreen(): ReactElement {
           </View>
         ) : null}
 
-        {needsBattery === true ? (
-          <Pressable
-            onPress={() => router.push('/battery-setup')}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.batteryBanner, pressed && styles.batteryBannerPressed]}
-          >
-            <View style={styles.batteryIcon}>
-              <Feather name="alert-triangle" size={16} color={colors.warning} />
-            </View>
-            <View style={styles.batteryText}>
-              <Text style={styles.batteryTitle}>Finish alert setup</Text>
-              <Text style={styles.batteryBody}>
-                Your phone may still silence trip offers in the background.
+        {/*
+          PERMISSION HEALTH. One card, one row per problem, one tap per fix — and it disappears
+          entirely once everything is granted. Required items (offers WILL be missed) are listed
+          first and turn the card red; recommended ones (offers MAY be missed) stay amber.
+        */}
+        {issues.length > 0 ? (
+          <View style={[styles.healthCard, hasRequiredIssue && styles.healthCardRequired]}>
+            <View style={styles.healthHeader}>
+              <Feather
+                name="alert-triangle"
+                size={16}
+                color={hasRequiredIssue ? colors.danger : colors.warning}
+              />
+              <Text style={styles.healthHeading}>
+                {hasRequiredIssue ? 'You may miss trip offers' : 'Finish alert setup'}
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color={colors.faint} />
-          </Pressable>
+            {issues.map((issue) => (
+              <View key={issue.id} style={styles.healthRow}>
+                <View style={styles.batteryText}>
+                  <Text style={styles.batteryTitle}>{issue.title}</Text>
+                  <Text style={styles.batteryBody}>{issue.body}</Text>
+                </View>
+                <Pressable
+                  onPress={() => fix(issue)}
+                  disabled={fixing !== null}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${issue.action}: ${issue.title}`}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.healthFix, pressed && styles.batteryBannerPressed]}
+                >
+                  {fixing === issue.id ? (
+                    <ActivityIndicator size="small" color={colors.fg} />
+                  ) : (
+                    <Text style={styles.healthFixText}>{issue.action}</Text>
+                  )}
+                </Pressable>
+              </View>
+            ))}
+          </View>
         ) : null}
 
         {/* The duty card. One control, deliberately the largest thing on the screen — it is the
@@ -519,27 +581,34 @@ const styles = StyleSheet.create({
   greeting: { ...text.title, color: colors.fg },
   greetingSub: { ...text.body, color: colors.muted, marginTop: space.xs, marginBottom: space.lg },
 
-  batteryBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
+  batteryBannerPressed: { opacity: 0.9 },
+  batteryText: { flex: 1 },
+
+  /* Amber for "may miss offers", red for "will miss offers" — the same banner language as before. */
+  healthCard: {
     backgroundColor: '#FFF6E0',
     borderWidth: 1,
     borderColor: '#F0D9A0',
     borderRadius: radius.md,
     padding: space.md,
     marginBottom: space.md,
+    gap: space.sm,
   },
-  batteryBannerPressed: { opacity: 0.9 },
-  batteryIcon: {
-    width: 30,
-    height: 30,
+  healthCardRequired: { backgroundColor: '#FDECEC', borderColor: '#F3B8B8' },
+  healthHeader: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  healthHeading: { ...text.label, color: colors.fg },
+  healthRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  healthFix: {
+    minWidth: 72,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
     borderRadius: radius.pill,
     backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.fg,
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  batteryText: { flex: 1 },
+  healthFixText: { ...text.label, color: colors.fg },
   batteryTitle: { ...text.label, color: colors.fg },
   batteryBody: { ...text.caption, color: colors.muted, marginTop: 2 },
 

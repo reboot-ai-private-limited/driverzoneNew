@@ -147,16 +147,12 @@ async function startDutyForegroundServiceInner(): Promise<boolean> {
    * service TYPE, not the coordinate source), so a dev build with the override would otherwise
    * never be able to start it at all.
    *
-   * CHECK FIRST, PROMPT ONLY IF NEEDED, and that order is load-bearing:
-   * `requestForegroundPermissionsAsync` never resolves on ColorOS when the permission is ALREADY
-   * granted, which wedged this function silently — no crash, no log, the service simply never
-   * started. `getForegroundPermissionsAsync` always resolves, so it is the one on the hot path;
-   * the prompting variant runs only when there is genuinely something to ask.
+   * CHECK ONLY — NEVER PROMPT, for the same reason as `startLocationPings`: Android's location
+   * dialog may only appear straight after the in-app disclosure, and this runs from contexts that
+   * are not it. The disclosure screen asks; this just reads the answer. (The check variant is also
+   * the one that always resolves — the request variant hangs on ColorOS when already granted.)
    */
-  let permission = await Location.getForegroundPermissionsAsync().catch(() => null);
-  if (permission !== null && !permission.granted && permission.canAskAgain) {
-    permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
-  }
+  const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
   if (permission === null || !permission.granted) return false;
 
   /**
@@ -211,6 +207,10 @@ async function startDutyForegroundServiceInner(): Promise<boolean> {
       android: {
         channelId: DUTY_CHANNEL_ID,
         asForegroundService: true,
+        // A foreground-service notification is one Android WILL fully colourise: the whole card
+        // turns brand yellow for the shift.
+        color: '#F2F200',
+        colorized: true,
 
         /*
          * Android 14+ refuses to start a typed foreground service unless the type is declared in

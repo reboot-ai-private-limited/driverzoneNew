@@ -56,7 +56,7 @@ In Xcode:
 
 What to verify in the generated project (do this once per SDK upgrade):
 
-- `ios/DriverZone/Info.plist` has only `NSLocationWhenInUseUsageDescription` as a usage string — no `NSLocationAlways…`, camera, photos, microphone, Face ID or motion — and `UIBackgroundModes` is just `remote-notification`.
+- `ios/DriverZone/Info.plist` has `NSLocationWhenInUseUsageDescription` as the only string the app really uses — no `NSLocationAlways…`, camera, microphone or Face ID. It ALSO carries `NSPhotoLibraryUsageDescription` and `NSMotionUsageDescription` worded as "we do not use this": React Native, expo-file-system and Firebase reference the Photos API and expo-location/Reanimated reference Motion, and Apple's upload check (ITMS-90683) rejects the binary without a purpose string for any API it contains, used or not. `UIBackgroundModes` is just `remote-notification`.
 - `ios/DriverZone/PrivacyInfo.xcprivacy` exists (written from `app.json → ios.privacyManifests`).
 - Target *Supported Destinations* lists iPhone only (`TARGETED_DEVICE_FAMILY = 1`).
 - `GMSApiKey` in Info.plist is the iOS key.

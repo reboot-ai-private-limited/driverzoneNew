@@ -37,7 +37,7 @@
           "locationAlwaysPermission": false,
           "isIosBackgroundLocationEnabled": false,
           "isAndroidBackgroundLocationEnabled": false,
-          "motionUsagePermission": false
+          "motionUsagePermission": "DriverZone does not use your motion or fitness data. This message is required by a location component included in the app."
         }
       ],
       [
@@ -80,7 +80,7 @@
     },
     "ios": {
       "bundleIdentifier": "in.driverzone.customer",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "supportsTablet": false,
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
@@ -104,7 +104,8 @@
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "NSPhotoLibraryUsageDescription": "DriverZone does not access your photos. This message is required by system libraries included in the app."
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,

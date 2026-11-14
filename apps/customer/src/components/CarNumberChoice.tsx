@@ -57,28 +57,28 @@ export function CarNumberChoice({ vehicles, selection, onChange }: CarNumberChoi
         {answered ? null : <Text style={styles.required}>Required</Text>}
       </View>
 
-      {vehicles.length === 0 ? null : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.row}
-        >
-          {vehicles.map((vehicle) => (
-            <Chip
-              key={vehicle.id}
-              label={vehicle.plate_number}
-              selected={selection.kind === 'saved' && selection.id === vehicle.id}
-              onPress={() => onChange({ kind: 'saved', id: vehicle.id })}
-            />
-          ))}
+      {/* ALWAYS SHOWN, even with no saved car: the add option has to be findable on a first
+          booking too, not only once a car already exists. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.row}
+      >
+        {vehicles.map((vehicle) => (
           <Chip
-            label="+ Add another"
-            selected={typing}
-            onPress={() => onChange({ kind: 'new', plate: typing ? selection.plate : '' })}
+            key={vehicle.id}
+            label={vehicle.plate_number}
+            selected={selection.kind === 'saved' && selection.id === vehicle.id}
+            onPress={() => onChange({ kind: 'saved', id: vehicle.id })}
           />
-        </ScrollView>
-      )}
+        ))}
+        <Chip
+          label={vehicles.length === 0 ? '+ Add car number' : '+ Add another'}
+          selected={typing}
+          onPress={() => onChange({ kind: 'new', plate: typing ? selection.plate : '' })}
+        />
+      </ScrollView>
 
       {typing ? (
         <>

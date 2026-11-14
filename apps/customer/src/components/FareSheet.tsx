@@ -556,9 +556,15 @@ export function FareSheet({
               onVehicleType={setVehicleType}
             />
 
-            {carNumber === null ? null : (
-              <CarNumberChoice vehicles={savedCars} selection={carNumber} onChange={setCarNumber} />
-            )}
+            {/* Shown from the first frame — an empty "add car number" entry while the profile is
+                still loading — so the section never vanishes on a slow or failed profile request.
+                Once the profile arrives the effect above swaps in the default saved car, but only
+                if the customer has not already started typing. */}
+            <CarNumberChoice
+              vehicles={savedCars}
+              selection={carNumber ?? { kind: 'new', plate: '' }}
+              onChange={setCarNumber}
+            />
 
             {/*
               OFFERED ONLY TO A CUSTOMER WHO HAS FAVOURITES. A switch that can do nothing is worse

@@ -40,7 +40,12 @@
           "motionUsagePermission": false
         }
       ],
-      "@react-native-firebase/app",
+      [
+        "@react-native-firebase/app",
+        {
+          "disableSPM": true
+        }
+      ],
       "./plugins/withUpiQueries.js",
       "./plugins/withStripPermissions.js",
       "./plugins/withHighRefreshRate.js",

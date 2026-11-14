@@ -39,9 +39,13 @@ const { withAndroidManifest } = require('@expo/config-plugins');
  * `android/app/build/intermediates/merged_manifest/release/.../AndroidManifest.xml` — the merged
  * file — never in the prebuild one.
  *
- * **`RECORD_AUDIO` and `CAMERA` are NOT here, deliberately.** Both come from `expo-image-picker`,
- * which offers the same block at source: `["expo-image-picker", { "microphonePermission": false,
- * "cameraPermission": false }]` in `app.json` makes its own plugin emit exactly these directives.
+ * **`RECORD_AUDIO` and `CAMERA` are NOT here.** They used to arrive with `expo-image-picker`,
+ * which has since been removed from this app entirely (no profile photo upload), so nothing
+ * requests them any more. The historical note below is kept for context.
+ *
+ * Historically: `expo-image-picker` offered the block at source — `["expo-image-picker",
+ * { "microphonePermission": false, "cameraPermission": false }]` made its plugin emit exactly
+ * these directives.
  * Preferring a library's supported option over a local override keeps the reason next to the
  * dependency that caused it. Both are honest: `profile-setup.tsx` calls
  * `launchImageLibraryAsync({ mediaTypes: ['images'] })` — library only, stills only, no camera and

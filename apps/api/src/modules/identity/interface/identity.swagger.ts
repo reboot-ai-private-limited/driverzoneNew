@@ -98,6 +98,7 @@ const customerProfileDtoSchema = z.object({
   languages_known: z.array(z.string()),
   alternate_number: z.string().nullable(),
   emergency_contact: z.object({ name: z.string(), number: z.string() }).nullable(),
+  whatsapp_marketing_opt_in: z.boolean(),
   saved_addresses: z.array(savedAddressDtoSchema),
   vehicles: z.array(vehicleDtoSchema),
 });

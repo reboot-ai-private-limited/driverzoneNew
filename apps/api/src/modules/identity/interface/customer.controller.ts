@@ -79,6 +79,7 @@ function profileToDto(p: CustomerProfile): CustomerProfileDto {
       p.emergencyContact === null
         ? null
         : { name: p.emergencyContact.name, number: p.emergencyContact.phone },
+    whatsapp_marketing_opt_in: p.whatsappMarketingOptIn,
     saved_addresses: p.savedAddresses.map(addressToDto),
     vehicles: p.vehicles.map(vehicleToDto),
   };
@@ -144,6 +145,9 @@ export function makeCustomerControllers(deps: CustomerControllerDeps): CustomerC
                   ? null
                   : { name: input.emergency_contact.name, phone: input.emergency_contact.number },
             }),
+        ...(input.whatsapp_marketing_opt_in === undefined
+          ? {}
+          : { whatsappMarketingOptIn: input.whatsapp_marketing_opt_in }),
       });
 
       sendSuccess(req, res, profileToDto(updated), 'Profile updated');

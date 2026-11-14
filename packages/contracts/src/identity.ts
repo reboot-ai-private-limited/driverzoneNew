@@ -136,6 +136,11 @@ export interface CustomerProfileDto {
   languages_known: string[];
   alternate_number: string | null;
   emergency_contact: EmergencyContactDto | null;
+  /**
+   * Optional WhatsApp promotional messages — off unless the customer opts in. Sign-in codes and
+   * booking updates are transactional and are sent regardless of this flag.
+   */
+  whatsapp_marketing_opt_in: boolean;
   saved_addresses: SavedAddressDto[];
   vehicles: VehicleDto[];
 }
@@ -154,6 +159,7 @@ export interface UpdateCustomerProfileRequest {
   languages_known?: string[] | undefined;
   alternate_number?: string | null | undefined;
   emergency_contact?: EmergencyContactDto | null | undefined;
+  whatsapp_marketing_opt_in?: boolean | undefined;
 }
 
 // ─── Saved addresses ────────────────────────────────────────────────────────────────────────

@@ -1420,7 +1420,7 @@ export default function HomeScreen(): ReactElement {
       </View>
 
       {/*
-        BEFORE ANDROID'S LOCATION PROMPT, once. Closing the sheet counts as "Not now": the
+        BEFORE THE SYSTEM LOCATION PROMPT, once. Closing the sheet counts as "Not now": the
         customer dismissed a question, and re-showing it on every launch would be nagging.
       */}
       <BottomSheet visible={location.status === 'needs-consent'} onClose={location.decline}>
@@ -1430,8 +1430,8 @@ export default function HomeScreen(): ReactElement {
         <Text style={styles.consentTitle}>Use your location for pickup?</Text>
         <Text style={styles.consentBody}>
           DriverZone uses your location to set your pickup point and to check that drivers are
-          available where you are. It is only used while the app is open. Android will ask you to
-          allow it next.
+          available where you are. It is only used while the app is open. Your phone will ask you
+          to allow it next.
         </Text>
         <PrimaryButton label="Allow" onPress={location.allow} showArrow={false} />
         <Pressable

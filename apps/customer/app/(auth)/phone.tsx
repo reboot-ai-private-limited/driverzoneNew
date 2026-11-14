@@ -3,18 +3,21 @@ import { useMutation } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { type ReactElement, useState } from 'react';
 import {
+  Linking,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { Checkbox } from '@/components/Checkbox';
 import { Logo } from '@/components/Logo';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Skyline } from '@/components/Skyline';
 import { WaveBottom } from '@/components/Wave';
 import { isValidIndianMobile, normaliseInput, toE164 } from '@/features/auth/phoneNumber';
 import { sendOtp } from '@/lib/api/endpoints/auth';
+import { PRIVACY_URL, TERMS_URL } from '@/lib/config';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /**
@@ -29,6 +32,9 @@ export default function PhoneScreen(): ReactElement {
   const [national, setNational] = useState('');
   const [focused, setFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // OPTIONAL and unticked by default. Signing in and booking never depend on it; the choice is
+  // saved to the profile after verification and can be changed later under Notifications.
+  const [whatsappOffers, setWhatsappOffers] = useState(false);
 
   const valid = isValidIndianMobile(national);
 
@@ -40,7 +46,11 @@ export default function PhoneScreen(): ReactElement {
       // the server's cooldown rather than a number this app invented.
       router.push({
         pathname: '/otp',
-        params: { mobile, retryAfter: String(result.retry_after_seconds) },
+        params: {
+          mobile,
+          retryAfter: String(result.retry_after_seconds),
+          ...(whatsappOffers ? { whatsappOffers: '1' } : {}),
+        },
       });
     },
     onError: (cause) => {
@@ -123,6 +133,18 @@ export default function PhoneScreen(): ReactElement {
           </Text>
         ) : null}
 
+        <View style={styles.consentBlock}>
+          <Checkbox
+            checked={whatsappOffers}
+            onChange={setWhatsappOffers}
+            accessibilityLabel="Send me booking updates and promotional offers on WhatsApp (optional)"
+          >
+            <Text style={styles.consentText}>
+              Send me booking updates and promotional offers on WhatsApp
+            </Text>
+          </Checkbox>
+        </View>
+
         <View style={styles.buttonBlock}>
           <PrimaryButton
             label="Continue"
@@ -138,8 +160,21 @@ export default function PhoneScreen(): ReactElement {
 
         <Text style={styles.legal}>
           By continuing, you agree to our{' '}
-          <Text style={styles.legalLink}>Terms &amp; Conditions</Text> and{' '}
-          <Text style={styles.legalLink}>Privacy Policy</Text>
+          <Text
+            style={styles.legalLink}
+            accessibilityRole="link"
+            onPress={() => void Linking.openURL(TERMS_URL)}
+          >
+            Terms &amp; Conditions
+          </Text>{' '}
+          and{' '}
+          <Text
+            style={styles.legalLink}
+            accessibilityRole="link"
+            onPress={() => void Linking.openURL(PRIVACY_URL)}
+          >
+            Privacy Policy
+          </Text>
         </Text>
       </KeyboardAwareScrollView>
     </View>
@@ -190,6 +225,8 @@ const styles = StyleSheet.create({
   },
 
   errorText: { ...text.caption, color: colors.danger, marginTop: space.sm },
+  consentBlock: { marginTop: space.lg },
+  consentText: { ...text.caption, color: colors.fg },
   buttonBlock: { marginTop: space.lg },
 
   spacer: { flex: 1, minHeight: space.xl },
@@ -202,5 +239,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: space.lg,
   },
-  legalLink: { color: colors.link },
+  legalLink: { color: colors.link, textDecorationLine: 'underline' },
 });

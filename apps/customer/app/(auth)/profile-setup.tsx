@@ -2,20 +2,10 @@ import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useMutation } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
 import { type ReactElement, useState } from 'react';
-import {
-  Image,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import type { UpdateCustomerProfileRequest } from '@driverzone/contracts';
-import { BottomSheet } from '@/components/BottomSheet';
 import { FieldRow } from '@/components/FieldRow';
 import { Logo } from '@/components/Logo';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -24,39 +14,30 @@ import { WaveHeaderEdge } from '@/components/Wave';
 import {
   EMPTY_DRAFT,
   GENDER_OPTIONS,
-  PAYMENT_METHODS,
   type ProfileDraft,
   completionPercent,
   formatDob,
-  isPlausibleEmail,
   toDateOnly,
 } from '@/features/profile/completion';
 import { updateProfile } from '@/lib/api/endpoints/customer';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
-/** Which field owns the focus ring. One at a time, so the screen holds a single value. */
-type FocusTarget = 'name' | 'email' | 'address' | null;
+const MIN_NAME_LENGTH = 2;
 
 /**
- * Where a brand-new account lands, straight after `otp/verify` returned `is_new_user: true`.
+ * Where a brand-new account lands, straight after `otp/verify`, and where a signed-in account
+ * with no name is sent back to.
  *
- * **Only three of these fields reach the server today.** `PATCH /customer/profile` accepts
- * `full_name`, `gender` and `dob` (plus languages and emergency contact, which this screen does
- * not collect). Photo, email, payment method and address have no endpoint yet — see the note
- * above `handleSave`. They are collected and held in form state so the screen matches the
- * approved design, and the save reports honestly what it stored.
- *
- * Everything here is skippable, including the name. A customer account is created holding
- * nothing but a phone number and no endpoint ever requires more (docs/LLD/user.md §Customer) —
- * profiles complete progressively, so a wall here would be a wall we invented.
+ * NAME IS REQUIRED — it is what the driver is told to ask for at pickup. Gender and date of birth
+ * are optional and can be left blank. Every field shown here is one `PATCH /customer/profile`
+ * actually stores: a field the server would drop (photo, email, payment method, address) is not
+ * collected at all, rather than collected and silently thrown away.
  */
 export default function ProfileSetupScreen(): ReactElement {
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
-  const [focus, setFocus] = useState<FocusTarget>(null);
+  const [focused, setFocused] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
-  const [emailError, setEmailError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   function patch(next: Partial<ProfileDraft>): void {
@@ -64,44 +45,13 @@ export default function ProfileSetupScreen(): ReactElement {
   }
 
   const percent = completionPercent(draft);
+  const name = draft.fullName.trim();
+  const nameValid = name.length >= MIN_NAME_LENGTH;
 
-  /**
-   * NO PERMISSION REQUEST HERE, deliberately. `launchImageLibraryAsync` opens the system photo
-   * picker (`PickVisualMedia` on Android, `PHPickerViewController` on iOS) directly — both are
-   * privacy-preserving pickers that hand back only the one photo the customer chose, and neither
-   * needs a permission grant to open. A `requestMediaLibraryPermissionsAsync()` call ahead of it
-   * used to ask for broad photo-library access this screen never uses: on Android 13+ the library
-   * itself skips that request (it is a no-op there), but on Android 12 and below it does put up a
-   * real "Allow DriverZone to access photos and media on this device?" dialog — for a picker that
-   * does not need it, since the returned image's URI is granted directly by the picker regardless
-   * of whether this app holds any storage permission. Removing the call removes that dialog too.
-   */
-  async function pickPhoto(): Promise<void> {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      // Square, because every surface that shows an avatar crops it to a circle.
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (!result.canceled && result.assets[0] !== undefined) {
-      patch({ photoUri: result.assets[0].uri });
-    }
-  }
-
-  /**
-   * Builds the PATCH body BY OMISSION.
-   *
-   * `PATCH /customer/profile` treats an absent key as "leave it alone" and an explicit `null` as
-   * "clear it" — genuinely different intents (docs/LLD/user.md). Sending every field on every
-   * save would erase whatever the customer left blank here, which on a re-entry to this screen
-   * would wipe data they entered elsewhere.
-   */
+  /** Builds the PATCH body BY OMISSION — an absent key leaves the stored value alone. */
   const save = useMutation({
     mutationFn: async () => {
-      const body: UpdateCustomerProfileRequest = {};
-      const name = draft.fullName.trim();
-      if (name.length > 0) body.full_name = name;
+      const body: UpdateCustomerProfileRequest = { full_name: name };
       if (draft.gender !== null) body.gender = draft.gender;
       if (draft.dob !== null) body.dob = toDateOnly(draft.dob);
       return updateProfile(body);
@@ -114,21 +64,13 @@ export default function ProfileSetupScreen(): ReactElement {
   });
 
   function handleSave(): void {
-    const name = draft.fullName.trim();
-    if (name.length > 0 && name.length < 2) {
+    if (!nameValid) {
       setNameError('Enter your full name.');
       return;
     }
-    if (draft.email.trim().length > 0 && !isPlausibleEmail(draft.email)) {
-      setEmailError('Enter a valid email address.');
-      return;
-    }
     setNameError(null);
-    setEmailError(null);
     save.mutate();
   }
-
-  const selectedPayment = PAYMENT_METHODS.find((method) => method.value === draft.paymentMethod);
 
   return (
     <View style={styles.root}>
@@ -140,20 +82,9 @@ export default function ProfileSetupScreen(): ReactElement {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            style={styles.back}
-          >
-            <Feather name="arrow-left" size={22} color={colors.fg} />
-          </Pressable>
           <View style={styles.headerLogo}>
             <Logo width={150} />
           </View>
-          {/* Balances the back button so the logo stays optically centred. */}
-          <View style={styles.back} />
         </View>
 
         <WaveHeaderEdge height={40} />
@@ -161,56 +92,35 @@ export default function ProfileSetupScreen(): ReactElement {
         <View style={styles.titleRow}>
           <View style={styles.flex}>
             <Text style={styles.title}>Complete your profile</Text>
-            <Text style={styles.subtitle}>All of this is optional — skip anything you like.</Text>
+            <Text style={styles.subtitle}>
+              Your name is needed so your driver knows who to meet. Everything else is optional.
+            </Text>
           </View>
           <ProgressRing percent={percent} size={72} strokeWidth={6} />
         </View>
 
         <View style={styles.form}>
-          <View style={styles.avatarBlock}>
-            <Pressable
-              onPress={() => void pickPhoto()}
-              accessibilityRole="button"
-              accessibilityLabel={
-                draft.photoUri === null ? 'Add a profile photo' : 'Change your profile photo'
-              }
-              style={({ pressed }) => [styles.avatarPress, pressed && styles.pressedDim]}
-            >
-              {draft.photoUri === null ? (
-                <View style={styles.avatarPlaceholder}>
-                  <Feather name="user" size={38} color={colors.faint} />
-                </View>
-              ) : (
-                <Image source={{ uri: draft.photoUri }} style={styles.avatar} />
-              )}
-              <View style={styles.cameraBadge}>
-                <Feather name="camera" size={14} color={colors.fg} />
-              </View>
-            </Pressable>
-            <Text style={styles.avatarCaption}>
-              {draft.photoUri === null ? 'Add a photo' : 'Change photo'}
-            </Text>
-          </View>
-
-          <FieldRow icon="user" label="Full name" focused={focus === 'name'} error={nameError}>
+          <FieldRow icon="user" label="Full name (required)" focused={focused} error={nameError}>
             <TextInput
               value={draft.fullName}
               onChangeText={(value) => {
                 patch({ fullName: value });
                 if (nameError !== null) setNameError(null);
               }}
-              onFocus={() => setFocus('name')}
-              onBlur={() => setFocus(null)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               placeholder="Enter your full name"
               placeholderTextColor={colors.faint}
               autoCapitalize="words"
               autoComplete="name"
+              textContentType="name"
+              returnKeyType="done"
               style={styles.input}
-              accessibilityLabel="Full name"
+              accessibilityLabel="Full name, required"
             />
           </FieldRow>
 
-          <FieldRow label="Gender" boxed={false}>
+          <FieldRow label="Gender (optional)" boxed={false}>
             <View style={styles.genderRow}>
               {GENDER_OPTIONS.map((option) => {
                 const selected = draft.gender === option.value;
@@ -235,7 +145,7 @@ export default function ProfileSetupScreen(): ReactElement {
             </View>
           </FieldRow>
 
-          <FieldRow icon="calendar" label="Date of birth">
+          <FieldRow icon="calendar" label="Date of birth (optional)">
             <Pressable
               onPress={() => setShowDatePicker(true)}
               accessibilityRole="button"
@@ -249,60 +159,6 @@ export default function ProfileSetupScreen(): ReactElement {
             </Pressable>
           </FieldRow>
 
-          <FieldRow icon="mail" label="Email" focused={focus === 'email'} error={emailError}>
-            <TextInput
-              value={draft.email}
-              onChangeText={(value) => {
-                patch({ email: value });
-                if (emailError !== null) setEmailError(null);
-              }}
-              onFocus={() => setFocus('email')}
-              onBlur={() => setFocus(null)}
-              placeholder="you@example.com"
-              placeholderTextColor={colors.faint}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              style={styles.input}
-              accessibilityLabel="Email address"
-            />
-          </FieldRow>
-
-          <FieldRow icon="credit-card" label="Preferred payment method">
-            <Pressable
-              onPress={() => setShowPaymentSheet(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Select your preferred payment method"
-              style={styles.triggerRow}
-            >
-              <Text style={selectedPayment === undefined ? styles.placeholder : styles.value}>
-                {selectedPayment?.label ?? 'Select method'}
-              </Text>
-              <Feather name="chevron-down" size={18} color={colors.faint} />
-            </Pressable>
-          </FieldRow>
-
-          <FieldRow icon="map-pin" label="Current address" focused={focus === 'address'}>
-            <TextInput
-              value={draft.address}
-              onChangeText={(value) => patch({ address: value })}
-              onFocus={() => setFocus('address')}
-              onBlur={() => setFocus(null)}
-              placeholder="House, street, area"
-              placeholderTextColor={colors.faint}
-              style={styles.input}
-              accessibilityLabel="Current address"
-            />
-          </FieldRow>
-
-          {/* Honest about the gap: `PATCH /customer/profile` only persists name, gender and
-              dob today. The other fields are collected to match the approved design, but a
-              customer should not walk away believing a photo or an address was stored. */}
-          <Text style={styles.storageNote}>
-            Saved now: name, gender and date of birth. Photo, email, payment method and address
-            are coming soon.
-          </Text>
-
           {saveError !== null ? (
             <Text style={styles.saveError} accessibilityLiveRegion="polite">
               {saveError}
@@ -314,17 +170,8 @@ export default function ProfileSetupScreen(): ReactElement {
               label="Save & Continue"
               onPress={handleSave}
               loading={save.isPending}
+              disabled={!nameValid}
             />
-
-            <Pressable
-              onPress={() => router.replace('/home')}
-              accessibilityRole="button"
-              disabled={save.isPending}
-              hitSlop={8}
-              style={styles.skipButton}
-            >
-              <Text style={styles.skipLabel}>Skip for now</Text>
-            </Pressable>
           </View>
         </View>
       </KeyboardAwareScrollView>
@@ -338,41 +185,12 @@ export default function ProfileSetupScreen(): ReactElement {
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           maximumDate={new Date()}
           onChange={(event, selected) => {
-            // Android fires with type 'dismissed' on cancel and unmounts itself either way.
+            // The non-iOS picker fires with type 'dismissed' on cancel and unmounts itself.
             setShowDatePicker(Platform.OS === 'ios');
             if (event.type === 'set' && selected !== undefined) patch({ dob: selected });
           }}
         />
       ) : null}
-
-      {/*
-        `BottomSheet`, not a `Modal` with `animationType="slide"`. That prop animates the whole
-        modal window, backdrop included, so the dark scrim flew up from the bottom edge with the
-        panel. The backdrop has to fade in place while only the panel travels — see the component.
-      */}
-      <BottomSheet visible={showPaymentSheet} onClose={() => setShowPaymentSheet(false)}>
-        <Text style={styles.sheetTitle}>Preferred payment method</Text>
-        {PAYMENT_METHODS.map((method) => {
-          const selected = draft.paymentMethod === method.value;
-          return (
-            <Pressable
-              key={method.value}
-              onPress={() => {
-                patch({ paymentMethod: method.value });
-                setShowPaymentSheet(false);
-              }}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
-            >
-              <Text style={[styles.sheetOptionLabel, selected && styles.sheetOptionSelected]}>
-                {method.label}
-              </Text>
-              {selected ? <Feather name="check" size={18} color={colors.fg} /> : null}
-            </Pressable>
-          );
-        })}
-      </BottomSheet>
     </View>
   );
 }
@@ -394,8 +212,8 @@ const styles = StyleSheet.create({
     paddingBottom: space.sm,
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 32,
   },
-  back: { width: 32, height: 32, alignItems: 'flex-start', justifyContent: 'center' },
   headerLogo: { flex: 1, alignItems: 'center' },
 
   titleRow: {
@@ -408,38 +226,7 @@ const styles = StyleSheet.create({
   title: { ...text.title, color: colors.fg },
   subtitle: { ...text.body, color: colors.muted, marginTop: space.xs, paddingRight: space.md },
 
-  // A plain page section, not a raised card: a white card on a white page is a shadow with
-  // nothing behind it, and it cost 16pt of inset on both edges.
   form: { paddingHorizontal: space.lg },
-
-  avatarBlock: { alignItems: 'center', marginBottom: space.lg },
-  avatarPress: { width: 92, height: 92 },
-  pressedDim: { opacity: 0.85 },
-  avatar: { width: 92, height: 92, borderRadius: radius.pill },
-  avatarPlaceholder: {
-    width: 92,
-    height: 92,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bgSunken,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cameraBadge: {
-    position: 'absolute',
-    right: 0,
-    bottom: 2,
-    width: 30,
-    height: 30,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colors.bg,
-  },
-  avatarCaption: { ...text.caption, color: colors.muted, marginTop: space.sm },
 
   input: { fontSize: 15, color: colors.fg, paddingVertical: 0, paddingHorizontal: 0, height: 52 },
   placeholder: { fontSize: 15, color: colors.faint },
@@ -451,8 +238,6 @@ const styles = StyleSheet.create({
     height: 52,
   },
 
-  // `gap` rather than a margin on each chip: a trailing margin leaves the row 8pt short of the
-  // right edge and out of line with every field above it.
   genderRow: { flexDirection: 'row', gap: space.sm },
   genderChip: {
     flex: 1,
@@ -469,28 +254,7 @@ const styles = StyleSheet.create({
   genderLabel: { ...text.body, color: colors.fg },
   genderLabelSelected: { fontWeight: '700', fontFamily: fontFamily.bold },
 
-  storageNote: {
-    ...text.caption,
-    color: colors.muted,
-    marginTop: space.md,
-    textAlign: 'center',
-  },
   saveError: { ...text.body, color: colors.danger, marginTop: space.sm, textAlign: 'center' },
 
-  actions: { marginTop: space.md },
-  skipButton: { alignItems: 'center', paddingVertical: space.md, marginTop: space.xs },
-  skipLabel: { ...text.body, color: colors.link },
-
-  sheetTitle: { ...text.heading, color: colors.fg, marginBottom: space.sm },
-  sheetOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: space.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  sheetOptionPressed: { backgroundColor: colors.bgSunken },
-  sheetOptionLabel: { ...text.body, color: colors.fg },
-  sheetOptionSelected: { fontWeight: '700', fontFamily: fontFamily.bold },
+  actions: { marginTop: space.lg },
 });

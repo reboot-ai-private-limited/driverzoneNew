@@ -18,6 +18,10 @@ export interface CustomerProfile {
   languagesKnown: string[];
   alternatePhone: string | null;
   emergencyContact: { name: string; phone: string } | null;
+  /** Optional WhatsApp promotional messages. Never required; transactional messages ignore it. */
+  whatsappMarketingOptIn: boolean;
+  /** When the current opt-in/opt-out choice was made. Null if the customer never chose. */
+  whatsappMarketingConsentAt: Date | null;
   savedAddresses: SavedAddress[];
   vehicles: Vehicle[];
   /** When the account was created — the moment they first verified an OTP. Admin list only. */
@@ -41,6 +45,8 @@ export interface CustomerProfilePatch {
   languagesKnown?: string[];
   alternatePhone?: string | null;
   emergencyContact?: { name: string; phone: string } | null;
+  /** The customer's own choice only. The repository stamps `whatsappMarketingConsentAt`. */
+  whatsappMarketingOptIn?: boolean;
   /** Admin-only. No customer blocks themselves, so this never arrives from the self-serve route. */
   isBlocked?: boolean;
 }

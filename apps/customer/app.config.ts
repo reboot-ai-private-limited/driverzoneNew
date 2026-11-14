@@ -41,6 +41,23 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const apsEnvironment =
     process.env['IOS_APS_ENVIRONMENT'] === 'production' ? 'production' : 'development';
 
+  /*
+   * A STORE BUILD MUST CALL THE LIVE HTTPS API. `EXPO_PUBLIC_API_BASE_URL` is inlined into the JS
+   * bundle, so a release archived with the dev value (`http://localhost:4000/api`) ships an app
+   * whose every request fails — and App Transport Security blocks plain http on iOS anyway.
+   * `IOS_APS_ENVIRONMENT=production` is the marker for "this build leaves the machine", so that
+   * is when the check bites; local `expo run:ios` and Metro are unaffected.
+   */
+  if (apsEnvironment === 'production') {
+    const apiBase = process.env['EXPO_PUBLIC_API_BASE_URL'] ?? '';
+    if (!/^https:\/\//.test(apiBase) || /localhost|127\.0\.0\.1|192\.168\.|10\.0\./.test(apiBase)) {
+      throw new Error(
+        `[app.config] Store build (IOS_APS_ENVIRONMENT=production) but EXPO_PUBLIC_API_BASE_URL is "${apiBase}". ` +
+          'Set it to the live HTTPS API, e.g. https://api.driverzoneonline.com/api. See docs/engineering/ios-release-customer.md.',
+      );
+    }
+  }
+
   // A warning rather than a thrown error: `expo start` for Expo Go, `typecheck` and every CI task
   // evaluate this file too, and none of them need a key. Only a native build does, and a build
   // that quietly produced a black map is exactly what these lines exist to prevent.
@@ -74,9 +91,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       ...(config.plugins ?? []),
-      // The react-native-maps config plugin only takes the Android key; iOS goes through
-      // `ios.config.googleMapsApiKey` above.
-      ['react-native-maps', { androidGoogleMapsApiKey }],
+      // BOTH keys go to the react-native-maps plugin. On iOS it is what adds the
+      // `react-native-maps/Google` pod and the `GMSServices.provideAPIKey` call in AppDelegate;
+      // without `iosGoogleMapsApiKey` it actively removes both, and `MapCanvas` (PROVIDER_GOOGLE)
+      // fails on iOS. `ios.config.googleMapsApiKey` above only writes the Info.plist key.
+      ['react-native-maps', { androidGoogleMapsApiKey, iosGoogleMapsApiKey }],
     ],
   };
 };

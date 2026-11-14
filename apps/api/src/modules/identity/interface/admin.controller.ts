@@ -216,6 +216,7 @@ function mapCustomerToDetailsDto(c: CustomerProfile): AdminCustomerDetailsDto {
     gender: c.gender,
     languages_known: c.languagesKnown,
     alternate_number: c.alternatePhone,
+    whatsapp_marketing_opt_in: c.whatsappMarketingOptIn,
     emergency_contact:
       c.emergencyContact === null
         ? null

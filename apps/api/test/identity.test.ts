@@ -14,7 +14,7 @@ import {
   hashRefreshToken,
 } from '../src/modules/identity/domain/session.entity.js';
 import { SendOtpUseCase } from '../src/modules/identity/application/useCases/sendOtp.usecase.js';
-import { VerifyOtpUseCase } from '../src/modules/identity/application/useCases/verifyOtp.usecase.js';
+import { VerifyOtpUseCase, isReviewCode } from '../src/modules/identity/application/useCases/verifyOtp.usecase.js';
 import { TokenIssuer } from '../src/modules/identity/application/tokenIssuer.js';
 import type { OtpChallenge } from '../src/modules/identity/domain/otpChallenge.entity.js';
 import type { OtpStorePort } from '../src/modules/identity/domain/otpStore.port.js';
@@ -641,7 +641,8 @@ describe('VerifyOtpUseCase — dev bypass', () => {
 // ─── App-store review login ─────────────────────────────────────────────────────────────────
 
 describe('review login', () => {
-  const REVIEW = { phone: '+919000000000', code: '000000' };
+  const REVIEW = { phones: ['+919000000000', '+919000000001'], code: '000000' };
+  const REVIEW_PHONE = '+919000000000';
 
   function verifier(store: OtpStorePort, accounts: AccountRepositoryPort, review = REVIEW): VerifyOtpUseCase {
     return new VerifyOtpUseCase(
@@ -660,7 +661,7 @@ describe('review login', () => {
 
     const result = await verifier(fakeStore(), accounts).execute({
       role: 'CUSTOMER',
-      phone: REVIEW.phone,
+      phone: REVIEW_PHONE,
       code: REVIEW.code,
     });
 
@@ -670,10 +671,10 @@ describe('review login', () => {
   });
 
   it('is never accepted for a driver or admin login', async () => {
-    const existing: Account = { id: 'acc_1', mobileNumber: REVIEW.phone, fullName: 'X', isBlocked: false };
+    const existing: Account = { id: 'acc_1', mobileNumber: REVIEW_PHONE, fullName: 'X', isBlocked: false };
     for (const role of ['DRIVER', 'ADMIN'] as const) {
       const code = await codeOfRejection(
-        verifier(fakeStore(), fakeAccounts(existing)).execute({ role, phone: REVIEW.phone, code: REVIEW.code }),
+        verifier(fakeStore(), fakeAccounts(existing)).execute({ role, phone: REVIEW_PHONE, code: REVIEW.code }),
       );
       expect(code).toBe('OTP_INVALID_OR_EXPIRED');
     }
@@ -684,7 +685,7 @@ describe('review login', () => {
       verifier(fakeStore(), fakeAccounts()).execute({ role: 'CUSTOMER', phone: '+919876543210', code: REVIEW.code }),
     );
     const wrong = await codeOfRejection(
-      verifier(fakeStore(), fakeAccounts()).execute({ role: 'CUSTOMER', phone: REVIEW.phone, code: '123456' }),
+      verifier(fakeStore(), fakeAccounts()).execute({ role: 'CUSTOMER', phone: REVIEW_PHONE, code: '123456' }),
     );
 
     expect(other).toBe('OTP_INVALID_OR_EXPIRED');
@@ -692,10 +693,10 @@ describe('review login', () => {
   });
 
   it('still refuses a suspended demo account', async () => {
-    const blocked: Account = { id: 'acc_1', mobileNumber: REVIEW.phone, fullName: 'X', isBlocked: true };
+    const blocked: Account = { id: 'acc_1', mobileNumber: REVIEW_PHONE, fullName: 'X', isBlocked: true };
 
     const code = await codeOfRejection(
-      verifier(fakeStore(), fakeAccounts(blocked)).execute({ role: 'CUSTOMER', phone: REVIEW.phone, code: REVIEW.code }),
+      verifier(fakeStore(), fakeAccounts(blocked)).execute({ role: 'CUSTOMER', phone: REVIEW_PHONE, code: REVIEW.code }),
     );
 
     expect(code).toBe('FORBIDDEN');
@@ -703,11 +704,25 @@ describe('review login', () => {
 
   it('sends no code to the demo number, but still sends to everyone else', async () => {
     const sender = fakeSender();
-    const useCase = new SendOtpUseCase(fakeStore(), sender, fakeAccounts(), PEPPER, REVIEW.phone);
+    const useCase = new SendOtpUseCase(fakeStore(), sender, fakeAccounts(), PEPPER, REVIEW.phones);
 
-    await useCase.execute({ role: 'CUSTOMER', phone: REVIEW.phone });
+    await useCase.execute({ role: 'CUSTOMER', phone: REVIEW_PHONE });
+    await useCase.execute({ role: 'CUSTOMER', phone: '+919000000001' });
     await useCase.execute({ role: 'CUSTOMER', phone: '+919876543210' });
 
     expect(sender.sent.map((s) => s.phone)).toEqual(['+919876543210']);
+  });
+
+  it('signs the SECOND demo number in too, so a reviewer can still test after deleting the first', async () => {
+    const result = await verifier(fakeStore(), fakeAccounts()).execute({ role: 'CUSTOMER', phone: '+919000000001', code: REVIEW.code });
+    expect(result.accessToken).toBeTruthy();
+  });
+
+  it('accepts the fixed code as a deletion code only for a customer on a review number', () => {
+    expect(isReviewCode(REVIEW, 'CUSTOMER', '+919000000001', REVIEW.code)).toBe(true);
+    expect(isReviewCode(REVIEW, 'CUSTOMER', '+919876543210', REVIEW.code)).toBe(false);
+    expect(isReviewCode(REVIEW, 'CUSTOMER', REVIEW_PHONE, '111111')).toBe(false);
+    expect(isReviewCode(REVIEW, 'DRIVER', REVIEW_PHONE, REVIEW.code)).toBe(false);
+    expect(isReviewCode(undefined, 'CUSTOMER', REVIEW_PHONE, REVIEW.code)).toBe(false);
   });
 });

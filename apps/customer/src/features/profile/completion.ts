@@ -1,24 +1,16 @@
 import type { CustomerProfileDto, Gender } from '@driverzone/contracts';
 
-/** Everything the profile form collects, including the parts the API cannot store yet. */
+/** What the first-run profile form collects — only fields  stores. */
 export interface ProfileDraft {
-  photoUri: string | null;
   fullName: string;
   gender: Gender | null;
   dob: Date | null;
-  email: string;
-  paymentMethod: string | null;
-  address: string;
 }
 
 export const EMPTY_DRAFT: ProfileDraft = {
-  photoUri: null,
   fullName: '',
   gender: null,
   dob: null,
-  email: '',
-  paymentMethod: null,
-  address: '',
 };
 
 /**
@@ -35,13 +27,9 @@ export const EMPTY_DRAFT: ProfileDraft = {
 export function completionPercent(draft: ProfileDraft): number {
   const filled = [
     true, // mobile_number, verified at sign-in
-    draft.photoUri !== null,
     draft.fullName.trim().length > 0,
     draft.gender !== null,
     draft.dob !== null,
-    draft.email.trim().length > 0,
-    draft.paymentMethod !== null,
-    draft.address.trim().length > 0,
   ];
   const done = filled.filter(Boolean).length;
   return Math.round((done / filled.length) * 100);
@@ -99,18 +87,6 @@ export const LANGUAGE_OPTIONS: readonly string[] = [
   'Assamese',
 ];
 
-/**
- * UPI first — it is what the Indian market uses (docs/LLD/roadmap.md phase 8).
- *
- * Local to this screen for now. There is no payment module on the API, so these are not ids
- * from a server and must not be treated as though they were.
- */
-export const PAYMENT_METHODS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: 'UPI', label: 'UPI' },
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CARD', label: 'Card' },
-];
-
 /** The API takes `dob` as a date-only string; `toISOString` would send a timezone with it. */
 export function toDateOnly(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -122,7 +98,3 @@ export function formatDob(date: Date): string {
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-/** Deliberately permissive — the server validates, and a clever regex here only rejects real addresses. */
-export function isPlausibleEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}

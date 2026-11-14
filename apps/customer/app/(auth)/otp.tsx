@@ -16,6 +16,7 @@ import { WaveHeaderEdge } from '@/components/Wave';
 import { formatForDisplay } from '@/features/auth/phoneNumber';
 import { ApiError } from '@/lib/api/ApiError';
 import { sendOtp, verifyOtp } from '@/lib/api/endpoints/auth';
+import { updateProfile } from '@/lib/api/endpoints/customer';
 import * as session from '@/lib/auth/session';
 import { colors, fontFamily, space, text } from '@/theme/theme';
 
@@ -30,7 +31,11 @@ const OTP_LENGTH = 6;
  * tap into a guaranteed rejection or hold them back longer than the server actually requires.
  */
 export default function OtpScreen(): ReactElement {
-  const params = useLocalSearchParams<{ mobile?: string; retryAfter?: string }>();
+  const params = useLocalSearchParams<{
+    mobile?: string;
+    retryAfter?: string;
+    whatsappOffers?: string;
+  }>();
   const mobile = params.mobile ?? '';
 
   const [code, setCode] = useState('');
@@ -58,9 +63,17 @@ export default function OtpScreen(): ReactElement {
     },
     onSuccess: async (result) => {
       await session.beginSession(result);
+      // The optional WhatsApp offers box on the sign-in screen. Only an explicit tick is sent —
+      // an untouched box never overwrites a choice an existing customer made earlier. Best
+      // effort: a failure here must not stand between the customer and the app, and the choice
+      // can be made again under Profile → Notifications.
+      if (params.whatsappOffers === '1') {
+        await updateProfile({ whatsapp_marketing_opt_in: true }).catch(() => undefined);
+      }
       // `replace`, so back from the signed-in app exits rather than returning to a code that has
-      // already been consumed.
-      router.replace(result.is_new_user === true ? '/profile-setup' : '/home');
+      // already been consumed. A name is required, so an account without one finishes setup first.
+      const needsName = result.is_new_user === true || (result.user.full_name ?? '').trim() === '';
+      router.replace(needsName ? '/profile-setup' : '/home');
     },
     onError: (cause) => {
       setCode('');

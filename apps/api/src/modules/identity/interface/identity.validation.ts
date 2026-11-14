@@ -95,6 +95,7 @@ export const updateCustomerProfileSchema = z.object({
   languages_known: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   alternate_number: mobileNumber.nullable().optional(),
   emergency_contact: emergencyContact.nullable().optional(),
+  whatsapp_marketing_opt_in: z.boolean().optional(),
 });
 
 // ─── Addresses ──────────────────────────────────────────────────────────────────────────────

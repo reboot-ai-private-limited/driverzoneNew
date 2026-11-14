@@ -5,6 +5,10 @@
  */
 export const API_BASE_URL = process.env['EXPO_PUBLIC_API_BASE_URL'] ?? 'http://localhost:4000/api';
 
+/** Public legal pages on the website — opened from the sign-in screen. */
+export const TERMS_URL = 'https://www.driverzoneonline.com/terms';
+export const PRIVACY_URL = 'https://www.driverzoneonline.com/privacy';
+
 /** Every customer route the app calls is namespaced under this (apps/api/src/routes.ts). */
 export const ROLE_PREFIX = '/customer';
 

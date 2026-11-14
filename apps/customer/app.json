@@ -43,7 +43,9 @@
       [
         "@react-native-firebase/app",
         {
-          "disableSPM": true
+          "ios": {
+            "disableSPM": true
+          }
         }
       ],
       "./plugins/withUpiQueries.js",

@@ -75,7 +75,7 @@ export function coverageCopy(state: CoverageState): CoverageCopy | null {
     case 'servedFree':
       return {
         tone: 'good',
-        title: 'We have drivers in your area',
+        title: 'Driver Zone serves this area',
         body: inCity(state.cityName),
       };
     case 'served':
@@ -94,7 +94,7 @@ export function coverageCopy(state: CoverageState): CoverageCopy | null {
         title: "We don't have drivers at this pickup point yet",
         body:
           state.cityName === null
-            ? 'Try a pickup point closer to a town we serve.'
+            ? 'We currently serve Siliguri and nearby areas. Search for a pickup point there to see fares.'
             : `We are in ${state.cityName}, but not at this exact spot. Try moving the pin.`,
       };
     case 'unresolved':

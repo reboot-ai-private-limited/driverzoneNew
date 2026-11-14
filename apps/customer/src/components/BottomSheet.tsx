@@ -111,15 +111,11 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps): R
       fade.setValue(0);
       const frame = requestAnimationFrame(() => {
         Animated.parallel([
-          // A firm, barely-overshooting spring: quick to arrive, one soft settle, no bounce
-          // that would show the screen edge past the sheet.
-          Animated.spring(progress, {
+          // A plain ease-out glide — no spring, so nothing can overshoot or bounce.
+          Animated.timing(progress, {
             toValue: 1,
-            stiffness: 210,
-            damping: 24,
-            mass: 1,
-            restDisplacementThreshold: 0.2,
-            restSpeedThreshold: 0.2,
+            duration: 260,
+            easing: Easing.out(Easing.cubic),
             useNativeDriver: true,
           }),
           Animated.timing(fade, {

@@ -3,7 +3,8 @@ import { router } from 'expo-router';
 import { type ReactElement, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { needsBackgroundLocationDisclosure } from '@/features/onboarding/backgroundLocationDisclosure';
+import { ensureDutyMachinery } from '@/duty/dutyRecovery';
+import { needsLocationDisclosure } from '@/features/onboarding/backgroundLocationDisclosure';
 import {
   markNotificationsAccepted,
   markNotificationsDeclined,
@@ -47,10 +48,13 @@ export default function NotificationDisclosureScreen(): ReactElement {
 
   /** On to the location disclosure if the shift still needs it, otherwise back to duty. */
   async function next(): Promise<void> {
-    if (await needsBackgroundLocationDisclosure()) {
+    if (await needsLocationDisclosure()) {
       router.replace('/location-disclosure');
       return;
     }
+    // The machinery may have started before notifications were allowed; re-run it so the duty
+    // service picks the grant up now rather than at the next resume. A no-op when off duty.
+    void ensureDutyMachinery();
     if (router.canGoBack()) router.back();
     else router.replace('/home');
   }

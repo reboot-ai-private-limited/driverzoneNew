@@ -25,6 +25,7 @@ the zone model, pricing, dispatch. This directory is about the _code_.
 | [Shared packages](shared-packages.md)                         | What belongs in `contracts` / `geo` / `design-system` / `mobile-ui` — and what must never |
 | [Mobile in the monorepo](mobile-in-monorepo.md)               | Expo + pnpm + Metro, and the resolution trap                                              |
 | [Build & deploy](build-and-deploy.md)                         | Artifacts, images, CI filtering, what deploys where                                       |
+| [Customer app — iOS release](ios-release-customer.md)           | Xcode build on a Mac, App Store reviewer accounts and notes                               |
 | [Testing](testing.md)                                         | What to test at which level, and with what                                                |
 | [Adding a module](adding-a-module.md)                         | The checklist                                                                             |
 

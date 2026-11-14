@@ -7,5 +7,5 @@ import { Stack } from 'expo-router';
  * the signed-in screens.
  */
 export default function AuthLayout(): ReactElement {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 240 }} />;
 }

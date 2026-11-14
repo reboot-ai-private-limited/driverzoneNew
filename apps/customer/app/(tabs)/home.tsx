@@ -17,7 +17,6 @@ import {
 import Animated, {
   FadeIn,
   FadeInDown,
-  FadeInUp,
   FadeOut,
   LinearTransition,
   useSharedValue,
@@ -892,17 +891,14 @@ export default function HomeScreen(): ReactElement {
 
       <View style={styles.topBar} pointerEvents="box-none">
         {picking ? (
-          <Animated.View
-            key="search"
-            style={styles.searchRow}
-            // Starts as the logo row finishes leaving, so the two cross in the same spot rather
-            // than sitting on top of each other at half opacity.
-            entering={FadeInUp.delay(motion.handoff).duration(motion.emphasis)}
-            exiting={FadeOut.duration(motion.exit)}
-          >
+          // NO enter/exit fade on this row. On Android the layout animation could stall part-way,
+          // leaving the back button and search field stuck semi-transparent over the map — which
+          // read as a grey shadow on the field every time the picker opened. It appears solid.
+          <View key="search" style={styles.searchRow}>
             {/* The back control is its own circle rather than an icon crammed inside the field.
                 Two different actions — leave, and type — should not share one surface. */}
-            <GlassPanel rounded="pill">
+            {/* Solid like the field beside it — glass let map labels show through. */}
+            <View style={styles.searchBack}>
               <Pressable
                 onPress={cancelPicking}
                 hitSlop={10}
@@ -912,12 +908,12 @@ export default function HomeScreen(): ReactElement {
               >
                 <Feather name="arrow-left" size={20} color={colors.fg} />
               </Pressable>
-            </GlassPanel>
+            </View>
 
-            {/* Liquid glass: the field is a lit pane of glass over the map, not a white card
-                dropped on top of it. The frost, the diagonal sheen and the bright rim all
-                come from `GlassPanel liquid`; this only lays out what sits on the pane. */}
-            <GlassPanel rounded="pill" liquid style={styles.searchGlass}>
+            {/* A plain solid field. It used to be translucent "liquid glass" with a drop shadow,
+                and on Android that shadow showed THROUGH the glass as a grey smudge the moment
+                the picker opened. Solid white with a hairline border reads clean on any map. */}
+            <View style={styles.searchGlass}>
               <View style={styles.searchInner}>
                 <View style={styles.searchGlyph}>
                   <Feather name="search" size={16} color={colors.onFg} />
@@ -960,8 +956,8 @@ export default function HomeScreen(): ReactElement {
                   </Pressable>
                 ) : null}
               </View>
-            </GlassPanel>
-          </Animated.View>
+            </View>
+          </View>
         ) : null}
 
         {/* THE SUGGESTION LIST.
@@ -1424,7 +1420,7 @@ export default function HomeScreen(): ReactElement {
       </View>
 
       {/*
-        BEFORE ANDROID'S LOCATION PROMPT, once. Closing the sheet counts as "Not now": the
+        BEFORE THE SYSTEM LOCATION PROMPT, once. Closing the sheet counts as "Not now": the
         customer dismissed a question, and re-showing it on every launch would be nagging.
       */}
       <BottomSheet visible={location.status === 'needs-consent'} onClose={location.decline}>
@@ -1434,8 +1430,8 @@ export default function HomeScreen(): ReactElement {
         <Text style={styles.consentTitle}>Use your location for pickup?</Text>
         <Text style={styles.consentBody}>
           DriverZone uses your location to set your pickup point and to check that drivers are
-          available where you are. It is only used while the app is open. Android will ask you to
-          allow it next.
+          available where you are. It is only used while the app is open. Your phone will ask you
+          to allow it next.
         </Text>
         <PrimaryButton label="Allow" onPress={location.allow} showArrow={false} />
         <Pressable
@@ -1659,11 +1655,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // The pane itself: fills the row beside the back button and carries the drop shadow that
-  // lifts the glass off the map. Frost, sheen and rim are the GlassPanel's `liquid` mode.
+  searchBack: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  // The field: fills the row beside the back button. Solid, flat, no shadow — see the JSX note.
   searchGlass: {
     flex: 1,
-    ...shadow.card,
+    backgroundColor: colors.bg,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   searchInner: {
     flexDirection: 'row',

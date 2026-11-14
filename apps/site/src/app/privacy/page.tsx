@@ -137,13 +137,19 @@ export default function PrivacyPage(): ReactElement {
             as a customer, and a confirmation when your driver account is approved.
           </li>
           <li>
-            <strong>Trip notifications</strong> in the app about your own bookings.
+            <strong>Trip notifications</strong> in the app and on WhatsApp about your own bookings.
+          </li>
+          <li>
+            <strong>Promotional offers on WhatsApp — only if you opt in.</strong> This is optional:
+            the box on the sign-in screen is unticked by default, and you can sign in and book
+            without it. We record your choice and when you made it.
           </li>
         </ul>
         <p>
-          You can stop non-essential WhatsApp messages at any time using the opt-out option in the
-          message, by blocking our number in WhatsApp, or by writing to us. Sign-in codes and
-          messages about a trip in progress are part of the service and are sent regardless.
+          Sign-in codes and messages about your bookings are transactional — part of the service —
+          and are sent regardless. Promotional messages are separate: you can withdraw consent at
+          any time in the app (Profile → Notifications → Offers on WhatsApp), using the opt-out
+          option in the message, or by writing to us.
         </p>
       </LegalSection>
 
@@ -219,7 +225,7 @@ export default function PrivacyPage(): ReactElement {
           </li>
           <li>
             <strong>Deletion.</strong> You can delete your account yourself, at any time, in the app
-            (Account → Delete account) or on our{' '}
+            (Profile → Delete account) — no need to contact support — or on our{' '}
             <Link href="/delete-account">account deletion page</Link> without installing the app.
           </li>
           <li>
@@ -267,6 +273,15 @@ export default function PrivacyPage(): ReactElement {
           <a href={`mailto:${LEGAL.grievanceOfficerEmail}`}>{LEGAL.grievanceOfficerEmail}</a>{' '}
           or by post to {CONTACT.address}. We will acknowledge a complaint within 48 hours and aim
           to resolve it within 30 days.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Platform &amp; Publisher Disclosure">
+        <p>
+          <strong>Platform &amp; Publisher Disclosure:</strong> The Driver Zone mobile applications
+          on the Apple App Store and Google Play Store are officially developed, published, and
+          technically maintained by our authorized technology partner, Reboot AI Private Limited,
+          on behalf of Driver Zone.
         </p>
       </LegalSection>
     </LegalPage>

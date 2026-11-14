@@ -94,6 +94,8 @@ interface RawCustomer {
   languagesKnown?: string[];
   alternatePhone?: string | null;
   emergencyContact?: { name?: string; phone?: string } | null;
+  whatsappMarketingOptIn?: boolean;
+  whatsappMarketingConsentAt?: Date | null;
   savedAddresses?: unknown[];
   vehicles?: unknown[];
   isBlocked?: boolean;
@@ -116,6 +118,8 @@ function toDomain(doc: RawCustomer): CustomerProfile {
       contact?.name !== undefined && contact.phone !== undefined
         ? { name: contact.name, phone: contact.phone }
         : null,
+    whatsappMarketingOptIn: doc.whatsappMarketingOptIn ?? false,
+    whatsappMarketingConsentAt: doc.whatsappMarketingConsentAt ?? null,
     savedAddresses: ((doc.savedAddresses ?? []) as StoredAddress[]).map(addressToDomain),
     vehicles: ((doc.vehicles ?? []) as StoredVehicle[]).map(vehicleToDomain),
     // `timestamps: true` guarantees `createdAt` on anything the schema has written. The fallback
@@ -142,6 +146,10 @@ function toSet(patch: CustomerProfilePatch): Record<string, unknown> {
   if (patch.languagesKnown !== undefined) set['languagesKnown'] = patch.languagesKnown;
   if (patch.alternatePhone !== undefined) set['alternatePhone'] = patch.alternatePhone;
   if (patch.emergencyContact !== undefined) set['emergencyContact'] = patch.emergencyContact;
+  if (patch.whatsappMarketingOptIn !== undefined) {
+    set['whatsappMarketingOptIn'] = patch.whatsappMarketingOptIn;
+    set['whatsappMarketingConsentAt'] = new Date();
+  }
   if (patch.isBlocked !== undefined) set['isBlocked'] = patch.isBlocked;
   return set;
 }

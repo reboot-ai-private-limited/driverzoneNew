@@ -1,25 +1,24 @@
 import { Feather } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { router, useLocalSearchParams } from 'expo-router';
-import { type ReactElement, type ReactNode, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { type ReactElement, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { CUSTOMER_TERMS, type TermsBlock } from '@/features/legal/customerTerms';
-import { PAYMENT_METHODS } from '@/features/profile/completion';
+import { getProfile, updateProfile } from '@/lib/api/endpoints/customer';
+import { PRIVACY_URL } from '@/lib/config';
+import { keys } from '@/lib/query/keys';
 import { colors, fontFamily, radius, space, text } from '@/theme/theme';
 
 /**
- * One route standing in for six Account-tab rows that have nothing behind them yet:
- * Preferred Payment Method, Notifications, Help & Support, Privacy Policy, Terms & Conditions,
- * About DriverZone. None of these has an API surface today — no stored payment preference, no
- * notification settings, no CMS-backed legal or help content — so a single generic screen beats
- * six near-identical files, and the ones with a real answer coming (payment, notifications) say
- * so plainly rather than pretending a local toggle is a saved setting.
+ * One route for five Account-tab rows: Notifications, Help & Support, Privacy Policy,
+ * Terms & Conditions, About DriverZone. Only Notifications talks to the API (the WhatsApp offers
+ * preference); the rest is static content, so one generic screen beats five near-identical files.
  */
-const TOPICS = ['payment-method', 'notifications', 'help', 'privacy', 'terms', 'about'] as const;
+const TOPICS = ['notifications', 'help', 'privacy', 'terms', 'about'] as const;
 type Topic = (typeof TOPICS)[number];
 
 const TITLES: Record<Topic, string> = {
-  'payment-method': 'Preferred Payment Method',
   notifications: 'Notifications',
   help: 'Help & Support',
   privacy: 'Privacy Policy',
@@ -52,8 +51,6 @@ export default function InfoScreen(): ReactElement {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {topic === null ? (
           <Text style={styles.body}>Nothing here.</Text>
-        ) : topic === 'payment-method' ? (
-          <PaymentMethodBody />
         ) : topic === 'notifications' ? (
           <NotificationsBody />
         ) : topic === 'help' ? (
@@ -62,15 +59,6 @@ export default function InfoScreen(): ReactElement {
           <StaticBody topic={topic} />
         )}
       </ScrollView>
-    </View>
-  );
-}
-
-function DemoNotice({ children }: { children: ReactNode }): ReactElement {
-  return (
-    <View style={styles.notice}>
-      <Feather name="info" size={13} color={colors.muted} />
-      <Text style={styles.noticeText}>{children}</Text>
     </View>
   );
 }
@@ -91,73 +79,68 @@ function BulletList({ items }: { items: string[] }): ReactElement {
 }
 
 /**
- * LOCAL STATE ONLY. There is no field on `CustomerProfileDto` for a payment preference, and
- * every booking today books in `CASH` regardless of anything picked here (`FareSheet.tsx`) — so
- * this choice is not sent anywhere and does not change what happens at Confirm. Shown honestly
- * rather than hidden, because the row exists in the design and a missing screen reads as broken.
+ * Notification preferences that are actually saved.
+ *
+ * Booking updates and sign-in codes are TRANSACTIONAL — the service cannot work without them — so
+ * they are explained, not offered as a switch. The one real choice is optional WhatsApp
+ * promotional messages, stored on the profile (`whatsapp_marketing_opt_in`) and off by default.
  */
-function PaymentMethodBody(): ReactElement {
-  const [selected, setSelected] = useState<string>('CASH');
-
-  return (
-    <>
-      <DemoNotice>
-        This choice is not saved yet — bookings currently always go through as cash, regardless of
-        what you pick here.
-      </DemoNotice>
-      {PAYMENT_METHODS.map((method) => {
-        const active = method.value === selected;
-        return (
-          <Pressable
-            key={method.value}
-            onPress={() => setSelected(method.value)}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: active }}
-            style={[styles.optionRow, active && styles.optionRowActive]}
-          >
-            <Text style={styles.optionLabel}>{method.label}</Text>
-            {active ? <Feather name="check-circle" size={18} color={colors.fg} /> : null}
-          </Pressable>
-        );
-      })}
-    </>
-  );
-}
-
-const NOTIFICATION_TOGGLES = [
-  { key: 'booking', label: 'Booking updates', hint: 'Driver assigned, arriving, trip started' },
-  { key: 'promo', label: 'Offers & promotions', hint: 'Occasional discounts and news' },
-  { key: 'account', label: 'Account activity', hint: 'Sign-ins and profile changes' },
-] as const;
-
-/** LOCAL STATE ONLY — there is no notification-preferences endpoint to read from or write to. */
 function NotificationsBody(): ReactElement {
-  const [state, setState] = useState<Record<string, boolean>>({
-    booking: true,
-    promo: false,
-    account: true,
+  const queryClient = useQueryClient();
+  const profile = useQuery({ queryKey: keys.profile.me(), queryFn: getProfile });
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = useMutation({
+    mutationFn: (next: boolean) => updateProfile({ whatsapp_marketing_opt_in: next }),
+    onMutate: () => setError(null),
+    onSuccess: (updated) => queryClient.setQueryData(keys.profile.me(), updated),
+    onError: (cause) =>
+      setError(cause instanceof Error ? cause.message : 'Could not save your choice. Please try again.'),
   });
 
+  const optedIn = toggle.isPending
+    ? (toggle.variables ?? false)
+    : (profile.data?.whatsapp_marketing_opt_in ?? false);
+
   return (
     <>
-      <DemoNotice>
-        These switches are not saved — there is nowhere on the server yet for a notification
-        preference to live.
-      </DemoNotice>
-      {NOTIFICATION_TOGGLES.map((item) => (
-        <View key={item.key} style={styles.toggleRow}>
-          <View style={styles.flex}>
-            <Text style={styles.optionLabel}>{item.label}</Text>
-            <Text style={styles.toggleHint}>{item.hint}</Text>
-          </View>
+      <View style={styles.toggleRow}>
+        <View style={styles.flex}>
+          <Text style={styles.optionLabel}>Booking updates &amp; sign-in codes</Text>
+          <Text style={styles.toggleHint}>
+            Always on. Sign-in codes and updates about your bookings (driver assigned, arriving,
+            trip completed) are sent by app notification and WhatsApp, because the service needs
+            them to work.
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.toggleRow}>
+        <View style={styles.flex}>
+          <Text style={styles.optionLabel}>Offers on WhatsApp</Text>
+          <Text style={styles.toggleHint}>
+            Optional. Occasional promotional offers from DriverZone. You can turn this off at any
+            time.
+          </Text>
+        </View>
+        {profile.isPending ? (
+          <ActivityIndicator color={colors.muted} />
+        ) : (
           <Switch
-            value={state[item.key] ?? false}
-            onValueChange={(next) => setState((prev) => ({ ...prev, [item.key]: next }))}
+            value={optedIn}
+            disabled={profile.isError || toggle.isPending}
+            onValueChange={(next) => toggle.mutate(next)}
             trackColor={{ false: colors.border, true: colors.brand }}
             thumbColor={colors.card}
+            accessibilityLabel="Send me promotional offers on WhatsApp"
           />
-        </View>
-      ))}
+        )}
+      </View>
+
+      {profile.isError ? (
+        <Text style={styles.errorText}>We could not load your preferences. Please try again later.</Text>
+      ) : null}
+      {error !== null ? <Text style={styles.errorText}>{error}</Text> : null}
     </>
   );
 }
@@ -215,6 +198,20 @@ function HelpBody(): ReactElement {
         </Pressable>
       </View>
     </>
+  );
+}
+
+/** Shown at the foot of the in-app Privacy Policy and Terms, as on the website. */
+function PublisherDisclosure(): ReactElement {
+  return (
+    <View style={styles.policySection}>
+      <Text style={styles.sectionHeading}>Platform &amp; Publisher Disclosure</Text>
+      <Text style={styles.sectionBody}>
+        The Driver Zone mobile applications on the Apple App Store and Google Play Store are
+        officially developed, published, and technically maintained by our authorized technology
+        partner, Reboot AI Private Limited, on behalf of Driver Zone.
+      </Text>
+    </View>
   );
 }
 
@@ -292,7 +289,7 @@ function StaticBody({ topic }: { topic: 'privacy' | 'terms' | 'about' }): ReactE
             items={[
               'Contact details: your full name, mobile number, and optional profile details.',
               'Location: collected while the app is active in the foreground, to pinpoint your pickup point, match nearby drivers, and monitor trip progress. We do not collect your location in the background.',
-              'Vehicle details: make, model, and transmission, to assign an appropriately trained chauffeur.',
+              'Vehicle details: the car type, registration (plate) number and fuel type of the cars you save, so the driver knows which car to drive.',
               'Booking & transaction metadata: trip reference, schedule, pickup/drop coordinates, and payment receipts.',
             ]}
           />
@@ -326,14 +323,24 @@ function StaticBody({ topic }: { topic: 'privacy' | 'terms' | 'about' }): ReactE
         </View>
 
         <View style={styles.policySection}>
-          <Text style={styles.sectionHeading}>5. Account & Data Deletion</Text>
+          <Text style={styles.sectionHeading}>5. WhatsApp Messages</Text>
+          <Text style={styles.sectionBody}>
+            Sign-in codes and updates about your bookings are sent on WhatsApp because the service
+            needs them. Promotional offers on WhatsApp are sent only if you opt in — the box on the
+            sign-in screen is optional and unticked by default — and you can withdraw at any time
+            under Profile → Notifications.
+          </Text>
+        </View>
+
+        <View style={styles.policySection}>
+          <Text style={styles.sectionHeading}>6. Account & Data Deletion</Text>
           <Text style={styles.sectionBody}>
             You have the right to delete your account and personal details at any time. You can initiate instant deletion within the app under Profile → Delete Account, or request deletion online at www.driverzoneonline.com/delete-account.
           </Text>
         </View>
 
         <View style={styles.policySection}>
-          <Text style={styles.sectionHeading}>6. Grievance Officer & Contact</Text>
+          <Text style={styles.sectionHeading}>7. Grievance Officer & Contact</Text>
           <Text style={styles.sectionBody}>
             Grievance Officer, DriverZone{'\n'}
             Near Uttarbanga Sangbad Office, Banipukur Road, Middle Shanti Nagar, Loknath Mandir Road,
@@ -353,7 +360,16 @@ function StaticBody({ topic }: { topic: 'privacy' | 'terms' | 'about' }): ReactE
             <Feather name="phone-call" size={14} color={colors.link} style={{ marginRight: 6 }} />
             <Text style={styles.webLinkText}>+91 85092 99342</Text>
           </Pressable>
+          <Pressable
+            onPress={() => void Linking.openURL(PRIVACY_URL)}
+            style={({ pressed }) => [styles.webLinkRow, pressed && styles.rowPressed]}
+          >
+            <Feather name="globe" size={14} color={colors.link} style={{ marginRight: 6 }} />
+            <Text style={styles.webLinkText}>Full policy at driverzoneonline.com/privacy</Text>
+          </Pressable>
         </View>
+
+        <PublisherDisclosure />
       </View>
     );
   }
@@ -391,6 +407,8 @@ function StaticBody({ topic }: { topic: 'privacy' | 'terms' | 'about' }): ReactE
           {line}
         </Text>
       ))}
+
+      <PublisherDisclosure />
     </View>
   );
 }
@@ -453,28 +471,7 @@ const styles = StyleSheet.create({
   leadText: { ...text.heading, color: colors.fg, fontSize: 16, marginBottom: space.sm },
   spaced: { marginTop: space.md },
 
-  notice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.xs,
-    backgroundColor: colors.bgSunken,
-    borderRadius: radius.md,
-    padding: space.sm,
-    marginBottom: space.md,
-  },
-  noticeText: { ...text.caption, color: colors.muted, flex: 1 },
-
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: space.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: space.sm,
-  },
-  optionRowActive: { borderColor: colors.fg, backgroundColor: colors.bgSunken },
+  errorText: { ...text.caption, color: colors.danger, marginTop: space.sm },
   optionLabel: { ...text.body, color: colors.fg, fontFamily: fontFamily.semibold },
 
   toggleRow: {

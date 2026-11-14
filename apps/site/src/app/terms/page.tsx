@@ -269,6 +269,15 @@ export default function TermsPage(): ReactElement {
           or {CONTACT.phoneDisplay}. See also our <Link href="/privacy">Privacy Policy</Link>.
         </p>
       </LegalSection>
+
+      <LegalSection title="Platform &amp; Publisher Disclosure">
+        <p>
+          <strong>Platform &amp; Publisher Disclosure:</strong> The Driver Zone mobile applications
+          on the Apple App Store and Google Play Store are officially developed, published, and
+          technically maintained by our authorized technology partner, Reboot AI Private Limited,
+          on behalf of Driver Zone.
+        </p>
+      </LegalSection>
     </LegalPage>
   );
 }

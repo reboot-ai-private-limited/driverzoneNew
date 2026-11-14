@@ -11,6 +11,8 @@ import {
 } from '@/features/offer/openOffer';
 import { useOfferRing } from '@/features/offer/useOfferRing';
 import { pushLog } from '@/notifications/log';
+import { cancelOfferNotification } from '@/notifications/offerNotification';
+import { onOfferAction } from '@/features/offer/offerActionBus';
 import { formatWhen } from '@/features/trips/scheduledWhen';
 import { acceptOffer, declineOffer, listOffers } from '@/lib/api/endpoints/offers';
 import { keys } from '@/lib/query/keys';
@@ -47,7 +49,7 @@ import { colors, radius, space, text } from '@/theme/theme';
  * the driver wait for the next poll to be told about a request that was already ringing.
  */
 export default function OfferScreen(): ReactElement {
-  const { offerId } = useLocalSearchParams<{ offerId: string }>();
+  const { offerId, autoAccept } = useLocalSearchParams<{ offerId: string; autoAccept?: string }>();
   const queryClient = useQueryClient();
 
   /**
@@ -222,6 +224,59 @@ export default function OfferScreen(): ReactElement {
    * crash. Passing `false` is how the ring is stopped; not calling it at all is a bug.
    */
   useOfferRing(offer !== null && outcome === null);
+
+  /*
+   * CLEAR THE RINGING NOTIFICATION once this offer is answered here, or the screen leaves.
+   *
+   * With the app open, the push posts a heads-up notification (with its own Accept / Decline)
+   * AND opens this screen. Answering here never touched that notification: it is `ongoing`, so it
+   * sat in the shade with live buttons until the offer's own timeout — a driver could tap Decline
+   * on a trip they had just accepted. `acted` covers the tap itself; the unmount covers lapsing,
+   * losing the race, and moving on to the next queued offer.
+   */
+  useEffect(() => {
+    if (acted) void cancelOfferNotification(offerId).catch(() => undefined);
+  }, [acted, offerId]);
+  useEffect(
+    () => () => {
+      void cancelOfferNotification(offerId).catch(() => undefined);
+    },
+    [offerId],
+  );
+
+  /*
+   * ACCEPT / DECLINE PRESSED ON THE NOTIFICATION.
+   *
+   * `?autoAccept=1` — the notification's Accept opened this screen (cold or from the background):
+   * claim the trip at once, exactly as the on-screen button would. Fired once, without waiting for
+   * the list: `acted` keeps the "offer vanished" effect from closing the screen meanwhile.
+   *
+   * `onOfferAction` — the app was already open on this screen when the button was pressed; act
+   * here so the screen shows the outcome (or closes) instead of ringing on behind the shade.
+   */
+  const actedRef = useRef(false);
+  actedRef.current = acted;
+  const autoAccepted = useRef(false);
+  useEffect(() => {
+    if (autoAccept !== '1' || autoAccepted.current) return;
+    autoAccepted.current = true;
+    pushLog('ring screen: auto-accepting from notification', { offerId });
+    accept.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount, by design
+  }, []);
+  useEffect(
+    () =>
+      onOfferAction((id, action) => {
+        if (id !== offerId) return false;
+        if (actedRef.current) return true;
+        if (action === 'accept') accept.mutate();
+        else decline.mutate();
+        return true;
+      }),
+    // `mutate` is stable across renders in TanStack Query v5.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [offerId],
+  );
 
   /*
    * WAIT, RATHER THAN DECLARE THE TRIP DEAD ON A CACHED ANSWER.

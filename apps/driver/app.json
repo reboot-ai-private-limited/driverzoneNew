@@ -36,7 +36,8 @@
       "./plugins/withDutyForegroundService",
       "./plugins/withOfferProguardRules",
       ["expo-image-picker", { "microphonePermission": false, "cameraPermission": false }],
-      "./plugins/withStripPermissions"
+      "./plugins/withStripPermissions",
+      "./plugins/withNotificationIcon"
     ],
     "android": {
       "package": "in.driverzone.driver",

@@ -391,8 +391,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: space.md,
-    marginTop: space.md,
+    // Same box as the ride screen's `SectionCard`s around it: gap BELOW, not above, so it keeps
+    // clear air from the next card instead of touching it.
+    padding: space.lg,
+    marginBottom: space.md,
   },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginBottom: space.xs },
   title: { ...text.label, color: colors.fg, fontFamily: fontFamily.bold },

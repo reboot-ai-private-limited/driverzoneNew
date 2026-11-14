@@ -8,7 +8,7 @@ import { TokenIssuer } from './application/tokenIssuer.js';
 import { LogoutUseCase } from './application/useCases/logout.usecase.js';
 import { RefreshSessionUseCase } from './application/useCases/refreshSession.usecase.js';
 import { SendOtpUseCase } from './application/useCases/sendOtp.usecase.js';
-import { VerifyOtpUseCase } from './application/useCases/verifyOtp.usecase.js';
+import { VerifyOtpUseCase, isReviewCode } from './application/useCases/verifyOtp.usecase.js';
 import { GetCustomerProfileUseCase } from './application/useCases/getCustomerProfile.usecase.js';
 import { UpdateCustomerProfileUseCase } from './application/useCases/updateCustomerProfile.usecase.js';
 import { ManageAddressesUseCase } from './application/useCases/manageAddresses.usecase.js';
@@ -380,7 +380,7 @@ export function buildIdentityContainer(): IdentityContainer {
   // The app-store demo login (config/env.ts). `loadEnv()` guarantees both are set or neither.
   const reviewLogin =
     env.REVIEW_LOGIN_PHONE !== undefined && env.REVIEW_LOGIN_OTP !== undefined
-      ? { phone: env.REVIEW_LOGIN_PHONE, code: env.REVIEW_LOGIN_OTP }
+      ? { phones: env.REVIEW_LOGIN_PHONE, code: env.REVIEW_LOGIN_OTP }
       : undefined;
 
   const sendOtp = new SendOtpUseCase(
@@ -388,7 +388,7 @@ export function buildIdentityContainer(): IdentityContainer {
     otpSender,
     accounts,
     env.OTP_PEPPER,
-    reviewLogin?.phone,
+    reviewLogin?.phones,
   );
   const verifyOtp = new VerifyOtpUseCase(
     otpStore,
@@ -449,6 +449,9 @@ export function buildIdentityContainer(): IdentityContainer {
     },
     sendClosureCode: (input) => sendOtp.execute({ ...input, purpose: 'DELETE_ACCOUNT' }),
     spendClosureCode: async (role, phone, code) => {
+      // A review number never receives a code (SendOtpUseCase skips delivery), so the fixed review
+      // code is what lets the app-store reviewer complete an in-app deletion. Customers only.
+      if (isReviewCode(reviewLogin, role, phone, code)) return;
       await closureCodes.check(role, phone, code, 'DELETE_ACCOUNT');
       // Single-use, like a login code.
       await otpStore.burn(role, phone, 'DELETE_ACCOUNT');

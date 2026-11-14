@@ -42,8 +42,19 @@ export interface DevOtpBypass {
  * Wired from `REVIEW_LOGIN_PHONE` / `REVIEW_LOGIN_OTP` in `identity.container.ts`.
  */
 export interface ReviewLogin {
-  phone: string;
+  phones: readonly string[];
   code: string;
+}
+
+/** True only for a CUSTOMER on one of the configured review numbers presenting the fixed code. */
+export function isReviewCode(
+  review: ReviewLogin | undefined,
+  role: Role,
+  phone: string,
+  code: string,
+): boolean {
+  if (review === undefined || role !== 'CUSTOMER') return false;
+  return review.phones.includes(phone) && review.code === code;
 }
 
 /**
@@ -71,8 +82,7 @@ export class VerifyOtpUseCase {
 
   /** Customer role only: the demo number must never become a way into the driver or admin apps. */
   private isReviewLogin(role: Role, phone: string, code: string): boolean {
-    if (this.reviewLogin === undefined || role !== 'CUSTOMER') return false;
-    return this.reviewLogin.phone === phone && this.reviewLogin.code === code;
+    return isReviewCode(this.reviewLogin, role, phone, code);
   }
 
   /**

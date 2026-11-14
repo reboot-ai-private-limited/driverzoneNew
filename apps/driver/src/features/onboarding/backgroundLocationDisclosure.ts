@@ -66,7 +66,7 @@ export const markBackgroundLocationAccepted = (): Promise<void> => writeDecision
  * The disclosure was shown and the driver pressed Not now.
  *
  * Recorded so the screen is not shown again on the next duty toggle. It is deliberately NOT
- * permanent in effect — `needsBackgroundLocationDisclosure` re-offers it if the driver later
+ * permanent in effect — `needsLocationDisclosure` re-offers it if the driver later
  * grants background location from system settings and then revokes it, which is the only way a
  * declined driver can end up wanting this again.
  */
@@ -79,7 +79,14 @@ export async function hasAcceptedBackgroundLocation(): Promise<boolean> {
 /**
  * Should the duty flow route to the disclosure screen before starting a shift?
  *
- * Four conditions, and every one of them is a reason NOT to show it:
+ * FIRST, ORDINARY LOCATION. The screen is also the only thing allowed to show Android's
+ * "Allow DriverZone Driver to access this device's location?" dialog — the duty machinery only
+ * checks (see `startLocationPings`). So whenever that grant is missing and askable, the screen is
+ * needed, on every platform and whatever was decided before: without it the driver cannot be
+ * dispatched at all, and a recorded "Not now" must not leave them with no way to be asked.
+ *
+ * Once ordinary location is granted, it is about background location only, and four conditions
+ * are each a reason NOT to show it:
  *
  *   - not Android — iOS has no separate background-location grant of this shape;
  *   - a decision is already on record — asked once is enough, either way;
@@ -94,7 +101,14 @@ export async function hasAcceptedBackgroundLocation(): Promise<boolean> {
  * `hasAcceptedBackgroundLocation` gates whether to PROMPT. Skipping the screen leaves the prompt
  * still locked; there is no path from here to an undisclosed prompt.
  */
-export async function needsBackgroundLocationDisclosure(): Promise<boolean> {
+export async function needsLocationDisclosure(): Promise<boolean> {
+  try {
+    const foreground = await Location.getForegroundPermissionsAsync();
+    if (!foreground.granted) return foreground.canAskAgain;
+  } catch {
+    return false;
+  }
+
   if (Platform.OS !== 'android') return false;
   if ((await readDecision()) !== null) return false;
 

@@ -31,6 +31,8 @@ export class MongoAccountEraser implements AccountEraserPort {
           languagesKnown: [],
           alternatePhone: null,
           emergencyContact: null,
+          whatsappMarketingOptIn: false,
+          whatsappMarketingConsentAt: null,
           savedAddresses: [],
           vehicles: [],
           fcmTokens: [],

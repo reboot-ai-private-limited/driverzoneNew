@@ -27,6 +27,8 @@ export interface CustomerDoc {
   languagesKnown?: string[];
   alternatePhone?: string | null;
   emergencyContact?: { name?: string; phone?: string } | null;
+  whatsappMarketingOptIn?: boolean;
+  whatsappMarketingConsentAt?: Date | null;
   savedAddresses?: unknown[];
   vehicles?: unknown[];
   rating: number;
@@ -68,6 +70,15 @@ const customerSchema = new Schema<CustomerDoc>(
      * stop resolving. An application-generated `adr_` id survives, and is self-describing when
      * it turns up pasted into a support ticket.
      */
+    /*
+     * Optional WhatsApp PROMOTIONAL messages. Off by default and never required to use the app.
+     * Transactional messages (sign-in codes, booking updates) do not depend on it.
+     * `whatsappMarketingConsentAt` is stamped on every change — opt-in and withdrawal alike — so
+     * there is a record of when the current choice was made.
+     */
+    whatsappMarketingOptIn: { type: Boolean, default: false },
+    whatsappMarketingConsentAt: { type: Date, default: null },
+
     savedAddresses: {
       type: [
         new Schema(

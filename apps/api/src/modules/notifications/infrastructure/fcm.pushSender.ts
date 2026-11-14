@@ -125,7 +125,9 @@ export class FcmPushSender implements PushSenderPort {
           // customer's battery to say the driver is two minutes away.
           priority: 'normal',
           ttl: 15 * 60_000,
-          notification: { channelId: 'booking-updates-v1' },
+          // Brand yellow on the notification Android draws itself while the app is closed — the
+          // app's own (Notifee) styling never runs for a `notification`-block push.
+          notification: { channelId: 'booking-updates-v1', color: '#F2F200' },
         },
       });
       await this.pruneCustomerTokens(tokens, response);
@@ -191,6 +193,7 @@ export class FcmPushSender implements PushSenderPort {
              * must match the one there or Android drops the notification without a word.
              */
             channelId: 'duty-alert-v1',
+            color: '#F2F200',
             /*
              * NO `clickAction`, and its absence is the fix — not an omission.
              *

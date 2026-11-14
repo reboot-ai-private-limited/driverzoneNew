@@ -133,14 +133,9 @@ export default function AccountScreen(): ReactElement {
             label="Favourite Drivers"
             onPress={() => router.push('/favourite-drivers')}
           />
-          {/* Above the payment method on purpose: the wallet is what a trip is paid from FIRST,
-              and the payment mode only settles whatever is left. */}
+          {/* The wallet is real (admin-granted credit and any charges owed), so it stays. There is
+              no "preferred payment method" row: payment is chosen per trip, nothing stored it. */}
           <MenuRow icon="gift" label="Wallet" onPress={() => router.push('/wallet')} />
-          <MenuRow
-            icon="credit-card"
-            label="Preferred Payment Method"
-            onPress={() => router.push('/info/payment-method')}
-          />
           <MenuRow
             icon="bell"
             label="Notifications"
@@ -181,14 +176,16 @@ export default function AccountScreen(): ReactElement {
           <Text style={styles.logoutLabel}>Logout</Text>
         </Pressable>
 
-        {/* Quiet and last on purpose: required to be reachable (Google Play), not to be tapped by
-            accident. The screen behind it explains everything and asks for a code first. */}
+        {/* Clearly visible, as both app stores require, and last so it is not tapped by accident.
+            The screen behind it explains what is erased and asks for a code before deleting. */}
         <Pressable
           onPress={() => router.push('/delete-account')}
           accessibilityRole="button"
+          accessibilityLabel="Delete account"
           hitSlop={8}
-          style={styles.deleteRow}
+          style={({ pressed }) => [styles.deleteRow, pressed && styles.logoutRowPressed]}
         >
+          <Feather name="trash-2" size={16} color={colors.danger} />
           <Text style={styles.deleteLabel}>Delete account</Text>
         </Pressable>
       </ScrollView>
@@ -375,8 +372,15 @@ const styles = StyleSheet.create({
   },
   logoutRowPressed: { backgroundColor: colors.bgSunken },
   logoutLabel: { ...text.body, color: colors.danger, fontFamily: fontFamily.semibold },
-  deleteRow: { alignItems: 'center', paddingVertical: space.md, marginTop: space.sm },
-  deleteLabel: { ...text.caption, color: colors.muted, textDecorationLine: 'underline' },
+  deleteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    paddingVertical: space.md,
+    marginTop: space.sm,
+  },
+  deleteLabel: { ...text.body, color: colors.danger },
 
   logoutModal: { alignItems: 'center' },
   logoutIcon: {

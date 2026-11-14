@@ -120,17 +120,36 @@ const schema = z.object({
     .optional(),
 
   /**
-   * A demo login for app-store review: ONE customer number that signs in with a fixed code, in
-   * production, with no SMS sent. Set both or neither — `loadEnv()` refuses one without the other.
+   * Demo logins for app-store review: up to FIVE customer numbers (comma-separated) that sign in
+   * with one fixed code, in production, with no WhatsApp/SMS sent. Set both or neither —
+   * `loadEnv()` refuses one without the other.
    *
-   * Unlike `DEV_FIXED_OTP` this needs no escape hatch, because what it opens is bounded: a single
-   * CUSTOMER account whose number and code the operator chose. It is never accepted for a driver
-   * or admin login, and the account rules (suspension included) still apply — blocking the
-   * account in the admin panel shuts it off without a redeploy.
+   * More than one because Apple's reviewer is expected to test account deletion: once the first
+   * account is deleted they still need a second to carry on testing.
+   *
+   * The same fixed code also confirms an in-app account DELETION for these numbers (and only
+   * these), since no code can be delivered to a number nobody holds.
+   *
+   * Unlike `DEV_FIXED_OTP` this needs no escape hatch, because what it opens is bounded: a few
+   * CUSTOMER accounts whose numbers and code the operator chose. It is never accepted for a driver
+   * or admin login, and the account rules (suspension included) still apply — blocking an account
+   * in the admin panel shuts it off without a redeploy. Remove both variables and restart to turn
+   * the mechanism off entirely.
    */
   REVIEW_LOGIN_PHONE: z
     .string()
-    .regex(/^\+[1-9]\d{7,14}$/, 'REVIEW_LOGIN_PHONE must be E.164, e.g. +919000000000')
+    .transform((raw) =>
+      raw
+        .split(',')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0),
+    )
+    .pipe(
+      z
+        .array(z.string().regex(/^\+[1-9]\d{7,14}$/, 'each REVIEW_LOGIN_PHONE must be E.164, e.g. +919999999999'))
+        .min(1, 'REVIEW_LOGIN_PHONE is empty')
+        .max(5, 'REVIEW_LOGIN_PHONE takes at most 5 numbers'),
+    )
     .optional(),
   REVIEW_LOGIN_OTP: z
     .string()

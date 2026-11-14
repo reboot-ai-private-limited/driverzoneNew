@@ -36,7 +36,7 @@ export default function DeleteAccountPage(): ReactElement {
       <LegalSection title="Other ways to delete">
         <ul>
           <li>
-            <strong>In the app:</strong> open the DriverZone app, go to <strong>Account → Delete
+            <strong>In the app:</strong> open the DriverZone app, go to <strong>Profile → Delete
             account</strong>, and follow the steps.
           </li>
           <li>

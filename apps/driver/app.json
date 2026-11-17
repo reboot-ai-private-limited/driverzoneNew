@@ -35,6 +35,7 @@
       "./plugins/withRingOverLockScreen",
       "./plugins/withDutyForegroundService",
       "./plugins/withOfferProguardRules",
+      "./plugins/withOptionalScreenFeatures",
       ["expo-image-picker", { "microphonePermission": false, "cameraPermission": false }],
       "./plugins/withStripPermissions",
       "./plugins/withNotificationIcon"

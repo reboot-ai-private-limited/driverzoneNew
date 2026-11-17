@@ -51,6 +51,7 @@
       "./plugins/withUpiQueries.js",
       "./plugins/withStripPermissions.js",
       "./plugins/withHighRefreshRate.js",
+      "./plugins/withOptionalScreenFeatures.js",
       "./plugins/withNotificationIcon.js",
       [
         "expo-build-properties",

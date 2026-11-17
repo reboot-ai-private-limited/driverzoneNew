@@ -89,6 +89,7 @@ const GUIDES: Record<OemFamily, OemGuide> = {
       'Open the button below, then in Battery turn Allow background activity on.',
       'Turn off Battery optimisation for DriverZone (choose Don’t optimise).',
       'In the phone’s Startup manager or Auto-launch list, enable DriverZone.',
+      'Also open Settings > Apps > Google Play services > Battery and set it to Unrestricted. Without this, trip alerts can arrive late on Realme and Oppo phones.',
     ],
   },
   vivo: {

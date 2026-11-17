@@ -1,5 +1,6 @@
 import type { LocationPingDto } from '@driverzone/contracts';
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import { sendLocationPings } from '@/lib/api/endpoints/driver';
 
 /**
@@ -14,7 +15,13 @@ import { sendLocationPings } from '@/lib/api/endpoints/driver';
  * scale, costs a driver base (docs/LLD/api-contracts.md). Fixes accumulate in `buffer` and go up
  * every `FLUSH_INTERVAL_MS`.
  *
- * **These are JS timers, and they only survive a locked screen because the S-8 foreground service
+ * **NATIVE UPDATES FIRST, JS TIMERS ONLY AS A FALLBACK.** The normal path is
+ * `Location.startLocationUpdatesAsync(DUTY_LOCATION_TASK)`: Android's fused provider delivers
+ * fixes (batched, so the radio is not woken every 15s) and wakes the task below even while the
+ * app's JS is paused. The old timer loop remains only for the dev override and for a device that
+ * refuses the native updates — see `startFallbackLoop`.
+ *
+ * **The timer fallback only survives a locked screen because the S-8 foreground service
  * holds the process open.** `dutyForegroundService.ts` is started before this loop and stopped
  * after it, deliberately: without it Android freezes the process seconds after the screen goes
  * off, the intervals stop firing, and the driver ages out of the pool's two-minute window while
@@ -80,10 +87,42 @@ function devOverride(): { lat: number; lng: number } | null {
 let buffer: LocationPingDto[] = [];
 let fixTimer: ReturnType<typeof setInterval> | null = null;
 let flushTimer: ReturnType<typeof setInterval> | null = null;
+/** True while ANY mode (native updates or fallback timers) is delivering pings. */
+let pinging = false;
+
+/** The name Android knows the native location subscription by. Also the TaskManager task id. */
+export const DUTY_LOCATION_TASK = 'dz-duty-location';
 
 /** Called with the server's answer on every flush, so a duty change made elsewhere lands here. */
 type DutyObserver = (isOnDuty: boolean) => void;
 let observer: DutyObserver | null = null;
+
+/**
+ * Registered once at module scope by `dutyRecovery`. The native task can fire in a headless JS
+ * context where `startLocationPings` was never called, so the observer cannot depend on that call.
+ */
+export function setDutyObserver(next: DutyObserver): void {
+  observer = next;
+}
+
+/**
+ * THE TASK ANDROID WAKES WITH EACH BATCH OF FIXES, defined at module scope (this file is imported
+ * from `index.js`) so it exists in a headless process with no React mounted.
+ */
+TaskManager.defineTask(DUTY_LOCATION_TASK, async ({ data, error }) => {
+  if (error) return;
+  const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations;
+  if (!locations || locations.length === 0) return;
+
+  const now = Date.now();
+  for (const loc of locations) {
+    // Fix's own time, unless implausible (boot-relative on some devices) — then wall clock.
+    const t = loc.timestamp;
+    const plausible = Number.isFinite(t) && t > 1.5e12 && t <= now + 60_000;
+    push(loc.coords.latitude, loc.coords.longitude, new Date(plausible ? t : now));
+  }
+  await flush();
+});
 
 async function takeFix(): Promise<void> {
   const override = devOverride();
@@ -131,7 +170,7 @@ async function takeFix(): Promise<void> {
   // The driver may have gone off duty while we waited. `stopLocationPings` has already emptied the
   // buffer by then, so pushing here would resurrect a position from the end of a finished shift and
   // hand it to the next shift's first flush.
-  if (fixTimer === null) return;
+  if (!pinging) return;
 
   try {
     const retried = await Location.getCurrentPositionAsync({
@@ -183,7 +222,7 @@ async function flush(): Promise<void> {
  * caller needs to say so rather than leaving them on duty and never rung.
  */
 export async function startLocationPings(onDutyChange?: DutyObserver): Promise<boolean> {
-  if (fixTimer !== null) return true;
+  if (pinging) return true;
 
   if (devOverride() === null) {
     /**
@@ -202,30 +241,69 @@ export async function startLocationPings(onDutyChange?: DutyObserver): Promise<b
     if (permission === null || !permission.granted) return false;
   }
 
-  observer = onDutyChange ?? null;
+  if (onDutyChange !== undefined) observer = onDutyChange;
 
-  // One immediately, so the driver is dispatchable within a second of going on duty rather than
-  // after the first interval.
-  void takeFix().then(() => flush());
+  if (devOverride() === null) {
+    // Already subscribed — typically a fresh process adopting updates the OS kept alive across a
+    // kill or reboot. Nothing to start; just mark ourselves as pinging.
+    const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(DUTY_LOCATION_TASK).catch(
+      () => false,
+    );
+    if (alreadyStarted) {
+      pinging = true;
+      return true;
+    }
 
-  fixTimer = setInterval(() => void takeFix(), FIX_INTERVAL_MS);
-  flushTimer = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
+    try {
+      await Location.startLocationUpdatesAsync(DUTY_LOCATION_TASK, {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: FLUSH_INTERVAL_MS,
+        distanceInterval: 50,
+        // Lets the OS defer and batch deliveries rather than waking the radio per fix.
+        deferredUpdatesInterval: FLUSH_INTERVAL_MS,
+        // No Expo foreground-service notice: the Notifee duty service (`dutyForegroundService`)
+        // already keeps the process alive and shows the single "you're online" notification.
+      });
+      pinging = true;
+      // One immediately, so the driver is dispatchable within a second of going on duty.
+      void takeFix().then(() => flush());
+      return true;
+    } catch {
+      // Device refused native updates — fall through to the timer loop rather than lose duty.
+    }
+  }
+
+  startFallbackLoop();
   return true;
 }
 
-export function stopLocationPings(): void {
+function startFallbackLoop(): void {
+  pinging = true;
+  void takeFix().then(() => flush());
+  fixTimer = setInterval(() => void takeFix(), FIX_INTERVAL_MS);
+  flushTimer = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
+}
+
+export async function stopLocationPings(): Promise<void> {
   if (fixTimer !== null) clearInterval(fixTimer);
   if (flushTimer !== null) clearInterval(flushTimer);
   fixTimer = null;
   flushTimer = null;
-  observer = null;
+  pinging = false;
   // Dropped, not flushed: these describe where the driver was while working, and they have just
   // stopped working. Sending them would keep them in the dispatch pool for another two minutes.
   buffer = [];
+  try {
+    if (await Location.hasStartedLocationUpdatesAsync(DUTY_LOCATION_TASK)) {
+      await Location.stopLocationUpdatesAsync(DUTY_LOCATION_TASK);
+    }
+  } catch {
+    // Already stopped, or never started.
+  }
 }
 
 export function isPinging(): boolean {
-  return fixTimer !== null;
+  return pinging;
 }
 
 /**

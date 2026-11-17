@@ -8,7 +8,12 @@ import {
   startDutyForegroundService,
   stopDutyForegroundService,
 } from './dutyForegroundService';
-import { isPinging, startLocationPings, stopLocationPings } from './locationPings';
+import {
+  isPinging,
+  setDutyObserver,
+  startLocationPings,
+  stopLocationPings,
+} from './locationPings';
 
 /**
  * BRINGING A KILLED APP BACK ON DUTY — docs/LLD/driver-app.md S-8, the half S-1 says cannot be
@@ -100,6 +105,9 @@ function onServerDutyChange(isOnDuty: boolean): void {
   void rememberDutyState(false).then(() => teardownDutyMachinery());
 }
 
+// Module scope so the native location task works in a headless process too.
+setDutyObserver(onServerDutyChange);
+
 /**
  * What `ensureDutyMachinery` managed to bring up.
  *
@@ -155,7 +163,7 @@ async function ensureDutyMachineryInner(): Promise<DutyMachineryResult> {
   });
 
   if (!isPinging()) {
-    const started = await startLocationPings(onServerDutyChange);
+    const started = await startLocationPings();
     // No location grant means the service cannot legally start either. Bail rather than crash.
     if (!started) {
       pushLog('ensureDutyMachinery: no location grant');
@@ -176,7 +184,7 @@ async function ensureDutyMachineryInner(): Promise<DutyMachineryResult> {
 
 /** Stop everything. Safe when nothing is running. */
 export async function teardownDutyMachinery(): Promise<void> {
-  stopLocationPings();
+  await stopLocationPings();
   await stopDutyForegroundService();
 }
 

@@ -15,5 +15,6 @@
  */
 import './src/notifications/backgroundMessage';
 import './src/duty/dutyForegroundService';
+import './src/duty/locationPings';
 
 import 'expo-router/entry';
